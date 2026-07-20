@@ -1,0 +1,45 @@
+// assets/data/countries.ron
+// 国家初期データ
+// フォーマット: RON (Rusty Object Notation)
+// map_color: [r, g, b] 各 0.0〜1.0
+// capital_state_id: 首都となる StateId
+// treasury: 初期国庫残高
+
+[
+    (
+        id: (0),
+        name: "Kingdom of Arcadia",
+        map_color: (0.78, 0.18, 0.18),
+        capital_state_id: (0),
+        treasury: 5000.0,
+        government_type: Monarchy,
+        economic_system: Mercantilism,
+    ),
+    (
+        id: (1),
+        name: "Elfin Republic",
+        map_color: (0.18, 0.68, 0.28),
+        capital_state_id: (3),
+        treasury: 3500.0,
+        government_type: Republic,
+        economic_system: FreeMarket,
+    ),
+    (
+        id: (2),
+        name: "Dwarf Federation",
+        map_color: (0.58, 0.38, 0.08),
+        capital_state_id: (5),
+        treasury: 7200.0,
+        government_type: Republic,
+        economic_system: GuildEconomy,
+    ),
+    (
+        id: (3),
+        name: "Oceanic Magic Empire",
+        map_color: (0.18, 0.28, 0.78),
+        capital_state_id: (8),
+        treasury: 12000.0,
+        government_type: Monarchy,
+        economic_system: TempleEconomy,
+    ),
+]

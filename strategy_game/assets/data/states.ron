@@ -1,0 +1,136 @@
+// assets/data/states.ron
+// 州初期データ
+// フォーマット: RON (Rusty Object Notation)
+// world_position: [x, y] ワールド座標（中心）
+// size: [w, h] 矩形サイズ（ワールド座標）
+// workforce: 就労率 0.0〜1.0
+// education: 教育水準 0.0〜1.0
+// living_standard: 生活水準 0.0〜1.0
+// unrest: 不満度 0.0〜1.0
+
+[
+    // ─ Kingdom of Arcadia (owner_country_id: 0) ─────────────────────────
+    (
+        id: (0),
+        name: "Arcadia Capital",
+        owner_country_id: (0),
+        population: 1200000,
+        workforce: 0.55,
+        education: 0.62,
+        living_standard: 0.70,
+        unrest: 0.05,
+        world_position: (-400.0, 200.0),
+        size: (180.0, 130.0),
+    ),
+    (
+        id: (1),
+        name: "Northern Frontier",
+        owner_country_id: (0),
+        population: 450000,
+        workforce: 0.60,
+        education: 0.38,
+        living_standard: 0.45,
+        unrest: 0.12,
+        world_position: (-250.0, 320.0),
+        size: (150.0, 110.0),
+    ),
+    (
+        id: (2),
+        name: "Western Mage Province",
+        owner_country_id: (0),
+        population: 680000,
+        workforce: 0.48,
+        education: 0.75,
+        living_standard: 0.65,
+        unrest: 0.08,
+        world_position: (-560.0, 80.0),
+        size: (140.0, 120.0),
+    ),
+    // ─ Elfin Republic (owner_country_id: 1) ──────────────────────────────
+    (
+        id: (3),
+        name: "Elfin Central",
+        owner_country_id: (1),
+        population: 980000,
+        workforce: 0.52,
+        education: 0.80,
+        living_standard: 0.78,
+        unrest: 0.03,
+        world_position: (50.0, 250.0),
+        size: (170.0, 140.0),
+    ),
+    (
+        id: (4),
+        name: "Forest Research Zone",
+        owner_country_id: (1),
+        population: 320000,
+        workforce: 0.45,
+        education: 0.88,
+        living_standard: 0.72,
+        unrest: 0.02,
+        world_position: (230.0, 150.0),
+        size: (160.0, 110.0),
+    ),
+    // ─ Dwarf Federation (owner_country_id: 2) ────────────────────────────
+    (
+        id: (5),
+        name: "Dwarf Mining Region",
+        owner_country_id: (2),
+        population: 750000,
+        workforce: 0.70,
+        education: 0.50,
+        living_standard: 0.60,
+        unrest: 0.10,
+        world_position: (-100.0, -150.0),
+        size: (150.0, 120.0),
+    ),
+    (
+        id: (6),
+        name: "Southern Industry",
+        owner_country_id: (2),
+        population: 590000,
+        workforce: 0.68,
+        education: 0.55,
+        living_standard: 0.58,
+        unrest: 0.09,
+        world_position: (100.0, -280.0),
+        size: (160.0, 110.0),
+    ),
+    (
+        id: (7),
+        name: "Eastern Technology",
+        owner_country_id: (2),
+        population: 410000,
+        workforce: 0.62,
+        education: 0.65,
+        living_standard: 0.62,
+        unrest: 0.07,
+        world_position: (350.0, -200.0),
+        size: (140.0, 130.0),
+    ),
+    // ─ Oceanic Magic Empire (owner_country_id: 3) ────────────────────────
+    (
+        id: (8),
+        name: "Imperial Capital",
+        owner_country_id: (3),
+        population: 2100000,
+        workforce: 0.50,
+        education: 0.72,
+        living_standard: 0.82,
+        unrest: 0.04,
+        world_position: (500.0, 50.0),
+        size: (160.0, 150.0),
+    ),
+    (
+        id: (9),
+        name: "Magic Harbor",
+        owner_country_id: (3),
+        population: 870000,
+        workforce: 0.58,
+        education: 0.68,
+        living_standard: 0.75,
+        unrest: 0.06,
+        world_position: (600.0, -150.0),
+        size: (140.0, 120.0),
+    ),
+]
