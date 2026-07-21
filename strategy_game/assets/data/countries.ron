@@ -1,10 +1,5 @@
 // assets/data/countries.ron
 // 国家初期データ
-// フォーマット: RON (Rusty Object Notation)
-// map_color: [r, g, b] 各 0.0〜1.0
-// capital_state_id: 首都となる StateId
-// treasury: 初期国庫残高
-
 [
     (
         id: (0),
@@ -14,6 +9,7 @@
         treasury: 5000.0,
         government_type: Monarchy,
         economic_system: Mercantilism,
+        stockpile: (amounts: { Food: 500.0, Wood: 300.0, Iron: 200.0, Coal: 200.0 }),
     ),
     (
         id: (1),
@@ -23,6 +19,7 @@
         treasury: 3500.0,
         government_type: Republic,
         economic_system: FreeMarket,
+        stockpile: (amounts: { Food: 600.0, Wood: 500.0 }),
     ),
     (
         id: (2),
@@ -32,6 +29,7 @@
         treasury: 7200.0,
         government_type: Republic,
         economic_system: GuildEconomy,
+        stockpile: (amounts: { Food: 400.0, Wood: 200.0, Iron: 500.0, Coal: 500.0 }),
     ),
     (
         id: (3),
@@ -41,5 +39,6 @@
         treasury: 12000.0,
         government_type: Monarchy,
         economic_system: TempleEconomy,
+        stockpile: (amounts: { Food: 800.0, Wood: 200.0, MagicCrystal: 300.0 }),
     ),
 ]

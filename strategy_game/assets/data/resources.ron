@@ -1,0 +1,18 @@
+// assets/data/resources.ron
+// 州ごとの初期資源鉱床データ
+{
+    (0): [
+        (resource_type: Iron, base_output: 50.0, discovered: true, development_level: 1),
+        (resource_type: Coal, base_output: 40.0, discovered: true, development_level: 1),
+    ],
+    (2): [
+        (resource_type: MagicCrystal, base_output: 30.0, discovered: true, development_level: 1),
+    ],
+    (5): [
+        (resource_type: Iron, base_output: 100.0, discovered: true, development_level: 2),
+        (resource_type: Coal, base_output: 80.0, discovered: true, development_level: 2),
+    ],
+    (7): [
+        (resource_type: MagicCrystal, base_output: 60.0, discovered: true, development_level: 2),
+    ],
+}

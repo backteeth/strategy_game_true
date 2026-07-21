@@ -1,6 +1,7 @@
+use crate::building::construction::ConstructionQueueItem;
 use crate::common::{CountryId, StateId};
-/// 国家データモジュール
-/// CountryData、統治/経済体制enum、国家レジストリを定義する
+use crate::economy::economic_state::EconomicState;
+use crate::economy::resources::CountryStockpile;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +61,10 @@ impl EconomicSystem {
 
 // ─── 国家データ ──────────────────────────────────────────────────────────────
 
+fn default_tax_rate() -> f32 {
+    0.15
+}
+
 /// 1国家分のゲームデータ（RONデシリアライズ対応）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CountryData {
@@ -76,6 +81,34 @@ pub struct CountryData {
     pub government_type: GovernmentType,
     /// 経済体制
     pub economic_system: EconomicSystem,
+
+    /// 国家資源備蓄
+    #[serde(default)]
+    pub stockpile: CountryStockpile,
+    /// 税率 (0.0〜1.0)
+    #[serde(default = "default_tax_rate")]
+    pub tax_rate: f32,
+    /// 月次収入
+    #[serde(default)]
+    pub monthly_income: f64,
+    /// 月次支出
+    #[serde(default)]
+    pub monthly_expenses: f64,
+    /// 月次収支
+    #[serde(default)]
+    pub monthly_balance: f64,
+    /// 科学研究力
+    #[serde(default)]
+    pub science_research_capacity: f64,
+    /// 魔法研究力
+    #[serde(default)]
+    pub magic_research_capacity: f64,
+    /// 国家経済状況 (5段階)
+    #[serde(default)]
+    pub economic_state: EconomicState,
+    /// 建設キュー
+    #[serde(default)]
+    pub construction_queue: Vec<ConstructionQueueItem>,
 }
 
 impl CountryData {
@@ -88,7 +121,6 @@ impl CountryData {
 // ─── レジストリ ──────────────────────────────────────────────────────────────
 
 /// ゲーム内全国家データを保持するリソース
-/// O(n) 検索だが、国家数は通常100以下なので問題ない
 #[derive(Resource, Default)]
 pub struct CountryRegistry {
     pub countries: Vec<CountryData>,
@@ -98,6 +130,11 @@ impl CountryRegistry {
     /// ID で国家を検索する
     pub fn get(&self, id: CountryId) -> Option<&CountryData> {
         self.countries.iter().find(|c| c.id == id)
+    }
+
+    /// ID で国家を可変検索する
+    pub fn get_mut(&mut self, id: CountryId) -> Option<&mut CountryData> {
+        self.countries.iter_mut().find(|c| c.id == id)
     }
 }
 
@@ -110,7 +147,6 @@ pub struct PlayerCountry(pub Option<CountryId>);
 // ─── プラグイン ──────────────────────────────────────────────────────────────
 
 /// 国家関連プラグイン
-/// データはローダー側で注入するため、ここでは Resource だけ登録する
 pub struct CountryPlugin;
 
 impl Plugin for CountryPlugin {

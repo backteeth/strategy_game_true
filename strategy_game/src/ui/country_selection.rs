@@ -2,23 +2,18 @@ use crate::app::game_state::GameState;
 use crate::common::CountryId;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::state::data::StateRegistry;
-/// 国家選択画面 UI
-/// CountrySelection 状態時に表示され、プレイヤー国家を確定する
+use crate::ui::JapaneseFont;
 use bevy::prelude::*;
 
-/// 画面全体のルートノード
 #[derive(Component)]
 pub struct CountrySelectionRoot;
 
-/// 国家リストのボタン
 #[derive(Component)]
 pub struct CountrySelectButton(pub CountryId);
 
-/// 選択中プレビュー国家
 #[derive(Resource, Default)]
 pub struct PreviewCountry(pub Option<CountryId>);
 
-/// プレビュー詳細テキスト
 #[derive(Component)]
 pub struct PreviewDetailText;
 
@@ -41,16 +36,14 @@ impl Plugin for CountrySelectionPlugin {
     }
 }
 
-/// UI構築
 fn setup_ui(
     mut commands: Commands,
     country_registry: Res<CountryRegistry>,
     mut preview: ResMut<PreviewCountry>,
+    font: Res<JapaneseFont>,
 ) {
-    // 初期選択は1番目の国家
     preview.0 = country_registry.countries.first().map(|c| c.id);
 
-    // フルスクリーンコンテナ
     commands
         .spawn((
             CountrySelectionRoot,
@@ -64,7 +57,6 @@ fn setup_ui(
             BackgroundColor(Color::srgba(0.05, 0.05, 0.08, 1.0)),
         ))
         .with_children(|root| {
-            // 左側: 国家リスト
             root.spawn((Node {
                 width: Val::Percent(30.0),
                 height: Val::Percent(100.0),
@@ -74,8 +66,9 @@ fn setup_ui(
             },))
                 .with_children(|left_panel| {
                     left_panel.spawn((
-                        Text::new("Select Your Nation"),
+                        Text::new("国家選択"),
                         TextFont {
+                            font: font.0.clone().into(),
                             font_size: FontSize::Px(24.0),
                             ..default()
                         },
@@ -99,6 +92,7 @@ fn setup_ui(
                                     Text::new(&country.name),
                                     TextColor(Color::srgb(0.9, 0.9, 0.9)),
                                     TextFont {
+                                        font: font.0.clone().into(),
                                         font_size: FontSize::Px(18.0),
                                         ..default()
                                     },
@@ -107,7 +101,6 @@ fn setup_ui(
                     }
                 });
 
-            // 右側: プレビュー詳細と開始ボタン
             root.spawn((Node {
                 width: Val::Percent(65.0),
                 height: Val::Percent(100.0),
@@ -118,18 +111,17 @@ fn setup_ui(
                 ..default()
             },))
                 .with_children(|right_panel| {
-                    // 詳細テキスト
                     right_panel.spawn((
                         PreviewDetailText,
-                        Text::new("Select a nation..."),
+                        Text::new("国家を選択してください..."),
                         TextColor(Color::srgb(0.8, 0.8, 0.8)),
                         TextFont {
+                            font: font.0.clone().into(),
                             font_size: FontSize::Px(20.0),
                             ..default()
                         },
                     ));
 
-                    // 開始ボタン
                     right_panel
                         .spawn((
                             StartGameButton,
@@ -147,9 +139,10 @@ fn setup_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("Start Game"),
+                                Text::new("ゲーム開始"),
                                 TextColor(Color::WHITE),
                                 TextFont {
+                                    font: font.0.clone().into(),
                                     font_size: FontSize::Px(24.0),
                                     ..default()
                                 },
@@ -162,7 +155,6 @@ fn setup_ui(
 #[derive(Component)]
 pub struct StartGameButton;
 
-/// 国家リストボタンのクリック
 fn handle_country_button_click(
     mut interaction_query: Query<
         (&Interaction, &CountrySelectButton, &mut BackgroundColor),
@@ -186,7 +178,6 @@ fn handle_country_button_click(
     }
 }
 
-/// プレビュー詳細テキストの更新
 fn update_preview_details(
     preview: Res<PreviewCountry>,
     country_registry: Res<CountryRegistry>,
@@ -206,9 +197,8 @@ fn update_preview_details(
             let capital_name = state_registry
                 .get(country.capital_state_id)
                 .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
+                .unwrap_or("不明");
 
-            // 人口合算
             let total_pop: u64 = state_registry
                 .states
                 .iter()
@@ -217,7 +207,7 @@ fn update_preview_details(
                 .sum();
 
             let info = format!(
-                "Name: {}\nGovernment: {}\nEconomy: {}\nTotal Pop: {}\nTreasury: {}\nCapital: {}",
+                "国名: {}\n統治体制: {}\n経済体制: {}\n総人口: {}\n国庫: {:.0} G\n首都: {}",
                 country.name,
                 country.government_type.display_name(),
                 country.economic_system.display_name(),
@@ -230,7 +220,6 @@ fn update_preview_details(
     }
 }
 
-/// 開始ボタンのクリック処理
 fn handle_start_button(
     interaction_query: Query<&Interaction, (With<StartGameButton>, Changed<Interaction>)>,
     preview: Res<PreviewCountry>,
@@ -240,7 +229,6 @@ fn handle_start_button(
     for interaction in interaction_query.iter() {
         if *interaction == Interaction::Pressed {
             if let Some(id) = preview.0 {
-                // プレイヤー国家を確定して遷移
                 player_country.0 = Some(id);
                 next_state.set(GameState::Playing);
             }
@@ -248,7 +236,6 @@ fn handle_start_button(
     }
 }
 
-/// ステート退出時にUI破棄
 fn cleanup_ui(mut commands: Commands, query: Query<Entity, With<CountrySelectionRoot>>) {
     if let Ok(entity) = query.single() {
         commands.entity(entity).despawn();

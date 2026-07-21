@@ -1,17 +1,30 @@
 use crate::app::game_state::GameState;
-/// ゲーム内時間管理モジュール
-/// GameDate、一時停止、速度変更を管理する
-/// 描画フレームとゲーム内時間処理を分離するため、アキュムレーター方式を使用する
 use bevy::prelude::*;
 
 // ─── 定数 ──────────────────────────────────────────────────────────────────
 
-/// 各月の日数（うるう年は現段階では考慮しない、TODO: Phase 3でうるう年対応）
+/// 各月の日数
 const DAYS_IN_MONTH: [u8; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-/// 速度ごとのゲーム内秒数/実時間秒（1秒あたりに何ゲーム日進むか）
-/// Speed1=1日/秒, Speed2=3日/秒, Speed3=7日/秒, Speed4=30日/秒
+/// 速度ごとのゲーム内秒数/実時間秒
 const SPEED_DAYS_PER_REAL_SECOND: [f64; 4] = [1.0, 3.0, 7.0, 30.0];
+
+// ─── メッセージ ──────────────────────────────────────────────────────────────
+
+/// 日付が進んだことを通知するメッセージ（日次更新）
+#[derive(Message, Debug, Clone, Copy)]
+pub struct DayChangedMessage {
+    pub year: i32,
+    pub month: u8,
+    pub day: u8,
+}
+
+/// 月が切り替わったことを通知するメッセージ（月次更新）
+#[derive(Message, Debug, Clone, Copy)]
+pub struct MonthChangedMessage {
+    pub year: i32,
+    pub month: u8,
+}
 
 // ─── データ型 ───────────────────────────────────────────────────────────────
 
@@ -23,7 +36,7 @@ pub struct GameDate {
     pub month: u8,
     /// 日（1〜28/30/31）
     pub day: u8,
-    /// 経過日数の小数点以下アキュムレーター（描画と分離するため）
+    /// 経過日数の小数点以下アキュムレーター
     accumulator: f64,
 }
 
@@ -43,22 +56,6 @@ impl GameDate {
     pub fn display(&self) -> String {
         format!("{:04}/{:02}/{:02}", self.year, self.month, self.day)
     }
-
-    /// n 日進める
-    fn advance_days(&mut self, days: u32) {
-        for _ in 0..days {
-            self.day += 1;
-            let max_day = DAYS_IN_MONTH[(self.month as usize) - 1];
-            if self.day > max_day {
-                self.day = 1;
-                self.month += 1;
-                if self.month > 12 {
-                    self.month = 1;
-                    self.year += 1;
-                }
-            }
-        }
-    }
 }
 
 /// 速度設定（1〜4）
@@ -72,7 +69,7 @@ impl Default for GameSpeed {
 }
 
 impl GameSpeed {
-    /// 1日進めるのに必要な実時間（秒）
+    /// 1秒間に進む日数
     pub fn days_per_real_second(self) -> f64 {
         SPEED_DAYS_PER_REAL_SECOND[(self.0 as usize).saturating_sub(1).min(3)]
     }
@@ -90,7 +87,9 @@ impl Plugin for GameTimePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(GameDate::default())
             .insert_resource(GameSpeed::default())
-            .insert_resource(GamePaused(true)) // 開始時は停止
+            .insert_resource(GamePaused(true))
+            .add_message::<DayChangedMessage>()
+            .add_message::<MonthChangedMessage>()
             .add_systems(
                 Update,
                 (advance_game_date, toggle_pause_key).run_if(in_state(GameState::Playing)),
@@ -105,12 +104,14 @@ fn toggle_pause_key(keys: Res<ButtonInput<KeyCode>>, mut paused: ResMut<GamePaus
     }
 }
 
-/// ゲーム内日付を進める（描画フレームから独立したアキュムレーター方式）
+/// ゲーム内日付を進める（日次・月次の切り替わり時にMessageを発行）
 fn advance_game_date(
     time: Res<Time>,
     speed: Res<GameSpeed>,
     paused: Res<GamePaused>,
     mut date: ResMut<GameDate>,
+    mut day_events: MessageWriter<DayChangedMessage>,
+    mut month_events: MessageWriter<MonthChangedMessage>,
 ) {
     if paused.0 {
         return;
@@ -119,10 +120,37 @@ fn advance_game_date(
     let delta = time.delta_secs_f64() * speed.days_per_real_second();
     date.accumulator += delta;
 
-    // アキュムレーターが 1.0 以上になった分だけ日付を進める
     if date.accumulator >= 1.0 {
         let days = date.accumulator.floor() as u32;
         date.accumulator -= days as f64;
-        date.advance_days(days);
+
+        for _ in 0..days {
+            let old_month = date.month;
+            date.day += 1;
+            let max_day = DAYS_IN_MONTH[(date.month as usize) - 1];
+            if date.day > max_day {
+                date.day = 1;
+                date.month += 1;
+                if date.month > 12 {
+                    date.month = 1;
+                    date.year += 1;
+                }
+            }
+
+            // 日次メッセージ発行
+            day_events.write(DayChangedMessage {
+                year: date.year,
+                month: date.month,
+                day: date.day,
+            });
+
+            // 月次メッセージ発行（月が変わった1回目の日）
+            if date.month != old_month {
+                month_events.write(MonthChangedMessage {
+                    year: date.year,
+                    month: date.month,
+                });
+            }
+        }
     }
 }

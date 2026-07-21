@@ -2,9 +2,8 @@ use crate::app::game_state::GameState;
 use crate::app::time::{GameDate, GamePaused, GameSpeed};
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::state::data::StateRegistry;
+use crate::ui::JapaneseFont;
 use crate::ui::state_panel::format_population;
-/// 上部ステータスバー UI
-/// Playing 状態時に画面上部に表示される
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -41,7 +40,7 @@ impl Plugin for TopBarPlugin {
     }
 }
 
-fn setup_top_bar(mut commands: Commands) {
+fn setup_top_bar(mut commands: Commands, font: Res<JapaneseFont>) {
     commands
         .spawn((
             TopBarRoot,
@@ -59,18 +58,17 @@ fn setup_top_bar(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.95)),
         ))
         .with_children(|root| {
-            // 左側: プレイヤー情報
             root.spawn((
                 TopBarPlayerInfoText,
                 Text::new(""),
                 TextColor(Color::srgb(0.9, 0.9, 0.9)),
                 TextFont {
+                    font: font.0.clone().into(),
                     font_size: FontSize::Px(16.0),
                     ..default()
                 },
             ));
 
-            // 右側: 日付とコントロール
             root.spawn((Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -83,12 +81,12 @@ fn setup_top_bar(mut commands: Commands) {
                         Text::new("1800/01/01"),
                         TextColor(Color::srgb(0.9, 0.9, 0.9)),
                         TextFont {
+                            font: font.0.clone().into(),
                             font_size: FontSize::Px(16.0),
                             ..default()
                         },
                     ));
 
-                    // Pause Button
                     right_panel
                         .spawn((
                             PauseButton,
@@ -106,13 +104,13 @@ fn setup_top_bar(mut commands: Commands) {
                                 Text::new("||"),
                                 TextColor(Color::WHITE),
                                 TextFont {
+                                    font: font.0.clone().into(),
                                     font_size: FontSize::Px(14.0),
                                     ..default()
                                 },
                             ));
                         });
 
-                    // Speed Buttons (1..=4)
                     for i in 1..=4 {
                         right_panel
                             .spawn((
@@ -131,6 +129,7 @@ fn setup_top_bar(mut commands: Commands) {
                                     Text::new(format!(">{}", i)),
                                     TextColor(Color::WHITE),
                                     TextFont {
+                                        font: font.0.clone().into(),
                                         font_size: FontSize::Px(14.0),
                                         ..default()
                                     },
@@ -147,10 +146,6 @@ fn update_top_bar_player_info(
     state_registry: Res<StateRegistry>,
     mut text_query: Query<&mut Text, With<TopBarPlayerInfoText>>,
 ) {
-    if !player_country.is_changed() {
-        // FIXME: 将来人口や国庫が変動する場合は監視条件を変更する
-    }
-
     let Ok(mut text) = text_query.single_mut() else {
         return;
     };
@@ -165,7 +160,7 @@ fn update_top_bar_player_info(
                 .sum();
 
             let info = format!(
-                "{} | Pop: {} | Treasury: {} | Gov: {}",
+                "{} | 人口: {} | 国庫: {:.0} G | 制度: {}",
                 country.name,
                 format_population(total_pop),
                 country.treasury,
@@ -194,9 +189,9 @@ fn update_top_bar_date(
     };
 
     let status = if paused.0 {
-        "PAUSED".to_string()
+        "一時停止".to_string()
     } else {
-        format!("Spd: {}", speed.0)
+        format!("速度: {}", speed.0)
     };
 
     let info = format!("{} [{}]", date.display(), status);
@@ -217,7 +212,7 @@ fn handle_speed_buttons(
         match *interaction {
             Interaction::Pressed => {
                 speed.0 = btn.0;
-                paused.0 = false; // 速度変更時は再生開始
+                paused.0 = false;
                 *bg = BackgroundColor(Color::srgb(0.5, 0.5, 0.5));
             }
             Interaction::Hovered => {

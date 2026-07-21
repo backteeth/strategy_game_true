@@ -1,13 +1,14 @@
 use crate::app::game_state::GameState;
+use crate::building::data::{BuildingDefinition, BuildingRegistry, BuildingType};
+use crate::common::StateId;
 use crate::country::{CountryData, CountryRegistry};
+use crate::economy::resources::StateResourceDeposit;
 use crate::state::data::{StateData, StateRegistry};
 use bevy::prelude::*;
-/// データローダーモジュール
-/// assets/data/ 以下の RON ファイルを起動時に読み込み、バリデーションを行う
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 /// ローダープラグイン
-/// Startup システムでRONを読み込み、バリデーション後にResourceへ注入する
 pub struct DataLoaderPlugin;
 
 impl Plugin for DataLoaderPlugin {
@@ -21,11 +22,75 @@ impl Plugin for DataLoaderPlugin {
 }
 
 /// RONファイルからゲームデータを読み込む
-/// 失敗時はパニックして原因を表示する（起動時エラーは致命的）
 pub fn load_game_data(
     mut country_registry: ResMut<CountryRegistry>,
     mut state_registry: ResMut<StateRegistry>,
+    mut building_registry: ResMut<BuildingRegistry>,
 ) {
+    // ── 建物データ読み込み ───────────────────────────────────────────────
+    let buildings_ron = std::fs::read_to_string("assets/data/buildings.ron").unwrap_or_else(|e| {
+        panic!(
+            "[DataLoader] Failed to read assets/data/buildings.ron: {e}\n\
+                 Make sure to run the game from the project root directory."
+        )
+    });
+
+    let building_defs: Vec<BuildingDefinition> = ron::from_str(&buildings_ron)
+        .unwrap_or_else(|e| panic!("[DataLoader] Failed to parse assets/data/buildings.ron: {e}"));
+
+    let mut building_map = HashMap::new();
+    for b in building_defs {
+        if b.construction_cost < 0.0 {
+            panic!(
+                "[DataLoader] assets/data/buildings.ron: Building '{:?}' has negative construction cost: {}",
+                b.building_type, b.construction_cost
+            );
+        }
+        if b.required_progress <= 0.0 {
+            panic!(
+                "[DataLoader] assets/data/buildings.ron: Building '{:?}' has invalid required_progress (<= 0): {}",
+                b.building_type, b.required_progress
+            );
+        }
+        if b.max_level == 0 {
+            panic!(
+                "[DataLoader] assets/data/buildings.ron: Building '{:?}' has max_level of 0",
+                b.building_type
+            );
+        }
+        for (res, &amount) in &b.input_resources {
+            if amount < 0.0 {
+                panic!(
+                    "[DataLoader] assets/data/buildings.ron: Building '{:?}' has negative input resource amount for {:?}: {}",
+                    b.building_type, res, amount
+                );
+            }
+        }
+        for (res, &amount) in &b.output_resources {
+            if amount < 0.0 {
+                panic!(
+                    "[DataLoader] assets/data/buildings.ron: Building '{:?}' has negative output resource amount for {:?}: {}",
+                    b.building_type, res, amount
+                );
+            }
+        }
+        building_map.insert(b.building_type, b);
+    }
+    building_registry.definitions = building_map;
+
+    // ── 資源鉱床データ読み込み ───────────────────────────────────────────
+    let resources_ron = std::fs::read_to_string("assets/data/resources.ron").unwrap_or_else(|e| {
+        panic!(
+            "[DataLoader] Failed to read assets/data/resources.ron: {e}\n\
+                 Make sure to run the game from the project root directory."
+        )
+    });
+
+    let resource_deposits_map: HashMap<StateId, Vec<StateResourceDeposit>> =
+        ron::from_str(&resources_ron).unwrap_or_else(|e| {
+            panic!("[DataLoader] Failed to parse assets/data/resources.ron: {e}")
+        });
+
     // ── 国家データ読み込み ───────────────────────────────────────────────
     let countries_ron = std::fs::read_to_string("assets/data/countries.ron").unwrap_or_else(|e| {
         panic!(
@@ -45,14 +110,22 @@ pub fn load_game_data(
         )
     });
 
-    let states: Vec<StateData> = ron::from_str(&states_ron)
+    let mut states: Vec<StateData> = ron::from_str(&states_ron)
         .unwrap_or_else(|e| panic!("[DataLoader] Failed to parse assets/data/states.ron: {e}"));
 
+    // 鉱床情報を各州へアタッチ
+    for state in states.iter_mut() {
+        if let Some(deposits) = resource_deposits_map.get(&state.id) {
+            state.resource_deposits = deposits.clone();
+        }
+    }
+
     // ── バリデーション ───────────────────────────────────────────────────
-    validate_data(&countries, &states);
+    validate_data(&countries, &states, &building_registry.definitions);
 
     info!(
-        "[DataLoader] Loaded {} countries, {} states",
+        "[DataLoader] Successfully loaded {} buildings, {} countries, {} states",
+        building_registry.definitions.len(),
         countries.len(),
         states.len()
     );
@@ -63,9 +136,11 @@ pub fn load_game_data(
 }
 
 /// データの整合性を検証する
-/// 問題があれば panic して詳細メッセージを表示する
-fn validate_data(countries: &[CountryData], states: &[StateData]) {
-    // CountryId 重複チェック
+fn validate_data(
+    countries: &[CountryData],
+    states: &[StateData],
+    building_defs: &HashMap<BuildingType, BuildingDefinition>,
+) {
     let mut country_ids = HashSet::new();
     for c in countries {
         if !country_ids.insert(c.id.0) {
@@ -73,7 +148,6 @@ fn validate_data(countries: &[CountryData], states: &[StateData]) {
         }
     }
 
-    // StateId 重複チェック
     let mut state_ids = HashSet::new();
     for s in states {
         if !state_ids.insert(s.id.0) {
@@ -81,7 +155,6 @@ fn validate_data(countries: &[CountryData], states: &[StateData]) {
         }
     }
 
-    // 州の所有国が存在するか
     for s in states {
         if !country_ids.contains(&s.owner_country_id.0) {
             panic!(
@@ -89,9 +162,25 @@ fn validate_data(countries: &[CountryData], states: &[StateData]) {
                 s.name, s.id.0, s.owner_country_id.0
             );
         }
+
+        // 初期建物レベルのチェック
+        for (&b_type, &lvl) in &s.buildings {
+            if let Some(def) = building_defs.get(&b_type) {
+                if lvl > def.max_level {
+                    panic!(
+                        "[DataLoader] State '{}' (id={}) initial building level for {:?} ({}) exceeds max level ({})",
+                        s.name, s.id.0, b_type, lvl, def.max_level
+                    );
+                }
+            } else {
+                panic!(
+                    "[DataLoader] State '{}' (id={}) references unknown BuildingType: {:?}",
+                    s.name, s.id.0, b_type
+                );
+            }
+        }
     }
 
-    // 国家の首都州が存在し、かつその国家が所有しているか
     for c in countries {
         if !state_ids.contains(&c.capital_state_id.0) {
             panic!(
@@ -99,7 +188,6 @@ fn validate_data(countries: &[CountryData], states: &[StateData]) {
                 c.name, c.id.0, c.capital_state_id.0
             );
         }
-        // 首都州の所有者確認
         let capital_owner = states
             .iter()
             .find(|s| s.id == c.capital_state_id)
@@ -107,8 +195,7 @@ fn validate_data(countries: &[CountryData], states: &[StateData]) {
 
         if capital_owner != Some(c.id) {
             panic!(
-                "[DataLoader] Country '{}' (id={}) capital state {} is not owned by that country \
-                 (owner: {:?})",
+                "[DataLoader] Country '{}' (id={}) capital state {} is not owned by that country (owner: {:?})",
                 c.name, c.id.0, c.capital_state_id.0, capital_owner
             );
         }
