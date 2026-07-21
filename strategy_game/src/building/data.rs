@@ -28,17 +28,17 @@ impl BuildingType {
         BuildingType::MagicAcademy,
     ];
 
-    /// 日本語表示名
+    /// 表示用英語名
     pub fn display_name(self) -> &'static str {
         match self {
-            BuildingType::Farm => "農場",
-            BuildingType::LoggingCamp => "伐採所",
-            BuildingType::Mine => "鉱山",
-            BuildingType::Factory => "民需工場",
-            BuildingType::MilitaryFactory => "軍需工場",
-            BuildingType::Railway => "鉄道",
-            BuildingType::University => "大学",
-            BuildingType::MagicAcademy => "魔法学院",
+            BuildingType::Farm => "Farm",
+            BuildingType::LoggingCamp => "Logging Camp",
+            BuildingType::Mine => "Mine",
+            BuildingType::Factory => "Factory",
+            BuildingType::MilitaryFactory => "Military Factory",
+            BuildingType::Railway => "Railway",
+            BuildingType::University => "University",
+            BuildingType::MagicAcademy => "Magic Academy",
         }
     }
 }

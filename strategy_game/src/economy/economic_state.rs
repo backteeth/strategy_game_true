@@ -19,21 +19,21 @@ pub enum EconomicState {
 impl EconomicState {
     pub fn display_name(self) -> &'static str {
         match self {
-            EconomicState::Depression => "大恐慌 (Depression)",
-            EconomicState::Recession => "不況 (Recession)",
-            EconomicState::Stable => "安定 (Stable)",
-            EconomicState::Boom => "好況 (Boom)",
-            EconomicState::Prosperity => "繁栄 (Prosperity)",
+            EconomicState::Depression => "Depression",
+            EconomicState::Recession => "Recession",
+            EconomicState::Stable => "Stable",
+            EconomicState::Boom => "Boom",
+            EconomicState::Prosperity => "Prosperity",
         }
     }
 
     pub fn display_name_short(self) -> &'static str {
         match self {
-            EconomicState::Depression => "大恐慌",
-            EconomicState::Recession => "不況",
-            EconomicState::Stable => "安定",
-            EconomicState::Boom => "好況",
-            EconomicState::Prosperity => "繁栄",
+            EconomicState::Depression => "Depression",
+            EconomicState::Recession => "Recession",
+            EconomicState::Stable => "Stable",
+            EconomicState::Boom => "Boom",
+            EconomicState::Prosperity => "Prosperity",
         }
     }
 }

@@ -2,7 +2,6 @@ use crate::app::game_state::GameState;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::economy::resources::ResourceType;
 use crate::state::data::StateRegistry;
-use crate::ui::JapaneseFont;
 use crate::ui::notification::NotificationHistory;
 use bevy::prelude::*;
 
@@ -30,7 +29,7 @@ impl Plugin for EconomyPanelPlugin {
     }
 }
 
-fn setup_economy_panel(mut commands: Commands, font: Res<JapaneseFont>) {
+fn setup_economy_panel(mut commands: Commands) {
     commands
         .spawn((
             EconomyPanelRoot,
@@ -49,10 +48,13 @@ fn setup_economy_panel(mut commands: Commands, font: Res<JapaneseFont>) {
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("-- 国家経済 --"),
+                Text::new("-- National Economy --"),
+                TextLayout {
+                    linebreak: LineBreak::AnyCharacter,
+                    ..default()
+                },
                 TextColor(Color::srgb(0.9, 0.85, 0.6)),
                 TextFont {
-                    font: font.0.clone().into(),
                     font_size: FontSize::Px(16.0),
                     ..default()
                 },
@@ -67,10 +69,13 @@ fn setup_economy_panel(mut commands: Commands, font: Res<JapaneseFont>) {
                 })
                 .with_children(|row| {
                     row.spawn((
-                        Text::new("税率:"),
+                        Text::new("Tax Rate:"),
+                        TextLayout {
+                            linebreak: LineBreak::AnyCharacter,
+                            ..default()
+                        },
                         TextColor(Color::srgb(0.8, 0.8, 0.8)),
                         TextFont {
-                            font: font.0.clone().into(),
                             font_size: FontSize::Px(14.0),
                             ..default()
                         },
@@ -90,9 +95,12 @@ fn setup_economy_panel(mut commands: Commands, font: Res<JapaneseFont>) {
                     .with_children(|b| {
                         b.spawn((
                             Text::new("-1%"),
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
                             TextColor(Color::WHITE),
                             TextFont {
-                                font: font.0.clone().into(),
                                 font_size: FontSize::Px(12.0),
                                 ..default()
                             },
@@ -113,9 +121,12 @@ fn setup_economy_panel(mut commands: Commands, font: Res<JapaneseFont>) {
                     .with_children(|b| {
                         b.spawn((
                             Text::new("+1%"),
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
                             TextColor(Color::WHITE),
                             TextFont {
-                                font: font.0.clone().into(),
                                 font_size: FontSize::Px(12.0),
                                 ..default()
                             },
@@ -125,10 +136,13 @@ fn setup_economy_panel(mut commands: Commands, font: Res<JapaneseFont>) {
 
             parent.spawn((
                 EconomyPanelText,
-                Text::new("国家データを読み込み中..."),
+                Text::new("Loading nation economy data..."),
+                TextLayout {
+                    linebreak: LineBreak::AnyCharacter,
+                    ..default()
+                },
                 TextColor(Color::srgb(0.85, 0.85, 0.9)),
                 TextFont {
-                    font: font.0.clone().into(),
                     font_size: FontSize::Px(13.0),
                     ..default()
                 },
@@ -148,7 +162,7 @@ fn update_economy_panel(
     };
 
     let Some(country_id) = player_country.0 else {
-        *text = Text::new("国家が選択されていません");
+        *text = Text::new("No player country selected");
         return;
     };
 
@@ -164,15 +178,15 @@ fn update_economy_panel(
 
     let mut queue_str = String::new();
     if country.construction_queue.is_empty() {
-        queue_str.push_str("  (空)\n");
+        queue_str.push_str("  (Empty)\n");
     } else {
         for (i, item) in country.construction_queue.iter().enumerate() {
             let state_name = state_registry
                 .get(item.state_id)
                 .map(|s| s.name.as_str())
-                .unwrap_or("不明");
+                .unwrap_or("Unknown");
             queue_str.push_str(&format!(
-                "  [{}] {} @ {} ({:.0}/{:.0}日)\n",
+                "  [{}] {} @ {} ({:.0}/{:.0} d)\n",
                 i + 1,
                 item.building_type.display_name(),
                 state_name,
@@ -186,10 +200,10 @@ fn update_economy_panel(
         .recent
         .last()
         .map(|s| s.as_str())
-        .unwrap_or("なし");
+        .unwrap_or("None");
 
     let info = format!(
-        "経済状況: {}\n税率: {:.1}%\n月収: +{:.1} G\n支出: -{:.1} G\n収支: {:.1} G\n科学研究力: {:.1}\n魔法研究力: {:.1}\n\n[国家備蓄]\n{}\n[建設キュー (Cキーでキャンセル)]\n{}\n[最新通知]\n  {}",
+        "State: {}\nTax Rate: {:.1}%\nMonthly Inc: +{:.1} G\nMonthly Exp: -{:.1} G\nMonthly Bal: {:.1} G\nSci Capacity: {:.1}\nMag Capacity: {:.1}\n\n[Stockpile]\n{}\n[Construction Queue (Cancel: Press C)]\n{}\n[Notification]\n  {}",
         country.economic_state.display_name_short(),
         country.tax_rate * 100.0,
         country.monthly_income,

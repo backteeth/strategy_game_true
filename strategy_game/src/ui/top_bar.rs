@@ -1,8 +1,8 @@
 use crate::app::game_state::GameState;
 use crate::app::time::{GameDate, GamePaused, GameSpeed};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::research::world_stage::WorldCivilizationState;
 use crate::state::data::StateRegistry;
-use crate::ui::JapaneseFont;
 use crate::ui::state_panel::format_population;
 use bevy::prelude::*;
 
@@ -40,7 +40,7 @@ impl Plugin for TopBarPlugin {
     }
 }
 
-fn setup_top_bar(mut commands: Commands, font: Res<JapaneseFont>) {
+fn setup_top_bar(mut commands: Commands) {
     commands
         .spawn((
             TopBarRoot,
@@ -63,8 +63,7 @@ fn setup_top_bar(mut commands: Commands, font: Res<JapaneseFont>) {
                 Text::new(""),
                 TextColor(Color::srgb(0.9, 0.9, 0.9)),
                 TextFont {
-                    font: font.0.clone().into(),
-                    font_size: FontSize::Px(16.0),
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
             ));
@@ -81,8 +80,7 @@ fn setup_top_bar(mut commands: Commands, font: Res<JapaneseFont>) {
                         Text::new("1800/01/01"),
                         TextColor(Color::srgb(0.9, 0.9, 0.9)),
                         TextFont {
-                            font: font.0.clone().into(),
-                            font_size: FontSize::Px(16.0),
+                            font_size: FontSize::Px(14.0),
                             ..default()
                         },
                     ));
@@ -104,8 +102,7 @@ fn setup_top_bar(mut commands: Commands, font: Res<JapaneseFont>) {
                                 Text::new("||"),
                                 TextColor(Color::WHITE),
                                 TextFont {
-                                    font: font.0.clone().into(),
-                                    font_size: FontSize::Px(14.0),
+                                    font_size: FontSize::Px(12.0),
                                     ..default()
                                 },
                             ));
@@ -129,8 +126,7 @@ fn setup_top_bar(mut commands: Commands, font: Res<JapaneseFont>) {
                                     Text::new(format!(">{}", i)),
                                     TextColor(Color::WHITE),
                                     TextFont {
-                                        font: font.0.clone().into(),
-                                        font_size: FontSize::Px(14.0),
+                                        font_size: FontSize::Px(12.0),
                                         ..default()
                                     },
                                 ));
@@ -144,6 +140,7 @@ fn update_top_bar_player_info(
     player_country: Res<PlayerCountry>,
     country_registry: Res<CountryRegistry>,
     state_registry: Res<StateRegistry>,
+    world_state: Res<WorldCivilizationState>,
     mut text_query: Query<&mut Text, With<TopBarPlayerInfoText>>,
 ) {
     let Ok(mut text) = text_query.single_mut() else {
@@ -159,12 +156,21 @@ fn update_top_bar_player_info(
                 .map(|s| s.population)
                 .sum();
 
+            let active_techs = country.research_state.in_progress.len();
+            let reform_str = if let Some(ref r) = country.current_reform {
+                format!("Reform: {:.0}%", (r.progress / r.required_progress) * 100.0)
+            } else {
+                "Reform: None".to_string()
+            };
+
             let info = format!(
-                "{} | 人口: {} | 国庫: {:.0} G | 制度: {}",
+                "{} | Pop: {} | Treasury: {:.0} G | Era: {} | Active Research: {}/4 | {}",
                 country.name,
                 format_population(total_pop),
                 country.treasury,
-                country.government_type.display_name()
+                world_state.current_stage.display_name(),
+                active_techs,
+                reform_str
             );
 
             if text.0 != info {
@@ -189,9 +195,9 @@ fn update_top_bar_date(
     };
 
     let status = if paused.0 {
-        "一時停止".to_string()
+        "PAUSED".to_string()
     } else {
-        format!("速度: {}", speed.0)
+        format!("Spd: {}", speed.0)
     };
 
     let info = format!("{} [{}]", date.display(), status);

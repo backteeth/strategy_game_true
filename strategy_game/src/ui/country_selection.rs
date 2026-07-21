@@ -2,7 +2,6 @@ use crate::app::game_state::GameState;
 use crate::common::CountryId;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::state::data::StateRegistry;
-use crate::ui::JapaneseFont;
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -40,7 +39,6 @@ fn setup_ui(
     mut commands: Commands,
     country_registry: Res<CountryRegistry>,
     mut preview: ResMut<PreviewCountry>,
-    font: Res<JapaneseFont>,
 ) {
     preview.0 = country_registry.countries.first().map(|c| c.id);
 
@@ -66,9 +64,8 @@ fn setup_ui(
             },))
                 .with_children(|left_panel| {
                     left_panel.spawn((
-                        Text::new("国家選択"),
+                        Text::new("Select Your Nation"),
                         TextFont {
-                            font: font.0.clone().into(),
                             font_size: FontSize::Px(24.0),
                             ..default()
                         },
@@ -92,7 +89,6 @@ fn setup_ui(
                                     Text::new(&country.name),
                                     TextColor(Color::srgb(0.9, 0.9, 0.9)),
                                     TextFont {
-                                        font: font.0.clone().into(),
                                         font_size: FontSize::Px(18.0),
                                         ..default()
                                     },
@@ -113,10 +109,9 @@ fn setup_ui(
                 .with_children(|right_panel| {
                     right_panel.spawn((
                         PreviewDetailText,
-                        Text::new("国家を選択してください..."),
+                        Text::new("Select a nation..."),
                         TextColor(Color::srgb(0.8, 0.8, 0.8)),
                         TextFont {
-                            font: font.0.clone().into(),
                             font_size: FontSize::Px(20.0),
                             ..default()
                         },
@@ -139,10 +134,9 @@ fn setup_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("ゲーム開始"),
+                                Text::new("Start Game"),
                                 TextColor(Color::WHITE),
                                 TextFont {
-                                    font: font.0.clone().into(),
                                     font_size: FontSize::Px(24.0),
                                     ..default()
                                 },
@@ -197,7 +191,7 @@ fn update_preview_details(
             let capital_name = state_registry
                 .get(country.capital_state_id)
                 .map(|s| s.name.as_str())
-                .unwrap_or("不明");
+                .unwrap_or("Unknown");
 
             let total_pop: u64 = state_registry
                 .states
@@ -207,7 +201,7 @@ fn update_preview_details(
                 .sum();
 
             let info = format!(
-                "国名: {}\n統治体制: {}\n経済体制: {}\n総人口: {}\n国庫: {:.0} G\n首都: {}",
+                "Name: {}\nGovernment: {}\nEconomy: {}\nTotal Pop: {}\nTreasury: {:.0} G\nCapital: {}",
                 country.name,
                 country.government_type.display_name(),
                 country.economic_system.display_name(),

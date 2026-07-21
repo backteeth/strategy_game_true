@@ -24,16 +24,16 @@ impl ResourceType {
         ResourceType::MilitaryEquipment,
     ];
 
-    /// 日本語表示名
+    /// 表示用英語名
     pub fn display_name(self) -> &'static str {
         match self {
-            ResourceType::Food => "食料",
-            ResourceType::Wood => "木材",
-            ResourceType::Iron => "鉄",
-            ResourceType::Coal => "石炭",
-            ResourceType::MagicCrystal => "魔晶石",
-            ResourceType::IndustrialGoods => "工業製品",
-            ResourceType::MilitaryEquipment => "軍需品",
+            ResourceType::Food => "Food",
+            ResourceType::Wood => "Wood",
+            ResourceType::Iron => "Iron",
+            ResourceType::Coal => "Coal",
+            ResourceType::MagicCrystal => "Magic Crystal",
+            ResourceType::IndustrialGoods => "Industrial Goods",
+            ResourceType::MilitaryEquipment => "Military Equipment",
         }
     }
 }

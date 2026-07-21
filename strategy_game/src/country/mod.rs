@@ -2,6 +2,9 @@ use crate::building::construction::ConstructionQueueItem;
 use crate::common::{CountryId, StateId};
 use crate::economy::economic_state::EconomicState;
 use crate::economy::resources::CountryStockpile;
+use crate::politics::interest_groups::CountryPoliticsData;
+use crate::politics::reform::PoliticalReform;
+use crate::research::allocation::CountryResearchState;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +72,7 @@ fn default_tax_rate() -> f32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CountryData {
     pub id: CountryId,
-    /// 表示名（ASCII推奨、ICU4X制限のため）
+    /// 表示名（ASCII推奨）
     pub name: String,
     /// マップカラー (r, g, b) 0.0〜1.0
     pub map_color: [f32; 3],
@@ -109,6 +112,42 @@ pub struct CountryData {
     /// 建設キュー
     #[serde(default)]
     pub construction_queue: Vec<ConstructionQueueItem>,
+
+    /// 国家の研究状態
+    #[serde(default)]
+    pub research_state: CountryResearchState,
+    /// 政治・価値観・利益団体データ
+    #[serde(default = "CountryPoliticsData::new_default")]
+    pub politics: CountryPoliticsData,
+    /// 進行中の価値観改革
+    #[serde(default)]
+    pub current_reform: Option<PoliticalReform>,
+}
+
+impl Default for CountryData {
+    fn default() -> Self {
+        Self {
+            id: CountryId(0),
+            name: "Default Country".to_string(),
+            map_color: [0.5, 0.5, 0.5],
+            capital_state_id: StateId(0),
+            treasury: 1000.0,
+            government_type: GovernmentType::Monarchy,
+            economic_system: EconomicSystem::FreeMarket,
+            stockpile: CountryStockpile::default(),
+            tax_rate: 0.15,
+            monthly_income: 0.0,
+            monthly_expenses: 0.0,
+            monthly_balance: 0.0,
+            science_research_capacity: 10.0,
+            magic_research_capacity: 10.0,
+            economic_state: EconomicState::default(),
+            construction_queue: Vec::new(),
+            research_state: CountryResearchState::default(),
+            politics: CountryPoliticsData::new_default(),
+            current_reform: None,
+        }
+    }
 }
 
 impl CountryData {

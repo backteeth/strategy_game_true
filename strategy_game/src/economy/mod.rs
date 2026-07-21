@@ -63,7 +63,7 @@ fn handle_daily_construction(
                         if Some(country.id) == player_country.0 {
                             notif_writer.write(GameNotification {
                                 message: format!(
-                                    "建設完了: {} (州: {}, Lv.{})",
+                                    "Build Complete: {} (State: {}, Lv.{})",
                                     item.building_type.display_name(),
                                     state.name,
                                     current + 1
@@ -182,20 +182,20 @@ fn handle_monthly_economy(
                 if country.monthly_balance < 0.0 {
                     notif_writer.write(GameNotification {
                         message: format!(
-                            "警告: 月次収支が赤字です ({:.1} G)",
+                            "WARNING: Monthly balance is negative ({:.1} G)",
                             country.monthly_balance
                         ),
                     });
                 }
                 if is_bankrupt {
                     notif_writer.write(GameNotification {
-                        message: "警告: 国庫が負数（破産状態）です！建物稼働率が低下しています。"
+                        message: "WARNING: Treasury is negative (Bankrupt)! Efficiency reduced."
                             .to_string(),
                     });
                 }
                 if country.stockpile.get(ResourceType::Food) <= 0.0 {
                     notif_writer.write(GameNotification {
-                        message: "警告: 食料不足が発生しています！".to_string(),
+                        message: "WARNING: Food shortage detected!".to_string(),
                     });
                 }
             }

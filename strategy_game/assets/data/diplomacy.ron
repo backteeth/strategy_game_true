@@ -1,0 +1,20 @@
+[
+    (
+        country_a: (1),
+        country_b: (2),
+        opinion: 25.0,
+        treaties: [NonAggressionPact],
+    ),
+    (
+        country_a: (1),
+        country_b: (3),
+        opinion: -15.0,
+        treaties: [],
+    ),
+    (
+        country_a: (2),
+        country_b: (4),
+        opinion: 40.0,
+        treaties: [Alliance],
+    ),
+]

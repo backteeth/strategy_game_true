@@ -1,0 +1,34 @@
+[
+    (
+        stage: IndustrialRevolution,
+        display_name: "Industrial Revolution Age",
+        description: "Mechanization and steam power reshape society and industry.",
+        required_previous_stage: Some(PreIndustrial),
+        milestone_technologies: ["SteamEngine", "MechanizedProduction"],
+        required_country_count: 2,
+    ),
+    (
+        stage: ElectricalAge,
+        display_name: "Electrical Age",
+        description: "Electricity illuminates cities and accelerates research.",
+        required_previous_stage: Some(IndustrialRevolution),
+        milestone_technologies: ["Electricity"],
+        required_country_count: 2,
+    ),
+    (
+        stage: TotalWarAge,
+        display_name: "Total War Age",
+        description: "Doctrine and standardized armaments mobilize global resources.",
+        required_previous_stage: Some(ElectricalAge),
+        milestone_technologies: ["GeneralStaff"],
+        required_country_count: 2,
+    ),
+    (
+        stage: MagitechAge,
+        display_name: "Magitech Era",
+        description: "Science and magic fuse to unlock supreme human potential.",
+        required_previous_stage: Some(TotalWarAge),
+        milestone_technologies: ["IntegratedCivilization"],
+        required_country_count: 1,
+    ),
+]
