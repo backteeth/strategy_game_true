@@ -2,9 +2,11 @@ use crate::app::game_state::GameState;
 use crate::common::ArmyId;
 use crate::country::PlayerCountry;
 use crate::map::camera::GameCamera;
+use crate::military::battle::BattleRegistry;
 use crate::military::data::{ArmyStatus, MilitaryRegistry};
 use crate::state::SelectedState;
 use crate::state::data::StateRegistry;
+use crate::war::data::WarRegistry;
 use bevy::prelude::*;
 
 #[derive(Resource, Default, Debug)]
@@ -66,6 +68,7 @@ fn handle_army_selection(
     let army_radius = 16.0;
 
     for (army_id, army) in military_registry.armies.iter() {
+        // 既に存在しないユニットをスキップ
         let mut pos = state_registry
             .get(army.current_state)
             .map(|s| s.position())
@@ -86,9 +89,13 @@ fn handle_army_selection(
     }
 
     if let Some(army_id) = hit_army {
-        selected_army.army_id = Some(army_id);
-        // ユニット選択時は州選択をクリアしてUIの競合を抑止
-        selected_state.0 = None;
+        // 存在チェック（撃破済みユニットの選択防止）
+        if military_registry.armies.contains_key(&army_id) {
+            selected_army.army_id = Some(army_id);
+            selected_state.0 = None;
+        }
+    } else {
+        // ユニットをクリックしなければ選択を解除しない（状態UIパネルへの影響を避ける）
     }
 }
 
@@ -99,8 +106,10 @@ fn handle_movement_order(
     camera_q: Query<&Transform, With<GameCamera>>,
     player_country: Res<PlayerCountry>,
     state_registry: Res<StateRegistry>,
+    war_registry: Res<WarRegistry>,
     selected_army: Res<SelectedArmy>,
     mut military_registry: ResMut<MilitaryRegistry>,
+    battle_registry: Res<BattleRegistry>,
     ui_interactions_q: Query<&Interaction>,
 ) {
     if !mouse_buttons.just_pressed(MouseButton::Right) {
@@ -160,7 +169,9 @@ fn handle_movement_order(
         return;
     };
 
-    let Some(army) = military_registry.armies.get_mut(&army_id) else {
+    // ユニット存在確認（撃破済み選択防止）
+    let Some(army) = military_registry.armies.get(&army_id) else {
+        warn!("[ArmyMovement] Selected army {:?} no longer exists", army_id);
         return;
     };
 
@@ -173,20 +184,94 @@ fn handle_movement_order(
         return;
     }
 
-    if army.current_state == target && army.destination == Some(target) {
+    // 戦闘中ユニットへの移動命令を拒否
+    if army.status == ArmyStatus::Fighting {
+        warn!(
+            "[ArmyMovement] Army {} is in combat, cannot move",
+            army.id.0
+        );
         return;
     }
 
-    // 経路探索
+    // 撃破済みユニットへの命令を拒否
+    if army.manpower == 0 {
+        warn!(
+            "[ArmyMovement] Army {} has no manpower, cannot move",
+            army.id.0
+        );
+        return;
+    }
+
+    let army_current = army.current_state;
+    let army_owner = army.owner;
+
+    if army_current == target && army.destination == Some(target) {
+        return;
+    }
+
+    // 移動先の確認
+    let target_state_data = match state_registry.get(target) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let target_controller = target_state_data.controller();
+
+    // 移動先が自国支配地域か確認
+    let is_own_territory = target_controller == army_owner;
+
+    // 移動先が敵国支配地域（戦争中）か確認
+    let is_enemy_territory = war_registry.are_countries_at_war(army_owner, target_controller);
+
+    if !is_own_territory && !is_enemy_territory {
+        warn!(
+            "[ArmyMovement] Army {} cannot move to state {:?}: neutral or non-hostile territory",
+            army.id.0, target
+        );
+        return;
+    }
+
+    // 移動先が戦闘中の地域なら拒否（既に戦闘が行われている）
+    if let Some(_battle) = battle_registry.get_ongoing_battle_in_state(target) {
+        if !is_own_territory {
+            warn!(
+                "[ArmyMovement] Army {} cannot move to state {:?}: battle already ongoing",
+                army.id.0, target
+            );
+            return;
+        }
+    }
+
+    // 交戦中の敵国リストを構築
+    let hostile_countries: Vec<crate::common::CountryId> = war_registry
+        .wars
+        .values()
+        .filter(|w| {
+            w.status == crate::war::data::WarStatus::Active
+                && (w.attackers.contains(&army_owner) || w.defenders.contains(&army_owner))
+        })
+        .flat_map(|w| {
+            if w.attackers.contains(&army_owner) {
+                w.defenders.iter().copied().collect::<Vec<_>>()
+            } else {
+                w.attackers.iter().copied().collect::<Vec<_>>()
+            }
+        })
+        .collect();
+
+    // 経路探索（自国 + 交戦中の敵国を通過可能）
     let path = crate::military::pathfinding::find_path(
-        army.current_state,
+        army_current,
         target,
         &state_registry,
-        &[army.owner],
-        &[],
+        &[army_owner],
+        &hostile_countries,
     );
 
     if let Some(path) = path {
+        let Some(army) = military_registry.armies.get_mut(&army_id) else {
+            return;
+        };
         army.destination = Some(target);
         army.current_path = path;
         army.target_state = None;
@@ -200,7 +285,7 @@ fn handle_movement_order(
         );
     } else {
         warn!(
-            "[ArmyMovement] Army {} cannot reach state {:?}: No valid path in own territory",
+            "[ArmyMovement] Army {} cannot reach state {:?}: No valid path",
             army.id.0, target
         );
     }

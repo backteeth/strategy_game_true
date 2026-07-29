@@ -2,9 +2,11 @@ use crate::app::game_state::GameState;
 use crate::common::DivisionId;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::map::army_selection::SelectedArmy;
+use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::data::{ArmyStatus, MilitaryRegistry};
 use crate::military::recruitment::RecruitmentQueueItem;
 use crate::state::data::StateRegistry;
+use crate::war::data::WarRegistry;
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -76,8 +78,8 @@ fn setup_military_panel(mut commands: Commands) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(310.0),
                 top: Val::Px(75.0),
-                width: Val::Px(580.0),
-                height: Val::Px(600.0),
+                width: Val::Px(600.0),
+                height: Val::Px(650.0),
                 padding: UiRect::all(Val::Px(12.0)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(8.0),
@@ -151,6 +153,8 @@ fn update_military_panel_ui(
     country_registry: Res<CountryRegistry>,
     military_registry: Res<MilitaryRegistry>,
     state_registry: Res<StateRegistry>,
+    war_registry: Res<WarRegistry>,
+    battle_registry: Res<BattleRegistry>,
     selected_army: Res<SelectedArmy>,
     mut text_q: Query<&mut Text, With<MilitaryPanelText>>,
     _commands: Commands,
@@ -190,6 +194,7 @@ fn update_military_panel_ui(
     ));
     lines.push("".to_string());
 
+    // 選択中ユニット詳細
     if let Some(army) = selected_army
         .army_id
         .and_then(|id| military_registry.armies.get(&id))
@@ -206,6 +211,24 @@ fn update_military_panel_ui(
         lines.push(format!("ID: Army #{} | 所有国: {}", army.id.0, owner_name));
         lines.push(format!("現在位置: {}", current_state_name));
 
+        // 戦力・組織率
+        lines.push(format!(
+            "戦力: {} / {} ({:.0}%)",
+            army.manpower,
+            army.max_manpower,
+            army.manpower as f32 / army.max_manpower as f32 * 100.0
+        ));
+        lines.push(format!(
+            "組織率: {:.0} / {:.0} ({:.0}%)",
+            army.organization,
+            army.max_organization,
+            army.organization / army.max_organization * 100.0
+        ));
+        lines.push(format!(
+            "攻撃力: {} | 防御力: {}",
+            army.attack_power, army.defense_power
+        ));
+
         let status_str = match army.status {
             ArmyStatus::Idle => "待機中",
             ArmyStatus::Moving => "移動中",
@@ -215,6 +238,32 @@ fn update_military_panel_ui(
             ArmyStatus::Disbanding => "解散中",
         };
         lines.push(format!("状態: {}", status_str));
+
+        // 戦闘中の場合、戦闘詳細を表示
+        if army.status == ArmyStatus::Fighting {
+            if let Some(battle_id) = army.combat_id {
+                if let Some(battle) = battle_registry.battles.get(&battle_id) {
+                    let atk_name = country_registry
+                        .get(battle.attacker_country)
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("?");
+                    let def_name = country_registry
+                        .get(battle.defender_country)
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("?");
+                    let battle_state_name = state_registry
+                        .get(battle.state_id)
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("?");
+                    lines.push(format!("  戦闘地域: {}", battle_state_name));
+                    lines.push(format!(
+                        "  {} vs {}",
+                        atk_name, def_name
+                    ));
+                    lines.push(format!("  経過: {}日", battle.elapsed_days));
+                }
+            }
+        }
 
         if let Some(dest_id) = army.destination {
             let dest_name = state_registry
@@ -231,6 +280,96 @@ fn update_military_panel_ui(
             ));
         } else {
             lines.push("目的地: なし".to_string());
+        }
+        lines.push("".to_string());
+    }
+
+    // 進行中の戦闘一覧
+    let ongoing_battles: Vec<_> = battle_registry
+        .battles
+        .values()
+        .filter(|b| b.status == BattleStatus::Ongoing)
+        .collect();
+
+    if !ongoing_battles.is_empty() {
+        lines.push(format!("── 進行中の戦闘 ({} 件) ──", ongoing_battles.len()));
+        for battle in &ongoing_battles {
+            let battle_state_name = state_registry
+                .get(battle.state_id)
+                .map(|s| s.name.as_str())
+                .unwrap_or("?");
+            let atk_name = country_registry
+                .get(battle.attacker_country)
+                .map(|c| c.name.as_str())
+                .unwrap_or("?");
+            let def_name = country_registry
+                .get(battle.defender_country)
+                .map(|c| c.name.as_str())
+                .unwrap_or("?");
+
+            // 攻撃側・防御側の戦力を表示
+            let atk_manpower = military_registry
+                .armies
+                .get(&battle.attacker_army_id)
+                .map(|a| a.manpower)
+                .unwrap_or(0);
+            let def_manpower = military_registry
+                .armies
+                .get(&battle.defender_army_id)
+                .map(|a| a.manpower)
+                .unwrap_or(0);
+            let atk_org = military_registry
+                .armies
+                .get(&battle.attacker_army_id)
+                .map(|a| a.organization)
+                .unwrap_or(0.0);
+            let def_org = military_registry
+                .armies
+                .get(&battle.defender_army_id)
+                .map(|a| a.organization)
+                .unwrap_or(0.0);
+
+            // どちらが優勢か
+            let advantage = if atk_manpower > def_manpower {
+                format!("{}優勢", atk_name)
+            } else if def_manpower > atk_manpower {
+                format!("{}優勢", def_name)
+            } else {
+                "互角".to_string()
+            };
+
+            lines.push(format!(
+                "[戦闘] {} | {} vs {}",
+                battle_state_name, atk_name, def_name
+            ));
+            lines.push(format!(
+                "  攻: 戦力{} 組織{:.0} | 守: 戦力{} 組織{:.0} | {}",
+                atk_manpower, atk_org, def_manpower, def_org, advantage
+            ));
+            lines.push(format!(
+                "  {}日目 | 開始: {}",
+                battle.elapsed_days, battle.start_date
+            ));
+        }
+        lines.push("".to_string());
+    }
+
+    // 占領中の戦争
+    let active_wars: Vec<_> = war_registry
+        .wars
+        .values()
+        .filter(|w| {
+            w.status == crate::war::data::WarStatus::Active
+                && (w.attackers.contains(&player_cid) || w.defenders.contains(&player_cid))
+        })
+        .collect();
+
+    if !active_wars.is_empty() {
+        lines.push(format!("── 進行中の戦争 ({} 件) ──", active_wars.len()));
+        for war in &active_wars {
+            let is_attacker = war.attackers.contains(&player_cid);
+            let role = if is_attacker { "攻撃" } else { "防衛" };
+            lines.push(format!("{} [{}] スコア: {:.0}", war.name, role, war.war_score));
         }
         lines.push("".to_string());
     }
@@ -253,14 +392,13 @@ fn update_military_panel_ui(
         let selected = selected_army.army_id == Some(army.id);
         let sel_mark = if selected { "► " } else { "  " };
         lines.push(format!(
-            "{}{} [{:?}/{:?}] @ {} | {} | 士気:{:.0}%",
+            "{}#{} @ {} | {} | 兵力:{} 組:{:.0}",
             sel_mark,
             army.id.0,
-            army.division_type,
-            army.size,
             state_name,
             status_str,
-            army.morale / army.max_morale * 100.0,
+            army.manpower,
+            army.organization,
         ));
     }
 

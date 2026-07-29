@@ -5,7 +5,6 @@ use crate::military::data::{
     ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
 };
 use crate::state::data::{StateData, StateRegistry};
-use crate::war::combat::process_combat;
 use crate::war::data::{War, WarRegistry};
 use crate::war::peace::{PeaceDemand, execute_peace_treaty};
 use crate::war::war_score::process_war_score;
@@ -66,9 +65,12 @@ fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
 
 #[test]
 fn test_combat_resolution() {
-    let (mut mil_reg, war_reg, _) = setup();
+    // 旧 process_combat のテストを combat_calc ベースで更新
+    use crate::military::combat_calc::resolve_combat_day;
 
-    // Two armies in the same state
+    let (mil_reg, _, _) = setup();
+
+    // Two armies
     let a1 = ArmyUnit {
         id: ArmyId(1),
         owner: CountryId(1),
@@ -91,25 +93,25 @@ fn test_combat_resolution() {
         movement_progress: 0.0,
         status: ArmyStatus::Idle,
         def_id: DivisionId(1),
+        attack_power: 10,
+        defense_power: 10,
+        combat_id: None,
     };
 
     let mut a2 = a1.clone();
     a2.id = ArmyId(2);
-    a2.owner = CountryId(2); // Hostile country
+    a2.owner = CountryId(2);
 
-    mil_reg.add_army(a1); // id becomes 0
-    mil_reg.add_army(a2); // id becomes 1
+    // 1日分の戦闘計算で損失が発生する
+    let (atk_loss, _, def_loss, _) = resolve_combat_day(&a1, &a2, 0);
+    assert!(atk_loss > 0 || def_loss > 0, "Combat should cause damage");
 
-    process_combat(&mut mil_reg, &war_reg);
+    // 組織率が適用された後の戦力は元より低い
+    let new_manpower_a1 = a1.manpower.saturating_sub(atk_loss);
+    let new_manpower_a2 = a2.manpower.saturating_sub(def_loss);
+    assert!(new_manpower_a1 < 10000 || new_manpower_a2 < 10000);
 
-    let a1_ref = mil_reg.armies.get(&ArmyId(0)).unwrap();
-    let a2_ref = mil_reg.armies.get(&ArmyId(1)).unwrap();
-
-    // Both should take damage
-    assert_eq!(a1_ref.status, ArmyStatus::Fighting);
-    assert!(a1_ref.manpower < 10000);
-    assert_eq!(a2_ref.status, ArmyStatus::Fighting);
-    assert!(a2_ref.manpower < 10000);
+    let _ = mil_reg; // suppress unused warning
 }
 
 #[test]

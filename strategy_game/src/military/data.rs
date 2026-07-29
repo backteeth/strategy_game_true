@@ -1,4 +1,4 @@
-use crate::common::{ArmyId, CountryId, DivisionId, StateId};
+use crate::common::{ArmyId, BattleId, CountryId, DivisionId, StateId};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -92,6 +92,15 @@ pub struct ArmyUnit {
     pub movement_progress: f32,
     pub status: ArmyStatus,
     pub def_id: DivisionId,
+    /// 攻撃力（整数、決定的な戦闘計算に使用）
+    #[serde(default = "default_attack_power")]
+    pub attack_power: i32,
+    /// 防御力（整数）
+    #[serde(default = "default_defense_power")]
+    pub defense_power: i32,
+    /// 参加中の戦闘ID
+    #[serde(default)]
+    pub combat_id: Option<BattleId>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -119,4 +128,12 @@ impl MilitaryRegistry {
             .filter(|a| a.current_state == state)
             .collect()
     }
+}
+
+fn default_attack_power() -> i32 {
+    10
+}
+
+fn default_defense_power() -> i32 {
+    10
 }

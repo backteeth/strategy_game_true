@@ -33,3 +33,7 @@ pub struct ClaimId(pub usize);
 /// 条約を一意に識別するID型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TreatyId(pub usize);
+
+/// 陸上戦闘を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BattleId(pub usize);

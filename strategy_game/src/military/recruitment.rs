@@ -52,6 +52,9 @@ pub fn process_recruitment(
                         movement_progress: 0.0,
                         status: ArmyStatus::Idle,
                         def_id: item.division_id,
+                        attack_power: def.attack as i32,
+                        defense_power: def.defense as i32,
+                        combat_id: None,
                     });
                 }
             }

@@ -2,7 +2,8 @@ use crate::app::game_state::GameState;
 use crate::common::ArmyId;
 use crate::country::CountryRegistry;
 use crate::map::army_selection::SelectedArmy;
-use crate::military::data::MilitaryRegistry;
+use crate::military::battle::{BattleRegistry, BattleStatus};
+use crate::military::data::{ArmyStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 
@@ -17,7 +18,13 @@ impl Plugin for ArmyRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (sync_army_visuals, update_army_visuals, draw_army_paths)
+            (
+                sync_army_visuals,
+                update_army_visuals,
+                draw_army_paths,
+                draw_battle_overlays,
+                draw_occupation_overlays,
+            )
                 .run_if(in_state(GameState::Playing)),
         );
     }
@@ -126,10 +133,14 @@ fn update_army_visuals(
                 .map(|c| c.bevy_color())
                 .unwrap_or(Color::WHITE);
 
-            if is_selected {
-                // 強調表示: サイズ拡大 & 枠線風/黄金色の補正
+            if army.status == ArmyStatus::Fighting {
+                // 戦闘中: 赤みがかった色
+                sprite.custom_size = Some(Vec2::new(16.0, 16.0));
+                sprite.color = Color::srgb(1.0, 0.2, 0.2);
+            } else if is_selected {
+                // 強調表示: サイズ拡大 & 黄金色
                 sprite.custom_size = Some(Vec2::new(20.0, 20.0));
-                sprite.color = Color::srgb(1.0, 0.9, 0.3); // 金色強調
+                sprite.color = Color::srgb(1.0, 0.9, 0.3);
             } else {
                 sprite.custom_size = Some(Vec2::new(14.0, 14.0));
                 sprite.color = base_color;
@@ -188,5 +199,80 @@ fn draw_army_paths(
     // 目的地のハイライトマーク
     if army.destination.is_some() || army.target_state.is_some() {
         gizmos.circle_2d(current_pos, 8.0, Color::srgb(0.9, 0.2, 0.2));
+    }
+}
+
+/// 戦闘中の地域を Gizmos でハイライト表示（赤い枠）
+fn draw_battle_overlays(
+    battle_registry: Res<BattleRegistry>,
+    state_registry: Res<StateRegistry>,
+    mut gizmos: Gizmos,
+) {
+    for battle in battle_registry.battles.values() {
+        if battle.status != BattleStatus::Ongoing {
+            continue;
+        }
+        if let Some(state) = state_registry.get(battle.state_id) {
+            let pos = state.position();
+            let size = state.rect_size();
+            let half = size * 0.5;
+            // 赤い枠で戦闘中を表示
+            gizmos.line_2d(
+                pos + Vec2::new(-half.x, -half.y),
+                pos + Vec2::new(half.x, -half.y),
+                Color::srgb(1.0, 0.1, 0.1),
+            );
+            gizmos.line_2d(
+                pos + Vec2::new(half.x, -half.y),
+                pos + Vec2::new(half.x, half.y),
+                Color::srgb(1.0, 0.1, 0.1),
+            );
+            gizmos.line_2d(
+                pos + Vec2::new(half.x, half.y),
+                pos + Vec2::new(-half.x, half.y),
+                Color::srgb(1.0, 0.1, 0.1),
+            );
+            gizmos.line_2d(
+                pos + Vec2::new(-half.x, half.y),
+                pos + Vec2::new(-half.x, -half.y),
+                Color::srgb(1.0, 0.1, 0.1),
+            );
+        }
+    }
+}
+
+/// 所有国と支配国が異なる地域（占領地）を Gizmos でハイライト表示（黄色の枠）
+fn draw_occupation_overlays(state_registry: Res<StateRegistry>, mut gizmos: Gizmos) {
+    for state in &state_registry.states {
+        let controller = state.controller();
+        if controller == state.owner_country_id {
+            continue; // 所有国=支配国なら表示不要
+        }
+
+        let pos = state.position();
+        let size = state.rect_size();
+        let half = size * 0.5 + Vec2::new(2.0, 2.0); // 少し外側
+
+        let color = Color::srgb(1.0, 0.85, 0.1);
+        gizmos.line_2d(
+            pos + Vec2::new(-half.x, -half.y),
+            pos + Vec2::new(half.x, -half.y),
+            color,
+        );
+        gizmos.line_2d(
+            pos + Vec2::new(half.x, -half.y),
+            pos + Vec2::new(half.x, half.y),
+            color,
+        );
+        gizmos.line_2d(
+            pos + Vec2::new(half.x, half.y),
+            pos + Vec2::new(-half.x, half.y),
+            color,
+        );
+        gizmos.line_2d(
+            pos + Vec2::new(-half.x, half.y),
+            pos + Vec2::new(-half.x, -half.y),
+            color,
+        );
     }
 }
