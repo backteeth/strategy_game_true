@@ -20,6 +20,8 @@
         },
         world_position: (-400.0, 200.0),
         size: (180.0, 130.0),
+        neighbors: [(1), (2), (5)],
+        integration: 100.0,
     ),
     (
         id: (1),
@@ -37,6 +39,8 @@
         },
         world_position: (-250.0, 320.0),
         size: (150.0, 110.0),
+        neighbors: [(0), (3)],
+        integration: 100.0,
     ),
     (
         id: (2),
@@ -55,6 +59,8 @@
         },
         world_position: (-560.0, 80.0),
         size: (140.0, 120.0),
+        neighbors: [(0), (5)],
+        integration: 100.0,
     ),
     // ─ Elfin Republic (owner_country_id: 1) ──────────────────────────────
     (
@@ -73,6 +79,8 @@
         },
         world_position: (50.0, 250.0),
         size: (170.0, 140.0),
+        neighbors: [(1), (4), (5), (8)],
+        integration: 100.0,
     ),
     (
         id: (4),
@@ -90,6 +98,8 @@
         },
         world_position: (230.0, 150.0),
         size: (160.0, 110.0),
+        neighbors: [(3), (7), (8)],
+        integration: 100.0,
     ),
     // ─ Dwarf Federation (owner_country_id: 2) ────────────────────────────
     (
@@ -109,6 +119,8 @@
         },
         world_position: (-100.0, -150.0),
         size: (150.0, 120.0),
+        neighbors: [(0), (2), (3), (6)],
+        integration: 100.0,
     ),
     (
         id: (6),
@@ -126,6 +138,8 @@
         },
         world_position: (100.0, -280.0),
         size: (160.0, 110.0),
+        neighbors: [(5), (7)],
+        integration: 100.0,
     ),
     (
         id: (7),
@@ -143,6 +157,8 @@
         },
         world_position: (350.0, -200.0),
         size: (140.0, 130.0),
+        neighbors: [(4), (6), (9)],
+        integration: 100.0,
     ),
     // ─ Oceanic Magic Empire (owner_country_id: 3) ────────────────────────
     (
@@ -160,6 +176,8 @@
         },
         world_position: (500.0, 50.0),
         size: (160.0, 150.0),
+        neighbors: [(3), (4), (9)],
+        integration: 100.0,
     ),
     (
         id: (9),
@@ -177,5 +195,7 @@
         },
         world_position: (600.0, -150.0),
         size: (140.0, 120.0),
+        neighbors: [(7), (8)],
+        integration: 100.0,
     ),
 ]

@@ -147,35 +147,34 @@ fn update_top_bar_player_info(
         return;
     };
 
-    if let Some(id) = player_country.0 {
-        if let Some(country) = country_registry.get(id) {
-            let total_pop: u64 = state_registry
-                .states
-                .iter()
-                .filter(|s| s.owner_country_id == id)
-                .map(|s| s.population)
-                .sum();
+    if let Some(country) = player_country.0.and_then(|id| country_registry.get(id)) {
+        let id = country.id;
+        let total_pop: u64 = state_registry
+            .states
+            .iter()
+            .filter(|s| s.owner_country_id == id)
+            .map(|s| s.population)
+            .sum();
 
-            let active_techs = country.research_state.in_progress.len();
-            let reform_str = if let Some(ref r) = country.current_reform {
-                format!("Reform: {:.0}%", (r.progress / r.required_progress) * 100.0)
-            } else {
-                "Reform: None".to_string()
-            };
+        let active_techs = country.research_state.in_progress.len();
+        let reform_str = if let Some(ref r) = country.current_reform {
+            format!("Reform: {:.0}%", (r.progress / r.required_progress) * 100.0)
+        } else {
+            "Reform: None".to_string()
+        };
 
-            let info = format!(
-                "{} | Pop: {} | Treasury: {:.0} G | Era: {} | Active Research: {}/4 | {}",
-                country.name,
-                format_population(total_pop),
-                country.treasury,
-                world_state.current_stage.display_name(),
-                active_techs,
-                reform_str
-            );
+        let info = format!(
+            "{} | Pop: {} | Treasury: {:.0} G | Era: {} | Active Research: {}/4 | {}",
+            country.name,
+            format_population(total_pop),
+            country.treasury,
+            world_state.current_stage.display_name(),
+            active_techs,
+            reform_str
+        );
 
-            if text.0 != info {
-                *text = Text::new(info);
-            }
+        if text.0 != info {
+            *text = Text::new(info);
         }
     }
 }
@@ -231,6 +230,7 @@ fn handle_speed_buttons(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn handle_pause_button(
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor),

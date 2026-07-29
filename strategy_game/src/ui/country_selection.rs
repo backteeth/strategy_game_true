@@ -186,31 +186,30 @@ fn update_preview_details(
         return;
     };
 
-    if let Some(country_id) = preview.0 {
-        if let Some(country) = country_registry.get(country_id) {
-            let capital_name = state_registry
-                .get(country.capital_state_id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
+    if let Some(country) = preview.0.and_then(|id| country_registry.get(id)) {
+        let country_id = country.id;
+        let capital_name = state_registry
+            .get(country.capital_state_id)
+            .map(|s| s.name.as_str())
+            .unwrap_or("Unknown");
 
-            let total_pop: u64 = state_registry
-                .states
-                .iter()
-                .filter(|s| s.owner_country_id == country_id)
-                .map(|s| s.population)
-                .sum();
+        let total_pop: u64 = state_registry
+            .states
+            .iter()
+            .filter(|s| s.owner_country_id == country_id)
+            .map(|s| s.population)
+            .sum();
 
-            let info = format!(
-                "Name: {}\nGovernment: {}\nEconomy: {}\nTotal Pop: {}\nTreasury: {:.0} G\nCapital: {}",
-                country.name,
-                country.government_type.display_name(),
-                country.economic_system.display_name(),
-                crate::ui::state_panel::format_population(total_pop),
-                country.treasury,
-                capital_name
-            );
-            *text = Text::new(info);
-        }
+        let info = format!(
+            "Name: {}\nGovernment: {}\nEconomy: {}\nTotal Pop: {}\nTreasury: {:.0} G\nCapital: {}",
+            country.name,
+            country.government_type.display_name(),
+            country.economic_system.display_name(),
+            crate::ui::state_panel::format_population(total_pop),
+            country.treasury,
+            capital_name
+        );
+        *text = Text::new(info);
     }
 }
 
@@ -221,11 +220,11 @@ fn handle_start_button(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     for interaction in interaction_query.iter() {
-        if *interaction == Interaction::Pressed {
-            if let Some(id) = preview.0 {
-                player_country.0 = Some(id);
-                next_state.set(GameState::Playing);
-            }
+        if *interaction == Interaction::Pressed
+            && let Some(id) = preview.0
+        {
+            player_country.0 = Some(id);
+            next_state.set(GameState::Playing);
         }
     }
 }

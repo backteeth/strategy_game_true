@@ -4,6 +4,7 @@ use crate::politics::interest_groups::InterestGroupType;
 use crate::politics::values::CountryValues;
 
 /// 利益団体ごとの満足度 (approval: -100.0 〜 100.0) を計算する関数
+#[allow(clippy::too_many_arguments)]
 pub fn calculate_interest_group_approval(
     ig: InterestGroupType,
     gov: GovernmentType,

@@ -17,12 +17,15 @@ impl Plugin for SelectionPlugin {
 
 /// マウス左クリックで州を選択・解除する
 /// UI上の要素をホバー/クリックしている場合は無効化し、競合を避ける
+#[allow(clippy::too_many_arguments)]
 fn handle_state_click(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     camera_q: Query<&Transform, With<GameCamera>>,
     state_visuals_q: Query<(&Transform, &StateVisual)>,
     ui_interactions_q: Query<&Interaction>,
+    military_registry: Res<crate::military::data::MilitaryRegistry>,
+    state_registry: Res<crate::state::data::StateRegistry>,
     mut selected: ResMut<SelectedState>,
     mut selection_changed: MessageWriter<StateSelectionChanged>,
 ) {
@@ -56,6 +59,27 @@ fn handle_state_click(
     let scale = cam_transform.scale.x;
     let half_size = window_size * 0.5 * scale;
     let world_pos = cam_transform.translation.xy() + cursor_ndc * half_size;
+
+    // 陸軍ユニットをクリックした場合は州選択をスキップ
+    let army_radius = 16.0;
+    for army in military_registry.armies.values() {
+        let mut pos = state_registry
+            .get(army.current_state)
+            .map(|s| s.position())
+            .unwrap_or(Vec2::ZERO);
+
+        if let Some(target_state) = army.target_state {
+            let target_pos = state_registry
+                .get(target_state)
+                .map(|s| s.position())
+                .unwrap_or(Vec2::ZERO);
+            pos = pos.lerp(target_pos, army.movement_progress);
+        }
+
+        if world_pos.distance(pos) < army_radius {
+            return;
+        }
+    }
 
     let mut hit_state = None;
     let mut best_z = f32::NEG_INFINITY;

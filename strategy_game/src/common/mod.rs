@@ -9,3 +9,27 @@ pub struct CountryId(pub usize);
 /// 州を一意に識別するID型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StateId(pub usize);
+
+/// 軍隊を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ArmyId(pub usize);
+
+/// 師団・部隊定義を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DivisionId(pub usize);
+
+/// 戦争を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WarId(pub usize);
+
+/// 外交危機を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DiplomaticCrisisId(pub usize);
+
+/// 領土請求を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ClaimId(pub usize);
+
+/// 条約を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TreatyId(pub usize);

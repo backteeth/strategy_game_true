@@ -122,6 +122,26 @@ pub struct CountryData {
     /// 進行中の価値観改革
     #[serde(default)]
     pub current_reform: Option<PoliticalReform>,
+
+    // ── 軍事データ ────────────────────────────────────────────────────────
+    /// 募集可能な人的資源
+    #[serde(default)]
+    pub available_manpower: u64,
+    /// 動員済みの人的資源（軍隊に所属している合計）
+    #[serde(default)]
+    pub mobilized_manpower: u64,
+    /// 必要な軍備品の総量
+    #[serde(default)]
+    pub total_military_equipment_required: f64,
+    /// 利用可能な軍備品の総量（備蓄から割り当てられた分）
+    #[serde(default)]
+    pub total_military_equipment_available: f64,
+    /// 月次の軍維持費
+    #[serde(default)]
+    pub monthly_military_expenses: f64,
+    /// 募集キュー
+    #[serde(default)]
+    pub recruitment_queue: Vec<crate::military::recruitment::RecruitmentQueueItem>,
 }
 
 impl Default for CountryData {
@@ -146,6 +166,12 @@ impl Default for CountryData {
             research_state: CountryResearchState::default(),
             politics: CountryPoliticsData::new_default(),
             current_reform: None,
+            available_manpower: 100_000,
+            mobilized_manpower: 0,
+            total_military_equipment_required: 0.0,
+            total_military_equipment_available: 0.0,
+            monthly_military_expenses: 0.0,
+            recruitment_queue: Vec::new(),
         }
     }
 }

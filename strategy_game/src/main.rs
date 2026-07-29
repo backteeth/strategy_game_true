@@ -7,11 +7,13 @@ use strategy_game::diplomacy::DiplomacyPlugin;
 use strategy_game::economy::EconomyPlugin;
 use strategy_game::logistics::LogisticsPlugin;
 use strategy_game::map::MapPlugin;
+use strategy_game::military::MilitaryPlugin;
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::population::PopulationPlugin;
 use strategy_game::research::ResearchPlugin;
 use strategy_game::state::StatePlugin;
 use strategy_game::ui::UiPlugin;
+use strategy_game::war::WarPlugin;
 
 fn main() {
     App::new()
@@ -33,6 +35,8 @@ fn main() {
         .add_plugins(ResearchPlugin)
         .add_plugins(PoliticsPlugin)
         .add_plugins(DiplomacyPlugin)
+        .add_plugins(MilitaryPlugin)
+        .add_plugins(WarPlugin)
         .add_plugins(MapPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(DebugPlugin)

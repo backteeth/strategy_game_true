@@ -1,7 +1,9 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use strategy_game::common::CountryId;
 use strategy_game::country::CountryData;
 use strategy_game::diplomacy::data::{
-    ActiveTreaty, DiplomaticPairKey, DiplomaticRelation, DiplomacyRegistry, TreatyType,
+    ActiveTreaty, DiplomacyRegistry, DiplomaticPairKey, DiplomaticRelation, TreatyType,
 };
 use strategy_game::diplomacy::proposal::calculate_proposal_score;
 use strategy_game::state::data::StateRegistry;

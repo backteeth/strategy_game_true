@@ -7,6 +7,7 @@ use crate::diplomacy::data::{
     InitialDiplomaticRelation,
 };
 use crate::economy::resources::StateResourceDeposit;
+use crate::military::data::{ArmyStatus, ArmyUnit, DivisionDefinition, MilitaryRegistry};
 use crate::research::data::{TechnologyDefinition, TechnologyRegistry};
 use crate::research::world_stage::{WorldCivilizationState, WorldStageDefinition};
 use crate::state::data::{StateData, StateRegistry};
@@ -22,7 +23,8 @@ impl Plugin for DataLoaderPlugin {
             Startup,
             load_game_data.before(crate::app::loader::transition_to_country_selection),
         )
-        .add_systems(Startup, transition_to_country_selection);
+        .add_systems(Startup, transition_to_country_selection)
+        .add_systems(OnEnter(GameState::Playing), spawn_debug_armies);
     }
 }
 
@@ -34,6 +36,7 @@ pub fn load_game_data(
     mut tech_registry: ResMut<TechnologyRegistry>,
     mut world_state: ResMut<WorldCivilizationState>,
     mut diplomacy_registry: ResMut<DiplomacyRegistry>,
+    mut military_registry: ResMut<MilitaryRegistry>,
 ) {
     // ── 建物データ読み込み ───────────────────────────────────────────────
     let buildings_ron = std::fs::read_to_string("assets/data/buildings.ron").unwrap_or_else(|e| {
@@ -120,22 +123,35 @@ pub fn load_game_data(
     world_state.stage_definitions = stage_map;
 
     // ── 外交初期データ読み込み ─────────────────────────────────────────────
-    if let Ok(diplo_ron) = std::fs::read_to_string("assets/data/diplomacy.ron") {
-        if let Ok(initial_diplomacy) = ron::from_str::<Vec<InitialDiplomaticRelation>>(&diplo_ron) {
-            for init in initial_diplomacy {
-                if let Some(key) = DiplomaticPairKey::new(init.country_a, init.country_b) {
-                    let mut rel = DiplomaticRelation::default();
-                    rel.opinion = init.opinion.clamp(-100.0, 100.0);
-                    for t_type in init.treaties {
-                        rel.treaties.push(ActiveTreaty {
-                            treaty_type: t_type,
-                            countries: (init.country_a, init.country_b),
-                            signed_date: "1800/01/01".to_string(),
-                            is_active: true,
-                        });
-                    }
-                    diplomacy_registry.relations.insert(key, rel);
+    if let Ok(diplo_ron) = std::fs::read_to_string("assets/data/diplomacy.ron")
+        && let Ok(initial_diplomacy) = ron::from_str::<Vec<InitialDiplomaticRelation>>(&diplo_ron)
+    {
+        for init in initial_diplomacy {
+            if let Some(key) = DiplomaticPairKey::new(init.country_a, init.country_b) {
+                let mut rel = DiplomaticRelation {
+                    opinion: init.opinion.clamp(-100.0, 100.0),
+                    tension: init.tension.clamp(0.0, 100.0),
+                    trust: init.trust.clamp(0.0, 100.0),
+                    has_military_access: init.has_military_access,
+                    ..Default::default()
+                };
+
+                let mut treaties = init.treaties.clone();
+                if init.alliance
+                    && !treaties.contains(&crate::diplomacy::data::TreatyType::Alliance)
+                {
+                    treaties.push(crate::diplomacy::data::TreatyType::Alliance);
                 }
+
+                for t_type in treaties {
+                    rel.treaties.push(ActiveTreaty {
+                        treaty_type: t_type,
+                        countries: (init.country_a, init.country_b),
+                        signed_date: "1800/01/01".to_string(),
+                        is_active: true,
+                    });
+                }
+                diplomacy_registry.relations.insert(key, rel);
             }
         }
     }
@@ -148,6 +164,22 @@ pub fn load_game_data(
         ron::from_str(&resources_ron).unwrap_or_else(|e| {
             panic!("[DataLoader] Failed to parse assets/data/resources.ron: {e}")
         });
+
+    // ── 師団データ読み込み ───────────────────────────────────────────────
+    let divisions_ron = std::fs::read_to_string("assets/data/divisions.ron")
+        .unwrap_or_else(|e| panic!("[DataLoader] Failed to read assets/data/divisions.ron: {e}"));
+
+    let division_defs: Vec<DivisionDefinition> = ron::from_str(&divisions_ron)
+        .unwrap_or_else(|e| panic!("[DataLoader] Failed to parse assets/data/divisions.ron: {e}"));
+
+    let mut div_map = HashMap::new();
+    for d in division_defs {
+        if div_map.contains_key(&d.id) {
+            panic!("[DataLoader] Duplicate Division ID: '{:?}'", d.id);
+        }
+        div_map.insert(d.id, d);
+    }
+    military_registry.definitions = div_map;
 
     // ── 国家データ読み込み ───────────────────────────────────────────────
     let countries_ron = std::fs::read_to_string("assets/data/countries.ron")
@@ -247,4 +279,48 @@ fn validate_data(
 
 pub fn transition_to_country_selection(mut next_state: ResMut<NextState<GameState>>) {
     next_state.set(GameState::CountrySelection);
+}
+
+/// ゲーム開始時にデバッグ用の部隊を各国首都に1部隊ずつ配置する
+pub fn spawn_debug_armies(
+    mut military_registry: ResMut<MilitaryRegistry>,
+    country_registry: Res<crate::country::CountryRegistry>,
+) {
+    // Infantry (DivisionId=0) を各国首都に配置
+    let infantry_def_id = crate::common::DivisionId(0);
+
+    for country in country_registry.countries.iter() {
+        if let Some(def) = military_registry.definitions.get(&infantry_def_id) {
+            let def_id = infantry_def_id;
+            let new_army = ArmyUnit {
+                id: crate::common::ArmyId(0), // add_army で上書きされる
+                owner: country.id,
+                division_type: def.division_type,
+                size: def.size,
+                current_state: country.capital_state_id,
+                destination: None,
+                current_path: Vec::new(),
+                target_state: None,
+                manpower: def.required_manpower,
+                max_manpower: def.required_manpower,
+                equipment: def.required_equipment,
+                max_equipment: def.required_equipment,
+                organization: def.organization,
+                max_organization: def.organization,
+                morale: def.morale,
+                max_morale: def.morale,
+                experience: 0.0,
+                supply_ratio: 1.0,
+                movement_progress: 0.0,
+                status: ArmyStatus::Idle,
+                def_id,
+            };
+            military_registry.add_army(new_army);
+        }
+    }
+
+    info!(
+        "[DEBUG] Spawned {} initial armies",
+        military_registry.armies.len()
+    );
 }

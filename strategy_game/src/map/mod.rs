@@ -1,9 +1,13 @@
 /// map モジュール
 /// カメラ、描画、州選択を統合するプラグインを提供する
+pub mod army_render;
+pub mod army_selection;
 pub mod camera;
 pub mod rendering;
 pub mod selection;
 
+use army_render::ArmyRenderPlugin;
+use army_selection::ArmySelectionPlugin;
 use bevy::prelude::*;
 use camera::CameraPlugin;
 use rendering::RenderingPlugin;
@@ -16,6 +20,8 @@ impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(CameraPlugin)
             .add_plugins(RenderingPlugin)
-            .add_plugins(SelectionPlugin);
+            .add_plugins(SelectionPlugin)
+            .add_plugins(ArmyRenderPlugin)
+            .add_plugins(ArmySelectionPlugin);
     }
 }

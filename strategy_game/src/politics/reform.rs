@@ -46,19 +46,19 @@ pub fn calculate_reform_support_per_group(
     match axis {
         ValueAxis::ScienceMagic => match ig {
             InterestGroupType::Mages => 1.0 * direction,
-            InterestGroupType::Scholars => -1.0 * direction,
+            InterestGroupType::Scholars => -direction,
             InterestGroupType::Clergy => 0.5 * direction,
             InterestGroupType::Capitalists => -0.5 * direction,
             _ => 0.0,
         },
         ValueAxis::IndividualState => match ig {
             InterestGroupType::Military | InterestGroupType::Nobility => 1.0 * direction,
-            InterestGroupType::Capitalists | InterestGroupType::Merchants => -1.0 * direction,
+            InterestGroupType::Capitalists | InterestGroupType::Merchants => -direction,
             _ => 0.0,
         },
         ValueAxis::SecularReligious => match ig {
             InterestGroupType::Clergy => 1.0 * direction,
-            InterestGroupType::Scholars => -1.0 * direction,
+            InterestGroupType::Scholars => -direction,
             InterestGroupType::Mages => 0.5 * direction,
             _ => 0.0,
         },

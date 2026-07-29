@@ -12,6 +12,9 @@ use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
 use bevy::prelude::*;
 
+use crate::war::data::WarRegistry;
+use crate::war::justification::WarJustificationRegistry;
+
 #[derive(Component)]
 pub struct DiplomacyPanelRoot;
 
@@ -35,6 +38,12 @@ pub struct ProposeTreatyButton(pub CountryId, pub TreatyType);
 
 #[derive(Component)]
 pub struct BreakTreatyButton(pub CountryId, pub TreatyType);
+
+#[derive(Component)]
+pub struct JustifyWarButton(pub CountryId, pub crate::common::StateId);
+
+#[derive(Component)]
+pub struct DeclareWarButton(pub CountryId, pub crate::common::StateId);
 
 #[derive(Component)]
 pub struct DiplomacyHeaderText;
@@ -174,26 +183,29 @@ fn sync_target_country_from_selected_state(
     if !selected_state.is_changed() {
         return;
     }
-    if let Some(sid) = selected_state.0 {
-        if let Some(state) = state_registry.get(sid) {
-            if player_country.0 != Some(state.owner_country_id) {
-                diplo_state.target_country = Some(state.owner_country_id);
-            }
-        }
+    if let Some(state) = selected_state.0.and_then(|sid| state_registry.get(sid))
+        && player_country.0 != Some(state.owner_country_id)
+    {
+        diplo_state.target_country = Some(state.owner_country_id);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_diplomacy_action_buttons(
     imp_q: Query<(&Interaction, &ImproveRelationsButton), Changed<Interaction>>,
     harm_q: Query<(&Interaction, &HarmRelationsButton), Changed<Interaction>>,
     prop_q: Query<(&Interaction, &ProposeTreatyButton), Changed<Interaction>>,
     break_q: Query<(&Interaction, &BreakTreatyButton), Changed<Interaction>>,
+    just_q: Query<(&Interaction, &JustifyWarButton), Changed<Interaction>>,
+    dec_q: Query<(&Interaction, &DeclareWarButton), Changed<Interaction>>,
     player_country: Res<PlayerCountry>,
     mut diplo_registry: ResMut<DiplomacyRegistry>,
     country_registry: Res<CountryRegistry>,
     state_registry: Res<StateRegistry>,
     mut notif_writer: MessageWriter<GameNotification>,
     date: Res<GameDate>,
+    mut war_registry: ResMut<WarRegistry>,
+    mut justification_registry: ResMut<WarJustificationRegistry>,
 ) {
     let Some(p_cid) = player_country.0 else {
         return;
@@ -286,15 +298,74 @@ fn handle_diplomacy_action_buttons(
         if *interaction == Interaction::Pressed {
             let target_cid = btn.0;
             let treaty_type = btn.1;
-            if let Some(rel) = diplo_registry.get_mut(p_cid, target_cid) {
-                if rel.remove_treaty(treaty_type) {
-                    rel.opinion = (rel.opinion - 25.0).clamp(-100.0, 100.0);
+            if let Some(rel) = diplo_registry.get_mut(p_cid, target_cid)
+                && rel.remove_treaty(treaty_type)
+            {
+                rel.opinion = (rel.opinion - 25.0).clamp(-100.0, 100.0);
+                notif_writer.write(GameNotification {
+                    message: format!(
+                        "Treaty Broken: {} with Country #{}. Opinion -25",
+                        treaty_type.display_name(),
+                        target_cid.0
+                    ),
+                });
+            }
+        }
+    }
+
+    for (interaction, btn) in just_q.iter() {
+        if *interaction == Interaction::Pressed {
+            match justification_registry.start_justification(
+                p_cid,
+                btn.0,
+                btn.1,
+                date.display(),
+                &country_registry,
+                &state_registry,
+                &diplo_registry,
+            ) {
+                Ok(_) => {
+                    let st_name = state_registry
+                        .get(btn.1)
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("State");
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Treaty Broken: {} with Country #{}. Opinion -25",
-                            treaty_type.display_name(),
-                            target_cid.0
-                        ),
+                        message: format!("Started War Justification for {}!", st_name),
+                    });
+                }
+                Err(err) => {
+                    notif_writer.write(GameNotification {
+                        message: format!("Cannot Justify War: {}", err),
+                    });
+                }
+            }
+        }
+    }
+
+    for (interaction, btn) in dec_q.iter() {
+        if *interaction == Interaction::Pressed {
+            match war_registry.declare_war(
+                p_cid,
+                btn.0,
+                btn.1,
+                date.display(),
+                &country_registry,
+                &state_registry,
+                &mut diplo_registry,
+                &mut justification_registry,
+            ) {
+                Ok(war_id) => {
+                    let target_name = country_registry
+                        .get(btn.0)
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("Country");
+                    notif_writer.write(GameNotification {
+                        message: format!("DECLARED WAR on {}! (War ID: {:?})", target_name, war_id),
+                    });
+                }
+                Err(err) => {
+                    notif_writer.write(GameNotification {
+                        message: format!("Cannot Declare War: {}", err),
                     });
                 }
             }
@@ -302,6 +373,7 @@ fn handle_diplomacy_action_buttons(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_diplomacy_panel_ui(
     mut commands: Commands,
     state: Res<DiplomacyPanelState>,
@@ -309,6 +381,8 @@ fn update_diplomacy_panel_ui(
     country_registry: Res<CountryRegistry>,
     diplo_registry: Res<DiplomacyRegistry>,
     state_registry: Res<StateRegistry>,
+    justification_registry: Res<WarJustificationRegistry>,
+    war_registry: Res<WarRegistry>,
     mut header_q: Query<&mut Text, With<DiplomacyHeaderText>>,
     container_q: Query<(Entity, Option<&Children>), With<DiplomacyContentContainer>>,
 ) {
@@ -668,5 +742,244 @@ fn update_diplomacy_panel_ui(
                     ));
                 });
         }
+
+        // ── 5. 戦争正当化 & 宣戦布告セクション ───────────────────────
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(12.0)),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.12, 0.05, 0.05, 0.9)),
+            ))
+            .with_children(|sec| {
+                sec.spawn((
+                    Text::new("-- War & Justification --"),
+                    TextColor(Color::srgb(0.9, 0.4, 0.4)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                let has_alliance = rel.has_treaty(TreatyType::Alliance);
+                let has_nap = rel.has_treaty(TreatyType::NonAggressionPact);
+                let is_already_war = war_registry.are_countries_at_war(p_cid, target_cid);
+
+                if is_already_war {
+                    sec.spawn((
+                        Text::new("Currently at War with this country!"),
+                        TextColor(Color::srgb(1.0, 0.3, 0.3)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else if has_alliance {
+                    sec.spawn((
+                        Text::new("Cannot declare war / justify: Alliance is active."),
+                        TextColor(Color::srgb(0.9, 0.6, 0.3)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else if has_nap {
+                    sec.spawn((
+                        Text::new("Cannot declare war / justify: Non-Aggression Pact is active."),
+                        TextColor(Color::srgb(0.9, 0.6, 0.3)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    // 対象国家が所有する陸上州一覧を取得
+                    let owned_states: Vec<_> = state_registry
+                        .states
+                        .iter()
+                        .filter(|s| s.owner_country_id == target_cid)
+                        .collect();
+
+                    if owned_states.is_empty() {
+                        sec.spawn((
+                            Text::new("Target country owns no states."),
+                            TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                        ));
+                    } else {
+                        for st in owned_states {
+                            let ready_just = justification_registry
+                                .get_ready_justification(p_cid, target_cid, st.id);
+
+                            let active_just =
+                                justification_registry.justifications.values().find(|j| {
+                                    j.initiator == p_cid
+                                        && j.target == target_cid
+                                        && j.target_state == st.id
+                                });
+
+                            sec.spawn((Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(8.0),
+                                ..default()
+                            },))
+                                .with_children(|row| {
+                                    if ready_just.is_some() {
+                                        row.spawn((
+                                            Text::new(format!("Goal: Take {} [READY]", st.name)),
+                                            TextColor(Color::srgb(0.4, 0.9, 0.4)),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.0),
+                                                ..default()
+                                            },
+                                        ));
+
+                                        row.spawn((
+                                            DeclareWarButton(target_cid, st.id),
+                                            Button,
+                                            Node {
+                                                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgba(0.8, 0.1, 0.1, 1.0)),
+                                        ))
+                                        .with_children(
+                                            |b| {
+                                                b.spawn((
+                                                    Text::new("DECLARE WAR"),
+                                                    TextColor(Color::WHITE),
+                                                    TextFont {
+                                                        font_size: FontSize::Px(10.0),
+                                                        ..default()
+                                                    },
+                                                ));
+                                            },
+                                        );
+                                    } else if let Some(j) = active_just {
+                                        row.spawn((
+                                            Text::new(format!(
+                                                "Justifying for {}: {}/{} days",
+                                                st.name, j.days_passed, j.required_days
+                                            )),
+                                            TextColor(Color::srgb(0.9, 0.8, 0.3)),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.0),
+                                                ..default()
+                                            },
+                                        ));
+                                    } else {
+                                        row.spawn((
+                                            Text::new(format!("Target State: {}", st.name)),
+                                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                                            TextFont {
+                                                font_size: FontSize::Px(11.0),
+                                                ..default()
+                                            },
+                                        ));
+
+                                        row.spawn((
+                                            JustifyWarButton(target_cid, st.id),
+                                            Button,
+                                            Node {
+                                                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 1.0)),
+                                        ))
+                                        .with_children(
+                                            |b| {
+                                                b.spawn((
+                                                    Text::new("Justify War"),
+                                                    TextColor(Color::WHITE),
+                                                    TextFont {
+                                                        font_size: FontSize::Px(10.0),
+                                                        ..default()
+                                                    },
+                                                ));
+                                            },
+                                        );
+                                    }
+                                });
+                        }
+                    }
+                }
+            });
+
+        // ── 6. 進行中戦争一覧セクション ────────────────────────────
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(12.0)),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.9)),
+            ))
+            .with_children(|sec| {
+                sec.spawn((
+                    Text::new("-- Active Wars --"),
+                    TextColor(Color::srgb(0.5, 0.7, 0.9)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                let active_wars: Vec<_> = war_registry
+                    .wars
+                    .values()
+                    .filter(|w| w.status == crate::war::data::WarStatus::Active)
+                    .collect();
+
+                if active_wars.is_empty() {
+                    sec.spawn((
+                        Text::new("No active wars in the world."),
+                        TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    for war in active_wars {
+                        let attacker_names: Vec<_> = war
+                            .attackers
+                            .iter()
+                            .filter_map(|cid| country_registry.get(*cid).map(|c| c.name.as_str()))
+                            .collect();
+                        let defender_names: Vec<_> = war
+                            .defenders
+                            .iter()
+                            .filter_map(|cid| country_registry.get(*cid).map(|c| c.name.as_str()))
+                            .collect();
+
+                        sec.spawn((
+                            Text::new(format!(
+                                "[War #{:?}] {} ({} vs {}) - Started: {}",
+                                war.id.0,
+                                war.name,
+                                attacker_names.join(", "),
+                                defender_names.join(", "),
+                                war.start_date
+                            )),
+                            TextColor(Color::srgb(0.9, 0.5, 0.5)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                        ));
+                    }
+                }
+            });
     });
 }

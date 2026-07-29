@@ -3,6 +3,7 @@ use crate::country::{CountryRegistry, PlayerCountry};
 use crate::politics::interest_groups::InterestGroupType;
 use crate::politics::reform::PoliticalReform;
 use crate::politics::values::ValueAxis;
+use crate::ui::{ActivePanel, PanelKind};
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -126,6 +127,7 @@ fn setup_politics_panel(mut commands: Commands) {
 
 fn toggle_politics_panel_key(
     mut state: ResMut<PoliticsPanelState>,
+    mut active_panel: ResMut<ActivePanel>,
     keys: Res<ButtonInput<KeyCode>>,
     btn_q: Query<&Interaction, (With<TogglePoliticsPanelButton>, Changed<Interaction>)>,
     mut panel_q: Query<&mut Node, With<PoliticsPanelRoot>>,
@@ -141,7 +143,8 @@ fn toggle_politics_panel_key(
     }
 
     if toggle {
-        state.open = !state.open;
+        active_panel.toggle(PanelKind::Politics);
+        state.open = active_panel.current == PanelKind::Politics;
         if let Ok(mut node) = panel_q.single_mut() {
             node.display = if state.open {
                 Display::Flex
@@ -164,15 +167,13 @@ fn handle_reform_buttons(
     };
 
     for (interaction, btn) in start_q.iter() {
-        if *interaction == Interaction::Pressed {
-            if country.current_reform.is_none() {
-                let current_val = match btn.0 {
-                    ValueAxis::ScienceMagic => country.politics.values.science_magic,
-                    ValueAxis::IndividualState => country.politics.values.individual_state,
-                    ValueAxis::SecularReligious => country.politics.values.secular_religious,
-                };
-                country.current_reform = Some(PoliticalReform::new(btn.0, current_val, btn.1));
-            }
+        if *interaction == Interaction::Pressed && country.current_reform.is_none() {
+            let current_val = match btn.0 {
+                ValueAxis::ScienceMagic => country.politics.values.science_magic,
+                ValueAxis::IndividualState => country.politics.values.individual_state,
+                ValueAxis::SecularReligious => country.politics.values.secular_religious,
+            };
+            country.current_reform = Some(PoliticalReform::new(btn.0, current_val, btn.1));
         }
     }
 

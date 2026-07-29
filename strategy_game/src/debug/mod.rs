@@ -26,43 +26,41 @@ fn handle_debug_shortcuts(
     mut notif_writer: MessageWriter<GameNotification>,
 ) {
     // F1: Advance World Stage
-    if keys.just_pressed(KeyCode::F1) {
-        if let Some(next_stage) = world_state.get_next_stage() {
-            world_state.current_stage = next_stage;
-            notif_writer.write(GameNotification {
-                message: format!("[DEBUG] Advanced World Era to: {:?}", next_stage),
-            });
-        }
+    if keys.just_pressed(KeyCode::F1)
+        && let Some(next_stage) = world_state.get_next_stage()
+    {
+        world_state.current_stage = next_stage;
+        notif_writer.write(GameNotification {
+            message: format!("[DEBUG] Advanced World Era to: {:?}", next_stage),
+        });
     }
 
     // F2: Reveal All Deposits for Player
-    if keys.just_pressed(KeyCode::F2) {
-        if let Some(cid) = player_country.0 {
-            for state in state_registry.states.iter_mut() {
-                if state.owner_country_id == cid {
-                    for dep in state.resource_deposits.iter_mut() {
-                        dep.discovered = true;
-                    }
+    if keys.just_pressed(KeyCode::F2)
+        && let Some(cid) = player_country.0
+    {
+        for state in state_registry.states.iter_mut() {
+            if state.owner_country_id == cid {
+                for dep in state.resource_deposits.iter_mut() {
+                    dep.discovered = true;
                 }
             }
-            notif_writer.write(GameNotification {
-                message: "[DEBUG] Revealed all resource deposits in owned states.".to_string(),
-            });
         }
+        notif_writer.write(GameNotification {
+            message: "[DEBUG] Revealed all resource deposits in owned states.".to_string(),
+        });
     }
 
     // F3: Instant Complete Current Reform
-    if keys.just_pressed(KeyCode::F3) {
-        if let Some(cid) = player_country.0 {
-            if let Some(country) = country_registry.get_mut(cid) {
-                if let Some(ref reform) = country.current_reform.clone() {
-                    apply_reform_completion(reform, &mut country.politics.values);
-                    country.current_reform = None;
-                    notif_writer.write(GameNotification {
-                        message: "[DEBUG] Instantly completed political reform!".to_string(),
-                    });
-                }
-            }
-        }
+    if keys.just_pressed(KeyCode::F3)
+        && let Some(cid) = player_country.0
+        && let Some(country) = country_registry.get_mut(cid)
+        && let Some(ref reform) = country.current_reform.clone()
+    {
+        apply_reform_completion(reform, &mut country.politics.values);
+        country.current_reform = None;
+        notif_writer.write(GameNotification {
+            message: "[DEBUG] Instantly completed political reform!".to_string(),
+        });
     }
 }

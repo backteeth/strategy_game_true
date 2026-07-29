@@ -83,16 +83,39 @@ pub struct OpinionModifier {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiplomaticRelation {
     pub opinion: f32, // -100.0 〜 100.0
+    #[serde(default)]
+    pub tension: f32, // 0.0 〜 100.0
+    #[serde(default = "default_trust")]
+    pub trust: f32, // 0.0 〜 100.0
+    #[serde(default)]
+    pub threat: f32, // 0.0 〜 100.0
+    #[serde(default)]
+    pub at_war: bool,
+    #[serde(default)]
+    pub has_military_access: bool,
+    #[serde(default)]
+    pub truce_until: Option<String>,
+
     pub treaties: Vec<ActiveTreaty>,
     pub cooldowns: HashMap<CountryId, u32>,
     pub active_activity: Option<ActiveDiplomaticActivity>,
     pub last_updated_date: String,
 }
 
+fn default_trust() -> f32 {
+    50.0
+}
+
 impl Default for DiplomaticRelation {
     fn default() -> Self {
         Self {
             opinion: 0.0,
+            tension: 0.0,
+            trust: 50.0,
+            threat: 0.0,
+            at_war: false,
+            has_military_access: false,
+            truce_until: None,
             treaties: Vec::new(),
             cooldowns: HashMap::new(),
             active_activity: None,
@@ -104,6 +127,9 @@ impl Default for DiplomaticRelation {
 impl DiplomaticRelation {
     pub fn clamp_opinion(&mut self) {
         self.opinion = self.opinion.clamp(-100.0, 100.0);
+        self.tension = self.tension.clamp(0.0, 100.0);
+        self.trust = self.trust.clamp(0.0, 100.0);
+        self.threat = self.threat.clamp(0.0, 100.0);
     }
 
     pub fn has_treaty(&self, treaty_type: TreatyType) -> bool {
@@ -162,5 +188,13 @@ pub struct InitialDiplomaticRelation {
     pub country_b: CountryId,
     pub opinion: f32,
     #[serde(default)]
+    pub tension: f32,
+    #[serde(default = "default_trust")]
+    pub trust: f32,
+    #[serde(default)]
     pub treaties: Vec<TreatyType>,
+    #[serde(default)]
+    pub has_military_access: bool,
+    #[serde(default)]
+    pub alliance: bool,
 }

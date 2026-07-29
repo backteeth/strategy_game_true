@@ -61,6 +61,75 @@ pub struct StateData {
     pub world_position: [f32; 2],
     /// 州の矩形サイズ（ワールド座標）
     pub size: [f32; 2],
+
+    /// 隣接州リスト
+    #[serde(default)]
+    pub neighbors: Vec<StateId>,
+    /// 統合度 (0.0〜100.0)
+    #[serde(default = "default_integration")]
+    pub integration: f32,
+
+    /// 実効支配国（占領国、通常はowner_country_idと同じ）
+    #[serde(default)]
+    pub controller_country: Option<CountryId>,
+    /// 占領進捗 (0.0〜100.0)
+    #[serde(default)]
+    pub occupation_progress: f32,
+    /// 元の所有国（占領中に保持）
+    #[serde(default)]
+    pub original_owner: Option<CountryId>,
+    /// 占領政策
+    #[serde(default)]
+    pub occupation_policy: Option<OccupationPolicy>,
+    /// 関連する戦争ID
+    #[serde(default)]
+    pub war_id: Option<crate::common::WarId>,
+}
+
+impl Default for StateData {
+    fn default() -> Self {
+        Self {
+            id: StateId(0),
+            name: "Default State".to_string(),
+            owner_country_id: CountryId(0),
+            population: 0,
+            workforce_ratio: DEFAULT_WORKFORCE_RATIO,
+            employed_workforce: 0,
+            unemployed_workforce: 0,
+            education: 0.0,
+            living_standard: 10.0,
+            unrest: 0.0,
+            base_logistics_capacity: 10.0,
+            logistics_capacity: 10.0,
+            logistics_usage: 0.0,
+            logistics_ratio: 1.0,
+            buildings: HashMap::new(),
+            building_operation_ratios: HashMap::new(),
+            resource_deposits: Vec::new(),
+            world_position: [0.0, 0.0],
+            size: [100.0, 100.0],
+            neighbors: Vec::new(),
+            controller_country: None,
+            integration: 100.0,
+            occupation_progress: 0.0,
+            original_owner: None,
+            occupation_policy: None,
+            war_id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum OccupationPolicy {
+    #[default]
+    MilitaryRule,
+    DirectRule,
+    LocalAutonomy,
+    ResourceExtraction,
+}
+
+fn default_integration() -> f32 {
+    100.0
 }
 
 fn default_workforce_ratio() -> f32 {
@@ -119,6 +188,11 @@ impl StateData {
         if self.base_logistics_capacity == 0.0 {
             self.base_logistics_capacity = 100.0;
         }
+    }
+
+    /// 実効支配国を取得する
+    pub fn controller(&self) -> CountryId {
+        self.controller_country.unwrap_or(self.owner_country_id)
     }
 }
 

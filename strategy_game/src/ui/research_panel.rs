@@ -3,6 +3,7 @@ use crate::country::{CountryRegistry, PlayerCountry};
 use crate::research::allocation::InProgressTech;
 use crate::research::data::{TechnologyField, TechnologyRegistry};
 use crate::research::world_stage::WorldCivilizationState;
+use crate::ui::{ActivePanel, PanelKind};
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -207,6 +208,7 @@ fn setup_research_panel(mut commands: Commands) {
 
 fn toggle_research_panel_key(
     mut state: ResMut<ResearchPanelState>,
+    mut active_panel: ResMut<ActivePanel>,
     keys: Res<ButtonInput<KeyCode>>,
     btn_q: Query<&Interaction, (With<ToggleResearchPanelButton>, Changed<Interaction>)>,
     mut panel_q: Query<&mut Node, With<ResearchPanelRoot>>,
@@ -222,7 +224,8 @@ fn toggle_research_panel_key(
     }
 
     if toggle {
-        state.open = !state.open;
+        active_panel.toggle(PanelKind::Research);
+        state.open = active_panel.current == PanelKind::Research;
         if let Ok(mut node) = panel_q.single_mut() {
             node.display = if state.open {
                 Display::Flex
@@ -283,22 +286,21 @@ fn handle_tech_action_buttons(
             if country.research_state.in_progress.contains_key(&btn.1) {
                 continue;
             }
-            if let Some(def) = tech_registry.get(&btn.0) {
-                if def.minimum_world_stage <= world_state.current_stage
-                    && def
-                        .prerequisites
-                        .iter()
-                        .all(|pre| country.research_state.completed_technologies.contains(pre))
-                {
-                    country.research_state.in_progress.insert(
-                        btn.1,
-                        InProgressTech {
-                            tech_id: btn.0.clone(),
-                            progress: 0.0,
-                            cost: def.cost,
-                        },
-                    );
-                }
+            if let Some(def) = tech_registry.get(&btn.0)
+                && def.minimum_world_stage <= world_state.current_stage
+                && def
+                    .prerequisites
+                    .iter()
+                    .all(|pre| country.research_state.completed_technologies.contains(pre))
+            {
+                country.research_state.in_progress.insert(
+                    btn.1,
+                    InProgressTech {
+                        tech_id: btn.0.clone(),
+                        progress: 0.0,
+                        cost: def.cost,
+                    },
+                );
             }
         }
     }
@@ -310,6 +312,7 @@ fn handle_tech_action_buttons(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_research_panel_ui(
     mut commands: Commands,
     state: Res<ResearchPanelState>,

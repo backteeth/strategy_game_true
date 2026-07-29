@@ -107,6 +107,7 @@ mod tests {
             resource_deposits: Vec::new(),
             world_position: [0.0, 0.0],
             size: [100.0, 100.0],
+            ..Default::default()
         };
 
         update_state_welfare_and_unrest(&mut state, 0.05, true, false);

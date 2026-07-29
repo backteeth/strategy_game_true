@@ -27,6 +27,7 @@ impl Plugin for ResearchPlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::collapsible_if)]
 fn handle_monthly_research(
     mut month_events: MessageReader<MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,

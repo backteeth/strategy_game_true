@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use std::collections::HashMap;
 use strategy_game::country::GovernmentType;
 use strategy_game::politics::interest_groups::{
