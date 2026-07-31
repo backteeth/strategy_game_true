@@ -1,3 +1,4 @@
+pub mod capitulation;
 pub mod combat;
 pub mod data;
 pub mod justification;

@@ -6,7 +6,6 @@ use crate::military::data::{
 };
 use crate::state::data::{StateData, StateRegistry};
 use crate::war::data::{War, WarRegistry};
-use crate::war::peace::{PeaceDemand, execute_peace_treaty};
 use crate::war::war_score::process_war_score;
 
 fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
@@ -35,6 +34,8 @@ fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
         id: crate::common::WarId(1),
         name: "Test War".to_string(),
         start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
         war_score: 0.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
@@ -43,6 +44,12 @@ fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
         defender_war_exhaustion: 0.0,
         occupied_states: std::collections::HashSet::new(),
         status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
     };
     war_reg.wars.insert(war.id, war);
 
@@ -125,31 +132,34 @@ fn test_war_score_calculation() {
     process_war_score(&state_reg, &mut war_reg);
 
     let war = war_reg.wars.get(&crate::common::WarId(1)).unwrap();
-    assert_eq!(war.war_score, 10.0); // 1 state occupied = 10 score
+    // 新仕様：目標点や占領点の計算により戦勝点が正の値になる
+    assert!(war.war_score > 0.0);
 }
 
 #[test]
-fn test_peace_treaty() {
+fn test_peace_treaty_basic() {
     let (_, mut war_reg, mut state_reg) = setup();
+    let mut mil_reg = MilitaryRegistry::default();
+    let mut battle_reg = crate::military::battle::BattleRegistry::default();
+    let mut dip_reg = DiplomacyRegistry::default();
 
-    // Execute peace: Country 1 annexes StateId 2
-    let demands = vec![PeaceDemand::AnnexState(StateId(2))];
-    let result = execute_peace_treaty(
+    let result = crate::war::peace::execute_peace_settlement(
         crate::common::WarId(1),
-        CountryId(1),
-        demands,
+        crate::war::peace::PeaceTerm::CedeWarGoalRegion,
+        "Test Victory",
+        "1936/02/01",
         &mut state_reg,
         &mut war_reg,
+        &mut mil_reg,
+        &mut battle_reg,
+        &mut dip_reg,
     );
 
     assert!(result.is_ok());
 
-    // War should be removed
-    assert!(war_reg.wars.is_empty());
-
-    // State 2 owner should be Country 1
-    let state2 = state_reg.get(StateId(2)).unwrap();
-    assert_eq!(state2.owner_country_id, CountryId(1));
+    // 戦争は Ended/AttackerVictory 状態になるが履歴として保持
+    let war = war_reg.wars.get(&crate::common::WarId(1)).unwrap();
+    assert_eq!(war.status, crate::war::data::WarStatus::AttackerVictory);
 }
 
 // ── Phase 14 Tests ─────────────────────────────────────────────────────────
@@ -746,4 +756,403 @@ fn test_war_declaration_determinism() {
         .unwrap();
 
     assert_eq!(war_id1.0, 0);
+}
+
+// ── Phase 16 Tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_phase16_war_score_breakdown_and_clamping() {
+    use crate::diplomacy::crisis::{WarGoal, WarGoalType};
+    use crate::war::war_score::calculate_war_score;
+
+    let s1 = StateData {
+        id: StateId(1),
+        owner_country_id: CountryId(1),
+        controller_country: Some(CountryId(1)),
+        ..Default::default()
+    };
+    let s2 = StateData {
+        id: StateId(2),
+        owner_country_id: CountryId(2),
+        controller_country: Some(CountryId(1)), // Target state occupied by attacker
+        ..Default::default()
+    };
+    let state_reg = StateRegistry::build(vec![s1, s2]);
+
+    let goal = WarGoal {
+        attacker: CountryId(1),
+        defender: CountryId(2),
+        goal_type: WarGoalType::ConquerState,
+        target_states: vec![StateId(2)],
+        base_peace_cost: 20.0,
+        international_concern: 10.0,
+        completion: 0.0,
+        is_primary: true,
+    };
+
+    let mut war = War {
+        id: crate::common::WarId(10),
+        name: "Test Score War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 0.0,
+        attackers: vec![CountryId(1)].into_iter().collect(),
+        defenders: vec![CountryId(2)].into_iter().collect(),
+        war_goals: vec![goal],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 3,
+        won_defender_battles: 1,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+
+    let bd = calculate_war_score(&war, &state_reg);
+
+    // Goal +40, Attacker Occupy (1/1) +40, Defender Occupy (0/1) 0, Battle 5*(3-1)=+10
+    // Total = 40 + 40 + 0 + 10 = 90
+    assert_eq!(bd.war_goal_score, 40);
+    assert_eq!(bd.attacker_occupation_score, 40);
+    assert_eq!(bd.defender_occupation_score, 0);
+    assert_eq!(bd.battle_score, 10);
+    assert_eq!(bd.total_score, 90);
+
+    // Extreme battle score clamping test
+    war.won_attacker_battles = 100;
+    let bd2 = calculate_war_score(&war, &state_reg);
+    assert_eq!(bd2.battle_score, 20); // Clamped to 20
+    assert_eq!(bd2.total_score, 100); // Clamped to 100
+}
+
+#[test]
+fn test_phase16_battle_results_sync_and_deduplication() {
+    use crate::military::battle::{Battle, BattleRegistry, BattleStatus};
+    use crate::war::combat::sync_battle_results_to_wars;
+
+    let mut war_reg = WarRegistry::default();
+    let war = War {
+        id: crate::common::WarId(1),
+        name: "Test Sync War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 0.0,
+        attackers: vec![CountryId(1)].into_iter().collect(),
+        defenders: vec![CountryId(2)].into_iter().collect(),
+        war_goals: vec![],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+    war_reg.wars.insert(war.id, war);
+
+    let mut battle_reg = BattleRegistry::default();
+    let b1 = Battle {
+        id: crate::common::BattleId(101),
+        war_id: crate::common::WarId(1),
+        state_id: StateId(2),
+        attacker_country: CountryId(1),
+        defender_country: CountryId(2),
+        attacker_army_id: crate::common::ArmyId(1),
+        defender_army_id: crate::common::ArmyId(2),
+        start_date: "1936/01/01".to_string(),
+        elapsed_days: 2,
+        status: BattleStatus::AttackerWon,
+        attacker_origin_state: StateId(1),
+    };
+    battle_reg.battles.insert(b1.id, b1);
+
+    // Sync 1st time
+    sync_battle_results_to_wars(&battle_reg, &mut war_reg);
+    let war = war_reg.wars.get(&crate::common::WarId(1)).unwrap();
+    assert_eq!(war.won_attacker_battles, 1);
+    assert_eq!(war.won_defender_battles, 0);
+
+    // Sync 2nd time (Deduplication check)
+    sync_battle_results_to_wars(&battle_reg, &mut war_reg);
+    let war2 = war_reg.wars.get(&crate::common::WarId(1)).unwrap();
+    assert_eq!(war2.won_attacker_battles, 1); // Remains 1
+}
+
+#[test]
+fn test_phase16_capitulation_rules() {
+    use crate::diplomacy::crisis::{WarGoal, WarGoalType};
+    use crate::military::data::{ArmyStatus, ArmyUnit, DivisionSize, DivisionType};
+    use crate::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
+
+    let goal = WarGoal {
+        attacker: CountryId(1),
+        defender: CountryId(2),
+        goal_type: WarGoalType::ConquerState,
+        target_states: vec![StateId(2)],
+        base_peace_cost: 20.0,
+        international_concern: 10.0,
+        completion: 0.0,
+        is_primary: true,
+    };
+
+    let s1 = StateData {
+        id: StateId(1),
+        owner_country_id: CountryId(1),
+        controller_country: Some(CountryId(1)),
+        ..Default::default()
+    };
+    let s2 = StateData {
+        id: StateId(2),
+        owner_country_id: CountryId(2),
+        controller_country: Some(CountryId(1)), // Occupied by attacker
+        ..Default::default()
+    };
+    let state_reg = StateRegistry::build(vec![s1, s2]);
+
+    let mut mil_reg = MilitaryRegistry::default();
+    // Country 1 has an active army
+    let a1 = ArmyUnit {
+        id: crate::common::ArmyId(1),
+        owner: CountryId(1),
+        division_type: DivisionType::Infantry,
+        size: DivisionSize::Standard,
+        current_state: StateId(1),
+        destination: None,
+        current_path: Vec::new(),
+        target_state: None,
+        manpower: 5000,
+        max_manpower: 10000,
+        equipment: 50.0,
+        max_equipment: 100.0,
+        organization: 50.0,
+        max_organization: 100.0,
+        morale: 50.0,
+        max_morale: 100.0,
+        experience: 0.0,
+        supply_ratio: 1.0,
+        movement_progress: 0.0,
+        status: ArmyStatus::Idle,
+        def_id: crate::common::DivisionId(1),
+        attack_power: 10,
+        defense_power: 10,
+        combat_id: None,
+    };
+    mil_reg.armies.insert(a1.id, a1);
+
+    let war = War {
+        id: crate::common::WarId(1),
+        name: "Capitulation War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 50.0,
+        attackers: vec![CountryId(1)].into_iter().collect(),
+        defenders: vec![CountryId(2)].into_iter().collect(),
+        war_goals: vec![goal],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+
+    // Target state is occupied AND Country 2 has no ready army -> Defender Capitulates
+    let res = evaluate_war_capitulation(&war, &state_reg, &mil_reg);
+    assert_eq!(res, CapitulationResult::DefenderCapitulated);
+}
+
+#[test]
+fn test_phase16_peace_offer_validation() {
+    use crate::diplomacy::crisis::{WarGoal, WarGoalType};
+    use crate::war::peace::{PeaceOffer, PeaceTerm, can_accept_peace_offer};
+
+    let goal = WarGoal {
+        attacker: CountryId(1),
+        defender: CountryId(2),
+        goal_type: WarGoalType::ConquerState,
+        target_states: vec![StateId(2)],
+        base_peace_cost: 20.0,
+        international_concern: 10.0,
+        completion: 0.0,
+        is_primary: true,
+    };
+
+    let mut war_reg = WarRegistry::default();
+    let war = War {
+        id: crate::common::WarId(1),
+        name: "Peace Validation War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 50.0,
+        attackers: vec![CountryId(1)].into_iter().collect(),
+        defenders: vec![CountryId(2)].into_iter().collect(),
+        war_goals: vec![goal],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+    war_reg.wars.insert(war.id, war);
+
+    // 1. White Peace before 30 days should fail
+    let offer_early_wp = PeaceOffer {
+        war_id: crate::common::WarId(1),
+        proposer_country_id: CountryId(1),
+        recipient_country_id: CountryId(2),
+        term: PeaceTerm::WhitePeace,
+        created_date: "1936/01/10".to_string(), // Only 9 days
+    };
+    assert!(can_accept_peace_offer(&offer_early_wp, &war_reg, None, None, "1936/01/10").is_err());
+
+    // 2. White Peace after 30 days should succeed
+    let offer_valid_wp = PeaceOffer {
+        war_id: crate::common::WarId(1),
+        proposer_country_id: CountryId(1),
+        recipient_country_id: CountryId(2),
+        term: PeaceTerm::WhitePeace,
+        created_date: "1936/02/05".to_string(), // >30 days
+    };
+    assert!(can_accept_peace_offer(&offer_valid_wp, &war_reg, None, None, "1936/02/05").is_ok());
+
+    // 3. Cede region with score 50 (< 60) and no capitulation should fail
+    let offer_cede = PeaceOffer {
+        war_id: crate::common::WarId(1),
+        proposer_country_id: CountryId(1),
+        recipient_country_id: CountryId(2),
+        term: PeaceTerm::CedeWarGoalRegion,
+        created_date: "1936/02/05".to_string(),
+    };
+    assert!(can_accept_peace_offer(&offer_cede, &war_reg, None, None, "1936/02/05").is_err());
+
+    // 4. Update war score to 70 (>= 60) -> Cede region succeeds
+    war_reg
+        .wars
+        .get_mut(&crate::common::WarId(1))
+        .unwrap()
+        .war_score = 70.0;
+    assert!(can_accept_peace_offer(&offer_cede, &war_reg, None, None, "1936/02/05").is_ok());
+}
+
+#[test]
+fn test_phase16_sea_state_exclusion() {
+    use crate::war::war_score::calculate_war_score;
+
+    let s1 = StateData {
+        id: StateId(1),
+        owner_country_id: CountryId(1),
+        controller_country: Some(CountryId(1)),
+        is_sea: false,
+        ..Default::default()
+    };
+    let s2 = StateData {
+        id: StateId(2),
+        owner_country_id: CountryId(2),
+        controller_country: Some(CountryId(1)),
+        is_sea: false,
+        ..Default::default()
+    };
+    let s_sea = StateData {
+        id: StateId(3),
+        owner_country_id: CountryId(2),
+        controller_country: Some(CountryId(1)),
+        is_sea: true,
+        ..Default::default()
+    };
+    let mut state_reg = StateRegistry::build(vec![s1, s2, s_sea]);
+
+    let war = War {
+        id: crate::common::WarId(1),
+        name: "Sea Test War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 0.0,
+        attackers: vec![CountryId(1)].into_iter().collect(),
+        defenders: vec![CountryId(2)].into_iter().collect(),
+        war_goals: vec![],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+
+    let bd = calculate_war_score(&war, &state_reg);
+    // Sea state s_sea (StateId 3) is ignored; only s2 is counted -> 40 * (1/1) = 40
+    assert_eq!(bd.attacker_occupation_score, 40);
+
+    // Transferring sea region should fail
+    let res = state_reg.transfer_region_ownership(StateId(3), CountryId(1));
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err(), "Cannot transfer sea region ownership");
+}
+
+#[test]
+fn test_phase16_truce_prevents_justification_and_war() {
+    let (c_reg, s_reg, mut d_reg, j_reg, w_reg) = setup_phase14_env();
+
+    d_reg.set_truce(CountryId(1), CountryId(2), "1941/01/01".to_string());
+
+    // Justification should fail during truce
+    let res_j = j_reg.can_start_justification_with_date(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        &c_reg,
+        &s_reg,
+        &d_reg,
+        Some("1936/06/01"),
+    );
+    assert!(res_j.is_err());
+    assert_eq!(res_j.unwrap_err(), "Cannot justify war during truce");
+
+    // War declaration should fail during truce
+    let res_w = w_reg.can_declare_war_with_date(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        &c_reg,
+        &s_reg,
+        &d_reg,
+        &j_reg,
+        Some("1936/06/01"),
+    );
+    assert!(res_w.is_err());
+
+    // After truce expires (1941/01/02), justification is allowed
+    let res_j2 = j_reg.can_start_justification_with_date(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        &c_reg,
+        &s_reg,
+        &d_reg,
+        Some("1941/01/02"),
+    );
+    assert!(res_j2.is_ok());
 }

@@ -15,6 +15,7 @@ use crate::war::data::WarRegistry;
 /// * `arrival_state` - 到着地域
 /// * `origin_state` - 出発地域（攻撃側が敗北時の退路）
 /// * `current_date` - 戦闘開始日の文字列
+#[allow(clippy::too_many_arguments)]
 pub fn process_army_arrival(
     army_id: ArmyId,
     arrival_state: StateId,
@@ -71,7 +72,8 @@ pub fn process_army_arrival(
     }
 
     // 到着地域に敵軍がいるか確認（最小IDを持つユニットを選ぶ）
-    let enemy_army_id = find_enemy_army_in_state(arrival_state, army_owner, military_registry, war_registry);
+    let enemy_army_id =
+        find_enemy_army_in_state(arrival_state, army_owner, military_registry, war_registry);
 
     if let Some(enemy_id) = enemy_army_id {
         // 敵軍あり → 戦闘開始
@@ -276,7 +278,9 @@ mod tests {
     use super::*;
     use crate::common::{CountryId, DivisionId};
     use crate::military::battle::BattleRegistry;
-    use crate::military::data::{ArmyStatus, ArmyUnit, DivisionSize, DivisionType, MilitaryRegistry};
+    use crate::military::data::{
+        ArmyStatus, ArmyUnit, DivisionSize, DivisionType, MilitaryRegistry,
+    };
     use crate::state::data::{StateData, StateRegistry};
     use crate::war::data::{War, WarRegistry, WarStatus};
     use std::collections::HashSet;
@@ -316,6 +320,8 @@ mod tests {
             id: crate::common::WarId(0),
             name: "Test War".to_string(),
             start_date: "1800/01/01".to_string(),
+            end_date: None,
+            duration_days: 0,
             attackers: [c1].iter().cloned().collect(),
             defenders: [c2].iter().cloned().collect(),
             war_goals: vec![],
@@ -324,6 +330,12 @@ mod tests {
             defender_war_exhaustion: 0.0,
             occupied_states: HashSet::new(),
             status: WarStatus::Active,
+            winner: None,
+            end_reason: None,
+            applied_terms: Vec::new(),
+            won_attacker_battles: 0,
+            won_defender_battles: 0,
+            processed_battle_ids: HashSet::new(),
         };
         reg.wars.insert(war.id, war);
         reg
@@ -331,10 +343,12 @@ mod tests {
 
     #[test]
     fn test_occupy_state_changes_controller_not_owner() {
-        let mut state = StateData::default();
-        state.id = StateId(1);
-        state.owner_country_id = CountryId(2);
-        state.controller_country = None;
+        let state = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(2),
+            controller_country: None,
+            ..Default::default()
+        };
 
         let mut registry = StateRegistry::build(vec![state]);
         occupy_state(StateId(1), CountryId(1), &mut registry);
@@ -351,18 +365,24 @@ mod tests {
         // State 1 (owner: C2) has neighbors [2, 3]
         // State 2 (owner: C2, controller: C2)
         // State 3 (owner: C2, controller: C2)
-        let mut s1 = StateData::default();
-        s1.id = StateId(1);
-        s1.owner_country_id = CountryId(2);
-        s1.neighbors = vec![StateId(3), StateId(2)]; // 逆順で設定してIDソートをテスト
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(2),
+            neighbors: vec![StateId(3), StateId(2)], // 逆順で設定してIDソートをテスト
+            ..Default::default()
+        };
 
-        let mut s2 = StateData::default();
-        s2.id = StateId(2);
-        s2.owner_country_id = CountryId(2);
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: CountryId(2),
+            ..Default::default()
+        };
 
-        let mut s3 = StateData::default();
-        s3.id = StateId(3);
-        s3.owner_country_id = CountryId(2);
+        let s3 = StateData {
+            id: StateId(3),
+            owner_country_id: CountryId(2),
+            ..Default::default()
+        };
 
         let state_registry = StateRegistry::build(vec![s1, s2, s3]);
         let battle_registry = BattleRegistry::default();
@@ -395,8 +415,16 @@ mod tests {
         mil.armies.insert(ArmyId(0), army1);
         mil.armies.insert(ArmyId(1), army2);
 
-        let s1 = StateData { id: StateId(1), owner_country_id: c1, ..Default::default() };
-        let mut s2 = StateData { id: StateId(2), owner_country_id: c2, ..Default::default() };
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: c1,
+            ..Default::default()
+        };
+        let mut s2 = StateData {
+            id: StateId(2),
+            owner_country_id: c2,
+            ..Default::default()
+        };
         s2.controller_country = None;
         let mut state_reg = StateRegistry::build(vec![s1, s2]);
         let mut battle_reg = BattleRegistry::default();
@@ -430,8 +458,16 @@ mod tests {
         mil.armies.insert(ArmyId(0), army1);
         mil.armies.insert(ArmyId(1), army2);
 
-        let s1 = StateData { id: StateId(1), owner_country_id: c1, ..Default::default() };
-        let s2 = StateData { id: StateId(2), owner_country_id: c1, ..Default::default() };
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: c1,
+            ..Default::default()
+        };
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: c1,
+            ..Default::default()
+        };
         let mut state_reg = StateRegistry::build(vec![s1, s2]);
         let mut battle_reg = BattleRegistry::default();
 
@@ -462,8 +498,16 @@ mod tests {
         mil.armies.insert(ArmyId(0), army1);
         mil.armies.insert(ArmyId(1), army2);
 
-        let s1 = StateData { id: StateId(1), owner_country_id: c1, ..Default::default() };
-        let mut s2 = StateData { id: StateId(2), owner_country_id: c2, ..Default::default() };
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: c1,
+            ..Default::default()
+        };
+        let mut s2 = StateData {
+            id: StateId(2),
+            owner_country_id: c2,
+            ..Default::default()
+        };
         s2.controller_country = None;
         let mut state_reg = StateRegistry::build(vec![s1, s2]);
         let mut battle_reg = BattleRegistry::default();

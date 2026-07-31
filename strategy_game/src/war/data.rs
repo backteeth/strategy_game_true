@@ -6,9 +6,16 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WarStatus {
+    /// 進行中
     Active,
-    PeaceNegotiation,
-    Ended,
+    /// 攻撃側勝利
+    AttackerVictory,
+    /// 防御側勝利
+    DefenderVictory,
+    /// 白紙講和
+    WhitePeace,
+    /// 中止・無効化
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,11 +26,29 @@ pub struct War {
     pub defenders: HashSet<CountryId>,
     pub war_goals: Vec<WarGoal>,
     pub start_date: String,
+    #[serde(default)]
+    pub end_date: Option<String>,
+    #[serde(default)]
+    pub duration_days: u32,
     pub war_score: f32, // -100.0 (Defender winning) ~ 100.0 (Attacker winning)
     pub attacker_war_exhaustion: f32, // 0.0 ~ 100.0
     pub defender_war_exhaustion: f32, // 0.0 ~ 100.0
     pub occupied_states: HashSet<StateId>,
     pub status: WarStatus,
+    #[serde(default)]
+    pub winner: Option<CountryId>,
+    #[serde(default)]
+    pub end_reason: Option<String>,
+    #[serde(default)]
+    pub applied_terms: Vec<String>,
+
+    // 戦闘結果集計用
+    #[serde(default)]
+    pub won_attacker_battles: u32,
+    #[serde(default)]
+    pub won_defender_battles: u32,
+    #[serde(default)]
+    pub processed_battle_ids: HashSet<crate::common::BattleId>,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -70,6 +95,31 @@ impl WarRegistry {
         diplomacy_registry: &crate::diplomacy::data::DiplomacyRegistry,
         justification_registry: &crate::war::justification::WarJustificationRegistry,
     ) -> Result<(), &'static str> {
+        self.can_declare_war_with_date(
+            initiator,
+            target,
+            target_state,
+            country_registry,
+            state_registry,
+            diplomacy_registry,
+            justification_registry,
+            None,
+        )
+    }
+
+    /// 日付情報を含めて宣戦布告の前提条件を検証する
+    #[allow(clippy::too_many_arguments)]
+    pub fn can_declare_war_with_date(
+        &self,
+        initiator: CountryId,
+        target: CountryId,
+        target_state: StateId,
+        country_registry: &crate::country::CountryRegistry,
+        state_registry: &crate::state::data::StateRegistry,
+        diplomacy_registry: &crate::diplomacy::data::DiplomacyRegistry,
+        justification_registry: &crate::war::justification::WarJustificationRegistry,
+        current_date_str: Option<&str>,
+    ) -> Result<(), &'static str> {
         if initiator == target {
             return Err("Cannot declare war against own country");
         }
@@ -95,6 +145,16 @@ impl WarRegistry {
             if rel.has_treaty(crate::diplomacy::data::TreatyType::NonAggressionPact) {
                 return Err("Cannot declare war on non-aggression pact partner");
             }
+        }
+
+        // 休戦チェック (日付指定があれば期限切れかどうか検証)
+        if let Some(date_str) = current_date_str {
+            if diplomacy_registry.is_in_truce(initiator, target, date_str) {
+                return Err("Cannot declare war during truce");
+            }
+        } else if matches!(diplomacy_registry.get(initiator, target), Some(rel) if rel.truce_until.is_some())
+        {
+            return Err("Cannot declare war during truce");
         }
 
         if self.are_countries_at_war(initiator, target) {
@@ -124,7 +184,7 @@ impl WarRegistry {
         diplomacy_registry: &mut crate::diplomacy::data::DiplomacyRegistry,
         justification_registry: &mut crate::war::justification::WarJustificationRegistry,
     ) -> Result<WarId, &'static str> {
-        self.can_declare_war(
+        self.can_declare_war_with_date(
             initiator,
             target,
             target_state,
@@ -132,6 +192,7 @@ impl WarRegistry {
             state_registry,
             diplomacy_registry,
             justification_registry,
+            Some(&start_date),
         )?;
 
         // 正当化を消費
@@ -182,11 +243,19 @@ impl WarRegistry {
             defenders,
             war_goals: vec![war_goal],
             start_date,
+            end_date: None,
+            duration_days: 0,
             war_score: 0.0,
             attacker_war_exhaustion: 0.0,
             defender_war_exhaustion: 0.0,
             occupied_states: HashSet::new(),
             status: WarStatus::Active,
+            winner: None,
+            end_reason: None,
+            applied_terms: Vec::new(),
+            won_attacker_battles: 0,
+            won_defender_battles: 0,
+            processed_battle_ids: HashSet::new(),
         };
 
         let war_id = self.add_war(war);

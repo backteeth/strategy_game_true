@@ -65,6 +65,7 @@ pub enum ArmyStatus {
     Retreating,
     Occupying,
     Disbanding,
+    Destroyed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

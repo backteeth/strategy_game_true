@@ -1,7 +1,7 @@
 use crate::common::StateId;
 use crate::military::combat::calculate_combat_strength;
 use crate::military::data::{ArmyStatus, MilitaryRegistry};
-use crate::war::data::WarRegistry;
+use crate::war::data::{WarRegistry, WarStatus};
 use std::collections::HashMap;
 
 pub fn process_combat(military_registry: &mut MilitaryRegistry, war_registry: &WarRegistry) {
@@ -58,6 +58,58 @@ pub fn process_combat(military_registry: &mut MilitaryRegistry, war_registry: &W
             a2_mut.manpower = a2_mut.manpower.saturating_sub(damage_to_2 as u64);
             a2_mut.equipment = (a2_mut.equipment - damage_to_2 as f64 * 0.1).max(0.0);
             a2_mut.organization = (a2_mut.organization - damage_to_2 * 0.5).max(0.0);
+        }
+    }
+}
+
+/// 終了した戦闘の勝敗結果を戦争データに一度だけ記録する（BattleId昇順で決定的に処理）
+pub fn sync_battle_results_to_wars(
+    battle_registry: &crate::military::battle::BattleRegistry,
+    war_registry: &mut WarRegistry,
+) {
+    let mut battle_ids: Vec<crate::common::BattleId> =
+        battle_registry.battles.keys().copied().collect();
+    battle_ids.sort_by_key(|id| id.0);
+
+    for battle_id in battle_ids {
+        let battle = match battle_registry.battles.get(&battle_id) {
+            Some(b) => b,
+            None => continue,
+        };
+
+        if battle.status == crate::military::battle::BattleStatus::Ongoing
+            || battle.status == crate::military::battle::BattleStatus::Cancelled
+        {
+            continue;
+        }
+
+        if let Some(war) = war_registry.wars.get_mut(&battle.war_id) {
+            if war.status != WarStatus::Active {
+                continue;
+            }
+            if war.processed_battle_ids.contains(&battle.id) {
+                continue;
+            }
+
+            match battle.status {
+                crate::military::battle::BattleStatus::AttackerWon => {
+                    if war.attackers.contains(&battle.attacker_country) {
+                        war.won_attacker_battles += 1;
+                    } else {
+                        war.won_defender_battles += 1;
+                    }
+                    war.processed_battle_ids.insert(battle.id);
+                }
+                crate::military::battle::BattleStatus::DefenderWon => {
+                    if war.defenders.contains(&battle.defender_country) {
+                        war.won_defender_battles += 1;
+                    } else {
+                        war.won_attacker_battles += 1;
+                    }
+                    war.processed_battle_ids.insert(battle.id);
+                }
+                _ => {}
+            }
         }
     }
 }

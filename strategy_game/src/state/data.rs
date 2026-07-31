@@ -84,6 +84,9 @@ pub struct StateData {
     /// 関連する戦争ID
     #[serde(default)]
     pub war_id: Option<crate::common::WarId>,
+    /// 海域フラグ (海域地域の場合は true)
+    #[serde(default)]
+    pub is_sea: bool,
 }
 
 impl Default for StateData {
@@ -115,6 +118,7 @@ impl Default for StateData {
             original_owner: None,
             occupation_policy: None,
             war_id: None,
+            is_sea: false,
         }
     }
 }
@@ -230,5 +234,43 @@ impl StateRegistry {
         } else {
             None
         }
+    }
+
+    /// 該当国家が法的に所有しているすべての州を取得する
+    pub fn get_owned_states(&self, country_id: CountryId) -> Vec<&StateData> {
+        self.states
+            .iter()
+            .filter(|s| s.owner_country_id == country_id)
+            .collect()
+    }
+
+    /// 該当国家が実効支配（占領含む）しているすべての州を取得する
+    pub fn get_controlled_states(&self, country_id: CountryId) -> Vec<&StateData> {
+        self.states
+            .iter()
+            .filter(|s| s.controller() == country_id)
+            .collect()
+    }
+
+    /// 法的領土所有権の変更
+    pub fn transfer_region_ownership(
+        &mut self,
+        state_id: StateId,
+        new_owner: CountryId,
+    ) -> Result<(), &'static str> {
+        let state = self.get_mut(state_id).ok_or("State does not exist")?;
+
+        if state.is_sea {
+            return Err("Cannot transfer sea region ownership");
+        }
+
+        // 法的所有権と支配権を新所有国へ設定
+        state.owner_country_id = new_owner;
+        state.controller_country = Some(new_owner);
+        state.occupation_progress = 0.0;
+        state.original_owner = None;
+        state.war_id = None;
+
+        Ok(())
     }
 }

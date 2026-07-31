@@ -116,7 +116,11 @@ pub fn process_movement(
             state_registry,
         ) as f32;
         let supply_mod = {
-            let army = military_registry.armies.get(&army_id).map(|a| a.supply_ratio).unwrap_or(0.5);
+            let army = military_registry
+                .armies
+                .get(&army_id)
+                .map(|a| a.supply_ratio)
+                .unwrap_or(0.5);
             army.max(0.5)
         };
         let movement_days = (base_days * step_cost / (def_speed * supply_mod)).max(1.0);
@@ -157,12 +161,13 @@ pub fn process_movement(
                 // 自国領への移動完了 → Idle（目的地到着時のみ）
                 let arrived_at_destination = {
                     let army = military_registry.armies.get(&army_id);
-                    army.map(|a| a.target_state.is_none() && a.destination.is_none()).unwrap_or(false)
+                    army.map(|a| a.target_state.is_none() && a.destination.is_none())
+                        .unwrap_or(false)
                 };
-                if arrived_at_destination {
-                    if let Some(army) = military_registry.armies.get_mut(&army_id) {
-                        army.status = ArmyStatus::Idle;
-                    }
+                if arrived_at_destination
+                    && let Some(army) = military_registry.armies.get_mut(&army_id)
+                {
+                    army.status = ArmyStatus::Idle;
                 }
             } else {
                 // 敵支配地域への到着 → 侵攻処理
@@ -199,20 +204,20 @@ pub fn validate_and_stop_invalid_movements(
         }
 
         // 現在の target_state が通過可能か確認
-        if let Some(target) = army.target_state {
-            if let Some(target_state) = state_registry.get(target) {
-                let controller = target_state.controller();
-                let is_own = controller == army.owner;
-                let is_enemy = war_registry.are_countries_at_war(army.owner, controller);
+        if let Some(target) = army.target_state
+            && let Some(target_state) = state_registry.get(target)
+        {
+            let controller = target_state.controller();
+            let is_own = controller == army.owner;
+            let is_enemy = war_registry.are_countries_at_war(army.owner, controller);
 
-                if !is_own && !is_enemy {
-                    // 無効になった → 停止
-                    army.status = ArmyStatus::Idle;
-                    army.target_state = None;
-                    army.destination = None;
-                    army.current_path.clear();
-                    army.movement_progress = 0.0;
-                }
+            if !is_own && !is_enemy {
+                // 無効になった → 停止
+                army.status = ArmyStatus::Idle;
+                army.target_state = None;
+                army.destination = None;
+                army.current_path.clear();
+                army.movement_progress = 0.0;
             }
         }
 

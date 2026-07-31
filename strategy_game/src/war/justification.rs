@@ -39,6 +39,29 @@ impl WarJustificationRegistry {
         state_registry: &StateRegistry,
         diplomacy_registry: &DiplomacyRegistry,
     ) -> Result<(), &'static str> {
+        self.can_start_justification_with_date(
+            initiator,
+            target,
+            target_state,
+            country_registry,
+            state_registry,
+            diplomacy_registry,
+            None,
+        )
+    }
+
+    /// 日付指定付きで正当化が開始可能かを検証する
+    #[allow(clippy::too_many_arguments)]
+    pub fn can_start_justification_with_date(
+        &self,
+        initiator: CountryId,
+        target: CountryId,
+        target_state: StateId,
+        country_registry: &CountryRegistry,
+        state_registry: &StateRegistry,
+        diplomacy_registry: &DiplomacyRegistry,
+        current_date_str: Option<&str>,
+    ) -> Result<(), &'static str> {
         // 自国に対する正当化は不可
         if initiator == target {
             return Err("Cannot justify war against own country");
@@ -60,7 +83,7 @@ impl WarJustificationRegistry {
             return Err("Target state is not owned by target country");
         }
 
-        // 同盟または不可侵条約のチェック
+        // 同盟・不可侵条約・休戦のチェック
         if let Some(rel) = diplomacy_registry.get(initiator, target) {
             if rel.has_treaty(TreatyType::Alliance) {
                 return Err("Cannot justify war against an ally");
@@ -68,6 +91,15 @@ impl WarJustificationRegistry {
             if rel.has_treaty(TreatyType::NonAggressionPact) {
                 return Err("Cannot justify war against non-aggression pact partner");
             }
+        }
+
+        if let Some(date_str) = current_date_str {
+            if diplomacy_registry.is_in_truce(initiator, target, date_str) {
+                return Err("Cannot justify war during truce");
+            }
+        } else if matches!(diplomacy_registry.get(initiator, target), Some(rel) if rel.truce_until.is_some())
+        {
+            return Err("Cannot justify war during truce");
         }
 
         // 重複正当化のチェック

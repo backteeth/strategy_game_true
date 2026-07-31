@@ -3,7 +3,9 @@
 
 use crate::common::{ArmyId, CountryId, DivisionId, StateId};
 use crate::country::{CountryData, CountryRegistry};
-use crate::military::data::{ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry};
+use crate::military::data::{
+    ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+};
 use crate::military::recruitment::{cancel_recruitment, process_recruitment, request_recruitment};
 
 fn setup_registry() -> MilitaryRegistry {
@@ -257,7 +259,13 @@ fn test_movement() {
     // movement_days = 5.0 / 4.0 = 1.25
     // daily_progress = 1.0 / 1.25 = 0.8
 
-    process_movement(&mut registry, &mut state_registry, &war_registry, &mut battle_registry, "1800/01/01");
+    process_movement(
+        &mut registry,
+        &mut state_registry,
+        &war_registry,
+        &mut battle_registry,
+        "1800/01/01",
+    );
 
     let army_ref = registry.armies.get(&ArmyId(0)).unwrap();
     assert_eq!(army_ref.status, ArmyStatus::Moving);
@@ -266,7 +274,13 @@ fn test_movement() {
     assert!(army_ref.movement_progress > 0.79 && army_ref.movement_progress < 0.81);
 
     // Next day
-    process_movement(&mut registry, &mut state_registry, &war_registry, &mut battle_registry, "1800/01/02");
+    process_movement(
+        &mut registry,
+        &mut state_registry,
+        &war_registry,
+        &mut battle_registry,
+        "1800/01/02",
+    );
 
     let army_ref2 = registry.armies.get(&ArmyId(0)).unwrap();
     assert_eq!(army_ref2.status, ArmyStatus::Idle);
@@ -507,22 +521,46 @@ fn test_phase13_movement_timing_and_arrival() {
     // 日数が経過（process_movement実行）
     // def_speed = 4.0, base_days = 5.0 => daily_progress = 0.8 / day
     // Day 1: progress -> 0.8
-    process_movement(&mut registry, &mut state_registry, &war_registry, &mut battle_registry, "1800/01/01");
+    process_movement(
+        &mut registry,
+        &mut state_registry,
+        &war_registry,
+        &mut battle_registry,
+        "1800/01/01",
+    );
     let a1 = registry.armies.get(&ArmyId(0)).unwrap();
     assert_eq!(a1.current_state, StateId(1));
     assert_eq!(a1.target_state, Some(StateId(2)));
 
     // Day 2: reaches State 2, target_state set to State 3
-    process_movement(&mut registry, &mut state_registry, &war_registry, &mut battle_registry, "1800/01/02");
+    process_movement(
+        &mut registry,
+        &mut state_registry,
+        &war_registry,
+        &mut battle_registry,
+        "1800/01/02",
+    );
     let a2 = registry.armies.get(&ArmyId(0)).unwrap();
     assert_eq!(a2.current_state, StateId(2));
     assert_eq!(a2.target_state, Some(StateId(3)));
 
     // Day 3: progress -> 0.8 towards State 3
-    process_movement(&mut registry, &mut state_registry, &war_registry, &mut battle_registry, "1800/01/03");
+    process_movement(
+        &mut registry,
+        &mut state_registry,
+        &war_registry,
+        &mut battle_registry,
+        "1800/01/03",
+    );
 
     // Day 4: reaches State 3 (destination), status -> Idle
-    process_movement(&mut registry, &mut state_registry, &war_registry, &mut battle_registry, "1800/01/04");
+    process_movement(
+        &mut registry,
+        &mut state_registry,
+        &war_registry,
+        &mut battle_registry,
+        "1800/01/04",
+    );
     let a_final = registry.armies.get(&ArmyId(0)).unwrap();
     assert_eq!(a_final.current_state, StateId(3));
     assert_eq!(a_final.status, ArmyStatus::Idle);
@@ -543,6 +581,8 @@ fn setup_war(c1: CountryId, c2: CountryId) -> WarRegistry {
         id: crate::common::WarId(0),
         name: "Test War".to_string(),
         start_date: "1800/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
         attackers: [c1].iter().cloned().collect(),
         defenders: [c2].iter().cloned().collect(),
         war_goals: vec![],
@@ -551,6 +591,12 @@ fn setup_war(c1: CountryId, c2: CountryId) -> WarRegistry {
         defender_war_exhaustion: 0.0,
         occupied_states: HashSet::new(),
         status: WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: HashSet::new(),
     };
     reg.wars.insert(war.id, war);
     reg
@@ -638,8 +684,16 @@ fn test_phase15_battle_starts_when_entering_defended_state() {
     mil.armies.insert(ArmyId(0), army1);
     mil.armies.insert(ArmyId(1), army2);
 
-    let s1 = StateData { id: StateId(1), owner_country_id: c1, ..Default::default() };
-    let mut s2 = StateData { id: StateId(2), owner_country_id: c2, ..Default::default() };
+    let s1 = StateData {
+        id: StateId(1),
+        owner_country_id: c1,
+        ..Default::default()
+    };
+    let mut s2 = StateData {
+        id: StateId(2),
+        owner_country_id: c2,
+        ..Default::default()
+    };
     s2.controller_country = None;
     let mut state_reg = StateRegistry::build(vec![s1, s2]);
     let mut battle_reg = BattleRegistry::default();
@@ -656,7 +710,11 @@ fn test_phase15_battle_starts_when_entering_defended_state() {
     );
 
     // 戦闘が1件作成される
-    assert_eq!(battle_reg.battles.len(), 1, "Exactly one battle should be created");
+    assert_eq!(
+        battle_reg.battles.len(),
+        1,
+        "Exactly one battle should be created"
+    );
     // 両ユニットが戦闘中
     assert_eq!(mil.armies[&ArmyId(0)].status, ArmyStatus::Fighting);
     assert_eq!(mil.armies[&ArmyId(1)].status, ArmyStatus::Fighting);
@@ -676,8 +734,16 @@ fn test_phase15_occupy_undefended_enemy_state() {
     mil.armies.insert(ArmyId(0), army1);
     // C2のユニットはいない
 
-    let s1 = StateData { id: StateId(1), owner_country_id: c1, ..Default::default() };
-    let mut s2 = StateData { id: StateId(2), owner_country_id: c2, ..Default::default() };
+    let s1 = StateData {
+        id: StateId(1),
+        owner_country_id: c1,
+        ..Default::default()
+    };
+    let mut s2 = StateData {
+        id: StateId(2),
+        owner_country_id: c2,
+        ..Default::default()
+    };
     s2.controller_country = None;
     let mut state_reg = StateRegistry::build(vec![s1, s2]);
     let mut battle_reg = BattleRegistry::default();
@@ -694,7 +760,11 @@ fn test_phase15_occupy_undefended_enemy_state() {
     );
 
     // 戦闘なし
-    assert_eq!(battle_reg.battles.len(), 0, "No battle for undefended state");
+    assert_eq!(
+        battle_reg.battles.len(),
+        0,
+        "No battle for undefended state"
+    );
     // 地域の支配国がC1に変わる
     assert_eq!(state_reg.get(StateId(2)).unwrap().controller(), c1);
     // 所有国はC2のまま
@@ -728,7 +798,10 @@ fn test_phase15_combat_daily_resolution() {
         resolve_combat_day(&attacker, &defender, 0);
 
     // 1日経過すると損失が発生する
-    assert!(atk_loss > 0 || def_loss > 0, "At least one side should take damage");
+    assert!(
+        atk_loss > 0 || def_loss > 0,
+        "At least one side should take damage"
+    );
     // 組織率損失も発生する
     assert!(atk_org_loss >= 0.0 && def_org_loss >= 0.0);
 }
@@ -749,7 +822,9 @@ fn test_phase15_combat_is_deterministic() {
 
 #[test]
 fn test_phase15_terrain_bonus_affects_combat() {
-    use crate::military::combat_calc::{TERRAIN_BONUS_MOUNTAIN, TERRAIN_BONUS_PLAIN, resolve_combat_day};
+    use crate::military::combat_calc::{
+        TERRAIN_BONUS_MOUNTAIN, TERRAIN_BONUS_PLAIN, resolve_combat_day,
+    };
 
     let attacker = make_test_army(0, CountryId(1), StateId(1));
     let defender = make_test_army(1, CountryId(2), StateId(1));
@@ -899,8 +974,16 @@ fn test_phase15_no_battle_between_same_country() {
     mil.armies.insert(ArmyId(0), army1);
     mil.armies.insert(ArmyId(1), army2);
 
-    let s1 = StateData { id: StateId(1), owner_country_id: c1, ..Default::default() };
-    let s2 = StateData { id: StateId(2), owner_country_id: c1, ..Default::default() };
+    let s1 = StateData {
+        id: StateId(1),
+        owner_country_id: c1,
+        ..Default::default()
+    };
+    let s2 = StateData {
+        id: StateId(2),
+        owner_country_id: c1,
+        ..Default::default()
+    };
     let mut state_reg = StateRegistry::build(vec![s1, s2]);
     let mut battle_reg = BattleRegistry::default();
 
@@ -915,7 +998,11 @@ fn test_phase15_no_battle_between_same_country() {
         &mut battle_reg,
     );
 
-    assert_eq!(battle_reg.battles.len(), 0, "No battle between same country");
+    assert_eq!(
+        battle_reg.battles.len(),
+        0,
+        "No battle between same country"
+    );
 }
 
 #[test]
@@ -950,7 +1037,11 @@ fn test_phase15_retreat_is_deterministic() {
     let dest = find_retreat_destination(ArmyId(0), StateId(1), &mil, &state_reg, &battle_reg);
 
     // StateId昇順で最小（StateId(3)）が選ばれる
-    assert_eq!(dest, Some(StateId(3)), "Should choose smallest StateId for retreat");
+    assert_eq!(
+        dest,
+        Some(StateId(3)),
+        "Should choose smallest StateId for retreat"
+    );
 }
 
 #[test]

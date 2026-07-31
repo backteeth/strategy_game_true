@@ -52,9 +52,81 @@ impl Default for GameDate {
 }
 
 impl GameDate {
-    /// 日付を文字列として取得する
+    /// 新しい GameDate を作成
+    pub fn new(year: i32, month: u8, day: u8) -> Self {
+        Self {
+            year,
+            month,
+            day,
+            accumulator: 0.0,
+        }
+    }
+
+    /// 日付を文字列として取得する ("YYYY/MM/DD")
     pub fn display(&self) -> String {
         format!("{:04}/{:02}/{:02}", self.year, self.month, self.day)
+    }
+
+    /// 指定日数後の GameDate を計算して取得する
+    pub fn add_days(&self, days: u32) -> GameDate {
+        let mut y = self.year;
+        let mut m = self.month;
+        let mut d = self.day as u32 + days;
+
+        loop {
+            let max_d = DAYS_IN_MONTH[(m as usize) - 1] as u32;
+            if d <= max_d {
+                break;
+            }
+            d -= max_d;
+            m += 1;
+            if m > 12 {
+                m = 1;
+                y += 1;
+            }
+        }
+
+        GameDate {
+            year: y,
+            month: m,
+            day: d as u8,
+            accumulator: 0.0,
+        }
+    }
+
+    /// "YYYY/MM/DD" または "YYYY-MM-DD" から GameDate を生成する
+    pub fn from_string(s: &str) -> Option<GameDate> {
+        let parts: Vec<&str> = if s.contains('/') {
+            s.split('/').collect()
+        } else {
+            s.split('-').collect()
+        };
+        if parts.len() != 3 {
+            return None;
+        }
+        let year = parts[0].trim().parse::<i32>().ok()?;
+        let month = parts[1].trim().parse::<u8>().ok()?;
+        let day = parts[2].trim().parse::<u8>().ok()?;
+        Some(GameDate::new(year, month, day))
+    }
+
+    /// 2つの日付間の概算経過日数を取得する (簡易計算)
+    pub fn days_since(&self, start: &GameDate) -> i32 {
+        let y_diff = self.year - start.year;
+        let m_diff = self.month as i32 - start.month as i32;
+        let d_diff = self.day as i32 - start.day as i32;
+        y_diff * 365 + m_diff * 30 + d_diff
+    }
+
+    /// self が other と同日かそれ以降か判定する
+    pub fn is_at_least(&self, other: &GameDate) -> bool {
+        if self.year != other.year {
+            return self.year > other.year;
+        }
+        if self.month != other.month {
+            return self.month > other.month;
+        }
+        self.day >= other.day
     }
 }
 

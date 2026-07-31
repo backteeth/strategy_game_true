@@ -179,6 +179,38 @@ impl DiplomacyRegistry {
         let key = DiplomaticPairKey::new(a, b)?;
         Some(self.relations.entry(key).or_default())
     }
+
+    /// 休戦を設定する
+    pub fn set_truce(&mut self, a: CountryId, b: CountryId, truce_until: String) {
+        if let Some(rel) = self.get_or_create_mut(a, b) {
+            rel.truce_until = Some(truce_until);
+        }
+    }
+
+    /// 現在の日付と照合して休戦中か判定し、有効な休戦終了日を返す
+    pub fn get_truce_until(
+        &self,
+        a: CountryId,
+        b: CountryId,
+        current_date: &str,
+    ) -> Option<String> {
+        let rel = self.get(a, b)?;
+        let truce_until_str = rel.truce_until.as_ref()?;
+
+        let curr = crate::app::time::GameDate::from_string(current_date)?;
+        let until = crate::app::time::GameDate::from_string(truce_until_str)?;
+
+        if curr.is_at_least(&until) {
+            None
+        } else {
+            Some(truce_until_str.clone())
+        }
+    }
+
+    /// 休戦中か判定する
+    pub fn is_in_truce(&self, a: CountryId, b: CountryId, current_date: &str) -> bool {
+        self.get_truce_until(a, b, current_date).is_some()
+    }
 }
 
 /// RONシリアライズ用初期関係定義

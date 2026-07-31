@@ -80,21 +80,15 @@ pub fn resolve_combat_day(
 
     // 実効攻撃力を固定小数点（×1000）で計算
     // attack_effective = attack_power * manpower_ratio * org_ratio（0〜attack_power*1000）
-    let atk_manpower_ratio_1000 =
-        (attacker.manpower as i64 * 1000) / attacker.max_manpower as i64;
-    let atk_org_ratio_1000 =
-        (attacker.organization * 1000.0 / attacker.max_organization) as i64;
+    let atk_manpower_ratio_1000 = (attacker.manpower as i64 * 1000) / attacker.max_manpower as i64;
+    let atk_org_ratio_1000 = (attacker.organization * 1000.0 / attacker.max_organization) as i64;
     let atk_effective_1000 =
-        (attacker.attack_power as i64 * atk_manpower_ratio_1000 * atk_org_ratio_1000)
-            / 1_000_000;
+        (attacker.attack_power as i64 * atk_manpower_ratio_1000 * atk_org_ratio_1000) / 1_000_000;
 
-    let def_manpower_ratio_1000 =
-        (defender.manpower as i64 * 1000) / defender.max_manpower as i64;
-    let def_org_ratio_1000 =
-        (defender.organization * 1000.0 / defender.max_organization) as i64;
+    let def_manpower_ratio_1000 = (defender.manpower as i64 * 1000) / defender.max_manpower as i64;
+    let def_org_ratio_1000 = (defender.organization * 1000.0 / defender.max_organization) as i64;
     let def_effective_1000 =
-        (defender.defense_power as i64 * def_manpower_ratio_1000 * def_org_ratio_1000)
-            / 1_000_000;
+        (defender.defense_power as i64 * def_manpower_ratio_1000 * def_org_ratio_1000) / 1_000_000;
 
     // 地形補正を防御側の実効値に加算（固定小数点×1000）
     let def_effective_with_terrain = def_effective_1000 + terrain_defense_bonus as i64;
@@ -103,18 +97,14 @@ pub fn resolve_combat_day(
     let def_manpower_loss = if def_effective_with_terrain < 1 {
         (atk_effective_1000 * DAMAGE_SCALE as i64 / 1000).max(0) as u64
     } else {
-        (atk_effective_1000 * DAMAGE_SCALE as i64
-            / def_effective_with_terrain.max(1))
-        .max(0) as u64
+        (atk_effective_1000 * DAMAGE_SCALE as i64 / def_effective_with_terrain.max(1)).max(0) as u64
     };
 
     // 攻撃側が受けるmanpowerダメージ
     let atk_manpower_loss = if atk_effective_1000 < 1 {
         (def_effective_with_terrain * DAMAGE_SCALE as i64 / 1000).max(0) as u64
     } else {
-        (def_effective_with_terrain * DAMAGE_SCALE as i64
-            / atk_effective_1000.max(1))
-        .max(0) as u64
+        (def_effective_with_terrain * DAMAGE_SCALE as i64 / atk_effective_1000.max(1)).max(0) as u64
     };
 
     // 組織率ダメージ（manpower_loss の 1/ORG_DAMAGE_DENOMINATOR）
@@ -123,13 +113,18 @@ pub fn resolve_combat_day(
     let def_org_loss =
         def_manpower_loss as f32 * ORG_DAMAGE_NUMERATOR as f32 / ORG_DAMAGE_DENOMINATOR as f32;
 
-    (atk_manpower_loss, atk_org_loss, def_manpower_loss, def_org_loss)
+    (
+        atk_manpower_loss,
+        atk_org_loss,
+        def_manpower_loss,
+        def_org_loss,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{ArmyId, BattleId, DivisionId, StateId, CountryId};
+    use crate::common::{ArmyId, BattleId, CountryId, DivisionId, StateId};
     use crate::military::data::{ArmyStatus, ArmyUnit, DivisionSize, DivisionType};
 
     fn make_army(owner: CountryId, manpower: u64, org: f32, atk: i32, def: i32) -> ArmyUnit {
@@ -211,6 +206,6 @@ mod tests {
         // 攻撃側の実効が0なので防御側のダメージも0
         assert_eq!(def_loss, 0);
         // 攻撃側はダメージを受ける
-        assert!(atk_loss >= 0);
+        let _ = atk_loss;
     }
 }

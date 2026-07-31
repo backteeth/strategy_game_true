@@ -171,7 +171,10 @@ fn handle_movement_order(
 
     // ユニット存在確認（撃破済み選択防止）
     let Some(army) = military_registry.armies.get(&army_id) else {
-        warn!("[ArmyMovement] Selected army {:?} no longer exists", army_id);
+        warn!(
+            "[ArmyMovement] Selected army {:?} no longer exists",
+            army_id
+        );
         return;
     };
 
@@ -232,14 +235,14 @@ fn handle_movement_order(
     }
 
     // 移動先が戦闘中の地域なら拒否（既に戦闘が行われている）
-    if let Some(_battle) = battle_registry.get_ongoing_battle_in_state(target) {
-        if !is_own_territory {
-            warn!(
-                "[ArmyMovement] Army {} cannot move to state {:?}: battle already ongoing",
-                army.id.0, target
-            );
-            return;
-        }
+    if let Some(_battle) = battle_registry.get_ongoing_battle_in_state(target)
+        && !is_own_territory
+    {
+        warn!(
+            "[ArmyMovement] Army {} cannot move to state {:?}: battle already ongoing",
+            army.id.0, target
+        );
+        return;
     }
 
     // 交戦中の敵国リストを構築

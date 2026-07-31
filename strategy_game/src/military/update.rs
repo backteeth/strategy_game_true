@@ -32,11 +32,7 @@ pub fn handle_daily_military(
         );
 
         // 2. 経路の事前検証（戦争終了等で無効になった移動を停止）
-        validate_and_stop_invalid_movements(
-            &mut military_registry,
-            &state_registry,
-            &war_registry,
-        );
+        validate_and_stop_invalid_movements(&mut military_registry, &state_registry, &war_registry);
 
         // 3. 移動処理（侵攻・戦闘開始を含む）
         process_movement(
@@ -79,11 +75,7 @@ fn process_daily_battles(
     war_registry: &WarRegistry,
 ) {
     // 戦闘IDの安定した処理順序（昇順）
-    let mut battle_ids: Vec<BattleId> = battle_registry
-        .battles
-        .keys()
-        .copied()
-        .collect();
+    let mut battle_ids: Vec<BattleId> = battle_registry.battles.keys().copied().collect();
     battle_ids.sort_by_key(|id| id.0);
 
     for battle_id in battle_ids {
@@ -108,13 +100,21 @@ fn process_daily_battles(
             if let Some(b) = battle_registry.battles.get_mut(&battle_id) {
                 b.status = BattleStatus::Cancelled;
             }
-            cleanup_battle_units(battle.attacker_army_id, battle.defender_army_id, military_registry);
+            cleanup_battle_units(
+                battle.attacker_army_id,
+                battle.defender_army_id,
+                military_registry,
+            );
             continue;
         }
 
         // 参加ユニットが存在するか確認
-        let attacker_exists = military_registry.armies.contains_key(&battle.attacker_army_id);
-        let defender_exists = military_registry.armies.contains_key(&battle.defender_army_id);
+        let attacker_exists = military_registry
+            .armies
+            .contains_key(&battle.attacker_army_id);
+        let defender_exists = military_registry
+            .armies
+            .contains_key(&battle.defender_army_id);
 
         if !attacker_exists || !defender_exists {
             // ユニット消滅 → 戦闘キャンセル
@@ -133,7 +133,7 @@ fn process_daily_battles(
         // 地形補正取得
         let terrain_bonus = state_registry
             .get(battle.state_id)
-            .map(|s| calculate_terrain_defense_bonus(s))
+            .map(calculate_terrain_defense_bonus)
             .unwrap_or(0);
 
         // 戦闘計算（クローンして借用衝突を避ける）
@@ -175,11 +175,7 @@ fn resolve_finished_battles(
     battle_registry: &mut BattleRegistry,
     war_registry: &WarRegistry,
 ) {
-    let battle_ids: Vec<BattleId> = battle_registry
-        .battles
-        .keys()
-        .copied()
-        .collect();
+    let battle_ids: Vec<BattleId> = battle_registry.battles.keys().copied().collect();
 
     for battle_id in battle_ids {
         let battle = match battle_registry.battles.get(&battle_id) {
@@ -192,8 +188,14 @@ fn resolve_finished_battles(
         }
 
         // 参加ユニット取得
-        let attacker = military_registry.armies.get(&battle.attacker_army_id).cloned();
-        let defender = military_registry.armies.get(&battle.defender_army_id).cloned();
+        let attacker = military_registry
+            .armies
+            .get(&battle.attacker_army_id)
+            .cloned();
+        let defender = military_registry
+            .armies
+            .get(&battle.defender_army_id)
+            .cloned();
 
         let (Some(atk), Some(def)) = (attacker, defender) else {
             // ユニット消滅 → キャンセル
@@ -267,10 +269,7 @@ fn handle_attacker_victory(
     battle_registry: &BattleRegistry,
     war_registry: &WarRegistry,
 ) {
-    let attacker_owner = military_registry
-        .armies
-        .get(&attacker_id)
-        .map(|a| a.owner);
+    let attacker_owner = military_registry.armies.get(&attacker_id).map(|a| a.owner);
 
     // 防御側ユニットの処理（撤退または撃破）
     if let Some(def) = military_registry.armies.get(&defender_id).cloned() {
@@ -297,11 +296,17 @@ fn handle_attacker_victory(
                 army.current_path.clear();
                 army.movement_progress = 0.0;
             }
-            info!("[Battle] Defender Army {:?} retreated to {:?}", defender_id, dest);
+            info!(
+                "[Battle] Defender Army {:?} retreated to {:?}",
+                defender_id, dest
+            );
         } else {
             // 撤退先なし → 包囲・撃破
             military_registry.remove_army(defender_id);
-            info!("[Battle] Defender Army {:?} surrounded and destroyed", defender_id);
+            info!(
+                "[Battle] Defender Army {:?} surrounded and destroyed",
+                defender_id
+            );
         }
     }
 
@@ -315,12 +320,20 @@ fn handle_attacker_victory(
 
         // 地域の支配国を攻撃側に変更
         occupy_state(battle_state, owner, state_registry);
-        info!("[Battle] Attacker {:?} captured state {:?}", attacker_id, battle_state);
+        info!(
+            "[Battle] Attacker {:?} captured state {:?}",
+            attacker_id, battle_state
+        );
     }
 
     // WarRegistryのoccupied_statesを更新
     if let Some(attacker_owner) = attacker_owner {
-        update_war_occupied_states(attacker_owner, battle_state, military_registry, war_registry);
+        update_war_occupied_states(
+            attacker_owner,
+            battle_state,
+            military_registry,
+            war_registry,
+        );
     }
 }
 
@@ -351,22 +364,21 @@ fn handle_defender_victory(
                 army.target_state = None;
                 army.movement_progress = 0.0;
             }
-            info!("[Battle] Attacker Army {:?} repelled, returns to {:?}", attacker_id, attacker_origin);
+            info!(
+                "[Battle] Attacker Army {:?} repelled, returns to {:?}",
+                attacker_id, attacker_origin
+            );
         }
     }
 
     // 防御側ユニットの後処理
-    if military_registry.armies.contains_key(&defender_id) {
-        if let Some(def) = military_registry.armies.get(&defender_id).cloned() {
-            if def.manpower == 0 {
-                // 両者敗北の場合は防御側も削除されることがある（この関数は両者敗北でも呼ばれる）
-                military_registry.remove_army(defender_id);
-            } else {
-                if let Some(army) = military_registry.armies.get_mut(&defender_id) {
-                    army.status = ArmyStatus::Idle;
-                    army.combat_id = None;
-                }
-            }
+    if let Some(def) = military_registry.armies.get(&defender_id).cloned() {
+        if def.manpower == 0 {
+            // 両者敗北の場合は防御側も削除されることがある（この関数は両者敗北でも呼ばれる）
+            military_registry.remove_army(defender_id);
+        } else if let Some(army) = military_registry.armies.get_mut(&defender_id) {
+            army.status = ArmyStatus::Idle;
+            army.combat_id = None;
         }
     }
 
@@ -428,8 +440,8 @@ pub fn process_org_recovery(
             .unwrap_or(false);
 
         if in_own_territory {
-            army.organization = (army.organization + ORG_RECOVERY_PER_DAY)
-                .min(army.max_organization);
+            army.organization =
+                (army.organization + ORG_RECOVERY_PER_DAY).min(army.max_organization);
         }
     }
 }

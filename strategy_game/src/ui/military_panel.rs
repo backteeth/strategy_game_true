@@ -236,33 +236,31 @@ fn update_military_panel_ui(
             ArmyStatus::Occupying => "占領中",
             ArmyStatus::Retreating => "退却中",
             ArmyStatus::Disbanding => "解散中",
+            ArmyStatus::Destroyed => "撃破",
         };
         lines.push(format!("状態: {}", status_str));
 
         // 戦闘中の場合、戦闘詳細を表示
-        if army.status == ArmyStatus::Fighting {
-            if let Some(battle_id) = army.combat_id {
-                if let Some(battle) = battle_registry.battles.get(&battle_id) {
-                    let atk_name = country_registry
-                        .get(battle.attacker_country)
-                        .map(|c| c.name.as_str())
-                        .unwrap_or("?");
-                    let def_name = country_registry
-                        .get(battle.defender_country)
-                        .map(|c| c.name.as_str())
-                        .unwrap_or("?");
-                    let battle_state_name = state_registry
-                        .get(battle.state_id)
-                        .map(|s| s.name.as_str())
-                        .unwrap_or("?");
-                    lines.push(format!("  戦闘地域: {}", battle_state_name));
-                    lines.push(format!(
-                        "  {} vs {}",
-                        atk_name, def_name
-                    ));
-                    lines.push(format!("  経過: {}日", battle.elapsed_days));
-                }
-            }
+        if army.status == ArmyStatus::Fighting
+            && let Some(battle) = army
+                .combat_id
+                .and_then(|id| battle_registry.battles.get(&id))
+        {
+            let atk_name = country_registry
+                .get(battle.attacker_country)
+                .map(|c| c.name.as_str())
+                .unwrap_or("?");
+            let def_name = country_registry
+                .get(battle.defender_country)
+                .map(|c| c.name.as_str())
+                .unwrap_or("?");
+            let battle_state_name = state_registry
+                .get(battle.state_id)
+                .map(|s| s.name.as_str())
+                .unwrap_or("?");
+            lines.push(format!("  戦闘地域: {}", battle_state_name));
+            lines.push(format!("  {} vs {}", atk_name, def_name));
+            lines.push(format!("  経過: {}日", battle.elapsed_days));
         }
 
         if let Some(dest_id) = army.destination {
@@ -369,7 +367,10 @@ fn update_military_panel_ui(
         for war in &active_wars {
             let is_attacker = war.attackers.contains(&player_cid);
             let role = if is_attacker { "攻撃" } else { "防衛" };
-            lines.push(format!("{} [{}] スコア: {:.0}", war.name, role, war.war_score));
+            lines.push(format!(
+                "{} [{}] スコア: {:.0}",
+                war.name, role, war.war_score
+            ));
         }
         lines.push("".to_string());
     }
@@ -388,17 +389,13 @@ fn update_military_panel_ui(
             ArmyStatus::Occupying => "占領中",
             ArmyStatus::Retreating => "退却中",
             ArmyStatus::Disbanding => "解散中",
+            ArmyStatus::Destroyed => "撃破",
         };
         let selected = selected_army.army_id == Some(army.id);
         let sel_mark = if selected { "► " } else { "  " };
         lines.push(format!(
             "{}#{} @ {} | {} | 兵力:{} 組:{:.0}",
-            sel_mark,
-            army.id.0,
-            state_name,
-            status_str,
-            army.manpower,
-            army.organization,
+            sel_mark, army.id.0, state_name, status_str, army.manpower, army.organization,
         ));
     }
 

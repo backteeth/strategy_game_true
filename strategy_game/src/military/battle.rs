@@ -56,10 +56,10 @@ impl BattleRegistry {
     /// 戦闘を登録する。同じ地域に進行中の戦闘がある場合は Err を返す
     pub fn start_battle(&mut self, battle: Battle) -> Result<BattleId, &'static str> {
         // 同一地域に進行中の戦闘が既にある場合は重複登録を防ぐ
-        let already_exists = self.battles.values().any(|b| {
-            b.state_id == battle.state_id
-                && b.status == BattleStatus::Ongoing
-        });
+        let already_exists = self
+            .battles
+            .values()
+            .any(|b| b.state_id == battle.state_id && b.status == BattleStatus::Ongoing);
         if already_exists {
             return Err("Battle already ongoing in this state");
         }
