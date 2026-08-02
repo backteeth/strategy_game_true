@@ -1,0 +1,25 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 1.00s
+     Running tests\ui_headless_render_test.rs (target\debug\deps\ui_headless_render_test-7666cbd1ae2f08df.exe)
+
+running 1 test
+[2m2026-08-02T11:51:14.788249Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "610.74", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-08-02T11:51:15.172561Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-08-02T11:51:15.172616Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[P20-007] Adapter: name="NVIDIA GeForce RTX 5070 Ti" backend=Vulkan device_type=DiscreteGpu driver="NVIDIA"
+[P20-007] Assets<Font> loaded: count=1
+[2m2026-08-02T11:51:15.176552Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DataLoader] Successfully loaded 8 buildings, 22 technologies, 4 countries, 10 states, 3 diplomatic relations
+[P20-007] CountrySelectionRoot ComputedNode size = Vec2(640.0, 480.0)
+[P20-007] checkpoint=country_selection_default non_bg=70135 unique_colors=528 bbox=Some((32, 35, 563, 393)) bg_ref=[13, 13, 20, 255]
+[P20-007] checkpoint=country_selection_default bbox=(32,35)-(563,393)
+[P20-007] checkpoint=country_selection_after_click non_bg=69473 unique_colors=527 bbox=Some((32, 35, 551, 393))
+[P20-007] diff(country_selection_default, country_selection_after_click) = 11818 pixels
+[2m2026-08-02T11:51:15.611460Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DEBUG] Spawned 4 initial armies
+[P20-007] TopBarRoot ComputedNode size = Vec2(640.0, 40.0)
+[P20-007] checkpoint=playing_topbar non_bg=283237 unique_colors=3531 bbox=Some((0, 0, 639, 479))
+[P20-007] diff(country_selection_after_click, playing_topbar) = 307198 pixels
+[P20-007] All headless UI render assertions passed.
+[P20-007] SUMMARY adapter_name="NVIDIA GeForce RTX 5070 Ti" backend=Vulkan resolution=640x480 format=Rgba8UnormSrgb non_bg(default=70135, after_click=69473, playing=283237) diff(default->after_click=11818, after_click->playing=307198)
+test ui_headless_render_produces_real_pixels ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s
+

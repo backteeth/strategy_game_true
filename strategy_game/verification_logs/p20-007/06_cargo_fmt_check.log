@@ -1,0 +1,166 @@
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:8:
+ };
+ use strategy_game::military::invasion::{occupy_state, process_army_arrival};
+ use strategy_game::state::data::{StateData, StateRegistry};
+[31m-use strategy_game::war::capitulation::{evaluate_war_capitulation, CapitulationResult};
+[0m[32m+use strategy_game::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
+[0m use strategy_game::war::combat::sync_battle_results_to_wars;
+ use strategy_game::war::data::{WarRegistry, WarStatus};
+[31m-use strategy_game::war::frontline::{update_all_frontlines, FrontlineRegistry};
+[0m[32m+use strategy_game::war::frontline::{FrontlineRegistry, update_all_frontlines};
+[0m use strategy_game::war::justification::WarJustificationRegistry;
+[31m-use strategy_game::war::peace::{execute_peace_settlement, PeaceTerm};
+[0m[32m+use strategy_game::war::peace::{PeaceTerm, execute_peace_settlement};
+[0m use strategy_game::war::war_score::process_war_score;
+ 
+ /// RONファイルからロードして全4国家が相互に陸続き（直接隣接）になっているかをテストする
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:21:
+ fn test_all_countries_are_directly_land_connected() {
+     let states_ron = std::fs::read_to_string("assets/data/states.ron")
+         .expect("assets/data/states.ron should exist");
+[31m-    let states: Vec<StateData> = ron::from_str(&states_ron)
+[0m[31m-        .expect("assets/data/states.ron should parse cleanly");
+[0m[32m+    let states: Vec<StateData> =
+[0m[32m+        ron::from_str(&states_ron).expect("assets/data/states.ron should parse cleanly");
+[0m     let state_reg = StateRegistry::build(states);
+ 
+     let countries_ron = std::fs::read_to_string("assets/data/countries.ron")
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:29:
+         .expect("assets/data/countries.ron should exist");
+[31m-    let countries: Vec<CountryData> = ron::from_str(&countries_ron)
+[0m[31m-        .expect("assets/data/countries.ron should parse cleanly");
+[0m[32m+    let countries: Vec<CountryData> =
+[0m[32m+        ron::from_str(&countries_ron).expect("assets/data/countries.ron should parse cleanly");
+[0m 
+     let country_ids: Vec<CountryId> = countries.iter().map(|c| c.id).collect();
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:35:
+     // 4国家存在することを確認
+[31m-    assert_eq!(country_ids.len(), 4, "Expected 4 countries in countries.ron");
+[0m[32m+    assert_eq!(
+[0m[32m+        country_ids.len(),
+[0m[32m+        4,
+[0m[32m+        "Expected 4 countries in countries.ron"
+[0m[32m+    );
+[0m 
+     // 全ての国家ペア (c1, c2) について、直接隣接する州が存在するか確認
+     for i in 0..country_ids.len() {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:107:
+ 
+     let attacker_country = CountryId(0); // Kingdom of Arcadia
+     let defender_country = CountryId(3); // Oceanic Magic Empire (今回直接接続した国家)
+[31m-    let target_state = StateId(8);      // Oceanic の首都州 (State 8)
+[0m[32m+    let target_state = StateId(8); // Oceanic の首都州 (State 8)
+[0m     let attacker_border_state = StateId(1); // Arcadia の State 1 (State 8 と直接隣接)
+ 
+     // 隣接の直接確認
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:114:
+     let s1 = state_reg.get(attacker_border_state).unwrap();
+[31m-    assert!(s1.neighbors.contains(&target_state), "State 1 must border State 8");
+[0m[32m+    assert!(
+[0m[32m+        s1.neighbors.contains(&target_state),
+[0m[32m+        "State 1 must border State 8"
+[0m[32m+    );
+[0m 
+     // 2. 正当化プロセスと開戦 (War Declaration)
+     let start_date = "1936/01/01".to_string();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:153:
+     let frontline = frontline_reg.get_frontline_for_war(war_id);
+     assert!(frontline.is_some(), "Frontline should be created for war");
+     let fl = frontline.unwrap();
+[31m-    assert!(fl.border_region_pairs.contains(&(attacker_border_state, target_state)));
+[0m[32m+    assert!(
+[0m[32m+        fl.border_region_pairs
+[0m[32m+            .contains(&(attacker_border_state, target_state))
+[0m[32m+    );
+[0m 
+     // 4. 部隊配置と戦闘の開始 (Army Placement & Combat)
+     let atk_army = ArmyUnit {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:226:
+     );
+ 
+     let ongoing_battle = battle_reg.get_ongoing_battle_in_state(target_state);
+[31m-    assert!(ongoing_battle.is_some(), "Battle should be successfully started on target state");
+[0m[32m+    assert!(
+[0m[32m+        ongoing_battle.is_some(),
+[0m[32m+        "Battle should be successfully started on target state"
+[0m[32m+    );
+[0m 
+     // 戦闘計算 (Resolve Combat Day)
+     let (atk_loss, _, def_loss, _) = resolve_combat_day(&atk_army, &def_army, 0);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:233:
+[31m-    assert!(atk_loss > 0 || def_loss > 0, "Combat should deal damage to forces");
+[0m[32m+    assert!(
+[0m[32m+        atk_loss > 0 || def_loss > 0,
+[0m[32m+        "Combat should deal damage to forces"
+[0m[32m+    );
+[0m 
+     // 戦闘勝利のシミュレーションと戦争ログ集計
+     sync_battle_results_to_wars(&battle_reg, &mut war_reg);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:239:
+     occupy_state(target_state, attacker_country, &mut state_reg);
+     occupy_state(StateId(9), attacker_country, &mut state_reg);
+     let state_8 = state_reg.get(target_state).unwrap();
+[31m-    assert_eq!(state_8.controller_country, Some(attacker_country), "Target state should now be controlled by attacker");
+[0m[32m+    assert_eq!(
+[0m[32m+        state_8.controller_country,
+[0m[32m+        Some(attacker_country),
+[0m[32m+        "Target state should now be controlled by attacker"
+[0m[32m+    );
+[0m 
+     process_war_score(&state_reg, &mut war_reg);
+     let active_war = war_reg.wars.get(&war_id).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:246:
+[31m-    assert!(active_war.war_score > 0.0, "Attacker war score should be positive after occupying target state");
+[0m[32m+    assert!(
+[0m[32m+        active_war.war_score > 0.0,
+[0m[32m+        "Attacker war score should be positive after occupying target state"
+[0m[32m+    );
+[0m 
+     // 6. 降伏判定・講和 (Capitulation & Peace Treaty Settlement)
+     let cap_result = evaluate_war_capitulation(active_war, &state_reg, &military_reg);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:264:
+         &mut frontline_reg,
+     );
+ 
+[31m-    assert!(peace_res.is_ok(), "Peace settlement execution should succeed");
+[0m[32m+    assert!(
+[0m[32m+        peace_res.is_ok(),
+[0m[32m+        "Peace settlement execution should succeed"
+[0m[32m+    );
+[0m 
+     // 講和完了の検証
+     let ended_war = war_reg.wars.get(&war_id).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:271:
+[31m-    assert_eq!(ended_war.status, WarStatus::AttackerVictory, "War status should be AttackerVictory after peace");
+[0m[32m+    assert_eq!(
+[0m[32m+        ended_war.status,
+[0m[32m+        WarStatus::AttackerVictory,
+[0m[32m+        "War status should be AttackerVictory after peace"
+[0m[32m+    );
+[0m     assert!(ended_war.end_date.is_some(), "War end date should be set");
+[31m-    assert_eq!(ended_war.end_reason.as_deref(), Some("Defender Capitulation Settlement"));
+[0m[32m+    assert_eq!(
+[0m[32m+        ended_war.end_reason.as_deref(),
+[0m[32m+        Some("Defender Capitulation Settlement")
+[0m[32m+    );
+[0m 
+     // 講和により領土割譲（Target State の所有権が攻撃側に移動）したことを確認
+     let cceded_state = state_reg.get(target_state).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:277:
+[31m-    assert_eq!(cceded_state.owner_country_id, attacker_country, "Target state ownership should be ceded to attacker");
+[0m[32m+    assert_eq!(
+[0m[32m+        cceded_state.owner_country_id, attacker_country,
+[0m[32m+        "Target state ownership should be ceded to attacker"
+[0m[32m+    );
+[0m 
+     // 前線が削除・整理されたことを確認
+     let fl_after = frontline_reg.get_frontline_for_war(war_id);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:281:
+[31m-    assert!(fl_after.is_none(), "Frontline should be removed after peace settlement");
+[0m[32m+    assert!(
+[0m[32m+        fl_after.is_none(),
+[0m[32m+        "Frontline should be removed after peace settlement"
+[0m[32m+    );
+[0m }
+ 
