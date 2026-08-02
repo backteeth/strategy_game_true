@@ -53,6 +53,10 @@ pub struct BattleRegistry {
 }
 
 impl BattleRegistry {
+    pub fn next_id(&self) -> usize {
+        self.next_id
+    }
+
     /// 戦闘を登録する。同じ地域に進行中の戦闘がある場合は Err を返す
     pub fn start_battle(&mut self, battle: Battle) -> Result<BattleId, &'static str> {
         // 同一地域に進行中の戦闘が既にある場合は重複登録を防ぐ

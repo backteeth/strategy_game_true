@@ -58,6 +58,10 @@ pub struct WarRegistry {
 }
 
 impl WarRegistry {
+    pub fn next_id(&self) -> usize {
+        self.next_id
+    }
+
     pub fn add_war(&mut self, mut war: War) -> WarId {
         war.id = WarId(self.next_id);
         self.next_id += 1;

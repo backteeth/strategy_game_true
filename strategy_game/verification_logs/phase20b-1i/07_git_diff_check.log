@@ -1,0 +1,12 @@
+warning: in the working copy of 'strategy_game/src/country/country_ai.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/country/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/economy/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/battle.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/data.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/research/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/state/data.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/data.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/frontline.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/justification.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/military_ai.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/tests/daily_system_integration_test.rs', LF will be replaced by CRLF the next time Git touches it

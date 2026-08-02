@@ -1,0 +1,3 @@
+warn: could not canonicalize path C:\Users\hirom
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.47s
+     Running `target\debug\strategy_game.exe`

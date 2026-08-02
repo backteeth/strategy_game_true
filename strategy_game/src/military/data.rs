@@ -112,6 +112,10 @@ pub struct MilitaryRegistry {
 }
 
 impl MilitaryRegistry {
+    pub fn next_army_id(&self) -> usize {
+        self.next_army_id
+    }
+
     pub fn add_army(&mut self, mut army: ArmyUnit) -> ArmyId {
         army.id = ArmyId(self.next_army_id);
         self.next_army_id += 1;

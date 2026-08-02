@@ -26,10 +26,7 @@ impl Plugin for EconomyPlugin {
             .add_message::<GameNotification>()
             .add_systems(
                 Update,
-                (
-                    handle_daily_construction,
-                    handle_monthly_economy,
-                )
+                (handle_daily_construction, handle_monthly_economy)
                     .chain()
                     .in_set(DailySimulationSet::Economy)
                     .run_if(in_state(GameState::Playing)),
@@ -44,7 +41,7 @@ impl Plugin for EconomyPlugin {
 }
 
 /// 日次建設キュー進捗システム
-fn handle_daily_construction(
+pub fn handle_daily_construction(
     mut day_events: MessageReader<DayChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     mut state_registry: ResMut<StateRegistry>,
@@ -89,7 +86,7 @@ fn handle_daily_construction(
 }
 
 /// 月次全経済計算システム
-fn handle_monthly_economy(
+pub fn handle_monthly_economy(
     mut month_events: MessageReader<MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     mut state_registry: ResMut<StateRegistry>,

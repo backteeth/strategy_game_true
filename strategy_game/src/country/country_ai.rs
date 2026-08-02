@@ -1,3 +1,4 @@
+use crate::app::time::DayChangedMessage;
 use crate::building::construction::{ConstructionQueueItem, ConstructionStatus};
 use crate::building::data::BuildingType;
 use crate::common::{CountryId, StateId};
@@ -14,7 +15,6 @@ use crate::war::data::{WarRegistry, WarStatus};
 use crate::war::frontline::update_all_frontlines;
 use crate::war::justification::WarJustificationRegistry;
 use crate::war::military_ai::{MilitaryAiRegistry, evaluate_army_power};
-use crate::app::time::DayChangedMessage;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

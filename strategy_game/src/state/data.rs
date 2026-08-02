@@ -209,6 +209,16 @@ pub struct StateRegistry {
 }
 
 impl StateRegistry {
+    pub fn sorted_index_entries(&self) -> Vec<(usize, usize)> {
+        let mut entries: Vec<(usize, usize)> = self
+            .index_map
+            .iter()
+            .map(|(&state_id, &index)| (state_id, index))
+            .collect();
+        entries.sort_by_key(|(state_id, _)| *state_id);
+        entries
+    }
+
     /// データを挿入してインデックスを再構築する
     pub fn build(mut states: Vec<StateData>) -> Self {
         for s in states.iter_mut() {

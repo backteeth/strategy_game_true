@@ -1,33 +1,49 @@
+#![allow(clippy::too_many_arguments)]
+
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
+use strategy_game::app::AppPlugin;
 use strategy_game::app::game_state::GameState;
 use strategy_game::app::time::{DailySimulationSet, GameDate, GamePaused};
-use strategy_game::app::AppPlugin;
+use strategy_game::building::BuildingPlugin;
 use strategy_game::building::construction::{ConstructionQueueItem, ConstructionStatus};
 use strategy_game::building::data::BuildingType;
-use strategy_game::building::BuildingPlugin;
-use strategy_game::common::{ArmyId, BattleId, CountryId, FrontlineId, StateId, WarId};
-use strategy_game::country::country_ai::{CountryAiRegistry, CountryAiMode, CountryAiDecisionReason};
-use strategy_game::country::{CountryPlugin, CountryRegistry, PlayerCountry};
-use strategy_game::diplomacy::data::DiplomacyRegistry;
+use strategy_game::common::{ArmyId, BattleId, CountryId, DivisionId, FrontlineId, StateId, WarId};
+use strategy_game::country::country_ai::{
+    CountryAiDecisionReason, CountryAiMode, CountryAiRegistry,
+};
+use strategy_game::country::{
+    CountryPlugin, CountryRegistry, EconomicSystem, GovernmentType, PlayerCountry,
+};
 use strategy_game::diplomacy::DiplomacyPlugin;
+use strategy_game::diplomacy::crisis::{WarGoal, WarGoalType};
+use strategy_game::diplomacy::data::{
+    ActiveDiplomaticActivity, ActiveTreaty, DiplomacyRegistry, DiplomaticActivityType, TreatyType,
+};
 use strategy_game::economy::EconomyPlugin;
-use strategy_game::military::battle::{BattleRegistry, BattleStatus};
-use strategy_game::military::data::{ArmyStatus, DivisionType, DivisionSize, MilitaryRegistry};
+use strategy_game::economy::economic_state::EconomicState;
+use strategy_game::economy::resources::{ResourceType, StateResourceDeposit};
 use strategy_game::military::MilitaryPlugin;
+use strategy_game::military::battle::{BattleRegistry, BattleStatus};
+use strategy_game::military::data::{
+    ArmyStatus, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+};
 use strategy_game::politics::PoliticsPlugin;
-use strategy_game::research::allocation::InProgressTech;
-use strategy_game::research::data::TechnologyField;
+use strategy_game::politics::interest_groups::{InterestGroupState, InterestGroupType};
+use strategy_game::politics::reform::PoliticalReform;
+use strategy_game::politics::values::ValueAxis;
 use strategy_game::research::ResearchPlugin;
-use strategy_game::state::data::StateRegistry;
+use strategy_game::research::allocation::{CountryResearchState, InProgressTech};
+use strategy_game::research::data::TechnologyField;
 use strategy_game::state::StatePlugin;
+use strategy_game::state::data::{OccupationPolicy, StateRegistry};
+use strategy_game::war::WarPlugin;
 use strategy_game::war::capitulation::CapitulationResult;
 use strategy_game::war::data::{WarRegistry, WarStatus};
 use strategy_game::war::frontline::{FrontlineRegistry, FrontlineStance};
 use strategy_game::war::justification::WarJustificationRegistry;
 use strategy_game::war::military_ai::{MilitaryAiDecisionReason, MilitaryAiRegistry};
-use strategy_game::war::WarPlugin;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SetBoundarySnapshot: 全フィールド・全関連情報を保持する境界観測スナップショット
@@ -54,28 +70,82 @@ pub struct InProgressTechSnapshot {
     pub cost: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResearchStateSnapshot {
+    pub completed_technologies: Vec<String>,
+    pub in_progress: Vec<InProgressTechSnapshot>,
+    pub allocation: [f32; 4],
+    pub preferred_fields: Vec<TechnologyField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterestGroupSnapshot {
+    pub group_type: InterestGroupType,
+    pub influence: f32,
+    pub approval: f32,
+    pub support_for_current_reform: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoliticalReformSnapshot {
+    pub axis: ValueAxis,
+    pub start_value: f32,
+    pub target_value: f32,
+    pub progress: f32,
+    pub required_progress: f32,
+    pub monthly_progress: f32,
+    pub support_score: f32,
+    pub opposition_score: f32,
+    pub clergy_resistance: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecruitmentQueueItemSnapshot {
+    pub division_id: DivisionId,
+    pub target_state: StateId,
+    pub days_remaining: u32,
+    pub total_days: u32,
+}
+
 /// 国家詳細スナップショット (CountryData 主要フィールド全対応)
 #[derive(Debug, Clone, PartialEq)]
 pub struct CountryDetailSnapshot {
     pub id: CountryId,
+    pub name: String,
+    pub map_color: [f32; 3],
+    pub capital_state_id: StateId,
     pub treasury: f64,
+    pub government_type: GovernmentType,
+    pub economic_system: EconomicSystem,
+    pub stockpile: Vec<(ResourceType, f64)>,
     pub tax_rate: f32,
-    /// 建設キュー全アイテムの全フィールドを保存 (IDでソート済み)
     pub construction_queue: Vec<ConstructionQueueItemSnapshot>,
-    /// 研究進行中の全フィールドを保存 (TechnologyField as u8でソート済み)
-    pub research_in_progress: Vec<InProgressTechSnapshot>,
-    pub available_manpower: u64,
-    pub mobilized_manpower: u64,
     pub monthly_income: f64,
     pub monthly_expenses: f64,
+    pub monthly_balance: f64,
+    pub science_research_capacity: f64,
+    pub magic_research_capacity: f64,
+    pub economic_state: EconomicState,
+    pub research_state: ResearchStateSnapshot,
+    pub country_values: [f32; 3],
+    pub interest_groups: Vec<InterestGroupSnapshot>,
+    pub current_reform: Option<PoliticalReformSnapshot>,
+    pub available_manpower: u64,
+    pub mobilized_manpower: u64,
+    pub total_military_equipment_required: f64,
+    pub total_military_equipment_available: f64,
+    pub monthly_military_expenses: f64,
+    pub recruitment_queue: Vec<RecruitmentQueueItemSnapshot>,
 }
 
 /// 正当化スナップショット (WarJustification 全フィールド)
 #[derive(Debug, Clone, PartialEq)]
 pub struct JustificationDetailSnapshot {
+    pub id: usize,
     pub initiator: CountryId,
     pub target: CountryId,
     pub target_state: StateId,
+    pub start_date: String,
     pub days_passed: u32,
     pub required_days: u32,
     pub is_ready: bool,
@@ -88,7 +158,43 @@ pub struct CountryAiDetailSnapshot {
     pub mode: CountryAiMode,
     pub decision_reason: CountryAiDecisionReason,
     pub last_daily_evaluation_day: u32,
+    pub last_weekly_evaluation_day: u32,
+    pub last_monthly_evaluation_day: u32,
+    pub cooldown_until_day: u32,
     pub dirty: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveTreatySnapshot {
+    pub treaty_type: TreatyType,
+    pub countries: (CountryId, CountryId),
+    pub signed_date: String,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveDiplomaticActivitySnapshot {
+    pub activity_type: DiplomaticActivityType,
+    pub initiator: CountryId,
+    pub target: CountryId,
+    pub days_remaining: u32,
+    pub daily_opinion_change: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiplomaticRelationSnapshot {
+    pub countries: (CountryId, CountryId),
+    pub opinion: f32,
+    pub tension: f32,
+    pub trust: f32,
+    pub threat: f32,
+    pub at_war: bool,
+    pub has_military_access: bool,
+    pub truce_until: Option<String>,
+    pub treaties: Vec<ActiveTreatySnapshot>,
+    pub cooldowns: Vec<(CountryId, u32)>,
+    pub active_activity: Option<ActiveDiplomaticActivitySnapshot>,
+    pub last_updated_date: String,
 }
 
 /// 軍事AIスナップショット (MilitaryAiState 全フィールド)
@@ -149,8 +255,29 @@ pub struct ArmyDetailSnapshot {
     pub supply_ratio: f32,
     pub movement_progress: f32,
     pub status: ArmyStatus,
+    pub def_id: DivisionId,
     pub attack_power: i32,
     pub defense_power: i32,
+    pub combat_id: Option<BattleId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DivisionDefinitionSnapshot {
+    pub id: DivisionId,
+    pub name: String,
+    pub division_type: DivisionType,
+    pub size: DivisionSize,
+    pub required_manpower: u64,
+    pub required_equipment: f64,
+    pub recruitment_days: u32,
+    pub movement_speed: f32,
+    pub attack: f32,
+    pub defense: f32,
+    pub breakthrough: f32,
+    pub organization: f32,
+    pub morale: f32,
+    pub supply_usage: f32,
+    pub maintenance_cost: f64,
 }
 
 /// 戦闘スナップショット (Battle 全フィールド)
@@ -176,6 +303,7 @@ pub struct WarDetailSnapshot {
     pub name: String,
     pub attackers: Vec<CountryId>,
     pub defenders: Vec<CountryId>,
+    pub war_goals: Vec<WarGoalSnapshot>,
     pub start_date: String,
     pub end_date: Option<String>,
     pub duration_days: u32,
@@ -189,36 +317,89 @@ pub struct WarDetailSnapshot {
     pub applied_terms: Vec<String>,
     pub won_attacker_battles: u32,
     pub won_defender_battles: u32,
+    pub processed_battle_ids: Vec<BattleId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarGoalSnapshot {
+    pub attacker: CountryId,
+    pub defender: CountryId,
+    pub goal_type: WarGoalType,
+    pub target_states: Vec<StateId>,
+    pub base_peace_cost: f32,
+    pub international_concern: f32,
+    pub completion: f32,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateResourceDepositSnapshot {
+    pub resource_type: ResourceType,
+    pub base_output: f64,
+    pub discovered: bool,
+    pub development_level: u32,
 }
 
 /// 州スナップショット (StateData 主要フィールド)
 #[derive(Debug, Clone, PartialEq)]
 pub struct StateDetailSnapshot {
     pub id: StateId,
+    pub name: String,
     pub owner_country_id: CountryId,
     pub population: u64,
-    pub controller_country: Option<CountryId>,
-    pub original_owner: Option<CountryId>,
-    pub occupation_progress: f32,
-    pub is_sea: bool,
-    pub integration: f32,
+    pub workforce_ratio: f32,
+    pub employed_workforce: u64,
+    pub unemployed_workforce: u64,
+    pub education: f32,
+    pub living_standard: f32,
     pub unrest: f32,
+    pub base_logistics_capacity: f32,
+    pub logistics_capacity: f32,
+    pub logistics_usage: f32,
+    pub logistics_ratio: f32,
+    pub buildings: Vec<(BuildingType, u32)>,
+    pub building_operation_ratios: Vec<(BuildingType, f32)>,
+    pub resource_deposits: Vec<StateResourceDepositSnapshot>,
+    pub world_position: [f32; 2],
+    pub size: [f32; 2],
+    pub neighbors: Vec<StateId>,
+    pub integration: f32,
+    pub controller_country: Option<CountryId>,
+    pub occupation_progress: f32,
+    pub original_owner: Option<CountryId>,
+    pub occupation_policy: Option<OccupationPolicy>,
+    pub war_id: Option<WarId>,
+    pub is_sea: bool,
 }
 
 /// ゲーム全体状態スナップショット (Test B 完全不変性検証用)
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameStateSnapshot {
     pub date: GameDate,
+    pub paused: bool,
+    pub player_country: Option<CountryId>,
     pub countries: Vec<CountryDetailSnapshot>,
+    pub diplomatic_relations: Vec<DiplomaticRelationSnapshot>,
     pub justifications: Vec<JustificationDetailSnapshot>,
+    pub justification_next_id: usize,
     pub country_ai: Vec<CountryAiDetailSnapshot>,
+    pub country_ai_registry_dirty: bool,
     pub military_ai: Vec<MilitaryAiDetailSnapshot>,
+    pub military_ai_registry_dirty: bool,
+    pub division_definitions: Vec<DivisionDefinitionSnapshot>,
     pub armies: Vec<ArmyDetailSnapshot>,
+    pub military_next_army_id: usize,
     pub battles: Vec<BattleDetailSnapshot>,
+    pub battle_next_id: usize,
     pub wars: Vec<WarDetailSnapshot>,
+    pub war_next_id: usize,
     pub frontlines: Vec<FrontlineDetailSnapshot>,
+    pub frontline_plans: Vec<FrontlinePlanSnapshot>,
+    pub next_frontline_id: usize,
     pub army_frontline_map: Vec<(ArmyId, FrontlineId)>,
+    pub frontline_generated_movements: Vec<ArmyId>,
     pub states: Vec<StateDetailSnapshot>,
+    pub state_index_entries: Vec<(usize, usize)>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,15 +433,20 @@ pub struct SetBoundarySnapshot {
     pub military_ai_decision_reason: Option<MilitaryAiDecisionReason>,
     pub military_ai_stance: Option<FrontlineStance>,
     pub military_ai_assigned_army_ids: Vec<ArmyId>,
+    pub military_ai_assigned_army_owners: Vec<(ArmyId, Option<CountryId>)>,
     pub frontline_plan_count: usize,
     pub capitulation_result: Option<CapitulationResult>,
     pub military_ai_estimated_own_power: Option<u64>,
     pub military_ai_estimated_enemy_power: Option<u64>,
+    pub player_construction_queue: Vec<ConstructionQueueItemSnapshot>,
+    pub player_research_state: Option<ResearchStateSnapshot>,
+    pub player_armies: Vec<ArmyDetailSnapshot>,
 }
 
 /// Set境界観測の全結果を蓄積するリソース
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SetBoundaryObserver {
+    pub economy_snap: Option<SetBoundarySnapshot>,
     pub diplomacy_snap: Option<SetBoundarySnapshot>,
     pub country_ai_snap: Option<SetBoundarySnapshot>,
     pub war_prep_snap: Option<SetBoundarySnapshot>,
@@ -269,6 +455,229 @@ pub struct SetBoundaryObserver {
     pub military_action_snap: Option<SetBoundarySnapshot>,
     pub war_resolution_snap: Option<SetBoundarySnapshot>,
     pub research_snap: Option<SetBoundarySnapshot>,
+}
+
+fn snapshot_construction_queue(
+    queue: &[ConstructionQueueItem],
+) -> Vec<ConstructionQueueItemSnapshot> {
+    queue
+        .iter()
+        .map(|item| ConstructionQueueItemSnapshot {
+            state_id: item.state_id,
+            building_type: item.building_type,
+            target_level: item.target_level,
+            progress: item.progress,
+            required_progress: item.required_progress,
+            paid_cost: item.paid_cost,
+            status: item.status,
+        })
+        .collect()
+}
+
+fn snapshot_research_state(state: &CountryResearchState) -> ResearchStateSnapshot {
+    let mut completed_technologies: Vec<String> =
+        state.completed_technologies.iter().cloned().collect();
+    completed_technologies.sort();
+
+    let mut in_progress: Vec<InProgressTechSnapshot> = state
+        .in_progress
+        .iter()
+        .map(|(&field, tech)| InProgressTechSnapshot {
+            field,
+            tech_id: tech.tech_id.clone(),
+            progress: tech.progress,
+            cost: tech.cost,
+        })
+        .collect();
+    in_progress.sort_by_key(|tech| tech.field as u8);
+
+    ResearchStateSnapshot {
+        completed_technologies,
+        in_progress,
+        allocation: [
+            state.allocation.science,
+            state.allocation.magic,
+            state.allocation.military,
+            state.allocation.fusion,
+        ],
+        preferred_fields: state.preferred_fields.clone(),
+    }
+}
+
+fn snapshot_reform(reform: &PoliticalReform) -> PoliticalReformSnapshot {
+    PoliticalReformSnapshot {
+        axis: reform.axis,
+        start_value: reform.start_value,
+        target_value: reform.target_value,
+        progress: reform.progress,
+        required_progress: reform.required_progress,
+        monthly_progress: reform.monthly_progress,
+        support_score: reform.support_score,
+        opposition_score: reform.opposition_score,
+        clergy_resistance: reform.clergy_resistance,
+    }
+}
+
+fn snapshot_interest_group(
+    group_type: InterestGroupType,
+    state: &InterestGroupState,
+) -> InterestGroupSnapshot {
+    InterestGroupSnapshot {
+        group_type,
+        influence: state.influence,
+        approval: state.approval,
+        support_for_current_reform: state.support_for_current_reform,
+    }
+}
+
+fn snapshot_army(army: &strategy_game::military::data::ArmyUnit) -> ArmyDetailSnapshot {
+    ArmyDetailSnapshot {
+        id: army.id,
+        owner: army.owner,
+        division_type: army.division_type,
+        size: army.size,
+        current_state: army.current_state,
+        destination: army.destination,
+        current_path: army.current_path.clone(),
+        target_state: army.target_state,
+        manpower: army.manpower,
+        max_manpower: army.max_manpower,
+        equipment: army.equipment,
+        max_equipment: army.max_equipment,
+        organization: army.organization,
+        max_organization: army.max_organization,
+        morale: army.morale,
+        max_morale: army.max_morale,
+        experience: army.experience,
+        supply_ratio: army.supply_ratio,
+        movement_progress: army.movement_progress,
+        status: army.status,
+        def_id: army.def_id,
+        attack_power: army.attack_power,
+        defense_power: army.defense_power,
+        combat_id: army.combat_id,
+    }
+}
+
+fn snapshot_country(country: &strategy_game::country::CountryData) -> CountryDetailSnapshot {
+    let mut stockpile: Vec<(ResourceType, f64)> = country
+        .stockpile
+        .amounts
+        .iter()
+        .map(|(&resource, &amount)| (resource, amount))
+        .collect();
+    stockpile.sort_by_key(|(resource, _)| *resource as u8);
+
+    let mut interest_groups: Vec<InterestGroupSnapshot> = country
+        .politics
+        .interest_groups
+        .iter()
+        .map(|(&group_type, state)| snapshot_interest_group(group_type, state))
+        .collect();
+    interest_groups.sort_by_key(|group| group.group_type as u8);
+
+    CountryDetailSnapshot {
+        id: country.id,
+        name: country.name.clone(),
+        map_color: country.map_color,
+        capital_state_id: country.capital_state_id,
+        treasury: country.treasury,
+        government_type: country.government_type,
+        economic_system: country.economic_system,
+        stockpile,
+        tax_rate: country.tax_rate,
+        construction_queue: snapshot_construction_queue(&country.construction_queue),
+        monthly_income: country.monthly_income,
+        monthly_expenses: country.monthly_expenses,
+        monthly_balance: country.monthly_balance,
+        science_research_capacity: country.science_research_capacity,
+        magic_research_capacity: country.magic_research_capacity,
+        economic_state: country.economic_state,
+        research_state: snapshot_research_state(&country.research_state),
+        country_values: [
+            country.politics.values.science_magic,
+            country.politics.values.individual_state,
+            country.politics.values.secular_religious,
+        ],
+        interest_groups,
+        current_reform: country.current_reform.as_ref().map(snapshot_reform),
+        available_manpower: country.available_manpower,
+        mobilized_manpower: country.mobilized_manpower,
+        total_military_equipment_required: country.total_military_equipment_required,
+        total_military_equipment_available: country.total_military_equipment_available,
+        monthly_military_expenses: country.monthly_military_expenses,
+        recruitment_queue: country
+            .recruitment_queue
+            .iter()
+            .map(|item| RecruitmentQueueItemSnapshot {
+                division_id: item.division_id,
+                target_state: item.target_state,
+                days_remaining: item.days_remaining,
+                total_days: item.total_days,
+            })
+            .collect(),
+    }
+}
+
+fn snapshot_division(definition: &DivisionDefinition) -> DivisionDefinitionSnapshot {
+    DivisionDefinitionSnapshot {
+        id: definition.id,
+        name: definition.name.clone(),
+        division_type: definition.division_type,
+        size: definition.size,
+        required_manpower: definition.required_manpower,
+        required_equipment: definition.required_equipment,
+        recruitment_days: definition.recruitment_days,
+        movement_speed: definition.movement_speed,
+        attack: definition.attack,
+        defense: definition.defense,
+        breakthrough: definition.breakthrough,
+        organization: definition.organization,
+        morale: definition.morale,
+        supply_usage: definition.supply_usage,
+        maintenance_cost: definition.maintenance_cost,
+    }
+}
+
+fn snapshot_war_goal(goal: &WarGoal) -> WarGoalSnapshot {
+    WarGoalSnapshot {
+        attacker: goal.attacker,
+        defender: goal.defender,
+        goal_type: goal.goal_type,
+        target_states: goal.target_states.clone(),
+        base_peace_cost: goal.base_peace_cost,
+        international_concern: goal.international_concern,
+        completion: goal.completion,
+        is_primary: goal.is_primary,
+    }
+}
+
+fn snapshot_treaty(treaty: &ActiveTreaty) -> ActiveTreatySnapshot {
+    ActiveTreatySnapshot {
+        treaty_type: treaty.treaty_type,
+        countries: treaty.countries,
+        signed_date: treaty.signed_date.clone(),
+        is_active: treaty.is_active,
+    }
+}
+
+fn snapshot_activity(activity: &ActiveDiplomaticActivity) -> ActiveDiplomaticActivitySnapshot {
+    ActiveDiplomaticActivitySnapshot {
+        activity_type: activity.activity_type,
+        initiator: activity.initiator,
+        target: activity.target,
+        days_remaining: activity.days_remaining,
+        daily_opinion_change: activity.daily_opinion_change,
+    }
+}
+
+fn snapshot_resource_deposit(deposit: &StateResourceDeposit) -> StateResourceDepositSnapshot {
+    StateResourceDepositSnapshot {
+        resource_type: deposit.resource_type,
+        base_output: deposit.base_output,
+        discovered: deposit.discovered,
+        development_level: deposit.development_level,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,6 +693,7 @@ pub struct SetBoundaryObserver {
 /// - war.status == Active → evaluate_war_capitulation() をリアルタイム評価
 /// - それ以外 → None
 fn capture_snapshot(
+    country_reg: &CountryRegistry,
     war_reg: &WarRegistry,
     frontline_reg: &FrontlineRegistry,
     military_reg: &MilitaryRegistry,
@@ -304,7 +714,7 @@ fn capture_snapshot(
         .filter(|s| s.controller() != s.owner_country_id)
         .count();
 
-    let first_war = war_reg.wars.values().next();
+    let first_war = war_reg.wars.values().min_by_key(|war| war.id.0);
 
     let cap_res = first_war.map(|w| {
         if w.status == WarStatus::Active {
@@ -325,7 +735,8 @@ fn capture_snapshot(
     let first_just = just_reg
         .justifications
         .values()
-        .find(|j| j.initiator == CountryId(1) && j.target == CountryId(0));
+        .filter(|j| j.initiator == CountryId(1) && j.target == CountryId(0))
+        .min_by_key(|j| j.id);
 
     let state0 = state_reg.get(StateId(0));
 
@@ -342,15 +753,42 @@ fn capture_snapshot(
         .values()
         .filter(|p| p.commanding_country_id == CountryId(1))
         .collect();
-    c1_plans.sort_by_key(|p| p.frontline_id.0);
+    c1_plans.sort_by_key(|p| (p.frontline_id.0, p.commanding_country_id.0));
     let first_c1_plan = c1_plans.first();
 
     let total_plans_count = frontline_reg.plans.len();
 
-    let mut assigned_ids: Vec<ArmyId> = first_c1_plan
-        .map(|p| p.assigned_army_ids.clone())
-        .unwrap_or_default();
+    let mut assigned_ids: Vec<ArmyId> = c1_plans
+        .iter()
+        .flat_map(|plan| plan.assigned_army_ids.iter().copied())
+        .collect();
     assigned_ids.sort_by_key(|id| id.0);
+    assigned_ids.dedup();
+
+    let assigned_army_owners: Vec<(ArmyId, Option<CountryId>)> = assigned_ids
+        .iter()
+        .map(|&army_id| {
+            (
+                army_id,
+                military_reg.armies.get(&army_id).map(|army| army.owner),
+            )
+        })
+        .collect();
+
+    let player_construction_queue = country_reg
+        .get(CountryId(0))
+        .map(|country| snapshot_construction_queue(&country.construction_queue))
+        .unwrap_or_default();
+    let player_research_state = country_reg
+        .get(CountryId(0))
+        .map(|country| snapshot_research_state(&country.research_state));
+    let mut player_armies: Vec<ArmyDetailSnapshot> = military_reg
+        .armies
+        .values()
+        .filter(|army| army.owner == CountryId(0))
+        .map(snapshot_army)
+        .collect();
+    player_armies.sort_by_key(|army| army.id.0);
 
     SetBoundarySnapshot {
         war_record_count: war_reg.wars.len(),
@@ -373,9 +811,13 @@ fn capture_snapshot(
         military_ai_decision_reason: ai_state_c1.map(|s| s.last_decision_reason),
         military_ai_stance: first_c1_plan.map(|p| p.stance),
         military_ai_assigned_army_ids: assigned_ids,
+        military_ai_assigned_army_owners: assigned_army_owners,
         frontline_plan_count: total_plans_count,
         military_ai_estimated_own_power: ai_state_c1.map(|s| s.estimated_own_power),
         military_ai_estimated_enemy_power: ai_state_c1.map(|s| s.estimated_enemy_power),
+        player_construction_queue,
+        player_research_state,
+        player_armies,
     }
 }
 
@@ -383,7 +825,29 @@ fn capture_snapshot(
 // Observer システム関数: 各 Set の直後に登録し SetBoundarySnapshot を保存する
 // ─────────────────────────────────────────────────────────────────────────────
 
+pub fn observe_economy_boundary(
+    country_reg: Res<CountryRegistry>,
+    war_reg: Res<WarRegistry>,
+    frontline_reg: Res<FrontlineRegistry>,
+    military_reg: Res<MilitaryRegistry>,
+    state_reg: Res<StateRegistry>,
+    just_reg: Res<WarJustificationRegistry>,
+    military_ai_reg: Res<MilitaryAiRegistry>,
+    mut observer: ResMut<SetBoundaryObserver>,
+) {
+    observer.economy_snap = Some(capture_snapshot(
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
+    ));
+}
+
 pub fn observe_research_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -393,11 +857,18 @@ pub fn observe_research_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.research_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_diplomacy_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -407,11 +878,18 @@ pub fn observe_diplomacy_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.diplomacy_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_country_ai_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -421,11 +899,18 @@ pub fn observe_country_ai_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.country_ai_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_war_prep_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -435,11 +920,18 @@ pub fn observe_war_prep_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.war_prep_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_military_ai_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -449,11 +941,18 @@ pub fn observe_military_ai_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.military_ai_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_frontline_orders_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -463,11 +962,18 @@ pub fn observe_frontline_orders_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.frontline_orders_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_military_action_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -477,11 +983,18 @@ pub fn observe_military_action_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.military_action_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
 pub fn observe_war_resolution_boundary(
+    country_reg: Res<CountryRegistry>,
     war_reg: Res<WarRegistry>,
     frontline_reg: Res<FrontlineRegistry>,
     military_reg: Res<MilitaryRegistry>,
@@ -491,7 +1004,13 @@ pub fn observe_war_resolution_boundary(
     mut observer: ResMut<SetBoundaryObserver>,
 ) {
     observer.war_resolution_snap = Some(capture_snapshot(
-        &war_reg, &frontline_reg, &military_reg, &state_reg, &just_reg, &military_ai_reg,
+        &country_reg,
+        &war_reg,
+        &frontline_reg,
+        &military_reg,
+        &state_reg,
+        &just_reg,
+        &military_ai_reg,
     ));
 }
 
@@ -501,84 +1020,79 @@ pub fn observe_war_resolution_boundary(
 
 /// Test B 用の全リソース全フィールドスナップショット生成関数
 ///
-/// - CountryRegistry: 建設キュー全6フィールド (state_id/building_type/target_level/progress/
-///                    required_progress/paid_cost/status)・研究全フィールド (field/tech_id/progress/cost)
+/// - CountryRegistry: CountryData、建設キュー全7フィールド、研究状態全フィールドを保存
+/// - DiplomacyRegistry: 全関係・条約・cooldown・活動を保存
 /// - FrontlineRegistry: frontlines 全フィールド・plans 全フィールド・army_frontline_map を保存
-/// - WarRegistry: War 全関連フィールドを保存
+/// - WarRegistry: War、war_goals、processed_battle_idsを含む全フィールドを保存
+/// - MilitaryRegistry: definitions と ArmyUnit の全フィールドを保存
 /// - BattleRegistry: Battle 全フィールドを保存
-/// - StateRegistry: StateData 主要フィールドを保存
+/// - StateRegistry: StateData 全フィールドを保存
 /// - 全 HashMap は対応キーで昇順ソートして決定論的比較を保証
 pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
     let date = app.world().resource::<GameDate>().clone();
+    let paused = app.world().resource::<GamePaused>().0;
+    let player_country = app.world().resource::<PlayerCountry>().0;
 
     let mut countries: Vec<CountryDetailSnapshot> = app
         .world()
         .resource::<CountryRegistry>()
         .countries
         .iter()
-        .map(|c| {
-            let mut queue: Vec<ConstructionQueueItemSnapshot> = c
-                .construction_queue
-                .iter()
-                .map(|item| ConstructionQueueItemSnapshot {
-                    state_id: item.state_id,
-                    building_type: item.building_type,
-                    target_level: item.target_level,
-                    progress: item.progress,
-                    required_progress: item.required_progress,
-                    paid_cost: item.paid_cost,
-                    status: item.status,
-                })
-                .collect();
-            queue.sort_by_key(|item| (item.state_id.0, item.building_type as u8));
-
-            let mut research: Vec<InProgressTechSnapshot> = c
-                .research_state
-                .in_progress
-                .iter()
-                .map(|(&field, tech)| InProgressTechSnapshot {
-                    field,
-                    tech_id: tech.tech_id.clone(),
-                    progress: tech.progress,
-                    cost: tech.cost,
-                })
-                .collect();
-            research.sort_by_key(|r| r.field as u8);
-
-            CountryDetailSnapshot {
-                id: c.id,
-                treasury: c.treasury,
-                tax_rate: c.tax_rate,
-                construction_queue: queue,
-                research_in_progress: research,
-                available_manpower: c.available_manpower,
-                mobilized_manpower: c.mobilized_manpower,
-                monthly_income: c.monthly_income,
-                monthly_expenses: c.monthly_expenses,
-            }
-        })
+        .map(snapshot_country)
         .collect();
     countries.sort_by_key(|c| c.id.0);
 
-    let mut justifications: Vec<JustificationDetailSnapshot> = app
+    let mut diplomatic_relations: Vec<DiplomaticRelationSnapshot> = app
         .world()
-        .resource::<WarJustificationRegistry>()
+        .resource::<DiplomacyRegistry>()
+        .relations
+        .iter()
+        .map(|(&key, relation)| {
+            let mut cooldowns: Vec<(CountryId, u32)> = relation
+                .cooldowns
+                .iter()
+                .map(|(&country_id, &days)| (country_id, days))
+                .collect();
+            cooldowns.sort_by_key(|(country_id, _)| country_id.0);
+            DiplomaticRelationSnapshot {
+                countries: (key.0, key.1),
+                opinion: relation.opinion,
+                tension: relation.tension,
+                trust: relation.trust,
+                threat: relation.threat,
+                at_war: relation.at_war,
+                has_military_access: relation.has_military_access,
+                truce_until: relation.truce_until.clone(),
+                treaties: relation.treaties.iter().map(snapshot_treaty).collect(),
+                cooldowns,
+                active_activity: relation.active_activity.as_ref().map(snapshot_activity),
+                last_updated_date: relation.last_updated_date.clone(),
+            }
+        })
+        .collect();
+    diplomatic_relations.sort_by_key(|relation| (relation.countries.0.0, relation.countries.1.0));
+
+    let justification_registry = app.world().resource::<WarJustificationRegistry>();
+    let justification_next_id = justification_registry.next_id();
+    let mut justifications: Vec<JustificationDetailSnapshot> = justification_registry
         .justifications
         .values()
         .map(|j| JustificationDetailSnapshot {
+            id: j.id,
             initiator: j.initiator,
             target: j.target,
             target_state: j.target_state,
+            start_date: j.start_date.clone(),
             days_passed: j.days_passed,
             required_days: j.required_days,
             is_ready: j.is_ready,
         })
         .collect();
-    justifications.sort_by_key(|j| j.initiator.0);
+    justifications.sort_by_key(|j| j.id);
 
-    let mut country_ai: Vec<CountryAiDetailSnapshot> = app
-        .world()
-        .resource::<CountryAiRegistry>()
+    let country_ai_registry = app.world().resource::<CountryAiRegistry>();
+    let country_ai_registry_dirty = country_ai_registry.dirty;
+    let mut country_ai: Vec<CountryAiDetailSnapshot> = country_ai_registry
         .ai_states
         .values()
         .map(|s| CountryAiDetailSnapshot {
@@ -586,14 +1100,17 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
             mode: s.mode,
             decision_reason: s.decision_reason,
             last_daily_evaluation_day: s.last_daily_evaluation_day,
+            last_weekly_evaluation_day: s.last_weekly_evaluation_day,
+            last_monthly_evaluation_day: s.last_monthly_evaluation_day,
+            cooldown_until_day: s.cooldown_until_day,
             dirty: s.dirty,
         })
         .collect();
     country_ai.sort_by_key(|s| s.country_id.0);
 
-    let mut military_ai: Vec<MilitaryAiDetailSnapshot> = app
-        .world()
-        .resource::<MilitaryAiRegistry>()
+    let military_ai_registry = app.world().resource::<MilitaryAiRegistry>();
+    let military_ai_registry_dirty = military_ai_registry.dirty;
+    let mut military_ai: Vec<MilitaryAiDetailSnapshot> = military_ai_registry
         .ai_states
         .values()
         .map(|s| MilitaryAiDetailSnapshot {
@@ -607,41 +1124,25 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         .collect();
     military_ai.sort_by_key(|s| s.country_id.0);
 
-    let mut armies: Vec<ArmyDetailSnapshot> = app
-        .world()
-        .resource::<MilitaryRegistry>()
+    let military_registry = app.world().resource::<MilitaryRegistry>();
+    let military_next_army_id = military_registry.next_army_id();
+    let mut division_definitions: Vec<DivisionDefinitionSnapshot> = military_registry
+        .definitions
+        .values()
+        .map(snapshot_division)
+        .collect();
+    division_definitions.sort_by_key(|definition| definition.id.0);
+
+    let mut armies: Vec<ArmyDetailSnapshot> = military_registry
         .armies
         .values()
-        .map(|a| ArmyDetailSnapshot {
-            id: a.id,
-            owner: a.owner,
-            division_type: a.division_type,
-            size: a.size,
-            current_state: a.current_state,
-            destination: a.destination,
-            current_path: a.current_path.clone(),
-            target_state: a.target_state,
-            manpower: a.manpower,
-            max_manpower: a.max_manpower,
-            equipment: a.equipment,
-            max_equipment: a.max_equipment,
-            organization: a.organization,
-            max_organization: a.max_organization,
-            morale: a.morale,
-            max_morale: a.max_morale,
-            experience: a.experience,
-            supply_ratio: a.supply_ratio,
-            movement_progress: a.movement_progress,
-            status: a.status,
-            attack_power: a.attack_power,
-            defense_power: a.defense_power,
-        })
+        .map(snapshot_army)
         .collect();
     armies.sort_by_key(|a| a.id.0);
 
-    let mut battles: Vec<BattleDetailSnapshot> = app
-        .world()
-        .resource::<BattleRegistry>()
+    let battle_registry = app.world().resource::<BattleRegistry>();
+    let battle_next_id = battle_registry.next_id();
+    let mut battles: Vec<BattleDetailSnapshot> = battle_registry
         .battles
         .values()
         .map(|b| BattleDetailSnapshot {
@@ -660,9 +1161,9 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         .collect();
     battles.sort_by_key(|b| b.id.0);
 
-    let mut wars: Vec<WarDetailSnapshot> = app
-        .world()
-        .resource::<WarRegistry>()
+    let war_registry = app.world().resource::<WarRegistry>();
+    let war_next_id = war_registry.next_id();
+    let mut wars: Vec<WarDetailSnapshot> = war_registry
         .wars
         .values()
         .map(|w| {
@@ -672,11 +1173,15 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
             defenders.sort_by_key(|c| c.0);
             let mut occupied_states: Vec<StateId> = w.occupied_states.iter().copied().collect();
             occupied_states.sort_by_key(|s| s.0);
+            let mut processed_battle_ids: Vec<BattleId> =
+                w.processed_battle_ids.iter().copied().collect();
+            processed_battle_ids.sort_by_key(|battle_id| battle_id.0);
             WarDetailSnapshot {
                 id: w.id,
                 name: w.name.clone(),
                 attackers,
                 defenders,
+                war_goals: w.war_goals.iter().map(snapshot_war_goal).collect(),
                 start_date: w.start_date.clone(),
                 end_date: w.end_date.clone(),
                 duration_days: w.duration_days,
@@ -690,6 +1195,7 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
                 applied_terms: w.applied_terms.clone(),
                 won_attacker_battles: w.won_attacker_battles,
                 won_defender_battles: w.won_defender_battles,
+                processed_battle_ids,
             }
         })
         .collect();
@@ -739,6 +1245,24 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         .collect();
     frontlines.sort_by_key(|f| f.frontline_id.0);
 
+    let mut frontline_plans: Vec<FrontlinePlanSnapshot> = frontline_reg
+        .plans
+        .values()
+        .map(|plan| {
+            let mut assigned_army_ids = plan.assigned_army_ids.clone();
+            assigned_army_ids.sort_by_key(|army_id| army_id.0);
+            FrontlinePlanSnapshot {
+                frontline_id: plan.frontline_id,
+                commanding_country_id: plan.commanding_country_id,
+                stance: plan.stance,
+                objective_region_id: plan.objective_region_id,
+                assigned_army_ids,
+            }
+        })
+        .collect();
+    frontline_plans.sort_by_key(|plan| (plan.frontline_id.0, plan.commanding_country_id.0));
+    let next_frontline_id = frontline_reg.next_frontline_id;
+
     let mut army_frontline_map: Vec<(ArmyId, FrontlineId)> = frontline_reg
         .army_frontline_map
         .iter()
@@ -746,37 +1270,95 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         .collect();
     army_frontline_map.sort_by_key(|(aid, _)| aid.0);
 
-    let mut states: Vec<StateDetailSnapshot> = app
-        .world()
-        .resource::<StateRegistry>()
+    let mut frontline_generated_movements: Vec<ArmyId> = frontline_reg
+        .frontline_generated_movements
+        .iter()
+        .copied()
+        .collect();
+    frontline_generated_movements.sort_by_key(|army_id| army_id.0);
+
+    let state_registry = app.world().resource::<StateRegistry>();
+    let state_index_entries = state_registry.sorted_index_entries();
+    let mut states: Vec<StateDetailSnapshot> = state_registry
         .states
         .iter()
-        .map(|s| StateDetailSnapshot {
-            id: s.id,
-            owner_country_id: s.owner_country_id,
-            population: s.population,
-            controller_country: s.controller_country,
-            original_owner: s.original_owner,
-            occupation_progress: s.occupation_progress,
-            is_sea: s.is_sea,
-            integration: s.integration,
-            unrest: s.unrest,
+        .map(|state| {
+            let mut buildings: Vec<(BuildingType, u32)> = state
+                .buildings
+                .iter()
+                .map(|(&building_type, &level)| (building_type, level))
+                .collect();
+            buildings.sort_by_key(|(building_type, _)| *building_type as u8);
+            let mut building_operation_ratios: Vec<(BuildingType, f32)> = state
+                .building_operation_ratios
+                .iter()
+                .map(|(&building_type, &ratio)| (building_type, ratio))
+                .collect();
+            building_operation_ratios.sort_by_key(|(building_type, _)| *building_type as u8);
+
+            StateDetailSnapshot {
+                id: state.id,
+                name: state.name.clone(),
+                owner_country_id: state.owner_country_id,
+                population: state.population,
+                workforce_ratio: state.workforce_ratio,
+                employed_workforce: state.employed_workforce,
+                unemployed_workforce: state.unemployed_workforce,
+                education: state.education,
+                living_standard: state.living_standard,
+                unrest: state.unrest,
+                base_logistics_capacity: state.base_logistics_capacity,
+                logistics_capacity: state.logistics_capacity,
+                logistics_usage: state.logistics_usage,
+                logistics_ratio: state.logistics_ratio,
+                buildings,
+                building_operation_ratios,
+                resource_deposits: state
+                    .resource_deposits
+                    .iter()
+                    .map(snapshot_resource_deposit)
+                    .collect(),
+                world_position: state.world_position,
+                size: state.size,
+                neighbors: state.neighbors.clone(),
+                integration: state.integration,
+                controller_country: state.controller_country,
+                occupation_progress: state.occupation_progress,
+                original_owner: state.original_owner,
+                occupation_policy: state.occupation_policy,
+                war_id: state.war_id,
+                is_sea: state.is_sea,
+            }
         })
         .collect();
     states.sort_by_key(|s| s.id.0);
 
     GameStateSnapshot {
         date,
+        paused,
+        player_country,
         countries,
+        diplomatic_relations,
         justifications,
+        justification_next_id,
         country_ai,
+        country_ai_registry_dirty,
         military_ai,
+        military_ai_registry_dirty,
+        division_definitions,
         armies,
+        military_next_army_id,
         battles,
+        battle_next_id,
         wars,
+        war_next_id,
         frontlines,
+        frontline_plans,
+        next_frontline_id,
         army_frontline_map,
+        frontline_generated_movements,
         states,
+        state_index_entries,
     }
 }
 
@@ -806,8 +1388,12 @@ fn setup_test_app() -> App {
     app.add_systems(
         Update,
         (
+            observe_economy_boundary
+                .in_set(DailySimulationSet::Economy)
+                .after(strategy_game::economy::handle_monthly_economy),
             observe_research_boundary
-                .in_set(DailySimulationSet::Research),
+                .in_set(DailySimulationSet::Research)
+                .after(strategy_game::research::handle_npc_auto_research),
             observe_diplomacy_boundary
                 .in_set(DailySimulationSet::Diplomacy)
                 .after(strategy_game::diplomacy::update::handle_daily_diplomacy),
@@ -845,8 +1431,19 @@ fn setup_test_app() -> App {
 /// テスト用ヘルパー: add_accumulator で日付を 1 日進め App::update() を実行する
 fn advance_day_by_system(app: &mut App) {
     app.world_mut().resource_mut::<GamePaused>().0 = false;
-    app.world_mut().resource_mut::<GameDate>().add_accumulator(1.0);
+    app.world_mut()
+        .resource_mut::<GameDate>()
+        .add_accumulator(1.0);
     app.update();
+}
+
+fn boundary_army(snapshot: &SetBoundarySnapshot, army_id: ArmyId) -> ArmyDetailSnapshot {
+    snapshot
+        .player_armies
+        .iter()
+        .find(|army| army.id == army_id)
+        .unwrap_or_else(|| panic!("境界SnapshotにArmyId({:?})が存在すること", army_id))
+        .clone()
 }
 
 /// 正当化をセットアップし、日次処理直前に「残り1日・未完了」状態にするヘルパー
@@ -943,10 +1540,22 @@ fn test_b_game_paused_no_state_change() {
         snapshot_before.date, snapshot_after.date,
         "1. GameDate (year/month/day) が完全不変であること"
     );
+    assert_eq!(
+        snapshot_before.paused, snapshot_after.paused,
+        "GamePaused が不変"
+    );
+    assert_eq!(
+        snapshot_before.player_country, snapshot_after.player_country,
+        "PlayerCountry が不変"
+    );
     // (2) CountryRegistry: treasury/tax_rate/建設キュー全6フィールド/研究全フィールド/manpower/income
     assert_eq!(
         snapshot_before.countries, snapshot_after.countries,
-        "2. CountryRegistry (treasury/tax_rate/建設キュー全6フィールド/研究全フィールド/manpower/income) が完全不変であること"
+        "2. CountryRegistry (CountryData全フィールド、建設キュー全7フィールド、研究状態全フィールドを含む) が完全不変であること"
+    );
+    assert_eq!(
+        snapshot_before.diplomatic_relations, snapshot_after.diplomatic_relations,
+        "2b. DiplomacyRegistry の全関係・条約・cooldown・活動が完全不変であること"
     );
     // (3) WarJustificationRegistry
     assert_eq!(
@@ -958,10 +1567,22 @@ fn test_b_game_paused_no_state_change() {
         snapshot_before.country_ai, snapshot_after.country_ai,
         "4. CountryAiRegistry が完全不変であること"
     );
+    assert_eq!(
+        snapshot_before.country_ai_registry_dirty, snapshot_after.country_ai_registry_dirty,
+        "4b. CountryAiRegistry.dirty が完全不変であること"
+    );
     // (5) MilitaryAiRegistry
     assert_eq!(
         snapshot_before.military_ai, snapshot_after.military_ai,
         "5. MilitaryAiRegistry (last_evaluated_day/decision_reason/power/dirty) が完全不変であること"
+    );
+    assert_eq!(
+        snapshot_before.military_ai_registry_dirty, snapshot_after.military_ai_registry_dirty,
+        "5b. MilitaryAiRegistry.dirty が完全不変であること"
+    );
+    assert_eq!(
+        snapshot_before.division_definitions, snapshot_after.division_definitions,
+        "5c. MilitaryRegistry.definitions の全フィールドが完全不変であること"
     );
     // (6) MilitaryRegistry: 全ArmyUnit 全フィールド
     assert_eq!(
@@ -983,15 +1604,48 @@ fn test_b_game_paused_no_state_change() {
         snapshot_before.frontlines, snapshot_after.frontlines,
         "9. FrontlineRegistry (frontlines/plans全フィールド) が完全不変であること"
     );
+    assert_eq!(
+        snapshot_before.frontline_plans, snapshot_after.frontline_plans,
+        "9a. FrontlineRegistry.plans の全要素・全フィールドが完全不変であること"
+    );
+    assert_eq!(
+        snapshot_before.next_frontline_id, snapshot_after.next_frontline_id,
+        "9aa. FrontlineRegistry.next_frontline_id が完全不変であること"
+    );
     // (9b) FrontlineRegistry.army_frontline_map
     assert_eq!(
         snapshot_before.army_frontline_map, snapshot_after.army_frontline_map,
         "9b. FrontlineRegistry.army_frontline_map が完全不変であること"
     );
+    assert_eq!(
+        snapshot_before.frontline_generated_movements, snapshot_after.frontline_generated_movements,
+        "9c. FrontlineRegistry.frontline_generated_movements が完全不変であること"
+    );
     // (10) StateRegistry
     assert_eq!(
         snapshot_before.states, snapshot_after.states,
-        "10. StateRegistry (id/owner/population/controller/original_owner/occupation/is_sea/integration/unrest) が完全不変であること"
+        "10. StateRegistry.states の全要素・全フィールドが完全不変であること"
+    );
+    assert_eq!(
+        (
+            snapshot_before.justification_next_id,
+            snapshot_before.military_next_army_id,
+            snapshot_before.battle_next_id,
+            snapshot_before.war_next_id,
+            &snapshot_before.state_index_entries,
+        ),
+        (
+            snapshot_after.justification_next_id,
+            snapshot_after.military_next_army_id,
+            snapshot_after.battle_next_id,
+            snapshot_after.war_next_id,
+            &snapshot_after.state_index_entries,
+        ),
+        "10b. Registry内部の次IDカウンタとState索引キャッシュが完全不変であること"
+    );
+    assert_eq!(
+        snapshot_before, snapshot_after,
+        "11. GameStateSnapshot 全体が完全不変であること"
     );
 }
 
@@ -1131,31 +1785,14 @@ fn test_d_next_day_military_action() {
     // 日N: 宣戦布告・前線生成
     advance_day_by_system(&mut app);
 
-    // 日N+1 アップデート前の事前状態を保存 (MilitaryAi の実行前)
-    let eval_day_before: u32 = app
-        .world()
-        .resource::<MilitaryAiRegistry>()
-        .ai_states
-        .get(&CountryId(1))
-        .map(|s| s.last_evaluated_day)
-        .unwrap_or(0);
-
-    let mut assigned_ids_before: Vec<ArmyId> = app
-        .world()
-        .resource::<FrontlineRegistry>()
-        .plans
-        .values()
-        .filter(|p| p.commanding_country_id == CountryId(1))
-        .min_by_key(|p| p.frontline_id.0)
-        .map(|p| p.assigned_army_ids.clone())
-        .unwrap_or_default();
-    assigned_ids_before.sort_by_key(|id| id.0);
-
     // 日N+1: アップデート実行
     advance_day_by_system(&mut app);
 
     // MilitaryAi 境界の Observer データを取得 (後続の FrontlineOrders・MilitaryAction とは別)
     let observer = app.world().resource::<SetBoundaryObserver>().clone();
+    let before_military_ai_snap = observer
+        .war_prep_snap
+        .expect("WarPreparation Observer がMilitaryAi直前に実行されていること");
     let mil_ai_snap = observer
         .military_ai_snap
         .expect("MilitaryAi Observer が実行されていること");
@@ -1167,6 +1804,16 @@ fn test_d_next_day_military_action() {
         .expect("MilitaryAction Observer が実行されていること");
 
     // ─── MilitaryAi 境界での事前・事後アサート ───────────────────────────────
+
+    let eval_day_before = before_military_ai_snap
+        .military_ai_last_eval_day
+        .expect("MilitaryAi直前: CountryId(1)のAI状態が存在すること");
+    let dirty_before = before_military_ai_snap.military_ai_dirty;
+    let decision_reason_before = before_military_ai_snap.military_ai_decision_reason;
+    let stance_before = before_military_ai_snap.military_ai_stance;
+    let assigned_ids_before = before_military_ai_snap
+        .military_ai_assigned_army_ids
+        .clone();
 
     // (1) last_evaluated_day > eval_day_before (MilitaryAi 境界での厳密な実行証明)
     let last_eval = mil_ai_snap.military_ai_last_eval_day.unwrap_or(0);
@@ -1183,6 +1830,10 @@ fn test_d_next_day_military_action() {
         Some(false),
         "MilitaryAi直後はdirty == false であること"
     );
+    assert_ne!(
+        dirty_before, mil_ai_snap.military_ai_dirty,
+        "MilitaryAi境界でdirtyが実行前から更新されること"
+    );
 
     // (3) decision_reason == SufficientAdvantage (130%以上優勢で攻勢選択)
     assert_eq!(
@@ -1190,12 +1841,20 @@ fn test_d_next_day_military_action() {
         Some(MilitaryAiDecisionReason::SufficientAdvantage),
         "MilitaryAi直後のdecision_reason == SufficientAdvantage であること"
     );
+    assert_ne!(
+        decision_reason_before, mil_ai_snap.military_ai_decision_reason,
+        "MilitaryAi境界でdecision_reasonが実行前から更新されること"
+    );
 
     // (4) stance == Offensive (攻勢姿勢が確定)
     assert_eq!(
         mil_ai_snap.military_ai_stance,
         Some(FrontlineStance::Offensive),
         "MilitaryAi直後のstance == Offensive であること"
+    );
+    assert_ne!(
+        stance_before, mil_ai_snap.military_ai_stance,
+        "MilitaryAi境界でstanceが実行前から更新されること"
     );
 
     // (5) assigned_army_ids が実行前から更新されていること
@@ -1210,17 +1869,22 @@ fn test_d_next_day_military_action() {
         assigned_ids_after, assigned_ids_before
     );
 
-    // (6) 割り当てられた全IDが CountryId(1) 所有の実在部隊であること
-    let mil_reg = app.world().resource::<MilitaryRegistry>();
-    for &army_id in &assigned_ids_after {
-        let army = mil_reg
-            .armies
-            .get(&army_id)
-            .unwrap_or_else(|| panic!("割り当てられたArmyId({:?})が実在すること", army_id));
+    // (6) MilitaryAi Observer が同じ境界で記録した所有国により、全IDの実在・所有を検証
+    let assigned_owners = &mil_ai_snap.military_ai_assigned_army_owners;
+    assert_eq!(
+        assigned_owners.len(),
+        assigned_ids_after.len(),
+        "MilitaryAi直後: 全assigned_army_idsに所有国観測値があること"
+    );
+    for (&army_id, &(observed_id, owner)) in assigned_ids_after.iter().zip(assigned_owners) {
         assert_eq!(
-            army.owner,
-            CountryId(1),
-            "割り当てられたArmyId({:?})がCountryId(1)所有の実在部隊であること",
+            observed_id, army_id,
+            "MilitaryAi直後: assigned_army_idsと所有国観測のIDが一致すること"
+        );
+        assert_eq!(
+            owner,
+            Some(CountryId(1)),
+            "MilitaryAi直後: ArmyId({:?})がCountryId(1)所有の実在部隊であること",
             army_id
         );
     }
@@ -1285,14 +1949,14 @@ fn test_d_next_day_military_action() {
 // プレイヤーには明示的に以下を設定する:
 //   - 空でない建設キュー (Farm Lv.1 建設中, state_id=0)
 //   - 空でない研究対象 (Science 分野の仮技術, progress=10.0, cost=100.0)
-//   - 手動移動経路 ([StateId(0), StateId(1)], destination=StateId(1))
+//   - 手動移動経路 ([StateId(1)], destination=StateId(1), current_state=StateId(0))
 //
 // 境界ごとに以下を個別に分離・検証する:
+//   - Economy直後: 建設progressが0.0から1.0へ正規進捗したこと
 //   - Research直後: 占領数・戦争数が 0 であること
-//   - MilitaryAi直後: プレイヤーの建設キュー構造・研究・移動命令が変化していないこと
-//     (progressはEconomy Setが正当に更新するため構造的フィールドのみ比較)
+//   - MilitaryAi直後: Economy直後の建設キュー全内容とResearch直後の研究全内容が不変
 //   - FrontlineOrders直後: AI命令でプレイヤー陣営が上書きされていないこと
-//   - MilitaryAction直後: 手動移動命令に沿った移動だけが発生したこと
+//   - MilitaryAction直後: StateId(1)への経路、位置、進捗0.2を具体値で検証
 //
 // `movement_progress >= before` は禁止。MilitaryAction直後の具体的な進捗または位置を検証する。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1311,8 +1975,10 @@ fn test_e_player_protection_and_ai_evaluation() {
             .map(|a| a.id)
             .expect("CountryId(0) 所有の陸軍が存在すること");
         if let Some(army) = military_registry.armies.get_mut(&army_id) {
+            army.current_state = StateId(0);
             army.destination = Some(StateId(1));
-            army.current_path = vec![StateId(0), StateId(1)];
+            army.current_path = vec![StateId(1)];
+            army.target_state = None;
             army.movement_progress = 0.0;
             army.status = ArmyStatus::Moving;
         }
@@ -1326,15 +1992,17 @@ fn test_e_player_protection_and_ai_evaluation() {
             .get_mut(CountryId(0))
             .expect("CountryId(0)が存在すること");
         player_country.construction_queue.clear();
-        player_country.construction_queue.push(ConstructionQueueItem {
-            state_id: StateId(0),
-            building_type: BuildingType::Farm,
-            target_level: 1,
-            progress: 0.0,
-            required_progress: 100.0,
-            paid_cost: 50.0,
-            status: ConstructionStatus::InProgress,
-        });
+        player_country
+            .construction_queue
+            .push(ConstructionQueueItem {
+                state_id: StateId(0),
+                building_type: BuildingType::Farm,
+                target_level: 1,
+                progress: 0.0,
+                required_progress: 100.0,
+                paid_cost: 50.0,
+                status: ConstructionStatus::InProgress,
+            });
     }
 
     // プレイヤー国に研究対象 (Science 分野, tech_id="agri_basic", progress=10.0, cost=100.0) をセット
@@ -1354,70 +2022,6 @@ fn test_e_player_protection_and_ai_evaluation() {
         );
     }
 
-    // ─── 事前スナップショット取得 ────────────────────────────────────────────
-
-    let initial_path = {
-        let mil_reg = app.world().resource::<MilitaryRegistry>();
-        mil_reg
-            .armies
-            .get(&player_army_id)
-            .unwrap()
-            .current_path
-            .clone()
-    };
-    let initial_destination = {
-        let mil_reg = app.world().resource::<MilitaryRegistry>();
-        mil_reg.armies.get(&player_army_id).unwrap().destination
-    };
-    // 建設キューの構造的フィールドを事前保存 (progressは比較しない)
-    let initial_construction_structural: Vec<(StateId, BuildingType, u32, f64, f64, ConstructionStatus)> = {
-        let country_reg = app.world().resource::<CountryRegistry>();
-        country_reg
-            .get(CountryId(0))
-            .unwrap()
-            .construction_queue
-            .iter()
-            .map(|item| (
-                item.state_id,
-                item.building_type,
-                item.target_level,
-                item.required_progress,
-                item.paid_cost,
-                item.status,
-            ))
-            .collect()
-    };
-    let initial_construction_len = initial_construction_structural.len();
-    // 研究の全フィールドを事前保存 (Research は月次システムなので日次では変化しない)
-    let initial_research_in_progress: Vec<InProgressTechSnapshot> = {
-        let country_reg = app.world().resource::<CountryRegistry>();
-        country_reg
-            .get(CountryId(0))
-            .unwrap()
-            .research_state
-            .in_progress
-            .iter()
-            .map(|(&field, tech)| InProgressTechSnapshot {
-                field,
-                tech_id: tech.tech_id.clone(),
-                progress: tech.progress,
-                cost: tech.cost,
-            })
-            .collect()
-    };
-    let initial_current_state = {
-        let mil_reg = app.world().resource::<MilitaryRegistry>();
-        mil_reg.armies.get(&player_army_id).unwrap().current_state
-    };
-    let initial_movement_progress = {
-        let mil_reg = app.world().resource::<MilitaryRegistry>();
-        mil_reg
-            .armies
-            .get(&player_army_id)
-            .unwrap()
-            .movement_progress
-    };
-
     let eval_day_before: u32 = app
         .world()
         .resource::<MilitaryAiRegistry>()
@@ -1431,21 +2035,38 @@ fn test_e_player_protection_and_ai_evaluation() {
 
     // ─── 各境界のObserver データ取得 ─────────────────────────────────────────
     let observer = app.world().resource::<SetBoundaryObserver>().clone();
+    let economy_snap = observer
+        .economy_snap
+        .expect("Economy Observer が実行されていること");
     let research_snap = observer
         .research_snap
         .expect("Research Observer が実行されていること");
     let mil_ai_snap = observer
         .military_ai_snap
         .expect("MilitaryAi Observer が実行されていること");
-    let _orders_snap = observer
+    let orders_snap = observer
         .frontline_orders_snap
         .expect("FrontlineOrders Observer が実行されていること");
-    let _action_snap = observer
+    let action_snap = observer
         .military_action_snap
         .expect("MilitaryAction Observer が実行されていること");
 
+    // ─── Economy 直後の検証 ──────────────────────────────────────────────────
+    let expected_construction_after_economy = vec![ConstructionQueueItemSnapshot {
+        state_id: StateId(0),
+        building_type: BuildingType::Farm,
+        target_level: 1,
+        progress: 1.0,
+        required_progress: 100.0,
+        paid_cost: 50.0,
+        status: ConstructionStatus::InProgress,
+    }];
+    assert_eq!(
+        economy_snap.player_construction_queue, expected_construction_after_economy,
+        "Economy直後: 建設キュー全要素・全7フィールドが期待値であること"
+    );
+
     // ─── Research 直後の検証 ─────────────────────────────────────────────────
-    // Research セット完了後の状態確認 (戦争なし・占領なし)
     assert_eq!(
         research_snap.occupied_states_count, 0,
         "Research直後は占領数が 0 であること"
@@ -1454,68 +2075,31 @@ fn test_e_player_protection_and_ai_evaluation() {
         research_snap.active_war_count, 0,
         "Research直後は戦争が 0 件であること"
     );
+    let expected_research_state = ResearchStateSnapshot {
+        completed_technologies: Vec::new(),
+        in_progress: vec![InProgressTechSnapshot {
+            field: TechnologyField::Science,
+            tech_id: "agri_basic".to_string(),
+            progress: 10.0,
+            cost: 100.0,
+        }],
+        allocation: [0.4, 0.4, 0.2, 0.0],
+        preferred_fields: Vec::new(),
+    };
+    assert_eq!(
+        research_snap.player_research_state,
+        Some(expected_research_state.clone()),
+        "Research直後: 研究対象・進捗・コストを含む研究状態全フィールドが期待値であること"
+    );
 
     // ─── MilitaryAi 直後の検証 ───────────────────────────────────────────────
-    // 注意: Economy システムは MilitaryAi より前 (Set 順序: Economy → ... → MilitaryAi) に実行される。
-    // そのため建設キューの progress フィールドは Economy により正当に更新される (0.0 → 1.0 等)。
-    // MilitaryAi が保護すべき構造的フィールド (state_id/building_type/target_level/
-    // required_progress/paid_cost/status) のみを比較することで
-    // 「MilitaryAi がキューを削除・追加・書き換えていない」ことを証明する。
-    let mil_ai_construction_structural_post: Vec<(StateId, BuildingType, u32, f64, f64, ConstructionStatus)> = {
-        let country_reg = app.world().resource::<CountryRegistry>();
-        country_reg
-            .get(CountryId(0))
-            .unwrap()
-            .construction_queue
-            .iter()
-            .map(|item| (
-                item.state_id,
-                item.building_type,
-                item.target_level,
-                item.required_progress,
-                item.paid_cost,
-                item.status,
-            ))
-            .collect()
-    };
     assert_eq!(
-        mil_ai_construction_structural_post, initial_construction_structural,
-        "MilitaryAi直後: 建設キューの構造的フィールド (state_id/building_type/target_level/required_progress/paid_cost/status) が保護されていること \
-        (progressはEconomy Setが正当に更新するため比較対象外)"
+        mil_ai_snap.player_construction_queue, economy_snap.player_construction_queue,
+        "Economy直後とMilitaryAi直後: 建設キューのprogressを含む全要素・全フィールドが完全不変であること"
     );
     assert_eq!(
-        app.world()
-            .resource::<CountryRegistry>()
-            .get(CountryId(0))
-            .unwrap()
-            .construction_queue
-            .len(),
-        initial_construction_len,
-        "MilitaryAi直後: 建設キューの件数が不変であること"
-    );
-
-    let mil_ai_research: Vec<InProgressTechSnapshot> = {
-        let country_reg = app.world().resource::<CountryRegistry>();
-        country_reg
-            .get(CountryId(0))
-            .unwrap()
-            .research_state
-            .in_progress
-            .iter()
-            .map(|(&field, tech)| InProgressTechSnapshot {
-                field,
-                tech_id: tech.tech_id.clone(),
-                progress: tech.progress,
-                cost: tech.cost,
-            })
-            .collect()
-    };
-    // Research は月次システムのため、日次 update では progress が変化しない
-    // → MilitaryAi 直後に初期値と完全一致することで「MilitaryAi が研究を書き換えていない」を証明する
-    assert_eq!(
-        mil_ai_research, initial_research_in_progress,
-        "MilitaryAi直後: 研究対象・tech_id・progress・costが保護されていること \
-        (Researchは月次システムのため日次updateでprogressは不変)"
+        mil_ai_snap.player_research_state, research_snap.player_research_state,
+        "Research直後とMilitaryAi直後: 研究対象・進捗・コストを含む全研究状態が完全不変であること"
     );
 
     // AI国家のMilitaryAi評価が実行されたこと (eval_day_before より増加)
@@ -1537,6 +2121,31 @@ fn test_e_player_protection_and_ai_evaluation() {
         Some(MilitaryAiDecisionReason::NoActiveWar),
         "Test Eでは戦争なし: decision_reason == NoActiveWar であること"
     );
+    assert_eq!(
+        mil_ai_snap.military_ai_stance, None,
+        "Test Eでは戦争なし: stanceが存在しないこと"
+    );
+    assert!(
+        mil_ai_snap.military_ai_assigned_army_ids.is_empty(),
+        "Test Eでは戦争なし: assigned_army_idsが空であること"
+    );
+    assert!(
+        mil_ai_snap.military_ai_assigned_army_owners.is_empty(),
+        "Test Eでは戦争なし: assigned_army_idsの所有国観測も空であること"
+    );
+
+    let research_player_army = boundary_army(&research_snap, player_army_id);
+    let military_ai_player_army = boundary_army(&mil_ai_snap, player_army_id);
+    assert_eq!(
+        military_ai_player_army, research_player_army,
+        "Research直後とMilitaryAi直後: プレイヤー手動移動命令を含むArmy全フィールドが完全不変であること"
+    );
+    assert_eq!(military_ai_player_army.current_state, StateId(0));
+    assert_eq!(military_ai_player_army.destination, Some(StateId(1)));
+    assert_eq!(military_ai_player_army.current_path, vec![StateId(1)]);
+    assert_eq!(military_ai_player_army.target_state, None);
+    assert_eq!(military_ai_player_army.movement_progress, 0.0);
+    assert_eq!(military_ai_player_army.status, ArmyStatus::Moving);
 
     // プレイヤーは MilitaryAiRegistry に登録されていないこと
     let mil_ai_reg = app.world().resource::<MilitaryAiRegistry>();
@@ -1546,77 +2155,37 @@ fn test_e_player_protection_and_ai_evaluation() {
     );
 
     // ─── FrontlineOrders 直後の検証 ──────────────────────────────────────────
-    // AI命令でプレイヤー陣営が上書きされていないこと
-    let frontline_reg = app.world().resource::<FrontlineRegistry>();
-    for plan in frontline_reg.plans.values() {
-        assert!(
-            !plan.assigned_army_ids.contains(&player_army_id),
-            "FrontlineOrders直後: plan.assigned_army_ids にプレイヤー部隊が存在しないこと"
-        );
-    }
-    assert!(
-        !frontline_reg.army_frontline_map.contains_key(&player_army_id),
-        "FrontlineOrders直後: army_frontline_map にプレイヤー部隊が存在しないこと"
-    );
-
-    // FrontlineOrders 直後のプレイヤー陸軍の destination が保護されていること
-    let orders_player_army = app
-        .world()
-        .resource::<MilitaryRegistry>()
-        .armies
-        .get(&player_army_id)
-        .unwrap()
-        .clone();
+    let orders_player_army = boundary_army(&orders_snap, player_army_id);
     assert_eq!(
-        orders_player_army.destination, initial_destination,
-        "FrontlineOrders直後: destinationが保護されていること"
+        orders_player_army, military_ai_player_army,
+        "MilitaryAi直後とFrontlineOrders直後: プレイヤー手動移動命令を含むArmy全フィールドが完全不変であること"
     );
+    assert_eq!(orders_player_army.current_state, StateId(0));
+    assert_eq!(orders_player_army.destination, Some(StateId(1)));
+    assert_eq!(orders_player_army.current_path, vec![StateId(1)]);
+    assert_eq!(orders_player_army.target_state, None);
+    assert_eq!(orders_player_army.movement_progress, 0.0);
+    assert_eq!(orders_player_army.status, ArmyStatus::Moving);
 
     // ─── MilitaryAction 直後の検証 ──────────────────────────────────────────
-    // 手動移動命令に沿った正規の移動だけが発生したこと
-    // (movement_progress >= before は禁止。進捗または位置を具体的に検証する)
-    let action_player_army = app
-        .world()
-        .resource::<MilitaryRegistry>()
-        .armies
-        .get(&player_army_id)
-        .unwrap()
-        .clone();
-
-    // destination は保護されていること
+    let action_player_army = boundary_army(&action_snap, player_army_id);
     assert_eq!(
-        action_player_army.destination, initial_destination,
-        "MilitaryAction直後: destinationが保護されていること"
+        action_player_army.current_state,
+        StateId(0),
+        "MilitaryAction直後: 1日ではStateId(1)へ未到着で位置はStateId(0)"
     );
-
-    let path_after = action_player_army.current_path.clone();
-    let progress_after = action_player_army.movement_progress;
-
-    // 正規の移動検証: パスが消化されるか進捗が増加するかのどちらか
-    let path_progressed = path_after.len() < initial_path.len();
-    let progress_increased = progress_after > initial_movement_progress;
-    let arrived = action_player_army.current_state != initial_current_state;
-
-    assert!(
-        path_progressed || progress_increased || arrived,
-        "MilitaryAction直後: 手動移動命令に沿った移動が発生していること \
-        (path_len: {} -> {}, progress: {} -> {}, state: {:?} -> {:?})",
-        initial_path.len(),
-        path_after.len(),
-        initial_movement_progress,
-        progress_after,
-        initial_current_state,
-        action_player_army.current_state
+    assert_eq!(action_player_army.destination, Some(StateId(1)));
+    assert_eq!(
+        action_player_army.current_path,
+        Vec::<StateId>::new(),
+        "MilitaryAction直後: StateId(1)がcurrent_pathからtarget_stateへ移されたこと"
     );
-
-    // AIによる上書きが発生していないこと: パスが手動経路から逸脱していないことを確認
-    if !path_after.is_empty() && path_after.len() <= initial_path.len() {
-        let expected_suffix = &initial_path[initial_path.len() - path_after.len()..];
-        assert_eq!(
-            path_after, expected_suffix,
-            "MilitaryAction直後: current_pathがAIに書き換えられず手動経路のサフィックスとなること"
-        );
-    }
+    assert_eq!(action_player_army.target_state, Some(StateId(1)));
+    assert_eq!(
+        action_player_army.movement_progress, 0.2,
+        "MilitaryAction直後: base_days=5、step_cost=1、speed=1、supply=1なので進捗は正確に0.2"
+    );
+    assert_eq!(action_player_army.status, ArmyStatus::Moving);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1748,11 +2317,28 @@ fn test_f_same_day_battle_result_reflection() {
 
     // (2) end_reason == Some("Defender Capitulation") (本番データ直接検証)
     let war_reg = app.world().resource::<WarRegistry>();
-    let ended_war = war_reg.wars.values().next().expect("終戦レコードが存在すること");
+    let ended_war = war_reg
+        .wars
+        .values()
+        .next()
+        .expect("終戦レコードが存在すること");
+    let mut ended_attackers: Vec<CountryId> = ended_war.attackers.iter().copied().collect();
+    ended_attackers.sort_by_key(|country_id| country_id.0);
+    let mut ended_defenders: Vec<CountryId> = ended_war.defenders.iter().copied().collect();
+    ended_defenders.sort_by_key(|country_id| country_id.0);
+    assert_eq!(ended_attackers, vec![CountryId(1)]);
+    assert_eq!(ended_defenders, vec![CountryId(0)]);
+    assert_eq!(ended_war.status, WarStatus::AttackerVictory);
+    assert_eq!(ended_war.winner, Some(CountryId(1)));
     assert_eq!(
         ended_war.end_reason.as_deref(),
         Some("Defender Capitulation"),
         "WarResolution直後: end_reason == \"Defender Capitulation\" であること"
+    );
+    assert_eq!(
+        ended_war.end_date.as_deref(),
+        Some("1800/01/03"),
+        "WarResolution直後: end_dateが同日の日付で保存されること"
     );
 
     // (3) war_status == Some(AttackerVictory)
@@ -1775,6 +2361,16 @@ fn test_f_same_day_battle_result_reflection() {
         Some(CountryId(1)),
         "WarResolution直後: StateId(0) の所有権が CountryId(1) (Britannia) へ割譲されること"
     );
+    let transferred_state = app
+        .world()
+        .resource::<StateRegistry>()
+        .get(StateId(0))
+        .expect("StateId(0)が存在すること");
+    assert_eq!(transferred_state.owner_country_id, CountryId(1));
+    assert_eq!(transferred_state.controller_country, Some(CountryId(1)));
+    assert_eq!(transferred_state.original_owner, None);
+    assert_eq!(transferred_state.occupation_progress, 0.0);
+    assert_eq!(transferred_state.war_id, None);
 
     // (6) active_war_count == 0
     assert_eq!(
@@ -1818,6 +2414,14 @@ fn test_f_same_day_battle_result_reflection() {
     assert!(
         frontline_reg.plans.is_empty(),
         "WarResolution直後: frontline_reg.plans.is_empty() であること"
+    );
+    assert!(
+        frontline_reg.army_frontline_map.is_empty(),
+        "WarResolution直後: frontline_reg.army_frontline_map.is_empty() であること"
+    );
+    assert!(
+        frontline_reg.frontline_generated_movements.is_empty(),
+        "WarResolution直後: frontline_generated_movements.is_empty() であること"
     );
     // army_frontline_map に関係部隊が残っていないこと
     let war_related_army_ids: Vec<ArmyId> = app

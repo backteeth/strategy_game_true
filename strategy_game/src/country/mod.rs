@@ -1,3 +1,5 @@
+use crate::app::game_state::GameState;
+use crate::app::time::DailySimulationSet;
 use crate::building::construction::ConstructionQueueItem;
 use crate::common::{CountryId, StateId};
 use crate::economy::economic_state::EconomicState;
@@ -5,8 +7,6 @@ use crate::economy::resources::CountryStockpile;
 use crate::politics::interest_groups::CountryPoliticsData;
 use crate::politics::reform::PoliticalReform;
 use crate::research::allocation::CountryResearchState;
-use crate::app::game_state::GameState;
-use crate::app::time::DailySimulationSet;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 

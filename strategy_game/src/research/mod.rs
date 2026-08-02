@@ -30,7 +30,7 @@ impl Plugin for ResearchPlugin {
 }
 
 #[allow(clippy::too_many_arguments, clippy::collapsible_if)]
-fn handle_monthly_research(
+pub fn handle_monthly_research(
     mut month_events: MessageReader<MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     mut state_registry: ResMut<StateRegistry>,
@@ -141,7 +141,7 @@ fn handle_monthly_research(
     }
 }
 
-fn handle_npc_auto_research(
+pub fn handle_npc_auto_research(
     mut month_events: MessageReader<MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     tech_registry: Res<TechnologyRegistry>,

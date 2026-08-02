@@ -29,6 +29,10 @@ pub struct WarJustificationRegistry {
 }
 
 impl WarJustificationRegistry {
+    pub fn next_id(&self) -> usize {
+        self.next_id
+    }
+
     /// 正当化が開始可能かを検証し、エラーメッセージを返す
     pub fn can_start_justification(
         &self,

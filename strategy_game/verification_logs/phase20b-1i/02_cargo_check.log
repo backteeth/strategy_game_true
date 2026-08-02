@@ -1,0 +1,3 @@
+warn: could not canonicalize path C:\Users\hirom
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 1.80s

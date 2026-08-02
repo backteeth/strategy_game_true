@@ -1,9 +1,9 @@
+use crate::app::time::DayChangedMessage;
 use crate::common::{ArmyId, CountryId, FrontlineId, StateId, WarId};
 use crate::military::data::{ArmyStatus, MilitaryRegistry};
 use crate::military::pathfinding::find_path;
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarRegistry, WarStatus};
-use crate::app::time::DayChangedMessage;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
