@@ -4,7 +4,7 @@ pub mod production;
 pub mod resources;
 
 use crate::app::game_state::GameState;
-use crate::app::time::{DayChangedMessage, MonthChangedMessage};
+use crate::app::time::{DailySimulationSet, DayChangedMessage, MonthChangedMessage};
 use crate::building::construction::ConstructionStatus;
 use crate::building::data::BuildingRegistry;
 use crate::country::{CountryRegistry, PlayerCountry};
@@ -29,8 +29,15 @@ impl Plugin for EconomyPlugin {
                 (
                     handle_daily_construction,
                     handle_monthly_economy,
-                    handle_notifications,
                 )
+                    .chain()
+                    .in_set(DailySimulationSet::Economy)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                handle_notifications
+                    .in_set(DailySimulationSet::UiUpdate)
                     .run_if(in_state(GameState::Playing)),
             );
     }

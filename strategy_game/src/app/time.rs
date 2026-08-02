@@ -1,6 +1,21 @@
 use crate::app::game_state::GameState;
 use bevy::prelude::*;
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub enum DailySimulationSet {
+    TimeUpdate,
+    Economy,
+    Research,
+    Diplomacy,
+    CountryAi,
+    WarPreparation,
+    MilitaryAi,
+    FrontlineOrders,
+    MilitaryAction,
+    WarResolution,
+    UiUpdate,
+}
+
 // ─── 定数 ──────────────────────────────────────────────────────────────────
 
 /// 各月の日数
@@ -60,6 +75,11 @@ impl GameDate {
             day,
             accumulator: 0.0,
         }
+    }
+
+    /// 経過日数アキュムレーターに値を加算する（テスト・調整用）
+    pub fn add_accumulator(&mut self, amount: f64) {
+        self.accumulator += amount;
     }
 
     /// 日付を文字列として取得する ("YYYY/MM/DD")
@@ -161,11 +181,34 @@ impl Plugin for GameTimePlugin {
             .insert_resource(GameSpeed::default())
             .insert_resource(GamePaused(true))
             .add_message::<DayChangedMessage>()
-            .add_message::<MonthChangedMessage>()
-            .add_systems(
-                Update,
-                (advance_game_date, toggle_pause_key).run_if(in_state(GameState::Playing)),
-            );
+            .add_message::<MonthChangedMessage>();
+
+        // SystemSet の実行順序を保証
+        app.configure_sets(
+            Update,
+            (
+                DailySimulationSet::TimeUpdate,
+                DailySimulationSet::Economy,
+                DailySimulationSet::Research,
+                DailySimulationSet::Diplomacy,
+                DailySimulationSet::CountryAi,
+                DailySimulationSet::WarPreparation,
+                DailySimulationSet::MilitaryAi,
+                DailySimulationSet::FrontlineOrders,
+                DailySimulationSet::MilitaryAction,
+                DailySimulationSet::WarResolution,
+                DailySimulationSet::UiUpdate,
+            )
+                .chain()
+                .run_if(in_state(GameState::Playing)),
+        );
+
+        app.add_systems(
+            Update,
+            (toggle_pause_key, advance_game_date)
+                .chain()
+                .in_set(DailySimulationSet::TimeUpdate),
+        );
     }
 }
 

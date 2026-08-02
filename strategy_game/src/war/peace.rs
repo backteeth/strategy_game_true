@@ -208,7 +208,7 @@ pub fn relocate_hostile_territory_armies(
     }
 }
 
-/// 講和条約の終結処理を実行（二重適用防止、領土移転、戦闘中止、占領リセット、休戦作成）
+/// 講和条約の終結処理を実行（二重適用防止、領土移転、戦闘中止、占領リセット、休戦作成、前線削除）
 #[allow(clippy::too_many_arguments)]
 pub fn execute_peace_settlement(
     war_id: WarId,
@@ -220,6 +220,7 @@ pub fn execute_peace_settlement(
     military_registry: &mut MilitaryRegistry,
     battle_registry: &mut BattleRegistry,
     diplomacy_registry: &mut DiplomacyRegistry,
+    frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
 ) -> Result<(), &'static str> {
     let war = war_registry.wars.get_mut(&war_id).ok_or("War not found")?;
 
@@ -283,15 +284,20 @@ pub fn execute_peace_settlement(
         }
     }
 
-    // 4. 敵国領残存陸軍の帰還
+    // 4. 対応する前線・作戦命令・部隊割り当ての安全な削除
+    if let Some(fl) = frontline_registry.get_frontline_for_war(war_id).cloned() {
+        frontline_registry.remove_frontline(fl.frontline_id, military_registry);
+    }
+
+    // 5. 敵国領残存陸軍の帰還
     relocate_hostile_territory_armies(state_registry, military_registry);
 
-    // 5. 5年間 (1825日) の休戦の作成
+    // 6. 5年間 (1825日) の休戦の作成
     let curr_date = GameDate::from_string(current_date_str).unwrap_or_default();
     let truce_end_date = curr_date.add_days(1825).display();
     diplomacy_registry.set_truce(attacker, defender, truce_end_date.clone());
 
-    // 6. 戦争データの終了情報更新
+    // 7. 戦争データの終了情報更新
     let war = war_registry.wars.get_mut(&war_id).unwrap();
     war.status = final_status;
     war.winner = winner;

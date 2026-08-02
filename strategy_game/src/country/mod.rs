@@ -5,6 +5,8 @@ use crate::economy::resources::CountryStockpile;
 use crate::politics::interest_groups::CountryPoliticsData;
 use crate::politics::reform::PoliticalReform;
 use crate::research::allocation::CountryResearchState;
+use crate::app::game_state::GameState;
+use crate::app::time::DailySimulationSet;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -203,6 +205,10 @@ impl CountryRegistry {
     }
 }
 
+pub mod country_ai;
+
+use country_ai::{CountryAiRegistry, handle_daily_country_ai};
+
 // ─── プレイヤー国家 ──────────────────────────────────────────────────────────
 
 /// プレイヤーが選択した国家ID（Playing 中は必ず Some）
@@ -217,6 +223,13 @@ pub struct CountryPlugin;
 impl Plugin for CountryPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CountryRegistry::default())
-            .insert_resource(PlayerCountry::default());
+            .insert_resource(PlayerCountry::default())
+            .insert_resource(CountryAiRegistry::default())
+            .add_systems(
+                Update,
+                handle_daily_country_ai
+                    .in_set(DailySimulationSet::CountryAi)
+                    .run_if(in_state(GameState::Playing)),
+            );
     }
 }

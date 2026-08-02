@@ -150,6 +150,7 @@ fn handle_peace_action_buttons(
     mut military_registry: ResMut<MilitaryRegistry>,
     mut battle_registry: ResMut<BattleRegistry>,
     mut diplomacy_registry: ResMut<DiplomacyRegistry>,
+    mut frontline_registry: ResMut<crate::war::frontline::FrontlineRegistry>,
     mut notif_writer: MessageWriter<GameNotification>,
 ) {
     let player_id = match player_country.0 {
@@ -202,6 +203,7 @@ fn handle_peace_action_buttons(
                     &mut military_registry,
                     &mut battle_registry,
                     &mut diplomacy_registry,
+                    &mut frontline_registry,
                 );
 
                 if result.is_ok() {

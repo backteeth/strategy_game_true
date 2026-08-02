@@ -37,3 +37,7 @@ pub struct TreatyId(pub usize);
 /// 陸上戦闘を一意に識別するID型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BattleId(pub usize);
+
+/// 前線を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FrontlineId(pub usize);

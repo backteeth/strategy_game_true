@@ -7,6 +7,7 @@ use bevy::prelude::*;
 pub const ACTIVITY_DURATION_DAYS: u32 = 30;
 pub const COOLDOWN_DURATION_DAYS: u32 = 30;
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_daily_diplomacy(
     mut day_events: MessageReader<DayChangedMessage>,
     mut diplomacy_registry: ResMut<DiplomacyRegistry>,
@@ -14,8 +15,13 @@ pub fn handle_daily_diplomacy(
     mut notif_writer: MessageWriter<GameNotification>,
     country_registry: Res<CountryRegistry>,
     date: Res<GameDate>,
+    mut justification_registry: ResMut<crate::war::justification::WarJustificationRegistry>,
+    state_registry: Res<crate::state::data::StateRegistry>,
 ) {
     for _event in day_events.read() {
+        // 0. 正当化の日次進行 (CountryAiより前に完了判定を行うため)
+        justification_registry.process_daily_justifications(&state_registry);
+
         for (&key, relation) in diplomacy_registry.relations.iter_mut() {
             // 1. クールダウン減算
             let mut expired_cooldowns = Vec::new();

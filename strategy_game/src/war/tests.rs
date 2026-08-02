@@ -142,6 +142,7 @@ fn test_peace_treaty_basic() {
     let mut mil_reg = MilitaryRegistry::default();
     let mut battle_reg = crate::military::battle::BattleRegistry::default();
     let mut dip_reg = DiplomacyRegistry::default();
+    let mut frontline_reg = crate::war::frontline::FrontlineRegistry::default();
 
     let result = crate::war::peace::execute_peace_settlement(
         crate::common::WarId(1),
@@ -153,6 +154,7 @@ fn test_peace_treaty_basic() {
         &mut mil_reg,
         &mut battle_reg,
         &mut dip_reg,
+        &mut frontline_reg,
     );
 
     assert!(result.is_ok());

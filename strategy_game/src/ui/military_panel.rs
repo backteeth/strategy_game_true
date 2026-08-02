@@ -155,7 +155,12 @@ fn update_military_panel_ui(
     state_registry: Res<StateRegistry>,
     war_registry: Res<WarRegistry>,
     battle_registry: Res<BattleRegistry>,
+    mut frontline_registry: ResMut<crate::war::frontline::FrontlineRegistry>,
+    ai_registry: Res<crate::war::military_ai::MilitaryAiRegistry>,
+    country_ai_registry: Res<crate::country::country_ai::CountryAiRegistry>,
+    frontline_settings: Res<crate::map::frontline_render::FrontlineRenderSettings>,
     selected_army: Res<SelectedArmy>,
+    keys: Res<ButtonInput<KeyCode>>,
     mut text_q: Query<&mut Text, With<MilitaryPanelText>>,
     _commands: Commands,
     _panel_q: Query<Entity, With<MilitaryPanelRoot>>,
@@ -170,6 +175,55 @@ fn update_military_panel_ui(
     let Some(country) = country_registry.get(player_cid) else {
         return;
     };
+
+    // プレイヤー参加中のアクティブ戦争と前線を取得
+    let active_war = war_registry.get_active_war_for_country(player_cid);
+    let frontline =
+        active_war.and_then(|w| frontline_registry.get_frontline_for_war(w.id).cloned());
+
+    // --- キー操作による前線コントロール ---
+    if let Some(ref fl) = frontline {
+        // [Key1] 選択中陸軍を前線へ割り当て
+        if keys.just_pressed(KeyCode::Digit1)
+            && let Some(army_id) = selected_army.army_id
+        {
+            let _ = frontline_registry.assign_army(
+                army_id,
+                fl.frontline_id,
+                player_cid,
+                &military_registry,
+                &war_registry,
+            );
+        }
+        // [Key2] 選択中陸軍を前線から解除
+        if keys.just_pressed(KeyCode::Digit2)
+            && let Some(army_id) = selected_army.army_id
+        {
+            frontline_registry.unassign_army(army_id);
+        }
+        // [Key3] 全部隊の割り当て解除
+        if keys.just_pressed(KeyCode::Digit3) {
+            frontline_registry.unassign_all_armies_for_plan(fl.frontline_id, player_cid);
+        }
+        // [Key7] 停止 (Stopped)
+        if keys.just_pressed(KeyCode::Digit7)
+            && let Some(plan) = frontline_registry.get_plan_mut(fl.frontline_id, player_cid)
+        {
+            plan.stance = crate::war::frontline::FrontlineStance::Stopped;
+        }
+        // [Key8] 防御 (Defend)
+        if keys.just_pressed(KeyCode::Digit8)
+            && let Some(plan) = frontline_registry.get_plan_mut(fl.frontline_id, player_cid)
+        {
+            plan.stance = crate::war::frontline::FrontlineStance::Defend;
+        }
+        // [Key9] 攻勢 (Offensive)
+        if keys.just_pressed(KeyCode::Digit9)
+            && let Some(plan) = frontline_registry.get_plan_mut(fl.frontline_id, player_cid)
+        {
+            plan.stance = crate::war::frontline::FrontlineStance::Offensive;
+        }
+    }
 
     // 自国の軍隊を集計
     let my_armies: Vec<_> = military_registry
@@ -189,10 +243,144 @@ fn update_military_panel_ui(
         country.monthly_military_expenses
     ));
     lines.push(format!(
-        "募集キュー: {} 件",
-        country.recruitment_queue.len()
+        "前線表示 [F]: {}",
+        if frontline_settings.visible {
+            "ON"
+        } else {
+            "OFF"
+        }
     ));
     lines.push("".to_string());
+
+    // 前線・作戦命令表示
+    lines.push("── 前線・作戦命令 ──".to_string());
+    if let (Some(war), Some(fl)) = (active_war, frontline.as_ref()) {
+        let is_attacker = war.attackers.contains(&player_cid);
+        let atk_name = country_registry
+            .get(fl.attacker_country_id)
+            .map(|c| c.name.as_str())
+            .unwrap_or("Attacker");
+        let def_name = country_registry
+            .get(fl.defender_country_id)
+            .map(|c| c.name.as_str())
+            .unwrap_or("Defender");
+
+        lines.push(format!(
+            "前線ID: Frontline #{} (戦争: {})",
+            fl.frontline_id.0, war.name
+        ));
+        lines.push(format!(
+            "交戦国: {} vs {} | 国境ペア数: {}",
+            atk_name,
+            def_name,
+            fl.border_region_pairs.len()
+        ));
+        lines.push(format!(
+            "自国前線地域: {} 州 | 敵側前線地域: {} 州",
+            if is_attacker {
+                fl.attacker_front_regions.len()
+            } else {
+                fl.defender_front_regions.len()
+            },
+            if is_attacker {
+                fl.defender_front_regions.len()
+            } else {
+                fl.attacker_front_regions.len()
+            }
+        ));
+
+        if fl.border_region_pairs.is_empty() {
+            lines.push("【注意】直接接触する国境地域が存在しません (空の前線)".to_string());
+        }
+
+        let plan = frontline_registry.get_plan(fl.frontline_id, player_cid);
+        let stance = plan.map(|p| p.stance).unwrap_or_default();
+        let assigned_ids = plan.map(|p| p.assigned_army_ids.as_slice()).unwrap_or(&[]);
+
+        lines.push(format!("命令状態: [{}]", stance.display_name()));
+
+        if let Some(obj_id) = plan.and_then(|p| p.objective_region_id) {
+            let obj_name = state_registry
+                .get(obj_id)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+            lines.push(format!("攻勢目標地域: {} (#{})", obj_name, obj_id.0));
+        } else {
+            lines.push("攻勢目標地域: 未設定".to_string());
+        }
+
+        // 割当部隊の内訳集計
+        let mut count_idle = 0;
+        let mut count_moving = 0;
+        let mut count_fighting = 0;
+        for &id in assigned_ids {
+            if let Some(a) = military_registry.armies.get(&id) {
+                match a.status {
+                    ArmyStatus::Idle => count_idle += 1,
+                    ArmyStatus::Moving => count_moving += 1,
+                    ArmyStatus::Fighting => count_fighting += 1,
+                    _ => {}
+                }
+            }
+        }
+        lines.push(format!(
+            "割り当て部隊: {} 部隊 (待機/戦闘可能: {} / 移動中: {} / 戦闘中: {})",
+            assigned_ids.len(),
+            count_idle,
+            count_moving,
+            count_fighting
+        ));
+
+        lines.push(
+            "操作キー: [1]選択部隊を割当 [2]割当解除 [3]全解除 [7]停止 [8]防御 [9]攻勢".to_string(),
+        );
+    } else {
+        lines.push("進行中の戦争がないため、前線は形成されていません。".to_string());
+    }
+    lines.push("".to_string());
+
+    // AI軍事作戦状況
+    if !ai_registry.ai_states.is_empty() {
+        lines.push("── 軍事AI作戦状況 (AI国家) ──".to_string());
+        let mut ai_countries: Vec<_> = ai_registry.ai_states.values().collect();
+        ai_countries.sort_by_key(|a| a.country_id.0);
+
+        for ai in ai_countries {
+            let country_name = country_registry
+                .get(ai.country_id)
+                .map(|c| c.name.as_str())
+                .unwrap_or("AI Country");
+            lines.push(format!(
+                "[{}] 自軍戦力:{} / 敵戦力:{} | 判断: {}",
+                country_name,
+                ai.estimated_own_power,
+                ai.estimated_enemy_power,
+                ai.last_decision_reason.display_name()
+            ));
+        }
+        lines.push("".to_string());
+    }
+
+    // 国家AI運営状況
+    if !country_ai_registry.ai_states.is_empty() {
+        lines.push("── 国家AI運営状況 (AI国家) ──".to_string());
+        let mut country_ais: Vec<_> = country_ai_registry.ai_states.values().collect();
+        country_ais.sort_by_key(|c| c.country_id.0);
+
+        for cai in country_ais {
+            let country_name = country_registry
+                .get(cai.country_id)
+                .map(|c| c.name.as_str())
+                .unwrap_or("AI Country");
+            lines.push(format!(
+                "[{}] モード:{} | 判断: {}",
+                country_name,
+                cai.mode.display_name(),
+                cai.decision_reason.display_name()
+            ));
+        }
+        lines.push("".to_string());
+    }
 
     // 選択中ユニット詳細
     if let Some(army) = selected_army
@@ -210,6 +398,22 @@ fn update_military_panel_ui(
             .unwrap_or("Unknown");
         lines.push(format!("ID: Army #{} | 所有国: {}", army.id.0, owner_name));
         lines.push(format!("現在位置: {}", current_state_name));
+
+        // 前線割り当て状態
+        if let Some(fl_id) = frontline_registry.army_frontline_map.get(&army.id) {
+            lines.push(format!("前線割り当て: Frontline #{}", fl_id.0));
+        } else {
+            lines.push("前線割り当て: 未割り当て".to_string());
+        }
+
+        // 割り当て不可理由の判定と表示
+        if army.owner != player_cid {
+            lines.push("【操作不可】自国の陸軍ではありません".to_string());
+        } else if active_war.is_none() {
+            lines.push("【割当不可】進行中の戦争が存在しません".to_string());
+        } else if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
+            lines.push("【割当不可】部隊が撃破済みまたは戦力0です".to_string());
+        }
 
         // 戦力・組織率
         lines.push(format!(
@@ -240,42 +444,12 @@ fn update_military_panel_ui(
         };
         lines.push(format!("状態: {}", status_str));
 
-        // 戦闘中の場合、戦闘詳細を表示
-        if army.status == ArmyStatus::Fighting
-            && let Some(battle) = army
-                .combat_id
-                .and_then(|id| battle_registry.battles.get(&id))
-        {
-            let atk_name = country_registry
-                .get(battle.attacker_country)
-                .map(|c| c.name.as_str())
-                .unwrap_or("?");
-            let def_name = country_registry
-                .get(battle.defender_country)
-                .map(|c| c.name.as_str())
-                .unwrap_or("?");
-            let battle_state_name = state_registry
-                .get(battle.state_id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("?");
-            lines.push(format!("  戦闘地域: {}", battle_state_name));
-            lines.push(format!("  {} vs {}", atk_name, def_name));
-            lines.push(format!("  経過: {}日", battle.elapsed_days));
-        }
-
         if let Some(dest_id) = army.destination {
             let dest_name = state_registry
                 .get(dest_id)
                 .map(|s| s.name.as_str())
                 .unwrap_or("Unknown");
-            let remaining_steps =
-                army.current_path.len() + if army.target_state.is_some() { 1 } else { 0 };
-            let est_days =
-                (remaining_steps as f32 * 5.0 * (1.0 - army.movement_progress)).ceil() as u32;
-            lines.push(format!(
-                "目的地: {} (残り {} 州 / 推定 {} 日)",
-                dest_name, remaining_steps, est_days
-            ));
+            lines.push(format!("目的地: {}", dest_name));
         } else {
             lines.push("目的地: なし".to_string());
         }
@@ -305,71 +479,9 @@ fn update_military_panel_ui(
                 .map(|c| c.name.as_str())
                 .unwrap_or("?");
 
-            // 攻撃側・防御側の戦力を表示
-            let atk_manpower = military_registry
-                .armies
-                .get(&battle.attacker_army_id)
-                .map(|a| a.manpower)
-                .unwrap_or(0);
-            let def_manpower = military_registry
-                .armies
-                .get(&battle.defender_army_id)
-                .map(|a| a.manpower)
-                .unwrap_or(0);
-            let atk_org = military_registry
-                .armies
-                .get(&battle.attacker_army_id)
-                .map(|a| a.organization)
-                .unwrap_or(0.0);
-            let def_org = military_registry
-                .armies
-                .get(&battle.defender_army_id)
-                .map(|a| a.organization)
-                .unwrap_or(0.0);
-
-            // どちらが優勢か
-            let advantage = if atk_manpower > def_manpower {
-                format!("{}優勢", atk_name)
-            } else if def_manpower > atk_manpower {
-                format!("{}優勢", def_name)
-            } else {
-                "互角".to_string()
-            };
-
             lines.push(format!(
                 "[戦闘] {} | {} vs {}",
                 battle_state_name, atk_name, def_name
-            ));
-            lines.push(format!(
-                "  攻: 戦力{} 組織{:.0} | 守: 戦力{} 組織{:.0} | {}",
-                atk_manpower, atk_org, def_manpower, def_org, advantage
-            ));
-            lines.push(format!(
-                "  {}日目 | 開始: {}",
-                battle.elapsed_days, battle.start_date
-            ));
-        }
-        lines.push("".to_string());
-    }
-
-    // 占領中の戦争
-    let active_wars: Vec<_> = war_registry
-        .wars
-        .values()
-        .filter(|w| {
-            w.status == crate::war::data::WarStatus::Active
-                && (w.attackers.contains(&player_cid) || w.defenders.contains(&player_cid))
-        })
-        .collect();
-
-    if !active_wars.is_empty() {
-        lines.push(format!("── 進行中の戦争 ({} 件) ──", active_wars.len()));
-        for war in &active_wars {
-            let is_attacker = war.attackers.contains(&player_cid);
-            let role = if is_attacker { "攻撃" } else { "防衛" };
-            lines.push(format!(
-                "{} [{}] スコア: {:.0}",
-                war.name, role, war.war_score
             ));
         }
         lines.push("".to_string());
@@ -391,21 +503,16 @@ fn update_military_panel_ui(
             ArmyStatus::Disbanding => "解散中",
             ArmyStatus::Destroyed => "撃破",
         };
+        let fl_tag = if frontline_registry.army_frontline_map.contains_key(&army.id) {
+            " [前線]"
+        } else {
+            ""
+        };
         let selected = selected_army.army_id == Some(army.id);
         let sel_mark = if selected { "► " } else { "  " };
         lines.push(format!(
-            "{}#{} @ {} | {} | 兵力:{} 組:{:.0}",
-            sel_mark, army.id.0, state_name, status_str, army.manpower, army.organization,
-        ));
-    }
-
-    lines.push("".to_string());
-    lines.push("── 師団招募 ──".to_string());
-    lines.push("選択中の州に招募されます".to_string());
-    for def in military_registry.definitions.values() {
-        lines.push(format!(
-            "[Recruit] {} ({:?}/{:?}) 人員:{} 日数:{}日",
-            def.name, def.division_type, def.size, def.required_manpower, def.recruitment_days,
+            "{}#{} @ {} | {}{} | 兵力:{}",
+            sel_mark, army.id.0, state_name, status_str, fl_tag, army.manpower,
         ));
     }
 

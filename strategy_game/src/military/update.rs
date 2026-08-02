@@ -31,10 +31,10 @@ pub fn handle_daily_military(
             &mut military_registry,
         );
 
-        // 2. 経路の事前検証（戦争終了等で無効になった移動を停止）
+        // 3. 経路の事前検証（戦争終了等で無効になった移動を停止）
         validate_and_stop_invalid_movements(&mut military_registry, &state_registry, &war_registry);
 
-        // 3. 移動処理（侵攻・戦闘開始を含む）
+        // 4. 移動処理（侵攻・戦闘開始を含む）
         process_movement(
             &mut military_registry,
             &mut state_registry,

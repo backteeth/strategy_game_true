@@ -4,7 +4,7 @@ pub mod progress;
 pub mod world_stage;
 
 use crate::app::game_state::GameState;
-use crate::app::time::{GameDate, MonthChangedMessage};
+use crate::app::time::{DailySimulationSet, GameDate, MonthChangedMessage};
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::research::data::{TechnologyField, TechnologyRegistry};
 use crate::research::progress::calculate_field_monthly_points;
@@ -22,6 +22,8 @@ impl Plugin for ResearchPlugin {
             .add_systems(
                 Update,
                 (handle_monthly_research, handle_npc_auto_research)
+                    .chain()
+                    .in_set(DailySimulationSet::Research)
                     .run_if(in_state(GameState::Playing)),
             );
     }

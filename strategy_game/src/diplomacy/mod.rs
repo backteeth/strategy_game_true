@@ -9,6 +9,7 @@ pub mod update;
 mod tests;
 
 use crate::app::game_state::GameState;
+use crate::app::time::DailySimulationSet;
 use crate::diplomacy::claims::ClaimRegistry;
 use crate::diplomacy::crisis::CrisisRegistry;
 use crate::diplomacy::data::DiplomacyRegistry;
@@ -24,7 +25,9 @@ impl Plugin for DiplomacyPlugin {
             .insert_resource(CrisisRegistry::default())
             .add_systems(
                 Update,
-                handle_daily_diplomacy.run_if(in_state(GameState::Playing)),
+                handle_daily_diplomacy
+                    .in_set(DailySimulationSet::Diplomacy)
+                    .run_if(in_state(GameState::Playing)),
             );
     }
 }

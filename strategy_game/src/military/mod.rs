@@ -14,6 +14,7 @@ pub mod update;
 mod tests;
 
 use crate::app::game_state::GameState;
+use crate::app::time::DailySimulationSet;
 use crate::military::battle::BattleRegistry;
 use crate::military::data::MilitaryRegistry;
 use crate::military::update::handle_daily_military;
@@ -27,7 +28,9 @@ impl Plugin for MilitaryPlugin {
             .insert_resource(BattleRegistry::default())
             .add_systems(
                 Update,
-                handle_daily_military.run_if(in_state(GameState::Playing)),
+                handle_daily_military
+                    .in_set(DailySimulationSet::MilitaryAction)
+                    .run_if(in_state(GameState::Playing)),
             );
     }
 }
