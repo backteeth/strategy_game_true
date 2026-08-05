@@ -18,13 +18,14 @@ pub enum WorldStage {
 }
 
 impl WorldStage {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            WorldStage::PreIndustrial => "Pre-Industrial Age",
-            WorldStage::IndustrialRevolution => "Industrial Revolution Age",
-            WorldStage::ElectricalAge => "Electrical Age",
-            WorldStage::TotalWarAge => "Total War Age",
-            WorldStage::MagitechAge => "Magitech Age",
+            WorldStage::PreIndustrial => "world_stage.pre_industrial",
+            WorldStage::IndustrialRevolution => "world_stage.industrial_revolution",
+            WorldStage::ElectricalAge => "world_stage.electrical_age",
+            WorldStage::TotalWarAge => "world_stage.total_war_age",
+            WorldStage::MagitechAge => "world_stage.magitech_age",
         }
     }
 }
@@ -47,12 +48,13 @@ impl TechnologyField {
         TechnologyField::Fusion,
     ];
 
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            TechnologyField::Science => "Science",
-            TechnologyField::Magic => "Magic",
-            TechnologyField::Military => "Military",
-            TechnologyField::Fusion => "Fusion",
+            TechnologyField::Science => "technology_field.science",
+            TechnologyField::Magic => "technology_field.magic",
+            TechnologyField::Military => "technology_field.military",
+            TechnologyField::Fusion => "technology_field.fusion",
         }
     }
 }

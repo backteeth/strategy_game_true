@@ -2,6 +2,7 @@
 name = "strategy_game"
 version = "0.1.0"
 edition = "2024"
+default-run = "strategy_game"
 
 [lib]
 name = "strategy_game"
@@ -10,6 +11,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "strategy_game"
 path = "src/main.rs"
+
+[[bin]]
+name = "profile_1000_states"
+path = "src/bin/profile_1000_states.rs"
 
 [dependencies]
 bevy = { version = "0.19.0", features = ["dynamic_linking"] }

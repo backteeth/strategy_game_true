@@ -9,6 +9,7 @@ pub mod research_panel;
 pub mod state_panel;
 pub mod top_bar;
 
+use crate::localization::LocalizationPlugin;
 use bevy::prelude::*;
 use country_selection::CountrySelectionPlugin;
 use diplomacy_panel::DiplomacyPluginUI;
@@ -133,7 +134,8 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ActivePanel::default())
+        app.add_plugins(LocalizationPlugin)
+            .insert_resource(ActivePanel::default())
             .add_plugins(CountrySelectionPlugin)
             .add_plugins(StatePanelPlugin)
             .add_plugins(EconomyPanelPlugin)

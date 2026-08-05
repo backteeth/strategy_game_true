@@ -29,10 +29,11 @@ pub enum TreatyType {
 }
 
 impl TreatyType {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            TreatyType::NonAggressionPact => "Non-Aggression Pact",
-            TreatyType::Alliance => "Alliance",
+            TreatyType::NonAggressionPact => "treaty.non_aggression_pact",
+            TreatyType::Alliance => "treaty.alliance",
         }
     }
 }
@@ -54,10 +55,11 @@ pub enum DiplomaticActivityType {
 }
 
 impl DiplomaticActivityType {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            DiplomaticActivityType::ImproveRelations => "Improve Relations",
-            DiplomaticActivityType::HarmRelations => "Harm Relations",
+            DiplomaticActivityType::ImproveRelations => "diplomatic_activity.improve_relations",
+            DiplomaticActivityType::HarmRelations => "diplomatic_activity.harm_relations",
         }
     }
 }

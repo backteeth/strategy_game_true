@@ -1,0 +1,7 @@
+os = windows
+arch = x86_64
+rustc = rustc 1.97.1 (8bab26f4f 2026-07-14)
+cpu = 12th Gen Intel(R) Core(TM) i7-12700F
+logical_processors = 20
+total_physical_memory_gb = 31.8
+build_profile = release (cargo run --release)

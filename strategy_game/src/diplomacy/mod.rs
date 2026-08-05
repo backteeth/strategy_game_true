@@ -20,7 +20,8 @@ pub struct DiplomacyPlugin;
 
 impl Plugin for DiplomacyPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(DiplomacyRegistry::default())
+        app.add_plugins(crate::localization::TranslationCorePlugin)
+            .insert_resource(DiplomacyRegistry::default())
             .insert_resource(ClaimRegistry::default())
             .insert_resource(CrisisRegistry::default())
             .add_systems(

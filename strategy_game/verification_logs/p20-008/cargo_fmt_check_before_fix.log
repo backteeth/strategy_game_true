@@ -1,0 +1,393 @@
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:38:
+ 
+ impl DayStats {
+     fn new() -> Self {
+[31m-        Self { samples_ms: Vec::new() }
+[0m[32m+        Self {
+[0m[32m+            samples_ms: Vec::new(),
+[0m[32m+        }
+[0m     }
+     fn push(&mut self, d: Duration) {
+         self.samples_ms.push(d.as_secs_f64() * 1000.0);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:127:
+     if let Some(cpu) = query_powershell("(Get-CimInstance Win32_Processor).Name") {
+         out.push_str(&format!("cpu = {cpu}\n"));
+     }
+[31m-    if let Some(cores) = query_powershell("(Get-CimInstance Win32_Processor).NumberOfLogicalProcessors")
+[0m[32m+    if let Some(cores) =
+[0m[32m+        query_powershell("(Get-CimInstance Win32_Processor).NumberOfLogicalProcessors")
+[0m     {
+         out.push_str(&format!("logical_processors = {cores}\n"));
+     }
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:297:
+     for (idx, r) in results.iter().enumerate() {
+         json.push_str("    {\n");
+         json.push_str(&format!("      \"scale\": {},\n", r.scale));
+[31m-        json.push_str(&format!("      \"scenario\": \"{}\",\n", r.scenario.label()));
+[0m[31m-        json.push_str(&format!("      \"state_count\": {},\n", r.workload.state_count));
+[0m[31m-        json.push_str(&format!("      \"country_count\": {},\n", r.workload.country_count));
+[0m[31m-        json.push_str(&format!("      \"army_initial\": {},\n", r.workload.initial_army_count));
+[0m[31m-        json.push_str(&format!("      \"war_initial\": {},\n", r.workload.initial_war_count));
+[0m[31m-        json.push_str(&format!("      \"army_final\": {},\n", r.runtime_after.army_count));
+[0m         json.push_str(&format!(
+[32m+            "      \"scenario\": \"{}\",\n",
+[0m[32m+            r.scenario.label()
+[0m[32m+        ));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"state_count\": {},\n",
+[0m[32m+            r.workload.state_count
+[0m[32m+        ));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"country_count\": {},\n",
+[0m[32m+            r.workload.country_count
+[0m[32m+        ));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"army_initial\": {},\n",
+[0m[32m+            r.workload.initial_army_count
+[0m[32m+        ));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"war_initial\": {},\n",
+[0m[32m+            r.workload.initial_war_count
+[0m[32m+        ));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"army_final\": {},\n",
+[0m[32m+            r.runtime_after.army_count
+[0m[32m+        ));
+[0m[32m+        json.push_str(&format!(
+[0m             "      \"war_active_final\": {},\n",
+             r.runtime_after.active_war_count
+         ));
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:311:
+             "      \"frontline_final\": {},\n",
+             r.runtime_after.frontline_count
+         ));
+[31m-        json.push_str(&format!("      \"battle_final\": {},\n", r.runtime_after.battle_count));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"battle_final\": {},\n",
+[0m[32m+            r.runtime_after.battle_count
+[0m[32m+        ));
+[0m         json.push_str(&format!("      \"init_ms\": {:.4},\n", r.init_ms));
+         json.push_str(&format!("      \"warmup_days\": {WARMUP_DAYS},\n"));
+         json.push_str(&format!("      \"measured_days\": {MEASURED_DAYS},\n"));
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:318:
+         json.push_str(&format!("      \"mean_ms\": {:.4},\n", r.overall.mean()));
+[31m-        json.push_str(&format!("      \"median_ms\": {:.4},\n", r.overall.median()));
+[0m[32m+        json.push_str(&format!(
+[0m[32m+            "      \"median_ms\": {:.4},\n",
+[0m[32m+            r.overall.median()
+[0m[32m+        ));
+[0m         json.push_str(&format!("      \"p95_ms\": {:.4},\n", r.overall.p95()));
+         json.push_str(&format!("      \"min_ms\": {:.4},\n", r.overall.min()));
+         json.push_str(&format!("      \"max_ms\": {:.4},\n", r.overall.max()));
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:326:
+         ));
+         json.push_str(&format!(
+             "      \"memory_bytes\": {},\n",
+[31m-            r.memory_bytes.map(|b| b.to_string()).unwrap_or_else(|| "null".to_string())
+[0m[32m+            r.memory_bytes
+[0m[32m+                .map(|b| b.to_string())
+[0m[32m+                .unwrap_or_else(|| "null".to_string())
+[0m         ));
+         json.push_str("      \"per_set\": [\n");
+         for (i, set_name) in DAILY_SET_NAMES.iter().enumerate() {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:341:
+             ));
+         }
+         json.push_str("      ]\n");
+[31m-        json.push_str(if idx + 1 < results.len() { "    },\n" } else { "    }\n" });
+[0m[32m+        json.push_str(if idx + 1 < results.len() {
+[0m[32m+            "    },\n"
+[0m[32m+        } else {
+[0m[32m+            "    }\n"
+[0m[32m+        });
+[0m     }
+     json.push_str("  ]\n}\n");
+     fs::write(path, json).expect("results.json 書き込みに失敗");
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:384:
+         ));
+         out.push_str(&format!(
+             "  memory_bytes={}\n",
+[31m-            r.memory_bytes.map(|b| b.to_string()).unwrap_or_else(|| "unavailable".to_string())
+[0m[32m+            r.memory_bytes
+[0m[32m+                .map(|b| b.to_string())
+[0m[32m+                .unwrap_or_else(|| "unavailable".to_string())
+[0m         ));
+         out.push_str(&format!(
+             "  treasury: before={:.2} after={:.2} changed={}\n",
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\bin\profile_1000_states.rs:417:
+ }
+ 
+ fn main() {
+[31m-    let output_subdir = std::env::args().nth(1).unwrap_or_else(|| "baseline".to_string());
+[0m[32m+    let output_subdir = std::env::args()
+[0m[32m+        .nth(1)
+[0m[32m+        .unwrap_or_else(|| "baseline".to_string());
+[0m     let output_dir: PathBuf = Path::new("verification_logs/p20-008").join(&output_subdir);
+     fs::create_dir_all(&output_dir).expect("出力ディレクトリの作成に失敗");
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\country\country_ai.rs:923:
+     // 置き換えた最適化(P20-008)が、既存の`calculate_country_total_power`単体呼び出し
+     // および州支配フィルタと完全に同一の値を返すことを検証する。
+ 
+[31m-    fn make_test_army(owner: CountryId, current_state: StateId, manpower: u64) -> crate::military::data::ArmyUnit {
+[0m[32m+    fn make_test_army(
+[0m[32m+        owner: CountryId,
+[0m[32m+        current_state: StateId,
+[0m[32m+        manpower: u64,
+[0m[32m+    ) -> crate::military::data::ArmyUnit {
+[0m         use crate::military::data::{ArmyStatus, DivisionSize, DivisionType};
+         crate::military::data::ArmyUnit {
+             id: crate::common::ArmyId(0),
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\country\country_ai.rs:1092:
+             .find(|j| j.initiator == CountryId(0))
+             .expect("Strong(0)が開始した正当化が存在すること");
+         assert_eq!(j.target, CountryId(1), "正当化の対象がWeak(1)であること");
+[31m-        assert_eq!(j.target_state, StateId(1), "正当化の対象StateがState(1)であること");
+[0m[32m+        assert_eq!(
+[0m[32m+            j.target_state,
+[0m[32m+            StateId(1),
+[0m[32m+            "正当化の対象StateがState(1)であること"
+[0m[32m+        );
+[0m 
+         // 注: `ai_state.dirty` は初期値 true のため、同日内で月次建設AI
+         // (`process_construction_ai`) も実行され、`decision_reason` は
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\profiling.rs:385:
+     for a in 0..country_count {
+         for b in (a + 1)..country_count {
+             if let Some(key) = DiplomaticPairKey::new(CountryId(a), CountryId(b)) {
+[31m-                diplomacy.relations.insert(key, DiplomaticRelation::default());
+[0m[32m+                diplomacy
+[0m[32m+                    .relations
+[0m[32m+                    .insert(key, DiplomaticRelation::default());
+[0m             }
+         }
+     }
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\profiling.rs:461:
+ /// (`GameDate` のaccumulatorへ直接1.0を加算し、実時間待機を伴わず決定論的に1日進める)。
+ pub fn advance_one_day(app: &mut App) {
+     app.world_mut().resource_mut::<GamePaused>().0 = false;
+[31m-    app.world_mut().resource_mut::<GameDate>().add_accumulator(1.0);
+[0m[32m+    app.world_mut()
+[0m[32m+        .resource_mut::<GameDate>()
+[0m[32m+        .add_accumulator(1.0);
+[0m     app.update();
+ }
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\profiling.rs:593:
+ 
+     for c in &country_registry.countries {
+         if !c.treasury.is_finite() {
+[31m-            return Err(format!("Country {:?} treasury is not finite: {}", c.id, c.treasury));
+[0m[32m+            return Err(format!(
+[0m[32m+                "Country {:?} treasury is not finite: {}",
+[0m[32m+                c.id, c.treasury
+[0m[32m+            ));
+[0m         }
+         for (res, amount) in &c.stockpile.amounts {
+             if !amount.is_finite() {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\profiling.rs:612:
+     }
+ 
+     for s in &state_registry.states {
+[31m-        if !s.living_standard.is_finite() || !s.unrest.is_finite() || !s.logistics_ratio.is_finite() {
+[0m[32m+        if !s.living_standard.is_finite() || !s.unrest.is_finite() || !s.logistics_ratio.is_finite()
+[0m[32m+        {
+[0m             return Err(format!("State {:?} has non-finite derived value", s.id));
+         }
+         if country_registry.get(s.owner_country_id).is_none() {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:8:
+ };
+ use strategy_game::military::invasion::{occupy_state, process_army_arrival};
+ use strategy_game::state::data::{StateData, StateRegistry};
+[31m-use strategy_game::war::capitulation::{evaluate_war_capitulation, CapitulationResult};
+[0m[32m+use strategy_game::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
+[0m use strategy_game::war::combat::sync_battle_results_to_wars;
+ use strategy_game::war::data::{WarRegistry, WarStatus};
+[31m-use strategy_game::war::frontline::{update_all_frontlines, FrontlineRegistry};
+[0m[32m+use strategy_game::war::frontline::{FrontlineRegistry, update_all_frontlines};
+[0m use strategy_game::war::justification::WarJustificationRegistry;
+[31m-use strategy_game::war::peace::{execute_peace_settlement, PeaceTerm};
+[0m[32m+use strategy_game::war::peace::{PeaceTerm, execute_peace_settlement};
+[0m use strategy_game::war::war_score::process_war_score;
+ 
+ /// RONファイルからロードして全4国家が相互に陸続き（直接隣接）になっているかをテストする
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:21:
+ fn test_all_countries_are_directly_land_connected() {
+     let states_ron = std::fs::read_to_string("assets/data/states.ron")
+         .expect("assets/data/states.ron should exist");
+[31m-    let states: Vec<StateData> = ron::from_str(&states_ron)
+[0m[31m-        .expect("assets/data/states.ron should parse cleanly");
+[0m[32m+    let states: Vec<StateData> =
+[0m[32m+        ron::from_str(&states_ron).expect("assets/data/states.ron should parse cleanly");
+[0m     let state_reg = StateRegistry::build(states);
+ 
+     let countries_ron = std::fs::read_to_string("assets/data/countries.ron")
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:29:
+         .expect("assets/data/countries.ron should exist");
+[31m-    let countries: Vec<CountryData> = ron::from_str(&countries_ron)
+[0m[31m-        .expect("assets/data/countries.ron should parse cleanly");
+[0m[32m+    let countries: Vec<CountryData> =
+[0m[32m+        ron::from_str(&countries_ron).expect("assets/data/countries.ron should parse cleanly");
+[0m 
+     let country_ids: Vec<CountryId> = countries.iter().map(|c| c.id).collect();
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:35:
+     // 4国家存在することを確認
+[31m-    assert_eq!(country_ids.len(), 4, "Expected 4 countries in countries.ron");
+[0m[32m+    assert_eq!(
+[0m[32m+        country_ids.len(),
+[0m[32m+        4,
+[0m[32m+        "Expected 4 countries in countries.ron"
+[0m[32m+    );
+[0m 
+     // 全ての国家ペア (c1, c2) について、直接隣接する州が存在するか確認
+     for i in 0..country_ids.len() {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:107:
+ 
+     let attacker_country = CountryId(0); // Kingdom of Arcadia
+     let defender_country = CountryId(3); // Oceanic Magic Empire (今回直接接続した国家)
+[31m-    let target_state = StateId(8);      // Oceanic の首都州 (State 8)
+[0m[32m+    let target_state = StateId(8); // Oceanic の首都州 (State 8)
+[0m     let attacker_border_state = StateId(1); // Arcadia の State 1 (State 8 と直接隣接)
+ 
+     // 隣接の直接確認
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:114:
+     let s1 = state_reg.get(attacker_border_state).unwrap();
+[31m-    assert!(s1.neighbors.contains(&target_state), "State 1 must border State 8");
+[0m[32m+    assert!(
+[0m[32m+        s1.neighbors.contains(&target_state),
+[0m[32m+        "State 1 must border State 8"
+[0m[32m+    );
+[0m 
+     // 2. 正当化プロセスと開戦 (War Declaration)
+     let start_date = "1936/01/01".to_string();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:153:
+     let frontline = frontline_reg.get_frontline_for_war(war_id);
+     assert!(frontline.is_some(), "Frontline should be created for war");
+     let fl = frontline.unwrap();
+[31m-    assert!(fl.border_region_pairs.contains(&(attacker_border_state, target_state)));
+[0m[32m+    assert!(
+[0m[32m+        fl.border_region_pairs
+[0m[32m+            .contains(&(attacker_border_state, target_state))
+[0m[32m+    );
+[0m 
+     // 4. 部隊配置と戦闘の開始 (Army Placement & Combat)
+     let atk_army = ArmyUnit {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:226:
+     );
+ 
+     let ongoing_battle = battle_reg.get_ongoing_battle_in_state(target_state);
+[31m-    assert!(ongoing_battle.is_some(), "Battle should be successfully started on target state");
+[0m[32m+    assert!(
+[0m[32m+        ongoing_battle.is_some(),
+[0m[32m+        "Battle should be successfully started on target state"
+[0m[32m+    );
+[0m 
+     // 戦闘計算 (Resolve Combat Day)
+     let (atk_loss, _, def_loss, _) = resolve_combat_day(&atk_army, &def_army, 0);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:233:
+[31m-    assert!(atk_loss > 0 || def_loss > 0, "Combat should deal damage to forces");
+[0m[32m+    assert!(
+[0m[32m+        atk_loss > 0 || def_loss > 0,
+[0m[32m+        "Combat should deal damage to forces"
+[0m[32m+    );
+[0m 
+     // 戦闘勝利のシミュレーションと戦争ログ集計
+     sync_battle_results_to_wars(&battle_reg, &mut war_reg);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:239:
+     occupy_state(target_state, attacker_country, &mut state_reg);
+     occupy_state(StateId(9), attacker_country, &mut state_reg);
+     let state_8 = state_reg.get(target_state).unwrap();
+[31m-    assert_eq!(state_8.controller_country, Some(attacker_country), "Target state should now be controlled by attacker");
+[0m[32m+    assert_eq!(
+[0m[32m+        state_8.controller_country,
+[0m[32m+        Some(attacker_country),
+[0m[32m+        "Target state should now be controlled by attacker"
+[0m[32m+    );
+[0m 
+     process_war_score(&state_reg, &mut war_reg);
+     let active_war = war_reg.wars.get(&war_id).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:246:
+[31m-    assert!(active_war.war_score > 0.0, "Attacker war score should be positive after occupying target state");
+[0m[32m+    assert!(
+[0m[32m+        active_war.war_score > 0.0,
+[0m[32m+        "Attacker war score should be positive after occupying target state"
+[0m[32m+    );
+[0m 
+     // 6. 降伏判定・講和 (Capitulation & Peace Treaty Settlement)
+     let cap_result = evaluate_war_capitulation(active_war, &state_reg, &military_reg);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:264:
+         &mut frontline_reg,
+     );
+ 
+[31m-    assert!(peace_res.is_ok(), "Peace settlement execution should succeed");
+[0m[32m+    assert!(
+[0m[32m+        peace_res.is_ok(),
+[0m[32m+        "Peace settlement execution should succeed"
+[0m[32m+    );
+[0m 
+     // 講和完了の検証
+     let ended_war = war_reg.wars.get(&war_id).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:271:
+[31m-    assert_eq!(ended_war.status, WarStatus::AttackerVictory, "War status should be AttackerVictory after peace");
+[0m[32m+    assert_eq!(
+[0m[32m+        ended_war.status,
+[0m[32m+        WarStatus::AttackerVictory,
+[0m[32m+        "War status should be AttackerVictory after peace"
+[0m[32m+    );
+[0m     assert!(ended_war.end_date.is_some(), "War end date should be set");
+[31m-    assert_eq!(ended_war.end_reason.as_deref(), Some("Defender Capitulation Settlement"));
+[0m[32m+    assert_eq!(
+[0m[32m+        ended_war.end_reason.as_deref(),
+[0m[32m+        Some("Defender Capitulation Settlement")
+[0m[32m+    );
+[0m 
+     // 講和により領土割譲（Target State の所有権が攻撃側に移動）したことを確認
+     let cceded_state = state_reg.get(target_state).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:277:
+[31m-    assert_eq!(cceded_state.owner_country_id, attacker_country, "Target state ownership should be ceded to attacker");
+[0m[32m+    assert_eq!(
+[0m[32m+        cceded_state.owner_country_id, attacker_country,
+[0m[32m+        "Target state ownership should be ceded to attacker"
+[0m[32m+    );
+[0m 
+     // 前線が削除・整理されたことを確認
+     let fl_after = frontline_reg.get_frontline_for_war(war_id);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:281:
+[31m-    assert!(fl_after.is_none(), "Frontline should be removed after peace settlement");
+[0m[32m+    assert!(
+[0m[32m+        fl_after.is_none(),
+[0m[32m+        "Frontline should be removed after peace settlement"
+[0m[32m+    );
+[0m }
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\profile_workload_correctness_test.rs:23:
+ 
+     assert_eq!(counts.state_count, 137, "生成State数が指定値と一致すること");
+ 
+[31m-    let actual_states = app.world().resource::<strategy_game::state::data::StateRegistry>().states.len();
+[0m[31m-    assert_eq!(actual_states, 137, "StateRegistryの実際のState数が指定値と一致すること");
+[0m[32m+    let actual_states = app
+[0m[32m+        .world()
+[0m[32m+        .resource::<strategy_game::state::data::StateRegistry>()
+[0m[32m+        .states
+[0m[32m+        .len();
+[0m[32m+    assert_eq!(
+[0m[32m+        actual_states, 137,
+[0m[32m+        "StateRegistryの実際のState数が指定値と一致すること"
+[0m[32m+    );
+[0m 
+     assert_eq!(
+         counts.country_count,
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\profile_workload_correctness_test.rs:48:
+     let state_registry = world.resource::<strategy_game::state::data::StateRegistry>();
+     let country_registry = world.resource::<strategy_game::country::CountryRegistry>();
+ 
+[31m-    assert!(!country_registry.countries.is_empty(), "国家が1つ以上生成されること");
+[0m[32m+    assert!(
+[0m[32m+        !country_registry.countries.is_empty(),
+[0m[32m+        "国家が1つ以上生成されること"
+[0m[32m+    );
+[0m 
+     for state in &state_registry.states {
+         assert!(

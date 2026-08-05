@@ -30,16 +30,17 @@ impl InterestGroupType {
         InterestGroupType::Merchants,
     ];
 
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            InterestGroupType::Nobility => "Nobility",
-            InterestGroupType::Clergy => "Clergy",
-            InterestGroupType::Military => "Military",
-            InterestGroupType::Workers => "Workers",
-            InterestGroupType::Capitalists => "Capitalists",
-            InterestGroupType::Scholars => "Scholars",
-            InterestGroupType::Mages => "Mages",
-            InterestGroupType::Merchants => "Merchants",
+            InterestGroupType::Nobility => "interest_group.nobility",
+            InterestGroupType::Clergy => "interest_group.clergy",
+            InterestGroupType::Military => "interest_group.military",
+            InterestGroupType::Workers => "interest_group.workers",
+            InterestGroupType::Capitalists => "interest_group.capitalists",
+            InterestGroupType::Scholars => "interest_group.scholars",
+            InterestGroupType::Mages => "interest_group.mages",
+            InterestGroupType::Merchants => "interest_group.merchants",
         }
     }
 }

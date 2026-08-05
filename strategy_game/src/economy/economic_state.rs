@@ -17,24 +17,20 @@ pub enum EconomicState {
 }
 
 impl EconomicState {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            EconomicState::Depression => "Depression",
-            EconomicState::Recession => "Recession",
-            EconomicState::Stable => "Stable",
-            EconomicState::Boom => "Boom",
-            EconomicState::Prosperity => "Prosperity",
+            EconomicState::Depression => "economic_state.depression",
+            EconomicState::Recession => "economic_state.recession",
+            EconomicState::Stable => "economic_state.stable",
+            EconomicState::Boom => "economic_state.boom",
+            EconomicState::Prosperity => "economic_state.prosperity",
         }
     }
 
+    /// 短縮表示も現状は`display_name()`と同じ翻訳キーを指す。
     pub fn display_name_short(self) -> &'static str {
-        match self {
-            EconomicState::Depression => "Depression",
-            EconomicState::Recession => "Recession",
-            EconomicState::Stable => "Stable",
-            EconomicState::Boom => "Boom",
-            EconomicState::Prosperity => "Prosperity",
-        }
+        self.display_name()
     }
 }
 

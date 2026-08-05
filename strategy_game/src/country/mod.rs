@@ -23,13 +23,13 @@ pub enum GovernmentType {
 }
 
 impl GovernmentType {
-    /// 表示用英語名
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            GovernmentType::Monarchy => "Monarchy",
-            GovernmentType::Republic => "Republic",
-            GovernmentType::Dictatorship => "Dictatorship",
-            GovernmentType::Theocracy => "Theocracy",
+            GovernmentType::Monarchy => "government.monarchy",
+            GovernmentType::Republic => "government.republic",
+            GovernmentType::Dictatorship => "government.dictatorship",
+            GovernmentType::Theocracy => "government.theocracy",
         }
     }
 }
@@ -50,16 +50,16 @@ pub enum EconomicSystem {
 }
 
 impl EconomicSystem {
-    /// 表示用英語名
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            EconomicSystem::FreeMarket => "Free Market",
-            EconomicSystem::Mercantilism => "Mercantilism",
-            EconomicSystem::StateCapitalism => "State Capitalism",
-            EconomicSystem::Socialism => "Socialism",
-            EconomicSystem::PlannedEconomy => "Planned Economy",
-            EconomicSystem::TempleEconomy => "Temple Economy",
-            EconomicSystem::GuildEconomy => "Guild Economy",
+            EconomicSystem::FreeMarket => "economic_system.free_market",
+            EconomicSystem::Mercantilism => "economic_system.mercantilism",
+            EconomicSystem::StateCapitalism => "economic_system.state_capitalism",
+            EconomicSystem::Socialism => "economic_system.socialism",
+            EconomicSystem::PlannedEconomy => "economic_system.planned_economy",
+            EconomicSystem::TempleEconomy => "economic_system.temple_economy",
+            EconomicSystem::GuildEconomy => "economic_system.guild_economy",
         }
     }
 }

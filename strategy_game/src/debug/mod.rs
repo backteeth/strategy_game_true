@@ -1,5 +1,6 @@
 use crate::app::game_state::GameState;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::politics::reform::apply_reform_completion;
 use crate::research::world_stage::WorldCivilizationState;
 use crate::state::data::StateRegistry;
@@ -10,13 +11,15 @@ pub struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            handle_debug_shortcuts.run_if(in_state(GameState::Playing)),
-        );
+        app.add_plugins(crate::localization::TranslationCorePlugin)
+            .add_systems(
+                Update,
+                handle_debug_shortcuts.run_if(in_state(GameState::Playing)),
+            );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_debug_shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
     player_country: Res<PlayerCountry>,
@@ -24,6 +27,8 @@ fn handle_debug_shortcuts(
     mut state_registry: ResMut<StateRegistry>,
     mut world_state: ResMut<WorldCivilizationState>,
     mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     // F1: Advance World Stage
     if keys.just_pressed(KeyCode::F1)
@@ -31,7 +36,12 @@ fn handle_debug_shortcuts(
     {
         world_state.current_stage = next_stage;
         notif_writer.write(GameNotification {
-            message: format!("[DEBUG] Advanced World Era to: {:?}", next_stage),
+            message: tf(
+                &catalog,
+                locale.0,
+                "notif.debug_advanced_era",
+                vec![("era", t(&catalog, locale.0, next_stage.display_name()))],
+            ),
         });
     }
 
@@ -47,7 +57,7 @@ fn handle_debug_shortcuts(
             }
         }
         notif_writer.write(GameNotification {
-            message: "[DEBUG] Revealed all resource deposits in owned states.".to_string(),
+            message: t(&catalog, locale.0, "notif.debug_revealed_deposits"),
         });
     }
 
@@ -60,7 +70,7 @@ fn handle_debug_shortcuts(
         apply_reform_completion(reform, &mut country.politics.values);
         country.current_reform = None;
         notif_writer.write(GameNotification {
-            message: "[DEBUG] Instantly completed political reform!".to_string(),
+            message: t(&catalog, locale.0, "notif.debug_reform_completed"),
         });
     }
 }

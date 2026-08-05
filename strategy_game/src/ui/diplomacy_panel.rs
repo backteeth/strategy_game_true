@@ -7,6 +7,9 @@ use crate::diplomacy::data::{
 };
 use crate::diplomacy::proposal::calculate_proposal_score;
 use crate::diplomacy::update::ACTIVITY_DURATION_DAYS;
+use crate::localization::{
+    CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
+};
 use crate::state::SelectedState;
 use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
@@ -70,7 +73,11 @@ impl Plugin for DiplomacyPluginUI {
     }
 }
 
-fn setup_diplomacy_panel(mut commands: Commands) {
+fn setup_diplomacy_panel(
+    mut commands: Commands,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
     commands
         .spawn((
             ToggleDiplomacyPanelButton,
@@ -85,8 +92,11 @@ fn setup_diplomacy_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.2, 0.4, 0.3, 0.9)),
         ))
         .with_children(|parent| {
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "diplomacy_panel.toggle_button", vec![]);
             parent.spawn((
-                Text::new("[D] Diplomacy Panel"),
+                text,
+                marker,
                 TextColor(Color::WHITE),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -114,8 +124,11 @@ fn setup_diplomacy_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.06, 0.1, 0.08, 0.95)),
         ))
         .with_children(|parent| {
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "diplomacy_panel.title", vec![]);
             parent.spawn((
-                Text::new("-- Foreign Affairs & Diplomacy --"),
+                text,
+                marker,
                 TextColor(Color::srgb(0.6, 0.9, 0.7)),
                 TextFont {
                     font_size: FontSize::Px(18.0),
@@ -126,6 +139,7 @@ fn setup_diplomacy_panel(mut commands: Commands) {
             parent.spawn((
                 DiplomacyHeaderText,
                 Text::new(""),
+                LocalizedText::default(),
                 TextColor(Color::srgb(0.85, 0.85, 0.9)),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -206,6 +220,8 @@ fn handle_diplomacy_action_buttons(
     date: Res<GameDate>,
     mut war_registry: ResMut<WarRegistry>,
     mut justification_registry: ResMut<WarJustificationRegistry>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     let Some(p_cid) = player_country.0 else {
         return;
@@ -226,9 +242,11 @@ fn handle_diplomacy_action_buttons(
                     daily_opinion_change: 1.0,
                 });
                 notif_writer.write(GameNotification {
-                    message: format!(
-                        "Diplomacy Started: Improve Relations with Country #{}",
-                        target_cid.0
+                    message: tf(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.notif_diplomacy_started_improve",
+                        vec![("id", target_cid.0.to_string())],
                     ),
                 });
             }
@@ -247,9 +265,11 @@ fn handle_diplomacy_action_buttons(
                     daily_opinion_change: -1.0,
                 });
                 notif_writer.write(GameNotification {
-                    message: format!(
-                        "Diplomacy Started: Harm Relations with Country #{}",
-                        target_cid.0
+                    message: tf(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.notif_diplomacy_started_harm",
+                        vec![("id", target_cid.0.to_string())],
                     ),
                 });
             }
@@ -275,18 +295,26 @@ fn handle_diplomacy_action_buttons(
                         is_active: true,
                     });
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Proposal Accepted: {} signed with {}!",
-                            treaty_type.display_name(),
-                            target.name
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.notif_proposal_accepted",
+                            vec![
+                                ("treaty", t(&catalog, locale.0, treaty_type.display_name())),
+                                ("country", target.name.clone()),
+                            ],
                         ),
                     });
                 } else {
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Proposal Rejected: {} was declined by {}.",
-                            treaty_type.display_name(),
-                            target.name
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.notif_proposal_rejected",
+                            vec![
+                                ("treaty", t(&catalog, locale.0, treaty_type.display_name())),
+                                ("country", target.name.clone()),
+                            ],
                         ),
                     });
                 }
@@ -303,10 +331,14 @@ fn handle_diplomacy_action_buttons(
             {
                 rel.opinion = (rel.opinion - 25.0).clamp(-100.0, 100.0);
                 notif_writer.write(GameNotification {
-                    message: format!(
-                        "Treaty Broken: {} with Country #{}. Opinion -25",
-                        treaty_type.display_name(),
-                        target_cid.0
+                    message: tf(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.notif_treaty_broken",
+                        vec![
+                            ("treaty", t(&catalog, locale.0, treaty_type.display_name())),
+                            ("id", target_cid.0.to_string()),
+                        ],
                     ),
                 });
             }
@@ -327,15 +359,25 @@ fn handle_diplomacy_action_buttons(
                 Ok(_) => {
                     let st_name = state_registry
                         .get(btn.1)
-                        .map(|s| s.name.as_str())
-                        .unwrap_or("State");
+                        .map(|s| s.name.clone())
+                        .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
                     notif_writer.write(GameNotification {
-                        message: format!("Started War Justification for {}!", st_name),
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.notif_justification_started",
+                            vec![("state", st_name)],
+                        ),
                     });
                 }
                 Err(err) => {
                     notif_writer.write(GameNotification {
-                        message: format!("Cannot Justify War: {}", err),
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.notif_justify_failed",
+                            vec![("reason", t(&catalog, locale.0, err))],
+                        ),
                     });
                 }
             }
@@ -357,15 +399,28 @@ fn handle_diplomacy_action_buttons(
                 Ok(war_id) => {
                     let target_name = country_registry
                         .get(btn.0)
-                        .map(|c| c.name.as_str())
-                        .unwrap_or("Country");
+                        .map(|c| c.name.clone())
+                        .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
                     notif_writer.write(GameNotification {
-                        message: format!("DECLARED WAR on {}! (War ID: {:?})", target_name, war_id),
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.notif_war_declared",
+                            vec![
+                                ("country", target_name),
+                                ("war_id", format!("{:?}", war_id)),
+                            ],
+                        ),
                     });
                 }
                 Err(err) => {
                     notif_writer.write(GameNotification {
-                        message: format!("Cannot Declare War: {}", err),
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.notif_declare_failed",
+                            vec![("reason", t(&catalog, locale.0, err))],
+                        ),
                     });
                 }
             }
@@ -383,14 +438,16 @@ fn update_diplomacy_panel_ui(
     state_registry: Res<StateRegistry>,
     justification_registry: Res<WarJustificationRegistry>,
     war_registry: Res<WarRegistry>,
-    mut header_q: Query<&mut Text, With<DiplomacyHeaderText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut header_q: Query<(&mut Text, &mut LocalizedText), With<DiplomacyHeaderText>>,
     container_q: Query<(Entity, Option<&Children>), With<DiplomacyContentContainer>>,
 ) {
-    if !state.open {
+    if !state.open && !locale.is_changed() {
         return;
     }
 
-    let Ok(mut header_text) = header_q.single_mut() else {
+    let Ok((mut header_text, mut header_marker)) = header_q.single_mut() else {
         return;
     };
     let Ok((container_entity, children_opt)) = container_q.single() else {
@@ -401,7 +458,13 @@ fn update_diplomacy_panel_ui(
         return;
     };
     let Some(target_cid) = state.target_country else {
-        *header_text = Text::new("Select a foreign state/country on the map.");
+        let key = "diplomacy_panel.select_prompt";
+        let rendered = t(&catalog, locale.0, key);
+        if header_text.0 != rendered {
+            *header_text = Text::new(rendered);
+        }
+        header_marker.key = key;
+        header_marker.args = vec![];
         if let Some(children) = children_opt {
             for child in children.iter() {
                 commands.entity(child).despawn();
@@ -411,8 +474,13 @@ fn update_diplomacy_panel_ui(
     };
 
     if target_cid == p_cid {
-        *header_text =
-            Text::new("Selected self: Cannot perform foreign diplomacy on your own country.");
+        let key = "diplomacy_panel.self_selected";
+        let rendered = t(&catalog, locale.0, key);
+        if header_text.0 != rendered {
+            *header_text = Text::new(rendered);
+        }
+        header_marker.key = key;
+        header_marker.args = vec![];
         if let Some(children) = children_opt {
             for child in children.iter() {
                 commands.entity(child).despawn();
@@ -429,13 +497,22 @@ fn update_diplomacy_panel_ui(
     };
     let rel = diplo_registry.get_or_default(p_cid, target_cid);
 
-    let header_info = format!(
-        "Diplomacy with: {} (ID: {})\nOpinion: {:+.1} / 100.0",
-        target.name, target.id.0, rel.opinion
+    let header_args = vec![
+        ("country", target.name.clone()),
+        ("id", target.id.0.to_string()),
+        ("opinion", format!("{:+.1}", rel.opinion)),
+    ];
+    let header_info = tf(
+        &catalog,
+        locale.0,
+        "diplomacy_panel.header",
+        header_args.clone(),
     );
     if header_text.0 != header_info {
         *header_text = Text::new(header_info);
     }
+    header_marker.key = "diplomacy_panel.header";
+    header_marker.args = header_args;
 
     if let Some(children) = children_opt {
         for child in children.iter() {
@@ -455,18 +532,27 @@ fn update_diplomacy_panel_ui(
             .insert(BackgroundColor(Color::srgba(0.12, 0.15, 0.18, 0.9)))
             .with_children(|col| {
                 if let Some(ref act) = rel.active_activity {
-                    let side = if act.initiator == p_cid {
-                        "Initiated by you"
+                    let side_key = if act.initiator == p_cid {
+                        "diplomacy_panel.activity_initiated_by_you"
                     } else {
-                        "Initiated by foreign country"
+                        "diplomacy_panel.activity_initiated_by_foreign"
                     };
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.active_activity",
+                        vec![
+                            (
+                                "activity",
+                                t(&catalog, locale.0, act.activity_type.display_name()),
+                            ),
+                            ("days", act.days_remaining.to_string()),
+                            ("side", t(&catalog, locale.0, side_key)),
+                        ],
+                    );
                     col.spawn((
-                        Text::new(format!(
-                            "Active Activity: {} ({}d remaining) [{}]",
-                            act.activity_type.display_name(),
-                            act.days_remaining,
-                            side
-                        )),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.9, 0.9, 0.6)),
                         TextFont {
                             font_size: FontSize::Px(12.0),
@@ -474,8 +560,15 @@ fn update_diplomacy_panel_ui(
                         },
                     ));
                 } else {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.no_active_activity",
+                        vec![],
+                    );
                     col.spawn((
-                        Text::new("Active Activity: None"),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.7, 0.7, 0.7)),
                         TextFont {
                             font_size: FontSize::Px(12.0),
@@ -485,8 +578,15 @@ fn update_diplomacy_panel_ui(
                 }
 
                 if let Some(&cd) = rel.cooldowns.get(&p_cid) {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.cooldown_active",
+                        vec![("days", cd.to_string())],
+                    );
                     col.spawn((
-                        Text::new(format!("Cooldown Active: {} days remaining", cd)),
+                        text,
+                        marker,
                         TextColor(Color::srgb(1.0, 0.6, 0.6)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -506,8 +606,15 @@ fn update_diplomacy_panel_ui(
             })
             .insert(BackgroundColor(Color::srgba(0.12, 0.15, 0.18, 0.9)))
             .with_children(|col| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.treaties_header",
+                    vec![],
+                );
                 col.spawn((
-                    Text::new("[ Signed Treaties ]"),
+                    text,
+                    marker,
                     TextColor(Color::srgb(0.6, 0.9, 0.7)),
                     TextFont {
                         font_size: FontSize::Px(12.0),
@@ -517,8 +624,11 @@ fn update_diplomacy_panel_ui(
 
                 let active_treaties: Vec<_> = rel.treaties.iter().filter(|t| t.is_active).collect();
                 if active_treaties.is_empty() {
+                    let (text, marker) =
+                        localized_text(&catalog, locale.0, "diplomacy_panel.treaties_none", vec![]);
                     col.spawn((
-                        Text::new("  None"),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.7, 0.7, 0.7)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -526,7 +636,7 @@ fn update_diplomacy_panel_ui(
                         },
                     ));
                 } else {
-                    for t in active_treaties {
+                    for treaty in active_treaties {
                         col.spawn(Node {
                             flex_direction: FlexDirection::Row,
                             justify_content: JustifyContent::SpaceBetween,
@@ -534,12 +644,21 @@ fn update_diplomacy_panel_ui(
                             ..default()
                         })
                         .with_children(|row| {
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                "diplomacy_panel.treaty_line",
+                                vec![
+                                    (
+                                        "treaty",
+                                        t(&catalog, locale.0, treaty.treaty_type.display_name()),
+                                    ),
+                                    ("date", treaty.signed_date.clone()),
+                                ],
+                            );
                             row.spawn((
-                                Text::new(format!(
-                                    "  • {} (Signed: {})",
-                                    t.treaty_type.display_name(),
-                                    t.signed_date
-                                )),
+                                text,
+                                marker,
                                 TextColor(Color::WHITE),
                                 TextFont {
                                     font_size: FontSize::Px(11.0),
@@ -548,7 +667,7 @@ fn update_diplomacy_panel_ui(
                             ));
 
                             row.spawn((
-                                BreakTreatyButton(target_cid, t.treaty_type),
+                                BreakTreatyButton(target_cid, treaty.treaty_type),
                                 Button,
                                 Node {
                                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
@@ -557,8 +676,15 @@ fn update_diplomacy_panel_ui(
                                 BackgroundColor(Color::srgba(0.6, 0.2, 0.2, 1.0)),
                             ))
                             .with_children(|b| {
+                                let (text, marker) = localized_text(
+                                    &catalog,
+                                    locale.0,
+                                    "diplomacy_panel.break_button",
+                                    vec![],
+                                );
                                 b.spawn((
-                                    Text::new("Break"),
+                                    text,
+                                    marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
                                         font_size: FontSize::Px(10.0),
@@ -594,8 +720,15 @@ fn update_diplomacy_panel_ui(
                         BackgroundColor(Color::srgba(0.2, 0.5, 0.3, 1.0)),
                     ))
                     .with_children(|b| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.improve_relations_button",
+                            vec![],
+                        );
                         b.spawn((
-                            Text::new("Improve Relations (+30d)"),
+                            text,
+                            marker,
                             TextColor(Color::WHITE),
                             TextFont {
                                 font_size: FontSize::Px(11.0),
@@ -614,8 +747,15 @@ fn update_diplomacy_panel_ui(
                         BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 1.0)),
                     ))
                     .with_children(|b| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.harm_relations_button",
+                            vec![],
+                        );
                         b.spawn((
-                            Text::new("Harm Relations (-30d)"),
+                            text,
+                            marker,
                             TextColor(Color::WHITE),
                             TextFont {
                                 font_size: FontSize::Px(11.0),
@@ -624,13 +764,20 @@ fn update_diplomacy_panel_ui(
                         ));
                     });
                 } else {
-                    let reason = if act_active {
-                        "Activity in progress"
+                    let reason_key = if act_active {
+                        "diplomacy_panel.reason_activity_in_progress"
                     } else {
-                        "Cooldown active"
+                        "diplomacy_panel.reason_cooldown_active"
                     };
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.actions_disabled",
+                        vec![("reason", t(&catalog, locale.0, reason_key))],
+                    );
                     row.spawn((
-                        Text::new(format!("[Actions Disabled: {}]", reason)),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.7, 0.7, 0.7)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -640,8 +787,11 @@ fn update_diplomacy_panel_ui(
                 }
             });
 
+        let (text, marker) =
+            localized_text(&catalog, locale.0, "diplomacy_panel.propose_header", vec![]);
         parent.spawn((
-            Text::new("[ Propose Treaties & Score Breakdown ]"),
+            text,
+            marker,
             TextColor(Color::srgb(0.9, 0.85, 0.6)),
             TextFont {
                 font_size: FontSize::Px(12.0),
@@ -671,20 +821,27 @@ fn update_diplomacy_panel_ui(
                         ..default()
                     })
                     .with_children(|row| {
+                        let result_key = if already_signed {
+                            "diplomacy_panel.result_already_signed"
+                        } else if breakdown.accepted {
+                            "diplomacy_panel.result_accept"
+                        } else {
+                            "diplomacy_panel.result_reject"
+                        };
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.propose_line",
+                            vec![
+                                ("treaty", t(&catalog, locale.0, proposal.display_name())),
+                                ("total", format!("{:.1}", breakdown.total_score)),
+                                ("required", format!("{:.1}", breakdown.required_score)),
+                                ("result", t(&catalog, locale.0, result_key)),
+                            ],
+                        );
                         row.spawn((
-                            Text::new(format!(
-                                "Propose {}: Total Score {:.1} / Req {:.1} -> {}",
-                                proposal.display_name(),
-                                breakdown.total_score,
-                                breakdown.required_score,
-                                if already_signed {
-                                    "Already Signed"
-                                } else if breakdown.accepted {
-                                    "ACCEPT"
-                                } else {
-                                    "REJECT"
-                                }
-                            )),
+                            text,
+                            marker,
                             TextColor(if already_signed {
                                 Color::srgb(0.7, 0.7, 0.7)
                             } else if breakdown.accepted {
@@ -713,8 +870,15 @@ fn update_diplomacy_panel_ui(
                                 }),
                             ))
                             .with_children(|b| {
+                                let (text, marker) = localized_text(
+                                    &catalog,
+                                    locale.0,
+                                    "diplomacy_panel.propose_button",
+                                    vec![],
+                                );
                                 b.spawn((
-                                    Text::new("Propose"),
+                                    text,
+                                    marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
                                         font_size: FontSize::Px(10.0),
@@ -732,8 +896,15 @@ fn update_diplomacy_panel_ui(
                         .collect::<Vec<_>>()
                         .join(" | ");
 
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.breakdown_line",
+                        vec![("items", item_str)],
+                    );
                     col.spawn((
-                        Text::new(format!("  Breakdown: {}", item_str)),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.7, 0.7, 0.7)),
                         TextFont {
                             font_size: FontSize::Px(10.0),
@@ -756,8 +927,15 @@ fn update_diplomacy_panel_ui(
                 BackgroundColor(Color::srgba(0.12, 0.05, 0.05, 0.9)),
             ))
             .with_children(|sec| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.war_section_title",
+                    vec![],
+                );
                 sec.spawn((
-                    Text::new("-- War & Justification --"),
+                    text,
+                    marker,
                     TextColor(Color::srgb(0.9, 0.4, 0.4)),
                     TextFont {
                         font_size: FontSize::Px(13.0),
@@ -770,8 +948,15 @@ fn update_diplomacy_panel_ui(
                 let is_already_war = war_registry.are_countries_at_war(p_cid, target_cid);
 
                 if is_already_war {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.currently_at_war",
+                        vec![],
+                    );
                     sec.spawn((
-                        Text::new("Currently at War with this country!"),
+                        text,
+                        marker,
                         TextColor(Color::srgb(1.0, 0.3, 0.3)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -779,8 +964,15 @@ fn update_diplomacy_panel_ui(
                         },
                     ));
                 } else if has_alliance {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.alliance_blocks_war",
+                        vec![],
+                    );
                     sec.spawn((
-                        Text::new("Cannot declare war / justify: Alliance is active."),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.9, 0.6, 0.3)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -788,8 +980,15 @@ fn update_diplomacy_panel_ui(
                         },
                     ));
                 } else if has_nap {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.nap_blocks_war",
+                        vec![],
+                    );
                     sec.spawn((
-                        Text::new("Cannot declare war / justify: Non-Aggression Pact is active."),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.9, 0.6, 0.3)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -805,8 +1004,15 @@ fn update_diplomacy_panel_ui(
                         .collect();
 
                     if owned_states.is_empty() {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.target_no_states",
+                            vec![],
+                        );
                         sec.spawn((
-                            Text::new("Target country owns no states."),
+                            text,
+                            marker,
                             TextColor(Color::srgb(0.7, 0.7, 0.7)),
                             TextFont {
                                 font_size: FontSize::Px(11.0),
@@ -833,8 +1039,15 @@ fn update_diplomacy_panel_ui(
                             },))
                                 .with_children(|row| {
                                     if ready_just.is_some() {
+                                        let (text, marker) = localized_text(
+                                            &catalog,
+                                            locale.0,
+                                            "diplomacy_panel.goal_ready",
+                                            vec![("state", st.name.clone())],
+                                        );
                                         row.spawn((
-                                            Text::new(format!("Goal: Take {} [READY]", st.name)),
+                                            text,
+                                            marker,
                                             TextColor(Color::srgb(0.4, 0.9, 0.4)),
                                             TextFont {
                                                 font_size: FontSize::Px(11.0),
@@ -853,8 +1066,15 @@ fn update_diplomacy_panel_ui(
                                         ))
                                         .with_children(
                                             |b| {
+                                                let (text, marker) = localized_text(
+                                                    &catalog,
+                                                    locale.0,
+                                                    "diplomacy_panel.declare_war_button",
+                                                    vec![],
+                                                );
                                                 b.spawn((
-                                                    Text::new("DECLARE WAR"),
+                                                    text,
+                                                    marker,
                                                     TextColor(Color::WHITE),
                                                     TextFont {
                                                         font_size: FontSize::Px(10.0),
@@ -864,11 +1084,19 @@ fn update_diplomacy_panel_ui(
                                             },
                                         );
                                     } else if let Some(j) = active_just {
+                                        let (text, marker) = localized_text(
+                                            &catalog,
+                                            locale.0,
+                                            "diplomacy_panel.justifying",
+                                            vec![
+                                                ("state", st.name.clone()),
+                                                ("days", j.days_passed.to_string()),
+                                                ("required", j.required_days.to_string()),
+                                            ],
+                                        );
                                         row.spawn((
-                                            Text::new(format!(
-                                                "Justifying for {}: {}/{} days",
-                                                st.name, j.days_passed, j.required_days
-                                            )),
+                                            text,
+                                            marker,
                                             TextColor(Color::srgb(0.9, 0.8, 0.3)),
                                             TextFont {
                                                 font_size: FontSize::Px(11.0),
@@ -876,8 +1104,15 @@ fn update_diplomacy_panel_ui(
                                             },
                                         ));
                                     } else {
+                                        let (text, marker) = localized_text(
+                                            &catalog,
+                                            locale.0,
+                                            "diplomacy_panel.target_state_line",
+                                            vec![("state", st.name.clone())],
+                                        );
                                         row.spawn((
-                                            Text::new(format!("Target State: {}", st.name)),
+                                            text,
+                                            marker,
                                             TextColor(Color::srgb(0.8, 0.8, 0.8)),
                                             TextFont {
                                                 font_size: FontSize::Px(11.0),
@@ -896,8 +1131,15 @@ fn update_diplomacy_panel_ui(
                                         ))
                                         .with_children(
                                             |b| {
+                                                let (text, marker) = localized_text(
+                                                    &catalog,
+                                                    locale.0,
+                                                    "diplomacy_panel.justify_war_button",
+                                                    vec![],
+                                                );
                                                 b.spawn((
-                                                    Text::new("Justify War"),
+                                                    text,
+                                                    marker,
                                                     TextColor(Color::WHITE),
                                                     TextFont {
                                                         font_size: FontSize::Px(10.0),
@@ -926,8 +1168,15 @@ fn update_diplomacy_panel_ui(
                 BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.9)),
             ))
             .with_children(|sec| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.active_wars_header",
+                    vec![],
+                );
                 sec.spawn((
-                    Text::new("-- Active Wars --"),
+                    text,
+                    marker,
                     TextColor(Color::srgb(0.5, 0.7, 0.9)),
                     TextFont {
                         font_size: FontSize::Px(13.0),
@@ -942,8 +1191,15 @@ fn update_diplomacy_panel_ui(
                     .collect();
 
                 if active_wars.is_empty() {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.no_active_wars",
+                        vec![],
+                    );
                     sec.spawn((
-                        Text::new("No active wars in the world."),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.6, 0.6, 0.6)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -963,15 +1219,21 @@ fn update_diplomacy_panel_ui(
                             .filter_map(|cid| country_registry.get(*cid).map(|c| c.name.as_str()))
                             .collect();
 
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.war_line",
+                            vec![
+                                ("id", format!("{:?}", war.id.0)),
+                                ("name", war.name.clone()),
+                                ("attackers", attacker_names.join(", ")),
+                                ("defenders", defender_names.join(", ")),
+                                ("date", war.start_date.clone()),
+                            ],
+                        );
                         sec.spawn((
-                            Text::new(format!(
-                                "[War #{:?}] {} ({} vs {}) - Started: {}",
-                                war.id.0,
-                                war.name,
-                                attacker_names.join(", "),
-                                defender_names.join(", "),
-                                war.start_date
-                            )),
+                            text,
+                            marker,
                             TextColor(Color::srgb(0.9, 0.5, 0.5)),
                             TextFont {
                                 font_size: FontSize::Px(11.0),

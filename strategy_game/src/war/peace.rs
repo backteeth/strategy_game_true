@@ -19,11 +19,13 @@ pub enum PeaceTerm {
 }
 
 impl PeaceTerm {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
+    /// `War.applied_terms`にもこのキーがそのまま(未翻訳で)格納され、表示直前に解決される。
     pub fn display_name(self) -> &'static str {
         match self {
-            PeaceTerm::WhitePeace => "White Peace",
-            PeaceTerm::CedeWarGoalRegion => "Cede War Goal Region",
-            PeaceTerm::AttackerConcedes => "Attacker Concedes Defeat",
+            PeaceTerm::WhitePeace => "peace_term.white_peace",
+            PeaceTerm::CedeWarGoalRegion => "peace_term.cede_war_goal_region",
+            PeaceTerm::AttackerConcedes => "peace_term.attacker_concedes",
         }
     }
 }
@@ -46,13 +48,15 @@ pub fn can_accept_peace_offer(
     military_registry: Option<&MilitaryRegistry>,
     current_date_str: &str,
 ) -> Result<(), &'static str> {
+    // P20-009: 戻り値は表示用の英語原文ではなく安定した翻訳キー(war_error.peace.*)。
+    // 呼び出し元UI(peace_panel)が`localization::t()`で表示直前に言語へ解決する。
     let war = war_registry
         .wars
         .get(&offer.war_id)
-        .ok_or("War not found")?;
+        .ok_or("war_error.peace.war_not_found")?;
 
     if war.status != WarStatus::Active {
-        return Err("This war is already ended");
+        return Err("war_error.peace.already_ended");
     }
 
     // 提案者が戦争参加国か検証
@@ -60,13 +64,13 @@ pub fn can_accept_peace_offer(
     let is_defender = war.defenders.contains(&offer.proposer_country_id);
 
     if !is_attacker && !is_defender {
-        return Err("Proposer is not a participant in this war");
+        return Err("war_error.peace.not_participant");
     }
 
     let is_recipient_valid = (is_attacker && war.defenders.contains(&offer.recipient_country_id))
         || (is_defender && war.attackers.contains(&offer.recipient_country_id));
     if !is_recipient_valid {
-        return Err("Recipient is not an opposing participant");
+        return Err("war_error.peace.invalid_recipient");
     }
 
     match offer.term {
@@ -77,18 +81,18 @@ pub fn can_accept_peace_offer(
             let elapsed_days = current.days_since(&start);
 
             if elapsed_days < 30 {
-                return Err("Less than 30 days have passed since war started");
+                return Err("war_error.peace.white_peace_too_early");
             }
 
             // 条件2: 攻撃側戦勝点が -10 以上 (防御側視点で有利すぎない)
             if war.war_score < -10.0 {
-                return Err("Attacker war score is too low for defender to accept white peace");
+                return Err("war_error.peace.white_peace_score_too_low");
             }
         }
         PeaceTerm::CedeWarGoalRegion => {
             // 攻撃側のみが割譲要求を行える
             if !is_attacker {
-                return Err("Only attacker can demand war goal region cessions");
+                return Err("war_error.peace.cede_not_attacker");
             }
 
             // 戦争目標地域の法的所有国が防御側か検証
@@ -96,14 +100,14 @@ pub fn can_accept_peace_offer(
                 .war_goals
                 .first()
                 .and_then(|g| g.target_states.first().copied())
-                .ok_or("War has no valid target state")?;
+                .ok_or("war_error.peace.no_target_state")?;
 
             if let Some(s_reg) = state_registry {
                 let state = s_reg
                     .get(target_state_id)
-                    .ok_or("Target state does not exist")?;
+                    .ok_or("war_error.peace.target_state_missing")?;
                 if state.owner_country_id != offer.recipient_country_id {
-                    return Err("Target state is not owned by defender");
+                    return Err("war_error.peace.target_not_owned_by_defender");
                 }
             }
 
@@ -116,15 +120,13 @@ pub fn can_accept_peace_offer(
             };
 
             if war.war_score < 60.0 && !defender_capitulated {
-                return Err(
-                    "War score is insufficient and defender has not capitulated (Required score: 60)",
-                );
+                return Err("war_error.peace.cede_insufficient");
             }
         }
         PeaceTerm::AttackerConcedes => {
             // 攻撃側のみが敗北受諾を提案できる
             if !is_attacker {
-                return Err("Only attacker can concede defeat");
+                return Err("war_error.peace.concede_not_attacker");
             }
         }
     }
@@ -222,15 +224,26 @@ pub fn execute_peace_settlement(
     diplomacy_registry: &mut DiplomacyRegistry,
     frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
 ) -> Result<(), &'static str> {
-    let war = war_registry.wars.get_mut(&war_id).ok_or("War not found")?;
+    let war = war_registry
+        .wars
+        .get_mut(&war_id)
+        .ok_or("war_error.peace.war_not_found")?;
 
     // 二重適用防止
     if war.status != WarStatus::Active {
         return Ok(());
     }
 
-    let attacker = *war.attackers.iter().next().ok_or("No attacker")?;
-    let defender = *war.defenders.iter().next().ok_or("No defender")?;
+    let attacker = *war
+        .attackers
+        .iter()
+        .next()
+        .ok_or("war_error.peace.no_attacker")?;
+    let defender = *war
+        .defenders
+        .iter()
+        .next()
+        .ok_or("war_error.peace.no_defender")?;
 
     let target_state_id = war
         .war_goals

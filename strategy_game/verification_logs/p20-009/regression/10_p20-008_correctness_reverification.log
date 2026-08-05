@@ -1,0 +1,16 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.47s
+     Running tests\profile_workload_correctness_test.rs (target\debug\deps\profile_workload_correctness_test-30ee7836495ad250.exe)
+
+running 9 tests
+test generated_state_count_matches_requested ... ok
+test state_country_associations_are_valid ... ok
+test diplomatic_relation_advances_via_real_daily_diplomacy_system ... ok
+test daily_tick_advances_requested_number_of_days ... ok
+test larger_scale_smoke_test_stays_sane ... ok
+test high_load_scenario_produces_real_war_and_military_activity ... ok
+test normal_scenario_produces_real_economic_and_research_activity ... ok
+test same_seed_produces_deterministic_results ... ok
+test research_data_advances_via_real_monthly_research_system ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

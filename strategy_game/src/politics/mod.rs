@@ -7,6 +7,7 @@ pub mod values;
 use crate::app::game_state::GameState;
 use crate::app::time::MonthChangedMessage;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::politics::approval::calculate_interest_group_approval;
 use crate::politics::interest_groups::calculate_interest_group_influence;
 use crate::politics::reform::{apply_reform_completion, update_reform_progress_step};
@@ -18,19 +19,23 @@ pub struct PoliticsPlugin;
 
 impl Plugin for PoliticsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            handle_monthly_politics.run_if(in_state(GameState::Playing)),
-        );
+        app.add_plugins(crate::localization::TranslationCorePlugin)
+            .add_systems(
+                Update,
+                handle_monthly_politics.run_if(in_state(GameState::Playing)),
+            );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_monthly_politics(
     mut month_events: MessageReader<MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     state_registry: Res<StateRegistry>,
     player_country: Res<PlayerCountry>,
     mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     for _event in month_events.read() {
         for country in country_registry.countries.iter_mut() {
@@ -95,9 +100,11 @@ fn handle_monthly_politics(
 
                     if player_country.0 == Some(country.id) {
                         notif_writer.write(GameNotification {
-                            message: format!(
-                                "Political Reform Completed: {} target reached!",
-                                reform.axis.display_name()
+                            message: tf(
+                                &catalog,
+                                locale.0,
+                                "notif.reform_completed",
+                                vec![("axis", t(&catalog, locale.0, reform.axis.display_name()))],
                             ),
                         });
                     }

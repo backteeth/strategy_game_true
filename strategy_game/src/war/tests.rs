@@ -231,7 +231,8 @@ fn test_cannot_justify_against_self() {
         &d_reg,
     );
     assert!(res.is_err());
-    assert_eq!(res.unwrap_err(), "Cannot justify war against own country");
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res.unwrap_err(), "war_error.justify.self");
 }
 
 #[test]
@@ -248,10 +249,8 @@ fn test_cannot_justify_unowned_state() {
         &d_reg,
     );
     assert!(res.is_err());
-    assert_eq!(
-        res.unwrap_err(),
-        "Target state is not owned by target country"
-    );
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res.unwrap_err(), "war_error.justify.state_not_owned");
 }
 
 #[test]
@@ -275,7 +274,8 @@ fn test_cannot_justify_against_ally() {
         &d_reg,
     );
     assert!(res.is_err());
-    assert_eq!(res.unwrap_err(), "Cannot justify war against an ally");
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res.unwrap_err(), "war_error.justify.ally");
 }
 
 #[test]
@@ -299,10 +299,8 @@ fn test_cannot_justify_against_nap_partner() {
         &d_reg,
     );
     assert!(res.is_err());
-    assert_eq!(
-        res.unwrap_err(),
-        "Cannot justify war against non-aggression pact partner"
-    );
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res.unwrap_err(), "war_error.justify.nap");
 }
 
 #[test]
@@ -329,10 +327,8 @@ fn test_cannot_duplicate_justification() {
         &d_reg,
     );
     assert!(res2.is_err());
-    assert_eq!(
-        res2.unwrap_err(),
-        "Justification for this state already exists"
-    );
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res2.unwrap_err(), "war_error.justify.duplicate");
 }
 
 #[test]
@@ -423,10 +419,8 @@ fn test_cannot_declare_war_before_justification_complete() {
     );
 
     assert!(res.is_err());
-    assert_eq!(
-        res.unwrap_err(),
-        "No completed war justification for this state"
-    );
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res.unwrap_err(), "war_error.declare.no_justification");
 }
 
 #[test]
@@ -647,7 +641,8 @@ fn test_cannot_start_duplicate_war() {
     );
 
     assert!(res.is_err());
-    assert_eq!(res.unwrap_err(), "Countries are already at war");
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res.unwrap_err(), "war_error.declare.already_at_war");
 }
 
 #[test]
@@ -1131,7 +1126,8 @@ fn test_phase16_truce_prevents_justification_and_war() {
         Some("1936/06/01"),
     );
     assert!(res_j.is_err());
-    assert_eq!(res_j.unwrap_err(), "Cannot justify war during truce");
+    // P20-009: エラー戻り値は表示用英語原文ではなく安定した翻訳キー。
+    assert_eq!(res_j.unwrap_err(), "war_error.justify.truce");
 
     // War declaration should fail during truce
     let res_w = w_reg.can_declare_war_with_date(

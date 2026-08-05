@@ -11,11 +11,12 @@ pub enum DivisionType {
 }
 
 impl DivisionType {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            DivisionType::Infantry => "Infantry",
-            DivisionType::Artillery => "Artillery",
-            DivisionType::Mage => "Mage",
+            DivisionType::Infantry => "division_type.infantry",
+            DivisionType::Artillery => "division_type.artillery",
+            DivisionType::Mage => "division_type.mage",
         }
     }
 }
@@ -28,11 +29,12 @@ pub enum DivisionSize {
 }
 
 impl DivisionSize {
+    /// 表示用の翻訳キー(P20-009)。現状はUIから未参照だが、将来の表示追加に備えて維持する。
     pub fn display_name(self) -> &'static str {
         match self {
-            DivisionSize::Light => "Light",
-            DivisionSize::Standard => "Standard",
-            DivisionSize::Heavy => "Heavy",
+            DivisionSize::Light => "division_size.light",
+            DivisionSize::Standard => "division_size.standard",
+            DivisionSize::Heavy => "division_size.heavy",
         }
     }
 }

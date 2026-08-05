@@ -6,6 +6,7 @@ pub mod world_stage;
 use crate::app::game_state::GameState;
 use crate::app::time::{DailySimulationSet, GameDate, MonthChangedMessage};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::research::data::{TechnologyField, TechnologyRegistry};
 use crate::research::progress::calculate_field_monthly_points;
 use crate::research::world_stage::WorldCivilizationState;
@@ -17,7 +18,8 @@ pub struct ResearchPlugin;
 
 impl Plugin for ResearchPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(TechnologyRegistry::default())
+        app.add_plugins(crate::localization::TranslationCorePlugin)
+            .insert_resource(TechnologyRegistry::default())
             .insert_resource(WorldCivilizationState::default())
             .add_systems(
                 Update,
@@ -39,6 +41,8 @@ pub fn handle_monthly_research(
     player_country: Res<PlayerCountry>,
     mut notif_writer: MessageWriter<GameNotification>,
     date: Res<GameDate>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     for _event in month_events.read() {
         let mut newly_completed_milestones: Vec<(usize, String)> = Vec::new();
@@ -93,14 +97,20 @@ pub fn handle_monthly_research(
                         &mut state_registry,
                         player_country.0 == Some(country.id),
                         &mut notif_writer,
+                        &locale,
+                        &catalog,
                     );
 
                     if player_country.0 == Some(country.id) {
                         notif_writer.write(GameNotification {
-                            message: format!(
-                                "Research Complete: {} ({})",
-                                def.name,
-                                field.display_name()
+                            message: tf(
+                                &catalog,
+                                locale.0,
+                                "notif.research_complete",
+                                vec![
+                                    ("tech", def.name.clone()),
+                                    ("field", t(&catalog, locale.0, field.display_name())),
+                                ],
                             ),
                         });
                     }
@@ -130,9 +140,11 @@ pub fn handle_monthly_research(
                     world_state.current_stage = next_stage;
                     world_state.last_advanced_date = date.display();
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "WORLD EVENT: Entered new World Era [{}]!",
-                            next_stage.display_name()
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "notif.world_event_new_era",
+                            vec![("era", t(&catalog, locale.0, next_stage.display_name()))],
                         ),
                     });
                 }
@@ -194,12 +206,15 @@ pub fn handle_npc_auto_research(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_technology_effects_to_country(
     country: &mut crate::country::CountryData,
     def: &crate::research::data::TechnologyDefinition,
     state_registry: &mut StateRegistry,
     is_player: bool,
     notif_writer: &mut MessageWriter<GameNotification>,
+    locale: &CurrentLocale,
+    catalog: &TranslationCatalog,
 ) {
     for effect in &def.effects {
         if let crate::research::data::TechnologyEffect::RevealResourceType(res_type) = effect {
@@ -210,10 +225,17 @@ fn apply_technology_effects_to_country(
                             dep.discovered = true;
                             if is_player {
                                 notif_writer.write(GameNotification {
-                                    message: format!(
-                                        "Resource Discovered: {} in {}",
-                                        res_type.display_name(),
-                                        state.name
+                                    message: tf(
+                                        catalog,
+                                        locale.0,
+                                        "notif.resource_discovered",
+                                        vec![
+                                            (
+                                                "resource",
+                                                t(catalog, locale.0, res_type.display_name()),
+                                            ),
+                                            ("state", state.name.clone()),
+                                        ],
                                     ),
                                 });
                             }

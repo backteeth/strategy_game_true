@@ -1,0 +1,58 @@
+# P20-009 作業中に実行した主要コマンド一覧 (実行順)
+
+## 変更前監査
+git rev-parse --show-toplevel
+git status --short
+git diff --stat
+sha256sum strategy_game/assets/data/states.ron strategy_game/tests/land_war_combat_peace_test.rs
+git log --oneline -10
+grep -rn "P20-009" audit_report.md walkthrough.md
+cargo check (baseline確認)
+
+## 調査 (フォント・Bevy内部)
+PowerShell: System.Drawing.Text.PrivateFontCollection でJapaneseFont.ttc / NotoSansJP-Variable.ttf のファミリー名列挙
+curl (Noto Sans JP フォント・OFLライセンステキストのダウンロード, github.com/google/fonts)
+grep bevy_text-0.19.0 ソース (FontLoader拡張子, default_font機能, system_font_discovery機能, SystemParam最大arity)
+
+## 実装
+(Write/Edit多数: src/localization.rs, assets/localization/{ja-JP,en-US}.ron,
+ src/ui/*.rs, src/{economy,research,politics,debug}/mod.rs, src/diplomacy/update.rs,
+ src/{building,country,diplomacy,economy,military,politics,research,war}/*.rs の
+ display_name()系メソッド, war/{data,justification,peace}.rs のエラー文字列,
+ src/war/tests.rs のアサーション7箇所)
+
+## ビルド・テスト検証 (反復実行)
+cargo check --all-targets
+cargo test --lib
+cargo test (全体)
+cargo test --test daily_system_integration_test
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --test p20_009_localization_resource_test --test p20_009_hardcoded_string_scan_test -- --nocapture
+cargo test --test p20_009_localization_headless_render_test -- --nocapture
+
+## フォーマット (保護対象を除外し対象ファイルのみ)
+sha256sum (rustfmt前)
+rustfmt --edition 2024 <17個の変更・新規ファイルを個別指定>
+sha256sum (rustfmt後、一致確認)
+cargo fmt --check (保護対象の既知15差分のみであることを確認)
+
+## 実行系検証
+cargo build --bin strategy_game
+PowerShell: Start-Process strategy_game.exe → Get-Process確認 → Stop-Process (安全終了)
+Read (PNG目視確認: 01,02,04,05 の各screenshots)
+
+## P20-007 / P20-008 再検証
+cargo test --test ui_headless_render_test -- --nocapture
+cargo test --test profile_workload_correctness_test -- --nocapture
+cargo run --release --bin profile_1000_states -- verification_logs/p20-009/profile_1000_states_output
+
+## 最終回帰一式
+cargo check --all-targets
+cargo test -- --list
+cargo test (全体、152件)
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --check
+git status --short
+git diff --stat
+git diff --check
+sha256sum strategy_game/assets/data/states.ron strategy_game/tests/land_war_combat_peace_test.rs (最終確認)

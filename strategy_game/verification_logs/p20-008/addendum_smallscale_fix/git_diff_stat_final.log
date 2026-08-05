@@ -1,0 +1,9 @@
+warning: in the working copy of 'audit_report.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/country/country_ai.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'walkthrough.md', LF will be replaced by CRLF the next time Git touches it
+ audit_report.md                         | 227 +++++++++++++++++++++++
+ strategy_game/Cargo.toml                |   5 +
+ strategy_game/src/country/country_ai.rs | 314 ++++++++++++++++++++++++++++++--
+ strategy_game/src/lib.rs                |   1 +
+ walkthrough.md                          | 227 +++++++++++++++++++++++
+ 5 files changed, 757 insertions(+), 17 deletions(-)

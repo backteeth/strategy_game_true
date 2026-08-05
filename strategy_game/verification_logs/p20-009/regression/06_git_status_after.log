@@ -1,0 +1,51 @@
+ M audit_report.md
+ M strategy_game/Cargo.toml
+ M strategy_game/src/building/data.rs
+ M strategy_game/src/country/country_ai.rs
+ M strategy_game/src/country/mod.rs
+ M strategy_game/src/debug/mod.rs
+ M strategy_game/src/diplomacy/data.rs
+ M strategy_game/src/diplomacy/mod.rs
+ M strategy_game/src/diplomacy/update.rs
+ M strategy_game/src/economy/economic_state.rs
+ M strategy_game/src/economy/mod.rs
+ M strategy_game/src/economy/resources.rs
+ M strategy_game/src/lib.rs
+ M strategy_game/src/military/data.rs
+ M strategy_game/src/politics/interest_groups.rs
+ M strategy_game/src/politics/mod.rs
+ M strategy_game/src/politics/values.rs
+ M strategy_game/src/research/data.rs
+ M strategy_game/src/research/mod.rs
+ M strategy_game/src/ui/country_selection.rs
+ M strategy_game/src/ui/diplomacy_panel.rs
+ M strategy_game/src/ui/economy_panel.rs
+ M strategy_game/src/ui/military_panel.rs
+ M strategy_game/src/ui/mod.rs
+ M strategy_game/src/ui/peace_panel.rs
+ M strategy_game/src/ui/politics_panel.rs
+ M strategy_game/src/ui/research_panel.rs
+ M strategy_game/src/ui/state_panel.rs
+ M strategy_game/src/ui/top_bar.rs
+ M strategy_game/src/war/data.rs
+ M strategy_game/src/war/frontline.rs
+ M strategy_game/src/war/justification.rs
+ M strategy_game/src/war/military_ai.rs
+ M strategy_game/src/war/peace.rs
+ M strategy_game/src/war/tests.rs
+ M strategy_game/verification_logs/p20-007/screenshots/01_country_selection_default.png
+ M strategy_game/verification_logs/p20-007/screenshots/02_country_selection_after_click.png
+ M strategy_game/verification_logs/p20-007/screenshots/03_playing_topbar.png
+ M walkthrough.md
+?? strategy_game/assets/fonts/NotoSansJP-OFL.txt
+?? strategy_game/assets/fonts/NotoSansJP-Variable.ttf
+?? strategy_game/assets/localization/
+?? strategy_game/src/bin/
+?? strategy_game/src/localization.rs
+?? strategy_game/src/profiling.rs
+?? strategy_game/tests/p20_009_hardcoded_string_scan_test.rs
+?? strategy_game/tests/p20_009_localization_headless_render_test.rs
+?? strategy_game/tests/p20_009_localization_resource_test.rs
+?? strategy_game/tests/profile_workload_correctness_test.rs
+?? strategy_game/verification_logs/p20-008/
+?? strategy_game/verification_logs/p20-009/

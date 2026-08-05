@@ -38,11 +38,12 @@ pub enum ValueAxis {
 }
 
 impl ValueAxis {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            ValueAxis::ScienceMagic => "Science vs Magic",
-            ValueAxis::IndividualState => "Individualism vs Statism",
-            ValueAxis::SecularReligious => "Secularism vs Religion",
+            ValueAxis::ScienceMagic => "value_axis.science_magic",
+            ValueAxis::IndividualState => "value_axis.individual_state",
+            ValueAxis::SecularReligious => "value_axis.secular_religious",
         }
     }
 }

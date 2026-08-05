@@ -1,0 +1,203 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 15.82s
+     Running unittests src\lib.rs (target\debug\deps\strategy_game-72756a412b5e1897.exe)
+
+running 84 tests
+test military::combat_calc::tests::test_combat_is_deterministic ... ok
+test country::country_ai::tests::test_compute_land_states_by_controller_matches_individual_filter ... ok
+test military::combat_calc::tests::test_zero_manpower_no_damage ... ok
+test country::country_ai::tests::test_war_preparation_ai_starts_justification_via_optimized_path ... ok
+test country::country_ai::tests::test_player_country_not_controlled_by_country_ai ... ok
+test diplomacy::tests::test_claim_registry ... ok
+test diplomacy::tests::test_crisis_registry ... ok
+test diplomacy::tests::test_demand_acceptance ... ok
+test diplomacy::tests::test_diplomatic_pair_normalization ... ok
+test diplomacy::tests::test_relation_clamping ... ok
+test diplomacy::tests::test_treaty_addition_and_removal ... ok
+test diplomacy::tests::test_truce_prevents_war ... ok
+test country::country_ai::tests::test_compute_total_power_by_country_matches_individual_calculation ... ok
+test military::combat_calc::tests::test_resolve_combat_day_basic ... ok
+test country::country_ai::tests::test_ai_construction_validity_and_cost ... ok
+test military::invasion::tests::test_find_retreat_destination_deterministic ... ok
+test military::invasion::tests::test_no_battle_created_between_same_country ... ok
+test military::invasion::tests::test_occupy_state_changes_controller_not_owner ... ok
+test military::invasion::tests::test_no_duplicate_battle_in_same_state ... ok
+test military::combat_calc::tests::test_terrain_bonus_favors_defender ... ok
+test military::tests::test_movement ... ok
+test military::invasion::tests::test_start_battle_creates_exactly_one_battle ... ok
+test military::tests::test_combat_strength ... ok
+test military::tests::test_pathfinding ... ok
+test military::tests::test_phase13_movement_timing_and_arrival ... ok
+test military::tests::test_phase13_own_territory_and_foreign_pathfinding ... ok
+test military::tests::test_phase13_unreachable_destination_and_determinism ... ok
+test military::tests::test_phase15_battle_starts_when_entering_defended_state ... ok
+test military::tests::test_phase15_combat_daily_resolution ... ok
+test military::tests::test_phase15_combat_is_deterministic ... ok
+test military::tests::test_phase15_controller_restored_on_recapture ... ok
+test military::tests::test_phase15_invasion_path_to_enemy_territory ... ok
+test military::tests::test_phase15_no_battle_between_same_country ... ok
+test military::tests::test_phase15_manpower_does_not_go_below_zero ... ok
+test military::tests::test_phase15_no_path_to_neutral_territory ... ok
+test military::tests::test_phase15_org_recovery_does_not_exceed_max ... ok
+test military::tests::test_phase15_occupy_undefended_enemy_state ... ok
+test military::tests::test_phase15_org_recovery_in_own_territory ... ok
+test military::tests::test_phase15_org_recovery_not_during_combat ... ok
+test military::tests::test_phase15_org_recovery_not_when_moving ... ok
+test military::tests::test_phase15_retreat_is_deterministic ... ok
+test military::tests::test_phase15_owner_unchanged_after_occupation ... ok
+test military::tests::test_phase15_terrain_bonus_affects_combat ... ok
+test military::tests::test_recruitment_cancellation ... ok
+test military::tests::test_supply_processing ... ok
+test military::tests::test_recruitment_equipment_shortage ... ok
+test military::tests::test_recruitment_manpower_shortage ... ok
+test military::tests::test_recruitment_progress_and_completion ... ok
+test military::tests::test_recruitment_conditions ... ok
+test war::frontline::tests::test_army_assignment_and_validation ... ok
+test war::frontline::tests::test_defensive_positioning_and_determinism ... ok
+test war::frontline::tests::test_frontline_generation_border_calculation ... ok
+test war::frontline::tests::test_frontline_lifecycle_creation_and_removal ... ok
+test war::frontline::tests::test_offensive_operations_objective_and_attack ... ok
+test war::military_ai::tests::test_ai_army_assignment_and_power_evaluation ... ok
+test war::military_ai::tests::test_ai_decision_thresholds_and_hysteresis ... ok
+test war::military_ai::tests::test_ai_target_country_filtering ... ok
+test war::tests::test_are_countries_at_war_false_for_allies_or_neutrals ... ok
+test war::tests::test_are_countries_at_war_handles_invalid_ids ... ok
+test war::tests::test_are_countries_at_war_true_for_enemies ... ok
+test war::tests::test_attacker_and_defender_registered_correctly ... ok
+test war::frontline::tests::test_manual_vs_frontline_priority ... ok
+test war::tests::test_can_declare_war_after_justification_complete ... ok
+test war::tests::test_cannot_declare_war_before_justification_complete ... ok
+test war::tests::test_cannot_duplicate_justification ... ok
+test war::tests::test_cannot_justify_against_ally ... ok
+test war::tests::test_cannot_justify_against_nap_partner ... ok
+test war::tests::test_cannot_justify_against_self ... ok
+test war::tests::test_cannot_start_duplicate_war ... ok
+test war::tests::test_combat_resolution ... ok
+test war::tests::test_justification_completion_after_required_days ... ok
+test war::tests::test_justification_consumed_on_war_declaration ... ok
+test war::tests::test_justification_progress_timing ... ok
+test war::tests::test_cannot_justify_unowned_state ... ok
+test war::tests::test_peace_treaty_basic ... ok
+test war::tests::test_phase16_battle_results_sync_and_deduplication ... ok
+test war::tests::test_phase16_capitulation_rules ... ok
+test war::tests::test_phase16_peace_offer_validation ... ok
+test war::tests::test_phase16_sea_state_exclusion ... ok
+test war::tests::test_phase16_truce_prevents_justification_and_war ... ok
+test war::tests::test_phase16_war_score_breakdown_and_clamping ... ok
+test war::tests::test_war_data_created_on_declaration ... ok
+test war::tests::test_war_score_calculation ... ok
+test war::tests::test_war_declaration_determinism ... ok
+
+test result: ok. 84 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src\bin\profile_1000_states.rs (target\debug\deps\profile_1000_states-35af955b5cc92024.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\strategy_game-d6d7865ef8d5a87d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\daily_system_integration_test.rs (target\debug\deps\daily_system_integration_test-8f9774f24505c8b4.exe)
+
+running 6 tests
+test test_a_daily_processing_order ... ok
+test test_e_player_protection_and_ai_evaluation ... ok
+test test_d_next_day_military_action ... ok
+test test_b_game_paused_no_state_change ... ok
+test test_f_same_day_battle_result_reflection ... ok
+test test_c_war_declaration_and_frontline_generation ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\diplomacy_tests.rs (target\debug\deps\diplomacy_tests-f60d92b365eff76d.exe)
+
+running 5 tests
+test test_diplomatic_opinion_clamping ... ok
+test test_deterministic_proposal_score_calculation ... ok
+test test_diplomatic_pair_key_normalization ... ok
+test test_diplomacy_registry_access ... ok
+test test_treaty_duplication_prevention_and_removal ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\economy_tests.rs (target\debug\deps\economy_tests-932d572dbd74418a.exe)
+
+running 14 tests
+test tests::test_calculate_actual_output ... ok
+test tests::test_calculate_economic_state ... ok
+test tests::test_calculate_operation_ratio ... ok
+test tests::test_calculate_logistics_ratio ... ok
+test tests::test_calculate_unemployed_workforce ... ok
+test tests::test_calculate_state_tax ... ok
+test tests::test_construction_cancel_refund ... ok
+test tests::test_construction_completion ... ok
+test tests::test_construction_payment ... ok
+test tests::test_operation_ratio_input_shortage ... ok
+test tests::test_reject_exceeding_max_level ... ok
+test tests::test_welfare_and_unrest_clamping ... ok
+test tests::test_calculate_monthly_balance ... ok
+test tests::test_calculate_workforce ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\land_war_combat_peace_test.rs (target\debug\deps\land_war_combat_peace_test-26d11ef8987c2cac.exe)
+
+running 2 tests
+test test_all_countries_are_directly_land_connected ... ok
+test test_land_war_declaration_combat_and_peace_flow ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\profile_workload_correctness_test.rs (target\debug\deps\profile_workload_correctness_test-30ee7836495ad250.exe)
+
+running 9 tests
+test generated_state_count_matches_requested ... ok
+test state_country_associations_are_valid ... ok
+test diplomatic_relation_advances_via_real_daily_diplomacy_system ... ok
+test larger_scale_smoke_test_stays_sane ... ok
+test daily_tick_advances_requested_number_of_days ... ok
+test high_load_scenario_produces_real_war_and_military_activity ... ok
+test normal_scenario_produces_real_economic_and_research_activity ... ok
+test same_seed_produces_deterministic_results ... ok
+test research_data_advances_via_real_monthly_research_system ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\research_and_politics_tests.rs (target\debug\deps\research_and_politics_tests-c09c69d42bde17f3.exe)
+
+running 9 tests
+test test_calculate_field_monthly_points ... ok
+test test_clergy_resistance_to_secular_reform ... ok
+test test_interest_group_influence_normalization ... ok
+test test_country_values_clamping ... ok
+test test_rebuild_technology_modifiers ... ok
+test test_fusion_efficiency_imbalance_penalty ... ok
+test test_political_reform_completion ... ok
+test test_research_allocation_normalization ... ok
+test test_world_civilization_stage_progression ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ui_headless_render_test.rs (target\debug\deps\ui_headless_render_test-165bced55f6b26c4.exe)
+
+running 1 test
+[2m2026-08-03T12:25:58.646165Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "610.74", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-08-03T12:25:58.912742Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-08-03T12:25:58.912784Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-08-03T12:25:58.914867Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DataLoader] Successfully loaded 8 buildings, 22 technologies, 4 countries, 10 states, 3 diplomatic relations
+[2m2026-08-03T12:25:59.267948Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DEBUG] Spawned 4 initial armies
+test ui_headless_render_produces_real_pixels ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+   Doc-tests strategy_game
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

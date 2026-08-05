@@ -18,11 +18,12 @@ pub enum FrontlineStance {
 }
 
 impl FrontlineStance {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            FrontlineStance::Stopped => "Stopped",
-            FrontlineStance::Defend => "Defend",
-            FrontlineStance::Offensive => "Offensive",
+            FrontlineStance::Stopped => "frontline_stance.stopped",
+            FrontlineStance::Defend => "frontline_stance.defend",
+            FrontlineStance::Offensive => "frontline_stance.offensive",
         }
     }
 }

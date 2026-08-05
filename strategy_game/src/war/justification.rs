@@ -66,44 +66,47 @@ impl WarJustificationRegistry {
         diplomacy_registry: &DiplomacyRegistry,
         current_date_str: Option<&str>,
     ) -> Result<(), &'static str> {
+        // P20-009: 戻り値は表示用の英語原文ではなく安定した翻訳キー(war_error.justify.*)。
+        // 呼び出し元UI(diplomacy_panel)が`localization::t()`で表示直前に言語へ解決する。
+
         // 自国に対する正当化は不可
         if initiator == target {
-            return Err("Cannot justify war against own country");
+            return Err("war_error.justify.self");
         }
 
         // 国家の存在チェック
         if country_registry.get(initiator).is_none() {
-            return Err("Initiator country does not exist");
+            return Err("war_error.justify.initiator_missing");
         }
         if country_registry.get(target).is_none() {
-            return Err("Target country does not exist");
+            return Err("war_error.justify.target_missing");
         }
 
         // 州の存在チェックと所有権確認
         let state = state_registry
             .get(target_state)
-            .ok_or("Target state does not exist")?;
+            .ok_or("war_error.justify.state_missing")?;
         if state.owner_country_id != target {
-            return Err("Target state is not owned by target country");
+            return Err("war_error.justify.state_not_owned");
         }
 
         // 同盟・不可侵条約・休戦のチェック
         if let Some(rel) = diplomacy_registry.get(initiator, target) {
             if rel.has_treaty(TreatyType::Alliance) {
-                return Err("Cannot justify war against an ally");
+                return Err("war_error.justify.ally");
             }
             if rel.has_treaty(TreatyType::NonAggressionPact) {
-                return Err("Cannot justify war against non-aggression pact partner");
+                return Err("war_error.justify.nap");
             }
         }
 
         if let Some(date_str) = current_date_str {
             if diplomacy_registry.is_in_truce(initiator, target, date_str) {
-                return Err("Cannot justify war during truce");
+                return Err("war_error.justify.truce");
             }
         } else if matches!(diplomacy_registry.get(initiator, target), Some(rel) if rel.truce_until.is_some())
         {
-            return Err("Cannot justify war during truce");
+            return Err("war_error.justify.truce");
         }
 
         // 重複正当化のチェック
@@ -111,7 +114,7 @@ impl WarJustificationRegistry {
             j.initiator == initiator && j.target == target && j.target_state == target_state
         });
         if is_duplicate {
-            return Err("Justification for this state already exists");
+            return Err("war_error.justify.duplicate");
         }
 
         Ok(())

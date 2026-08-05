@@ -1,6 +1,9 @@
 use crate::app::game_state::GameState;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::economy::resources::ResourceType;
+use crate::localization::{
+    CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
+};
 use crate::state::data::StateRegistry;
 use crate::ui::notification::NotificationHistory;
 use bevy::prelude::*;
@@ -29,7 +32,11 @@ impl Plugin for EconomyPanelPlugin {
     }
 }
 
-fn setup_economy_panel(mut commands: Commands) {
+fn setup_economy_panel(
+    mut commands: Commands,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
     commands
         .spawn((
             EconomyPanelRoot,
@@ -47,8 +54,10 @@ fn setup_economy_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.05, 0.05, 0.1, 0.85)),
         ))
         .with_children(|parent| {
+            let (text, marker) = localized_text(&catalog, locale.0, "economy_panel.title", vec![]);
             parent.spawn((
-                Text::new("-- National Economy --"),
+                text,
+                marker,
                 TextLayout {
                     linebreak: LineBreak::AnyCharacter,
                     ..default()
@@ -68,8 +77,11 @@ fn setup_economy_panel(mut commands: Commands) {
                     ..default()
                 })
                 .with_children(|row| {
+                    let (text, marker) =
+                        localized_text(&catalog, locale.0, "economy_panel.tax_rate_label", vec![]);
                     row.spawn((
-                        Text::new("Tax Rate:"),
+                        text,
+                        marker,
                         TextLayout {
                             linebreak: LineBreak::AnyCharacter,
                             ..default()
@@ -134,9 +146,12 @@ fn setup_economy_panel(mut commands: Commands) {
                     });
                 });
 
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "economy_panel.loading", vec![]);
             parent.spawn((
                 EconomyPanelText,
-                Text::new("Loading nation economy data..."),
+                text,
+                marker,
                 TextLayout {
                     linebreak: LineBreak::AnyCharacter,
                     ..default()
@@ -155,14 +170,22 @@ fn update_economy_panel(
     country_registry: Res<CountryRegistry>,
     state_registry: Res<StateRegistry>,
     notif_history: Res<NotificationHistory>,
-    mut text_q: Query<&mut Text, With<EconomyPanelText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut text_q: Query<(&mut Text, &mut LocalizedText), With<EconomyPanelText>>,
 ) {
-    let Ok(mut text) = text_q.single_mut() else {
+    let Ok((mut text, mut marker)) = text_q.single_mut() else {
         return;
     };
 
     let Some(country_id) = player_country.0 else {
-        *text = Text::new("No player country selected");
+        let key = "economy_panel.no_country";
+        let rendered = t(&catalog, locale.0, key);
+        if text.0 != rendered {
+            *text = Text::new(rendered);
+        }
+        marker.key = key;
+        marker.args = vec![];
         return;
     };
 
@@ -173,25 +196,40 @@ fn update_economy_panel(
     let mut stockpile_str = String::new();
     for res in ResourceType::ALL {
         let amount = country.stockpile.get(res);
-        stockpile_str.push_str(&format!("  {}: {:.0}\n", res.display_name(), amount));
+        stockpile_str.push_str(&tf(
+            &catalog,
+            locale.0,
+            "economy_panel.stockpile_line",
+            vec![
+                ("resource", t(&catalog, locale.0, res.display_name())),
+                ("amount", format!("{:.0}", amount)),
+            ],
+        ));
     }
 
     let mut queue_str = String::new();
     if country.construction_queue.is_empty() {
-        queue_str.push_str("  (Empty)\n");
+        queue_str.push_str(&t(&catalog, locale.0, "economy_panel.queue_empty"));
     } else {
         for (i, item) in country.construction_queue.iter().enumerate() {
             let state_name = state_registry
                 .get(item.state_id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-            queue_str.push_str(&format!(
-                "  [{}] {} @ {} ({:.0}/{:.0} d)\n",
-                i + 1,
-                item.building_type.display_name(),
-                state_name,
-                item.progress,
-                item.required_progress
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+            queue_str.push_str(&tf(
+                &catalog,
+                locale.0,
+                "economy_panel.queue_line",
+                vec![
+                    ("index", (i + 1).to_string()),
+                    (
+                        "building",
+                        t(&catalog, locale.0, item.building_type.display_name()),
+                    ),
+                    ("state", state_name),
+                    ("progress", format!("{:.0}", item.progress)),
+                    ("required", format!("{:.0}", item.required_progress)),
+                ],
             ));
         }
     }
@@ -199,26 +237,38 @@ fn update_economy_panel(
     let last_notif = notif_history
         .recent
         .last()
-        .map(|s| s.as_str())
-        .unwrap_or("None");
+        .cloned()
+        .unwrap_or_else(|| t(&catalog, locale.0, "common.none"));
 
-    let info = format!(
-        "State: {}\nTax Rate: {:.1}%\nMonthly Inc: +{:.1} G\nMonthly Exp: -{:.1} G\nMonthly Bal: {:.1} G\nSci Capacity: {:.1}\nMag Capacity: {:.1}\n\n[Stockpile]\n{}\n[Construction Queue (Cancel: Press C)]\n{}\n[Notification]\n  {}",
-        country.economic_state.display_name_short(),
-        country.tax_rate * 100.0,
-        country.monthly_income,
-        country.monthly_expenses,
-        country.monthly_balance,
-        country.science_research_capacity,
-        country.magic_research_capacity,
-        stockpile_str,
-        queue_str,
-        last_notif
-    );
+    let args = vec![
+        (
+            "state",
+            t(
+                &catalog,
+                locale.0,
+                country.economic_state.display_name_short(),
+            ),
+        ),
+        ("tax_rate", format!("{:.1}", country.tax_rate * 100.0)),
+        ("income", format!("{:.1}", country.monthly_income)),
+        ("expenses", format!("{:.1}", country.monthly_expenses)),
+        ("balance", format!("{:.1}", country.monthly_balance)),
+        (
+            "sci_cap",
+            format!("{:.1}", country.science_research_capacity),
+        ),
+        ("mag_cap", format!("{:.1}", country.magic_research_capacity)),
+        ("stockpile", stockpile_str),
+        ("queue", queue_str),
+        ("last_notification", last_notif),
+    ];
+    let info = tf(&catalog, locale.0, "economy_panel.info", args.clone());
 
     if text.0 != info {
         *text = Text::new(info);
     }
+    marker.key = "economy_panel.info";
+    marker.args = args;
 }
 
 fn handle_tax_buttons(

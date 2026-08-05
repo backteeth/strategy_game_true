@@ -29,18 +29,25 @@ pub enum MilitaryAiDecisionReason {
 }
 
 impl MilitaryAiDecisionReason {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            MilitaryAiDecisionReason::NoActiveWar => "No Active War",
-            MilitaryAiDecisionReason::NoValidFrontline => "No Valid Frontline",
-            MilitaryAiDecisionReason::NoAvailableArmy => "No Available Army",
-            MilitaryAiDecisionReason::NoReachableFrontline => "No Reachable Frontline",
-            MilitaryAiDecisionReason::NoValidTarget => "No Valid Target",
-            MilitaryAiDecisionReason::Recovering => "Recovering",
-            MilitaryAiDecisionReason::EnemyStronger => "Enemy Stronger (Defend)",
-            MilitaryAiDecisionReason::ComparableStrength => "Comparable Strength (Defend)",
-            MilitaryAiDecisionReason::SufficientAdvantage => "Sufficient Advantage (Offensive)",
-            MilitaryAiDecisionReason::TargetCaptured => "Target Captured (Re-evaluating)",
+            MilitaryAiDecisionReason::NoActiveWar => "military_ai_reason.no_active_war",
+            MilitaryAiDecisionReason::NoValidFrontline => "military_ai_reason.no_valid_frontline",
+            MilitaryAiDecisionReason::NoAvailableArmy => "military_ai_reason.no_available_army",
+            MilitaryAiDecisionReason::NoReachableFrontline => {
+                "military_ai_reason.no_reachable_frontline"
+            }
+            MilitaryAiDecisionReason::NoValidTarget => "military_ai_reason.no_valid_target",
+            MilitaryAiDecisionReason::Recovering => "military_ai_reason.recovering",
+            MilitaryAiDecisionReason::EnemyStronger => "military_ai_reason.enemy_stronger",
+            MilitaryAiDecisionReason::ComparableStrength => {
+                "military_ai_reason.comparable_strength"
+            }
+            MilitaryAiDecisionReason::SufficientAdvantage => {
+                "military_ai_reason.sufficient_advantage"
+            }
+            MilitaryAiDecisionReason::TargetCaptured => "military_ai_reason.target_captured",
         }
     }
 }

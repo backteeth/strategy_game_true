@@ -31,13 +31,14 @@ pub enum CountryAiMode {
 }
 
 impl CountryAiMode {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            CountryAiMode::Developing => "Developing (Peacetime)",
-            CountryAiMode::Recovering => "Recovering (Post-war/Economic)",
-            CountryAiMode::PreparingWar => "Preparing War (Justifying)",
-            CountryAiMode::AtWar => "At War",
-            CountryAiMode::Disabled => "Disabled (Player)",
+            CountryAiMode::Developing => "country_ai_mode.developing",
+            CountryAiMode::Recovering => "country_ai_mode.recovering",
+            CountryAiMode::PreparingWar => "country_ai_mode.preparing_war",
+            CountryAiMode::AtWar => "country_ai_mode.at_war",
+            CountryAiMode::Disabled => "country_ai_mode.disabled",
         }
     }
 }
@@ -65,28 +66,41 @@ pub enum CountryAiDecisionReason {
 }
 
 impl CountryAiDecisionReason {
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            CountryAiDecisionReason::PeacetimeDevelopment => "Peacetime Development",
-            CountryAiDecisionReason::FoodShortageFarmPriority => "Food Shortage (Farm Priority)",
+            CountryAiDecisionReason::PeacetimeDevelopment => {
+                "country_ai_reason.peacetime_development"
+            }
+            CountryAiDecisionReason::FoodShortageFarmPriority => {
+                "country_ai_reason.food_shortage_farm_priority"
+            }
             CountryAiDecisionReason::RawMaterialMinePriority => {
-                "Raw Material Shortage (Mine Priority)"
+                "country_ai_reason.raw_material_mine_priority"
             }
             CountryAiDecisionReason::SteelShortageSteelMillPriority => {
-                "Steel Shortage (Steel Mill Priority)"
+                "country_ai_reason.steel_shortage_steel_mill_priority"
             }
-            CountryAiDecisionReason::FundsShortage => "Insufficient Funds for Construction",
-            CountryAiDecisionReason::NoBuildableState => "No Valid State for Construction",
-            CountryAiDecisionReason::NoResearchableTech => "No Available Tech to Research",
-            CountryAiDecisionReason::PostWarCooldown => "Post-war Cooldown (365 Days)",
-            CountryAiDecisionReason::NoAvailableArmies => "No Armies Available for Invasion",
-            CountryAiDecisionReason::NoReachableTargetCountry => "No Reachable Neighbor Country",
-            CountryAiDecisionReason::InsufficientPowerAdvantage => "Power Advantage < 130%",
-            CountryAiDecisionReason::TruceInEffect => "Truce or Pact in Effect",
-            CountryAiDecisionReason::JustificationInProgress => "Justification in Progress",
-            CountryAiDecisionReason::WarDeclarationPending => "War Declaration Pending",
-            CountryAiDecisionReason::WarInProgress => "War in Progress (Military AI active)",
-            CountryAiDecisionReason::PlayerControlled => "Disabled (Player Controlled)",
+            CountryAiDecisionReason::FundsShortage => "country_ai_reason.funds_shortage",
+            CountryAiDecisionReason::NoBuildableState => "country_ai_reason.no_buildable_state",
+            CountryAiDecisionReason::NoResearchableTech => "country_ai_reason.no_researchable_tech",
+            CountryAiDecisionReason::PostWarCooldown => "country_ai_reason.post_war_cooldown",
+            CountryAiDecisionReason::NoAvailableArmies => "country_ai_reason.no_available_armies",
+            CountryAiDecisionReason::NoReachableTargetCountry => {
+                "country_ai_reason.no_reachable_target_country"
+            }
+            CountryAiDecisionReason::InsufficientPowerAdvantage => {
+                "country_ai_reason.insufficient_power_advantage"
+            }
+            CountryAiDecisionReason::TruceInEffect => "country_ai_reason.truce_in_effect",
+            CountryAiDecisionReason::JustificationInProgress => {
+                "country_ai_reason.justification_in_progress"
+            }
+            CountryAiDecisionReason::WarDeclarationPending => {
+                "country_ai_reason.war_declaration_pending"
+            }
+            CountryAiDecisionReason::WarInProgress => "country_ai_reason.war_in_progress",
+            CountryAiDecisionReason::PlayerControlled => "country_ai_reason.player_controlled",
         }
     }
 }
@@ -168,6 +182,79 @@ pub fn calculate_country_total_power(
         })
         .map(evaluate_army_power)
         .sum()
+}
+
+/// 全国家の総有効陸戦力を一括計算する (P20-008最適化: `process_war_preparation_ai`が
+/// 候補国ごとに `calculate_country_total_power` を再計算していたO(countries)重複を排除する)。
+/// `calculate_country_total_power` と全く同一のフィルタ条件・集計方法を用いるため、
+/// 個別呼び出しの結果と完全に一致する(順序に依存しないu64合計のため計算順序の違いは影響しない)。
+///
+/// P20-008追補: `CountryId(pub usize)` が密な小さい整数キーであることを踏まえ、
+/// `HashMap` ではなく `Vec` をインデックスとして使用する。8か国程度の小規模ワールドでは
+/// `HashMap` のハッシュ計算・バケット確保という定数項オーバーヘッドが、削減できた
+/// 走査コストを上回り性能回帰を引き起こしていたため(詳細は報告書のP20-008追補セクション参照)、
+/// ハッシュ計算を伴わないVecインデックスへ置き換えることで小規模でもオーバーヘッドを抑える。
+/// 値・優先順位・決定論への影響は無い(単純な合計・グルーピングの実装変更のみ)。
+fn compute_total_power_by_country(
+    military_registry: &MilitaryRegistry,
+    state_registry: &StateRegistry,
+) -> Vec<u64> {
+    let mut power_by_country: Vec<u64> = Vec::new();
+    for army in military_registry.armies.values() {
+        if army.manpower == 0 || army.status == crate::military::data::ArmyStatus::Destroyed {
+            continue;
+        }
+        let is_land = state_registry
+            .get(army.current_state)
+            .map(|s| !s.is_sea)
+            .unwrap_or(false);
+        if !is_land {
+            continue;
+        }
+        let idx = army.owner.0;
+        if idx >= power_by_country.len() {
+            power_by_country.resize(idx + 1, 0);
+        }
+        power_by_country[idx] += evaluate_army_power(army);
+    }
+    power_by_country
+}
+
+/// `compute_total_power_by_country` の結果からCountryIdの値を安全に引く
+/// (登録済みでないIDは総戦力0として扱う。`calculate_country_total_power`が
+/// 該当軍0件の国に対して0を返すのと同じ意味)。
+fn total_power_for(power_by_country: &[u64], country_id: CountryId) -> u64 {
+    power_by_country.get(country_id.0).copied().unwrap_or(0)
+}
+
+/// 全国家の実効支配陸上State一覧を一括計算する (P20-008最適化: `process_war_preparation_ai`が
+/// 候補国ごとに `state_registry.states` 全件走査していたO(countries × states)重複を排除する)。
+/// `state_registry.states` を1回だけ走査し、元の走査順序(StateId昇順)を保ったまま
+/// 支配国ごとに振り分けるため、候補地域選択の優先順位(先頭要素優先)は変更しない。
+///
+/// P20-008追補: `compute_total_power_by_country` と同じ理由でVecインデックスを使用する。
+fn compute_land_states_by_controller(state_registry: &StateRegistry) -> Vec<Vec<StateId>> {
+    let mut states_by_controller: Vec<Vec<StateId>> = Vec::new();
+    for state in &state_registry.states {
+        if state.is_sea {
+            continue;
+        }
+        let idx = state.controller().0;
+        if idx >= states_by_controller.len() {
+            states_by_controller.resize_with(idx + 1, Vec::new);
+        }
+        states_by_controller[idx].push(state.id);
+    }
+    states_by_controller
+}
+
+/// `compute_land_states_by_controller` の結果からCountryIdの値を安全に引く
+/// (登録済みでないIDは陸上支配Stateなしとして扱う)。
+fn land_states_for(states_by_controller: &[Vec<StateId>], country_id: CountryId) -> &[StateId] {
+    states_by_controller
+        .get(country_id.0)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
 }
 
 /// 1. 建設AI (月次評価: game_day % 30 == country_id % 30 または dirty)
@@ -330,6 +417,10 @@ pub fn process_research_ai(
 }
 
 /// 3. 戦争準備・正当化AI (週次評価)
+///
+/// `power_by_country` / `land_states_by_controller` は呼び出し側(`process_daily_country_ai`)が
+/// 日次評価の開始時に一度だけ計算した事前計算結果(P20-008最適化)。
+/// 本関数はそれ以前と全く同じ値を参照するのみで、判定ロジック・優先順位は変更しない。
 #[allow(clippy::too_many_arguments)]
 pub fn process_war_preparation_ai(
     current_day: u32,
@@ -337,11 +428,12 @@ pub fn process_war_preparation_ai(
     current_date_str: &str,
     country_registry: &CountryRegistry,
     state_registry: &StateRegistry,
-    military_registry: &MilitaryRegistry,
     _war_registry: &WarRegistry,
     diplomacy_registry: &DiplomacyRegistry,
     justification_registry: &mut WarJustificationRegistry,
     ai_state: &mut CountryAiState,
+    power_by_country: &[u64],
+    land_states_by_controller: &[Vec<StateId>],
 ) {
     // 既存の正当化が進行中かチェック
     let is_justifying = justification_registry
@@ -362,7 +454,7 @@ pub fn process_war_preparation_ai(
     }
 
     // 自国の総有効戦力
-    let own_power = calculate_country_total_power(country_id, military_registry, state_registry);
+    let own_power = total_power_for(power_by_country, country_id);
     if own_power == 0 {
         ai_state.decision_reason = CountryAiDecisionReason::NoAvailableArmies;
         return;
@@ -371,12 +463,7 @@ pub fn process_war_preparation_ai(
     // 攻撃対象国候補の抽出 (陸上隣接国)
     let mut candidates: Vec<(CountryId, u64, StateId)> = Vec::new();
 
-    let my_states: Vec<StateId> = state_registry
-        .states
-        .iter()
-        .filter(|s| !s.is_sea && s.controller() == country_id)
-        .map(|s| s.id)
-        .collect();
+    let my_states: &[StateId] = land_states_for(land_states_by_controller, country_id);
 
     for other_country in &country_registry.countries {
         let tid = other_country.id;
@@ -384,7 +471,7 @@ pub fn process_war_preparation_ai(
             continue;
         }
 
-        let target_power = calculate_country_total_power(tid, military_registry, state_registry);
+        let target_power = total_power_for(power_by_country, tid);
 
         // 130% 戦力条件 (own * 1000 >= target * 1300)
         let has_power_advantage = if target_power == 0 {
@@ -398,16 +485,11 @@ pub fn process_war_preparation_ai(
         }
 
         // 隣接確認 & 到達可能な戦争目標地域の探索
-        let enemy_states: Vec<StateId> = state_registry
-            .states
-            .iter()
-            .filter(|s| !s.is_sea && s.controller() == tid)
-            .map(|s| s.id)
-            .collect();
+        let enemy_states: &[StateId] = land_states_for(land_states_by_controller, tid);
 
         let mut valid_target_state: Option<StateId> = None;
 
-        for &esid in &enemy_states {
+        for &esid in enemy_states {
             let reachable = my_states.iter().any(|&msid| {
                 find_path(msid, esid, state_registry, &[country_id], &[tid]).is_some()
             });
@@ -556,6 +638,18 @@ pub fn process_daily_country_ai(
         .collect();
     ai_country_ids.sort_by_key(|c| c.0);
 
+    // P20-008最適化: 週次の戦争準備AI (process_war_preparation_ai) が候補国ごとに
+    // 総戦力・支配State一覧を再計算していたO(countries)重複を排除するため、
+    // 日次評価の開始時に一度だけ計算する。値は再計算した場合と完全に一致する
+    // (`compute_total_power_by_country` / `compute_land_states_by_controller` のdoc参照)。
+    //
+    // P20-008追補: 全戦争中で `process_war_preparation_ai` が1件も呼ばれない日
+    // (例: 全AI国家が交戦中)には構築自体を省略するため、`Option`で遅延構築する。
+    // ループ内で実際に必要になった最初の国の処理時に一度だけ構築し、同日内の
+    // 以降の国では再利用する(値・優先順位は事前構築時と完全に同一)。
+    let mut power_by_country: Option<Vec<u64>> = None;
+    let mut land_states_by_controller: Option<Vec<Vec<StateId>>> = None;
+
     for country_id in ai_country_ids {
         let is_at_war = war_registry.wars.values().any(|w| {
             w.status == WarStatus::Active
@@ -601,17 +695,24 @@ pub fn process_daily_country_ai(
             );
 
             if !is_at_war {
+                let power_map = power_by_country.get_or_insert_with(|| {
+                    compute_total_power_by_country(military_registry, state_registry)
+                });
+                let land_map = land_states_by_controller
+                    .get_or_insert_with(|| compute_land_states_by_controller(state_registry));
+
                 process_war_preparation_ai(
                     current_day,
                     country_id,
                     current_date_str,
                     country_registry,
                     state_registry,
-                    military_registry,
                     war_registry,
                     diplomacy_registry,
                     justification_registry,
                     ai_state,
+                    power_map.as_slice(),
+                    land_map.as_slice(),
                 );
             }
             ai_state.last_weekly_evaluation_day = current_day;
@@ -865,5 +966,198 @@ mod tests {
         // 建設キューに1件追加され、資金が減っていることを確認
         assert_eq!(c2.construction_queue.len(), 1);
         assert!(c2.treasury < initial_treasury);
+    }
+
+    // ── P20-008 回帰テスト ───────────────────────────────────────────────────
+    // `process_war_preparation_ai` のO(countries)重複計算を事前計算マップに
+    // 置き換えた最適化(P20-008)が、既存の`calculate_country_total_power`単体呼び出し
+    // および州支配フィルタと完全に同一の値を返すことを検証する。
+
+    fn make_test_army(
+        owner: CountryId,
+        current_state: StateId,
+        manpower: u64,
+    ) -> crate::military::data::ArmyUnit {
+        use crate::military::data::{ArmyStatus, DivisionSize, DivisionType};
+        crate::military::data::ArmyUnit {
+            id: crate::common::ArmyId(0),
+            owner,
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state,
+            destination: None,
+            current_path: Vec::new(),
+            target_state: None,
+            manpower,
+            max_manpower: manpower,
+            equipment: 10.0,
+            max_equipment: 10.0,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 1.0,
+            max_morale: 1.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: ArmyStatus::Idle,
+            def_id: crate::common::DivisionId(0),
+            attack_power: 10,
+            defense_power: 10,
+            combat_id: None,
+        }
+    }
+
+    #[test]
+    fn test_compute_total_power_by_country_matches_individual_calculation() {
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(2)],
+            ..default()
+        };
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: CountryId(2),
+            neighbors: vec![StateId(1)],
+            ..default()
+        };
+        let state_registry = StateRegistry::build(vec![s1, s2]);
+
+        let mut military_registry = MilitaryRegistry::default();
+        military_registry.add_army(make_test_army(CountryId(1), StateId(1), 1000));
+        military_registry.add_army(make_test_army(CountryId(1), StateId(1), 500));
+        military_registry.add_army(make_test_army(CountryId(2), StateId(2), 2000));
+
+        let precomputed = compute_total_power_by_country(&military_registry, &state_registry);
+
+        for cid in [CountryId(1), CountryId(2), CountryId(3)] {
+            let expected = calculate_country_total_power(cid, &military_registry, &state_registry);
+            let actual = total_power_for(&precomputed, cid);
+            assert_eq!(
+                actual, expected,
+                "事前計算マップの国{cid:?}の総戦力は個別計算(calculate_country_total_power)と完全に一致すること"
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_land_states_by_controller_matches_individual_filter() {
+        let (_, _, state_registry, _, _, _, _, _, _, _, _, _, _) = setup_test_env();
+
+        let precomputed = compute_land_states_by_controller(&state_registry);
+
+        for country_id in [CountryId(1), CountryId(2)] {
+            let mut expected: Vec<StateId> = state_registry
+                .states
+                .iter()
+                .filter(|s| !s.is_sea && s.controller() == country_id)
+                .map(|s| s.id)
+                .collect();
+            let mut actual = land_states_for(&precomputed, country_id).to_vec();
+            expected.sort_by_key(|s| s.0);
+            actual.sort_by_key(|s| s.0);
+            assert_eq!(
+                actual, expected,
+                "事前計算マップの国{country_id:?}の支配State一覧は個別フィルタ結果と完全に一致すること"
+            );
+        }
+    }
+
+    /// 最適化後の `process_war_preparation_ai` (事前計算マップ経由)が、
+    /// 隣接する陸上国境を越えて弱い敵国へ実際に正当化(War Justification)を
+    /// 開始することを、本番の公開エントリーポイント経由で検証する。
+    #[test]
+    fn test_war_preparation_ai_starts_justification_via_optimized_path() {
+        let player_country = PlayerCountry(None);
+
+        let strong = CountryData {
+            id: CountryId(0),
+            name: "Strong".to_string(),
+            capital_state_id: StateId(0),
+            treasury: 1000.0,
+            ..default()
+        };
+        let weak = CountryData {
+            id: CountryId(1),
+            name: "Weak".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 1000.0,
+            ..default()
+        };
+        let mut country_registry = CountryRegistry {
+            countries: vec![strong, weak],
+        };
+
+        let s0 = StateData {
+            id: StateId(0),
+            owner_country_id: CountryId(0),
+            neighbors: vec![StateId(1)],
+            ..default()
+        };
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(0)],
+            ..default()
+        };
+        let state_registry = StateRegistry::build(vec![s0, s1]);
+
+        let mut military_registry = MilitaryRegistry::default();
+        // Strong(0) は Weak(1) に対し130%以上の戦力優位を持つ
+        military_registry.add_army(make_test_army(CountryId(0), StateId(0), 10_000));
+        military_registry.add_army(make_test_army(CountryId(1), StateId(1), 1_000));
+
+        let building_registry = crate::building::data::BuildingRegistry::default();
+        let mut war_registry = WarRegistry::default();
+        let mut diplomacy_registry = DiplomacyRegistry::default();
+        let tech_registry = TechnologyRegistry::default();
+        let world_state = WorldCivilizationState::default();
+        let mut justification_registry = WarJustificationRegistry::default();
+        let mut frontline_registry = crate::war::frontline::FrontlineRegistry::default();
+        let mut military_ai_registry = MilitaryAiRegistry::default();
+        let mut country_ai_registry = CountryAiRegistry::default();
+
+        // day=7: 週次評価 (day % 7 == country_id % 7) を Strong(0) に対して成立させる
+        process_daily_country_ai(
+            7,
+            "1800/01/08",
+            &player_country,
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            &military_registry,
+            &mut war_registry,
+            &mut diplomacy_registry,
+            &tech_registry,
+            &world_state,
+            &mut justification_registry,
+            &mut frontline_registry,
+            &mut military_ai_registry,
+            &mut country_ai_registry,
+        );
+
+        assert!(
+            !justification_registry.justifications.is_empty(),
+            "戦力優位かつ到達可能な隣国が存在する場合、最適化後の経路でも正当化が開始されること"
+        );
+        let j = justification_registry
+            .justifications
+            .values()
+            .find(|j| j.initiator == CountryId(0))
+            .expect("Strong(0)が開始した正当化が存在すること");
+        assert_eq!(j.target, CountryId(1), "正当化の対象がWeak(1)であること");
+        assert_eq!(
+            j.target_state,
+            StateId(1),
+            "正当化の対象StateがState(1)であること"
+        );
+
+        // 注: `ai_state.dirty` は初期値 true のため、同日内で月次建設AI
+        // (`process_construction_ai`) も実行され、`decision_reason` は
+        // その建設判断理由へ後から上書きされる(本番の既存仕様)。
+        // そのため war-prep AI が実際に機能したことは `mode` と
+        // 正当化(justification)の内容で検証する。
+        let ai_state = country_ai_registry.ai_states.get(&CountryId(0)).unwrap();
+        assert_eq!(ai_state.mode, CountryAiMode::PreparingWar);
     }
 }

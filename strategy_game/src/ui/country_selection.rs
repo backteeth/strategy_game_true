@@ -1,6 +1,10 @@
 use crate::app::game_state::GameState;
 use crate::common::CountryId;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{
+    CurrentLocale, LanguageToggleButton, LanguageToggleButtonText, LocalizedText,
+    TranslationCatalog, localized_text, t, tf,
+};
 use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 
@@ -39,6 +43,8 @@ fn setup_ui(
     mut commands: Commands,
     country_registry: Res<CountryRegistry>,
     mut preview: ResMut<PreviewCountry>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     preview.0 = country_registry.countries.first().map(|c| c.id);
 
@@ -63,14 +69,42 @@ fn setup_ui(
                 ..default()
             },))
                 .with_children(|left_panel| {
-                    left_panel.spawn((
-                        Text::new("Select Your Nation"),
-                        TextFont {
-                            font_size: FontSize::Px(24.0),
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.9, 0.9, 0.9)),
-                    ));
+                    {
+                        let (text, marker) =
+                            localized_text(&catalog, locale.0, "country_selection.title", vec![]);
+                        left_panel.spawn((
+                            text,
+                            marker,
+                            TextFont {
+                                font_size: FontSize::Px(24.0),
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                        ));
+                    }
+
+                    left_panel
+                        .spawn((
+                            LanguageToggleButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                                margin: UiRect::bottom(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.25, 0.35, 0.3, 1.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                LanguageToggleButtonText,
+                                Text::new(locale.0.next().own_name()),
+                                TextColor(Color::WHITE),
+                                TextFont {
+                                    font_size: FontSize::Px(13.0),
+                                    ..default()
+                                },
+                            ));
+                        });
 
                     for country in &country_registry.countries {
                         left_panel
@@ -107,15 +141,24 @@ fn setup_ui(
                 ..default()
             },))
                 .with_children(|right_panel| {
-                    right_panel.spawn((
-                        PreviewDetailText,
-                        Text::new("Select a nation..."),
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(20.0),
-                            ..default()
-                        },
-                    ));
+                    {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "country_selection.select_prompt",
+                            vec![],
+                        );
+                        right_panel.spawn((
+                            PreviewDetailText,
+                            text,
+                            marker,
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(20.0),
+                                ..default()
+                            },
+                        ));
+                    }
 
                     right_panel
                         .spawn((
@@ -133,8 +176,15 @@ fn setup_ui(
                             BackgroundColor(Color::srgb(0.2, 0.6, 0.2)),
                         ))
                         .with_children(|btn| {
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                "country_selection.start_button",
+                                vec![],
+                            );
                             btn.spawn((
-                                Text::new("Start Game"),
+                                text,
+                                marker,
                                 TextColor(Color::WHITE),
                                 TextFont {
                                     font_size: FontSize::Px(24.0),
@@ -176,13 +226,15 @@ fn update_preview_details(
     preview: Res<PreviewCountry>,
     country_registry: Res<CountryRegistry>,
     state_registry: Res<StateRegistry>,
-    mut text_query: Query<&mut Text, With<PreviewDetailText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut text_query: Query<(&mut Text, &mut LocalizedText), With<PreviewDetailText>>,
 ) {
-    if !preview.is_changed() {
+    if !preview.is_changed() && !locale.is_changed() {
         return;
     }
 
-    let Ok(mut text) = text_query.single_mut() else {
+    let Ok((mut text, mut marker)) = text_query.single_mut() else {
         return;
     };
 
@@ -190,8 +242,8 @@ fn update_preview_details(
         let country_id = country.id;
         let capital_name = state_registry
             .get(country.capital_state_id)
-            .map(|s| s.name.as_str())
-            .unwrap_or("Unknown");
+            .map(|s| s.name.to_string())
+            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
 
         let total_pop: u64 = state_registry
             .states
@@ -200,16 +252,34 @@ fn update_preview_details(
             .map(|s| s.population)
             .sum();
 
-        let info = format!(
-            "Name: {}\nGovernment: {}\nEconomy: {}\nTotal Pop: {}\nTreasury: {:.0} G\nCapital: {}",
-            country.name,
-            country.government_type.display_name(),
-            country.economic_system.display_name(),
-            crate::ui::state_panel::format_population(total_pop),
-            country.treasury,
-            capital_name
+        let args = vec![
+            ("name", country.name.clone()),
+            (
+                "government",
+                t(&catalog, locale.0, country.government_type.display_name()),
+            ),
+            (
+                "economy",
+                t(&catalog, locale.0, country.economic_system.display_name()),
+            ),
+            (
+                "population",
+                crate::ui::state_panel::format_population(total_pop),
+            ),
+            ("treasury", format!("{:.0}", country.treasury)),
+            ("capital", capital_name),
+        ];
+        let info = tf(
+            &catalog,
+            locale.0,
+            "country_selection.preview",
+            args.clone(),
         );
-        *text = Text::new(info);
+        if text.0 != info {
+            *text = Text::new(info);
+        }
+        marker.key = "country_selection.preview";
+        marker.args = args;
     }
 }
 

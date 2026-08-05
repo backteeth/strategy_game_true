@@ -1,6 +1,10 @@
 use crate::app::game_state::GameState;
 use crate::app::time::{GameDate, GamePaused, GameSpeed};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{
+    CurrentLocale, LanguageToggleButton, LanguageToggleButtonText, Locale, LocalizedText,
+    TranslationCatalog, t, tf,
+};
 use crate::research::world_stage::WorldCivilizationState;
 use crate::state::data::StateRegistry;
 use crate::ui::state_panel::format_population;
@@ -40,7 +44,7 @@ impl Plugin for TopBarPlugin {
     }
 }
 
-fn setup_top_bar(mut commands: Commands) {
+fn setup_top_bar(mut commands: Commands, locale: Res<CurrentLocale>) {
     commands
         .spawn((
             TopBarRoot,
@@ -61,6 +65,7 @@ fn setup_top_bar(mut commands: Commands) {
             root.spawn((
                 TopBarPlayerInfoText,
                 Text::new(""),
+                LocalizedText::default(),
                 TextColor(Color::srgb(0.9, 0.9, 0.9)),
                 TextFont {
                     font_size: FontSize::Px(14.0),
@@ -78,6 +83,7 @@ fn setup_top_bar(mut commands: Commands) {
                     right_panel.spawn((
                         TopBarDateText,
                         Text::new("1800/01/01"),
+                        LocalizedText::default(),
                         TextColor(Color::srgb(0.9, 0.9, 0.9)),
                         TextFont {
                             font_size: FontSize::Px(14.0),
@@ -132,18 +138,47 @@ fn setup_top_bar(mut commands: Commands) {
                                 ));
                             });
                     }
+
+                    // 言語切り替えボタン(P20-009): ラベルは切り替え先言語の自称(翻訳キーを介さない)
+                    right_panel
+                        .spawn((
+                            LanguageToggleButton,
+                            Button,
+                            Node {
+                                padding: UiRect::horizontal(Val::Px(8.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                margin: UiRect::left(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.25, 0.35, 0.3, 1.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                LanguageToggleButtonText,
+                                Text::new(locale.0.next().own_name()),
+                                TextColor(Color::WHITE),
+                                TextFont {
+                                    font_size: FontSize::Px(12.0),
+                                    ..default()
+                                },
+                            ));
+                        });
                 });
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_top_bar_player_info(
     player_country: Res<PlayerCountry>,
     country_registry: Res<CountryRegistry>,
     state_registry: Res<StateRegistry>,
     world_state: Res<WorldCivilizationState>,
-    mut text_query: Query<&mut Text, With<TopBarPlayerInfoText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut text_query: Query<(&mut Text, &mut LocalizedText), With<TopBarPlayerInfoText>>,
 ) {
-    let Ok(mut text) = text_query.single_mut() else {
+    let Ok((mut text, mut marker)) = text_query.single_mut() else {
         return;
     };
 
@@ -158,23 +193,52 @@ fn update_top_bar_player_info(
 
         let active_techs = country.research_state.in_progress.len();
         let reform_str = if let Some(ref r) = country.current_reform {
-            format!("Reform: {:.0}%", (r.progress / r.required_progress) * 100.0)
+            tf(
+                &catalog,
+                locale.0,
+                "top_bar.reform_active",
+                vec![(
+                    "percent",
+                    format!("{:.0}", (r.progress / r.required_progress) * 100.0),
+                )],
+            )
         } else {
-            "Reform: None".to_string()
+            tf(&catalog, locale.0, "top_bar.reform_none", vec![])
         };
 
-        let info = format!(
-            "{} | Pop: {} | Treasury: {:.0} G | Era: {} | Active Research: {}/4 | {}",
-            country.name,
-            format_population(total_pop),
-            country.treasury,
-            world_state.current_stage.display_name(),
-            active_techs,
-            reform_str
-        );
+        let args = vec![
+            ("country", country.name.clone()),
+            ("pop", format_population(total_pop)),
+            ("treasury", format!("{:.0}", country.treasury)),
+            (
+                "era",
+                t(&catalog, locale.0, world_state.current_stage.display_name()),
+            ),
+            ("research", active_techs.to_string()),
+            ("reform", reform_str),
+        ];
+        let info = tf(&catalog, locale.0, "top_bar.info", args.clone());
 
         if text.0 != info {
             *text = Text::new(info);
+        }
+        marker.key = "top_bar.info";
+        marker.args = args;
+    }
+}
+
+/// UI表示専用の日付表記。`GameDate::display()`(内部シリアライズ形式 "YYYY/MM/DD",
+/// 治療条約・戦争開始日などのゲーム状態文字列として使われる)とは完全に独立しており、
+/// 値(年月日)そのものは変えず、言語ごとの慣用表記のみを切り替える。
+fn format_date_for_locale(date: &GameDate, locale: Locale) -> String {
+    const EN_MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    match locale {
+        Locale::JaJp => format!("{}年{}月{}日", date.year, date.month, date.day),
+        Locale::EnUs => {
+            let month_idx = (date.month.max(1) as usize - 1).min(EN_MONTHS.len() - 1);
+            format!("{} {}, {}", EN_MONTHS[month_idx], date.day, date.year)
         }
     }
 }
@@ -183,26 +247,34 @@ fn update_top_bar_date(
     date: Res<GameDate>,
     paused: Res<GamePaused>,
     speed: Res<GameSpeed>,
-    mut text_query: Query<&mut Text, With<TopBarDateText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut text_query: Query<(&mut Text, &mut LocalizedText), With<TopBarDateText>>,
 ) {
-    if !date.is_changed() && !paused.is_changed() && !speed.is_changed() {
+    if !date.is_changed() && !paused.is_changed() && !speed.is_changed() && !locale.is_changed() {
         return;
     }
 
-    let Ok(mut text) = text_query.single_mut() else {
+    let Ok((mut text, mut marker)) = text_query.single_mut() else {
         return;
     };
 
-    let status = if paused.0 {
-        "PAUSED".to_string()
+    let localized_date = format_date_for_locale(&date, locale.0);
+    let (key, args) = if paused.0 {
+        ("top_bar.date_paused", vec![("date", localized_date)])
     } else {
-        format!("Spd: {}", speed.0)
+        (
+            "top_bar.date_speed",
+            vec![("date", localized_date), ("speed", speed.0.to_string())],
+        )
     };
 
-    let info = format!("{} [{}]", date.display(), status);
+    let info = tf(&catalog, locale.0, key, args.clone());
     if text.0 != info {
         *text = Text::new(info);
     }
+    marker.key = key;
+    marker.args = args;
 }
 
 fn handle_speed_buttons(

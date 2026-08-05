@@ -1,5 +1,8 @@
 use crate::app::game_state::GameState;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{
+    CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
+};
 use crate::research::allocation::InProgressTech;
 use crate::research::data::{TechnologyField, TechnologyRegistry};
 use crate::research::world_stage::WorldCivilizationState;
@@ -56,7 +59,11 @@ impl Plugin for ResearchPluginUI {
     }
 }
 
-fn setup_research_panel(mut commands: Commands) {
+fn setup_research_panel(
+    mut commands: Commands,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
     // 画面左上に表示ボタンを配置
     commands
         .spawn((
@@ -72,8 +79,11 @@ fn setup_research_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.2, 0.3, 0.5, 0.9)),
         ))
         .with_children(|parent| {
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "research_panel.toggle_button", vec![]);
             parent.spawn((
-                Text::new("[R] Research Panel"),
+                text,
+                marker,
                 TextColor(Color::WHITE),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -102,8 +112,10 @@ fn setup_research_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.95)),
         ))
         .with_children(|parent| {
+            let (text, marker) = localized_text(&catalog, locale.0, "research_panel.title", vec![]);
             parent.spawn((
-                Text::new("-- Technology & Research --"),
+                text,
+                marker,
                 TextColor(Color::srgb(0.9, 0.85, 0.5)),
                 TextFont {
                     font_size: FontSize::Px(18.0),
@@ -114,6 +126,7 @@ fn setup_research_panel(mut commands: Commands) {
             parent.spawn((
                 ResearchHeaderText,
                 Text::new(""),
+                LocalizedText::default(),
                 TextColor(Color::srgb(0.85, 0.85, 0.9)),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -129,8 +142,11 @@ fn setup_research_panel(mut commands: Commands) {
                     ..default()
                 })
                 .with_children(|row| {
+                    let (text, marker) =
+                        localized_text(&catalog, locale.0, "research_panel.alloc_label", vec![]);
                     row.spawn((
-                        Text::new("Alloc (+5%):"),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.8, 0.8, 0.8)),
                         TextFont {
                             font_size: FontSize::Px(12.0),
@@ -149,8 +165,15 @@ fn setup_research_panel(mut commands: Commands) {
                             BackgroundColor(Color::srgba(0.3, 0.35, 0.45, 1.0)),
                         ))
                         .with_children(|b| {
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                "research_panel.alloc_field_button",
+                                vec![("field", t(&catalog, locale.0, field.display_name()))],
+                            );
                             b.spawn((
-                                Text::new(format!("+{}", field.display_name())),
+                                text,
+                                marker,
                                 TextColor(Color::WHITE),
                                 TextFont {
                                     font_size: FontSize::Px(11.0),
@@ -181,8 +204,15 @@ fn setup_research_panel(mut commands: Commands) {
                                 BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 1.0)),
                             ))
                             .with_children(|btn| {
+                                let (text, marker) = localized_text(
+                                    &catalog,
+                                    locale.0,
+                                    field.display_name(),
+                                    vec![],
+                                );
                                 btn.spawn((
-                                    Text::new(field.display_name()),
+                                    text,
+                                    marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
                                         font_size: FontSize::Px(13.0),
@@ -320,14 +350,16 @@ fn update_research_panel_ui(
     country_registry: Res<CountryRegistry>,
     tech_registry: Res<TechnologyRegistry>,
     world_state: Res<WorldCivilizationState>,
-    mut header_q: Query<&mut Text, With<ResearchHeaderText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut header_q: Query<(&mut Text, &mut LocalizedText), With<ResearchHeaderText>>,
     container_q: Query<(Entity, Option<&Children>), With<TechListContainer>>,
 ) {
     if !state.open {
         return;
     }
 
-    let Ok(mut header_text) = header_q.single_mut() else {
+    let Ok((mut header_text, mut header_marker)) = header_q.single_mut() else {
         return;
     };
     let Ok((container_entity, children_opt)) = container_q.single() else {
@@ -342,19 +374,32 @@ fn update_research_panel_ui(
     let active_field = state.active_tab;
     let alloc = &country.research_state.allocation;
 
-    let header_info = format!(
-        "World Era: {} | Sci Cap: {:.1} | Mag Cap: {:.1}\nAllocations: Sci {:.0}% | Mag {:.0}% | Mil {:.0}% | Fus {:.0}%",
-        world_state.current_stage.display_name(),
-        country.science_research_capacity,
-        country.magic_research_capacity,
-        alloc.science * 100.0,
-        alloc.magic * 100.0,
-        alloc.military * 100.0,
-        alloc.fusion * 100.0,
+    let header_args = vec![
+        (
+            "era",
+            t(&catalog, locale.0, world_state.current_stage.display_name()),
+        ),
+        (
+            "sci_cap",
+            format!("{:.1}", country.science_research_capacity),
+        ),
+        ("mag_cap", format!("{:.1}", country.magic_research_capacity)),
+        ("sci", format!("{:.0}", alloc.science * 100.0)),
+        ("mag", format!("{:.0}", alloc.magic * 100.0)),
+        ("mil", format!("{:.0}", alloc.military * 100.0)),
+        ("fus", format!("{:.0}", alloc.fusion * 100.0)),
+    ];
+    let header_info = tf(
+        &catalog,
+        locale.0,
+        "research_panel.header",
+        header_args.clone(),
     );
     if header_text.0 != header_info {
         *header_text = Text::new(header_info);
     }
+    header_marker.key = "research_panel.header";
+    header_marker.args = header_args;
 
     if let Some(children) = children_opt {
         for child in children.iter() {
@@ -366,8 +411,8 @@ fn update_research_panel_ui(
         if let Some(in_prog) = country.research_state.in_progress.get(&active_field) {
             let tech_name = tech_registry
                 .get(&in_prog.tech_id)
-                .map(|d| d.name.as_str())
-                .unwrap_or("Unknown");
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
 
             parent
                 .spawn(Node {
@@ -380,11 +425,19 @@ fn update_research_panel_ui(
                 })
                 .insert(BackgroundColor(Color::srgba(0.2, 0.3, 0.2, 0.9)))
                 .with_children(|row| {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "research_panel.researching",
+                        vec![
+                            ("tech", tech_name),
+                            ("progress", format!("{:.0}", in_prog.progress)),
+                            ("cost", format!("{:.0}", in_prog.cost)),
+                        ],
+                    );
                     row.spawn((
-                        Text::new(format!(
-                            "Researching: {} ({:.0}/{:.0} pts)",
-                            tech_name, in_prog.progress, in_prog.cost
-                        )),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.8, 1.0, 0.8)),
                         TextFont {
                             font_size: FontSize::Px(12.0),
@@ -402,8 +455,15 @@ fn update_research_panel_ui(
                         BackgroundColor(Color::srgba(0.6, 0.2, 0.2, 1.0)),
                     ))
                     .with_children(|btn| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "research_panel.cancel_button",
+                            vec![],
+                        );
                         btn.spawn((
-                            Text::new("Cancel"),
+                            text,
+                            marker,
                             TextColor(Color::WHITE),
                             TextFont {
                                 font_size: FontSize::Px(11.0),
@@ -444,17 +504,18 @@ fn update_research_panel_ui(
                         .in_progress
                         .contains_key(&active_field);
 
-                let status_label = if is_done {
-                    "[Completed]"
+                let status_key = if is_done {
+                    "research_panel.status_completed"
                 } else if is_in_prog {
-                    "[In Progress]"
+                    "research_panel.status_in_progress"
                 } else if !era_req_met {
-                    "[Locked: Era Req]"
+                    "research_panel.status_locked_era"
                 } else if !prereq_met {
-                    "[Locked: Prereq Req]"
+                    "research_panel.status_locked_prereq"
                 } else {
-                    "[Available]"
+                    "research_panel.status_available"
                 };
+                let status_label = t(&catalog, locale.0, status_key);
 
                 parent
                     .spawn(Node {
@@ -472,11 +533,19 @@ fn update_research_panel_ui(
                             ..default()
                         })
                         .with_children(|col| {
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                "research_panel.tech_line",
+                                vec![
+                                    ("name", def.name.clone()),
+                                    ("status", status_label),
+                                    ("cost", format!("{:.0}", def.cost)),
+                                ],
+                            );
                             col.spawn((
-                                Text::new(format!(
-                                    "{} {} (Cost: {:.0})",
-                                    def.name, status_label, def.cost
-                                )),
+                                text,
+                                marker,
                                 TextColor(if is_done {
                                     Color::srgb(0.6, 0.8, 0.6)
                                 } else {
@@ -508,8 +577,15 @@ fn update_research_panel_ui(
                                 BackgroundColor(Color::srgba(0.2, 0.5, 0.2, 1.0)),
                             ))
                             .with_children(|btn| {
+                                let (text, marker) = localized_text(
+                                    &catalog,
+                                    locale.0,
+                                    "research_panel.start_button",
+                                    vec![],
+                                );
                                 btn.spawn((
-                                    Text::new("Start"),
+                                    text,
+                                    marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
                                         font_size: FontSize::Px(11.0),

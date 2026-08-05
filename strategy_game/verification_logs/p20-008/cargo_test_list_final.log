@@ -1,0 +1,160 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 2.32s
+     Running unittests src\lib.rs (target\debug\deps\strategy_game-72756a412b5e1897.exe)
+country::country_ai::tests::test_ai_construction_validity_and_cost: test
+country::country_ai::tests::test_compute_land_states_by_controller_matches_individual_filter: test
+country::country_ai::tests::test_compute_total_power_by_country_matches_individual_calculation: test
+country::country_ai::tests::test_player_country_not_controlled_by_country_ai: test
+country::country_ai::tests::test_war_preparation_ai_starts_justification_via_optimized_path: test
+diplomacy::tests::test_claim_registry: test
+diplomacy::tests::test_crisis_registry: test
+diplomacy::tests::test_demand_acceptance: test
+diplomacy::tests::test_diplomatic_pair_normalization: test
+diplomacy::tests::test_relation_clamping: test
+diplomacy::tests::test_treaty_addition_and_removal: test
+diplomacy::tests::test_truce_prevents_war: test
+military::combat_calc::tests::test_combat_is_deterministic: test
+military::combat_calc::tests::test_resolve_combat_day_basic: test
+military::combat_calc::tests::test_terrain_bonus_favors_defender: test
+military::combat_calc::tests::test_zero_manpower_no_damage: test
+military::invasion::tests::test_find_retreat_destination_deterministic: test
+military::invasion::tests::test_no_battle_created_between_same_country: test
+military::invasion::tests::test_no_duplicate_battle_in_same_state: test
+military::invasion::tests::test_occupy_state_changes_controller_not_owner: test
+military::invasion::tests::test_start_battle_creates_exactly_one_battle: test
+military::tests::test_combat_strength: test
+military::tests::test_movement: test
+military::tests::test_pathfinding: test
+military::tests::test_phase13_movement_timing_and_arrival: test
+military::tests::test_phase13_own_territory_and_foreign_pathfinding: test
+military::tests::test_phase13_unreachable_destination_and_determinism: test
+military::tests::test_phase15_battle_starts_when_entering_defended_state: test
+military::tests::test_phase15_combat_daily_resolution: test
+military::tests::test_phase15_combat_is_deterministic: test
+military::tests::test_phase15_controller_restored_on_recapture: test
+military::tests::test_phase15_invasion_path_to_enemy_territory: test
+military::tests::test_phase15_manpower_does_not_go_below_zero: test
+military::tests::test_phase15_no_battle_between_same_country: test
+military::tests::test_phase15_no_path_to_neutral_territory: test
+military::tests::test_phase15_occupy_undefended_enemy_state: test
+military::tests::test_phase15_org_recovery_does_not_exceed_max: test
+military::tests::test_phase15_org_recovery_in_own_territory: test
+military::tests::test_phase15_org_recovery_not_during_combat: test
+military::tests::test_phase15_org_recovery_not_when_moving: test
+military::tests::test_phase15_owner_unchanged_after_occupation: test
+military::tests::test_phase15_retreat_is_deterministic: test
+military::tests::test_phase15_terrain_bonus_affects_combat: test
+military::tests::test_recruitment_cancellation: test
+military::tests::test_recruitment_conditions: test
+military::tests::test_recruitment_equipment_shortage: test
+military::tests::test_recruitment_manpower_shortage: test
+military::tests::test_recruitment_progress_and_completion: test
+military::tests::test_supply_processing: test
+war::frontline::tests::test_army_assignment_and_validation: test
+war::frontline::tests::test_defensive_positioning_and_determinism: test
+war::frontline::tests::test_frontline_generation_border_calculation: test
+war::frontline::tests::test_frontline_lifecycle_creation_and_removal: test
+war::frontline::tests::test_manual_vs_frontline_priority: test
+war::frontline::tests::test_offensive_operations_objective_and_attack: test
+war::military_ai::tests::test_ai_army_assignment_and_power_evaluation: test
+war::military_ai::tests::test_ai_decision_thresholds_and_hysteresis: test
+war::military_ai::tests::test_ai_target_country_filtering: test
+war::tests::test_are_countries_at_war_false_for_allies_or_neutrals: test
+war::tests::test_are_countries_at_war_handles_invalid_ids: test
+war::tests::test_are_countries_at_war_true_for_enemies: test
+war::tests::test_attacker_and_defender_registered_correctly: test
+war::tests::test_can_declare_war_after_justification_complete: test
+war::tests::test_cannot_declare_war_before_justification_complete: test
+war::tests::test_cannot_duplicate_justification: test
+war::tests::test_cannot_justify_against_ally: test
+war::tests::test_cannot_justify_against_nap_partner: test
+war::tests::test_cannot_justify_against_self: test
+war::tests::test_cannot_justify_unowned_state: test
+war::tests::test_cannot_start_duplicate_war: test
+war::tests::test_combat_resolution: test
+war::tests::test_justification_completion_after_required_days: test
+war::tests::test_justification_consumed_on_war_declaration: test
+war::tests::test_justification_progress_timing: test
+war::tests::test_peace_treaty_basic: test
+war::tests::test_phase16_battle_results_sync_and_deduplication: test
+war::tests::test_phase16_capitulation_rules: test
+war::tests::test_phase16_peace_offer_validation: test
+war::tests::test_phase16_sea_state_exclusion: test
+war::tests::test_phase16_truce_prevents_justification_and_war: test
+war::tests::test_phase16_war_score_breakdown_and_clamping: test
+war::tests::test_war_data_created_on_declaration: test
+war::tests::test_war_declaration_determinism: test
+war::tests::test_war_score_calculation: test
+
+84 tests, 0 benchmarks
+     Running unittests src\bin\profile_1000_states.rs (target\debug\deps\profile_1000_states-35af955b5cc92024.exe)
+0 tests, 0 benchmarks
+     Running unittests src\main.rs (target\debug\deps\strategy_game-d6d7865ef8d5a87d.exe)
+0 tests, 0 benchmarks
+     Running tests\daily_system_integration_test.rs (target\debug\deps\daily_system_integration_test-8f9774f24505c8b4.exe)
+test_a_daily_processing_order: test
+test_b_game_paused_no_state_change: test
+test_c_war_declaration_and_frontline_generation: test
+test_d_next_day_military_action: test
+test_e_player_protection_and_ai_evaluation: test
+test_f_same_day_battle_result_reflection: test
+
+6 tests, 0 benchmarks
+     Running tests\diplomacy_tests.rs (target\debug\deps\diplomacy_tests-f60d92b365eff76d.exe)
+test_deterministic_proposal_score_calculation: test
+test_diplomacy_registry_access: test
+test_diplomatic_opinion_clamping: test
+test_diplomatic_pair_key_normalization: test
+test_treaty_duplication_prevention_and_removal: test
+
+5 tests, 0 benchmarks
+     Running tests\economy_tests.rs (target\debug\deps\economy_tests-932d572dbd74418a.exe)
+tests::test_calculate_actual_output: test
+tests::test_calculate_economic_state: test
+tests::test_calculate_logistics_ratio: test
+tests::test_calculate_monthly_balance: test
+tests::test_calculate_operation_ratio: test
+tests::test_calculate_state_tax: test
+tests::test_calculate_unemployed_workforce: test
+tests::test_calculate_workforce: test
+tests::test_construction_cancel_refund: test
+tests::test_construction_completion: test
+tests::test_construction_payment: test
+tests::test_operation_ratio_input_shortage: test
+tests::test_reject_exceeding_max_level: test
+tests::test_welfare_and_unrest_clamping: test
+
+14 tests, 0 benchmarks
+     Running tests\land_war_combat_peace_test.rs (target\debug\deps\land_war_combat_peace_test-26d11ef8987c2cac.exe)
+test_all_countries_are_directly_land_connected: test
+test_land_war_declaration_combat_and_peace_flow: test
+
+2 tests, 0 benchmarks
+     Running tests\profile_workload_correctness_test.rs (target\debug\deps\profile_workload_correctness_test-30ee7836495ad250.exe)
+daily_tick_advances_requested_number_of_days: test
+generated_state_count_matches_requested: test
+high_load_scenario_produces_real_war_and_military_activity: test
+larger_scale_smoke_test_stays_sane: test
+normal_scenario_produces_real_economic_and_research_activity: test
+same_seed_produces_deterministic_results: test
+state_country_associations_are_valid: test
+
+7 tests, 0 benchmarks
+     Running tests\research_and_politics_tests.rs (target\debug\deps\research_and_politics_tests-c09c69d42bde17f3.exe)
+test_calculate_field_monthly_points: test
+test_clergy_resistance_to_secular_reform: test
+test_country_values_clamping: test
+test_fusion_efficiency_imbalance_penalty: test
+test_interest_group_influence_normalization: test
+test_political_reform_completion: test
+test_rebuild_technology_modifiers: test
+test_research_allocation_normalization: test
+test_world_civilization_stage_progression: test
+
+9 tests, 0 benchmarks
+     Running tests\ui_headless_render_test.rs (target\debug\deps\ui_headless_render_test-165bced55f6b26c4.exe)
+ui_headless_render_produces_real_pixels: test
+
+1 test, 0 benchmarks
+   Doc-tests strategy_game
+0 tests, 0 benchmarks

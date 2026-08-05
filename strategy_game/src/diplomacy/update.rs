@@ -1,6 +1,7 @@
 use crate::app::time::{DayChangedMessage, GameDate};
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::diplomacy::data::DiplomacyRegistry;
+use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::ui::notification::GameNotification;
 use bevy::prelude::*;
 
@@ -17,6 +18,8 @@ pub fn handle_daily_diplomacy(
     date: Res<GameDate>,
     mut justification_registry: ResMut<crate::war::justification::WarJustificationRegistry>,
     state_registry: Res<crate::state::data::StateRegistry>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     for _event in day_events.read() {
         // 0. 正当化の日次進行 (CountryAiより前に完了判定を行うため)
@@ -70,16 +73,24 @@ pub fn handle_daily_diplomacy(
                     };
                     let other_name = country_registry
                         .get(other_id)
-                        .map(|c| c.name.as_str())
-                        .unwrap_or("Unknown");
+                        .map(|c| c.name.clone())
+                        .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
                     let act_name = finished_type
-                        .map(|t| t.display_name())
-                        .unwrap_or("Diplomatic Activity");
+                        .map(|ty| t(&catalog, locale.0, ty.display_name()))
+                        .unwrap_or_else(|| {
+                            t(&catalog, locale.0, "notif.diplomatic_activity_fallback")
+                        });
 
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Diplomacy Finished: {} with {} (Opinion: {:.0})",
-                            act_name, other_name, relation.opinion
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "notif.diplomacy_finished",
+                            vec![
+                                ("activity", act_name),
+                                ("country", other_name),
+                                ("opinion", format!("{:.0}", relation.opinion)),
+                            ],
                         ),
                     });
                 }

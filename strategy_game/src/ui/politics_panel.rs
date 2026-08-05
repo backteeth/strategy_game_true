@@ -1,5 +1,8 @@
 use crate::app::game_state::GameState;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{
+    CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
+};
 use crate::politics::interest_groups::InterestGroupType;
 use crate::politics::reform::PoliticalReform;
 use crate::politics::values::ValueAxis;
@@ -47,7 +50,11 @@ impl Plugin for PoliticsPluginUI {
     }
 }
 
-fn setup_politics_panel(mut commands: Commands) {
+fn setup_politics_panel(
+    mut commands: Commands,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
     // 画面左上に表示ボタンを配置
     commands
         .spawn((
@@ -63,8 +70,11 @@ fn setup_politics_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.5, 0.2, 0.3, 0.9)),
         ))
         .with_children(|parent| {
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "politics_panel.toggle_button", vec![]);
             parent.spawn((
-                Text::new("[P] Politics Panel"),
+                text,
+                marker,
                 TextColor(Color::WHITE),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -93,8 +103,10 @@ fn setup_politics_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.12, 0.08, 0.1, 0.95)),
         ))
         .with_children(|parent| {
+            let (text, marker) = localized_text(&catalog, locale.0, "politics_panel.title", vec![]);
             parent.spawn((
-                Text::new("-- Government & Politics --"),
+                text,
+                marker,
                 TextColor(Color::srgb(0.9, 0.7, 0.5)),
                 TextFont {
                     font_size: FontSize::Px(18.0),
@@ -105,6 +117,7 @@ fn setup_politics_panel(mut commands: Commands) {
             parent.spawn((
                 PoliticsHeaderText,
                 Text::new(""),
+                LocalizedText::default(),
                 TextColor(Color::srgb(0.85, 0.85, 0.9)),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -184,19 +197,22 @@ fn handle_reform_buttons(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_politics_panel_ui(
     mut commands: Commands,
     state: Res<PoliticsPanelState>,
     player_country: Res<PlayerCountry>,
     country_registry: Res<CountryRegistry>,
-    mut header_q: Query<&mut Text, With<PoliticsHeaderText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut header_q: Query<(&mut Text, &mut LocalizedText), With<PoliticsHeaderText>>,
     container_q: Query<(Entity, Option<&Children>), With<PoliticsListContainer>>,
 ) {
     if !state.open {
         return;
     }
 
-    let Ok(mut header_text) = header_q.single_mut() else {
+    let Ok((mut header_text, mut header_marker)) = header_q.single_mut() else {
         return;
     };
     let Ok((container_entity, children_opt)) = container_q.single() else {
@@ -211,17 +227,30 @@ fn update_politics_panel_ui(
     let pol = &country.politics;
     let vals = &pol.values;
 
-    let header_info = format!(
-        "Gov: {} (Locked) | Econ: {} (Locked)\nValues: Sci/Mag {:.0} | Ind/State {:.0} | Sec/Rel {:.0}",
-        country.government_type.display_name(),
-        country.economic_system.display_name(),
-        vals.science_magic,
-        vals.individual_state,
-        vals.secular_religious
+    let header_args = vec![
+        (
+            "government",
+            t(&catalog, locale.0, country.government_type.display_name()),
+        ),
+        (
+            "economy",
+            t(&catalog, locale.0, country.economic_system.display_name()),
+        ),
+        ("sci_mag", format!("{:.0}", vals.science_magic)),
+        ("ind_state", format!("{:.0}", vals.individual_state)),
+        ("sec_rel", format!("{:.0}", vals.secular_religious)),
+    ];
+    let header_info = tf(
+        &catalog,
+        locale.0,
+        "politics_panel.header",
+        header_args.clone(),
     );
     if header_text.0 != header_info {
         *header_text = Text::new(header_info);
     }
+    header_marker.key = "politics_panel.header";
+    header_marker.args = header_args;
 
     if let Some(children) = children_opt {
         for child in children.iter() {
@@ -242,16 +271,22 @@ fn update_politics_panel_ui(
                 })
                 .insert(BackgroundColor(Color::srgba(0.3, 0.2, 0.2, 0.9)))
                 .with_children(|row| {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "politics_panel.reform_line",
+                        vec![
+                            ("axis", t(&catalog, locale.0, reform.axis.display_name())),
+                            ("target", format!("{:.0}", reform.target_value)),
+                            ("progress", format!("{:.0}", reform.progress)),
+                            ("required", format!("{:.0}", reform.required_progress)),
+                            ("monthly", format!("{:.1}", reform.monthly_progress)),
+                            ("resistance", format!("{:.1}", reform.clergy_resistance)),
+                        ],
+                    );
                     row.spawn((
-                        Text::new(format!(
-                            "Reform: {} -> {:.0} ({:.0}/{:.0} - {:.1}/mo, Res: {:.1})",
-                            reform.axis.display_name(),
-                            reform.target_value,
-                            reform.progress,
-                            reform.required_progress,
-                            reform.monthly_progress,
-                            reform.clergy_resistance
-                        )),
+                        text,
+                        marker,
                         TextColor(Color::srgb(1.0, 0.8, 0.8)),
                         TextFont {
                             font_size: FontSize::Px(11.0),
@@ -269,8 +304,15 @@ fn update_politics_panel_ui(
                         BackgroundColor(Color::srgba(0.6, 0.2, 0.2, 1.0)),
                     ))
                     .with_children(|btn| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "politics_panel.cancel_button",
+                            vec![],
+                        );
                         btn.spawn((
-                            Text::new("Cancel"),
+                            text,
+                            marker,
                             TextColor(Color::WHITE),
                             TextFont {
                                 font_size: FontSize::Px(11.0),
@@ -288,8 +330,15 @@ fn update_politics_panel_ui(
                     ..default()
                 })
                 .with_children(|col| {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "politics_panel.start_reform_header",
+                        vec![],
+                    );
                     col.spawn((
-                        Text::new("[ Start Value Reform ]"),
+                        text,
+                        marker,
                         TextColor(Color::srgb(0.9, 0.85, 0.6)),
                         TextFont {
                             font_size: FontSize::Px(12.0),
@@ -300,28 +349,28 @@ fn update_politics_panel_ui(
                     let axes = [
                         (
                             ValueAxis::ScienceMagic,
-                            "Science (-10)",
+                            "politics_panel.axis_science_magic_minus",
                             -10.0,
-                            "Magic (+10)",
+                            "politics_panel.axis_science_magic_plus",
                             10.0,
                         ),
                         (
                             ValueAxis::IndividualState,
-                            "Individual (-10)",
+                            "politics_panel.axis_individual_state_minus",
                             -10.0,
-                            "State (+10)",
+                            "politics_panel.axis_individual_state_plus",
                             10.0,
                         ),
                         (
                             ValueAxis::SecularReligious,
-                            "Secular (-10)",
+                            "politics_panel.axis_secular_religious_minus",
                             -10.0,
-                            "Religion (+10)",
+                            "politics_panel.axis_secular_religious_plus",
                             10.0,
                         ),
                     ];
 
-                    for (axis, label_minus, delta_minus, label_plus, delta_plus) in axes {
+                    for (axis, label_minus_key, delta_minus, label_plus_key, delta_plus) in axes {
                         col.spawn(Node {
                             flex_direction: FlexDirection::Row,
                             column_gap: Val::Px(6.0),
@@ -329,8 +378,15 @@ fn update_politics_panel_ui(
                             ..default()
                         })
                         .with_children(|row| {
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                "politics_panel.axis_label",
+                                vec![("axis", t(&catalog, locale.0, axis.display_name()))],
+                            );
                             row.spawn((
-                                Text::new(format!("{:15}:", axis.display_name())),
+                                text,
+                                marker,
                                 TextColor(Color::WHITE),
                                 TextFont {
                                     font_size: FontSize::Px(11.0),
@@ -348,8 +404,11 @@ fn update_politics_panel_ui(
                                 BackgroundColor(Color::srgba(0.25, 0.3, 0.4, 1.0)),
                             ))
                             .with_children(|b| {
+                                let (text, marker) =
+                                    localized_text(&catalog, locale.0, label_minus_key, vec![]);
                                 b.spawn((
-                                    Text::new(label_minus),
+                                    text,
+                                    marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
                                         font_size: FontSize::Px(10.0),
@@ -368,8 +427,11 @@ fn update_politics_panel_ui(
                                 BackgroundColor(Color::srgba(0.25, 0.3, 0.4, 1.0)),
                             ))
                             .with_children(|b| {
+                                let (text, marker) =
+                                    localized_text(&catalog, locale.0, label_plus_key, vec![]);
                                 b.spawn((
-                                    Text::new(label_plus),
+                                    text,
+                                    marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
                                         font_size: FontSize::Px(10.0),
@@ -382,8 +444,15 @@ fn update_politics_panel_ui(
                 });
         }
 
+        let (text, marker) = localized_text(
+            &catalog,
+            locale.0,
+            "politics_panel.interest_groups_header",
+            vec![],
+        );
         parent.spawn((
-            Text::new("[ Interest Groups ]"),
+            text,
+            marker,
             TextColor(Color::srgb(0.9, 0.85, 0.6)),
             TextFont {
                 font_size: FontSize::Px(12.0),
@@ -403,14 +472,23 @@ fn update_politics_panel_ui(
                     })
                     .insert(BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 0.9)))
                     .with_children(|row| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "politics_panel.interest_group_line",
+                            vec![
+                                ("group", t(&catalog, locale.0, ig_type.display_name())),
+                                ("influence", format!("{:.1}", ig_state.influence)),
+                                ("approval", format!("{:+.1}", ig_state.approval)),
+                                (
+                                    "stance",
+                                    format!("{:+.1}", ig_state.support_for_current_reform),
+                                ),
+                            ],
+                        );
                         row.spawn((
-                            Text::new(format!(
-                                "{:11} | Influence: {:4.1}% | Approval: {:+5.1} | Stance: {:+4.1}",
-                                ig_type.display_name(),
-                                ig_state.influence,
-                                ig_state.approval,
-                                ig_state.support_for_current_reform
-                            )),
+                            text,
+                            marker,
                             TextColor(if ig_state.approval > 20.0 {
                                 Color::srgb(0.6, 0.9, 0.6)
                             } else if ig_state.approval < -20.0 {

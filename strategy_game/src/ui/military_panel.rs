@@ -1,6 +1,7 @@
 use crate::app::game_state::GameState;
 use crate::common::DivisionId;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{CurrentLocale, TranslationCatalog, localized_text, t, tf};
 use crate::map::army_selection::SelectedArmy;
 use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::data::{ArmyStatus, MilitaryRegistry};
@@ -44,7 +45,11 @@ impl Plugin for MilitaryPanelPlugin {
     }
 }
 
-fn setup_military_panel(mut commands: Commands) {
+fn setup_military_panel(
+    mut commands: Commands,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
     // トグルボタン
     commands
         .spawn((
@@ -60,8 +65,11 @@ fn setup_military_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.3, 0.2, 0.5, 0.9)),
         ))
         .with_children(|parent| {
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "military_panel.toggle_button", vec![]);
             parent.spawn((
-                Text::new("[M] Military Panel"),
+                text,
+                marker,
                 TextColor(Color::WHITE),
                 TextFont {
                     font_size: FontSize::Px(12.0),
@@ -90,8 +98,10 @@ fn setup_military_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.08, 0.06, 0.14, 0.95)),
         ))
         .with_children(|parent| {
+            let (text, marker) = localized_text(&catalog, locale.0, "military_panel.title", vec![]);
             parent.spawn((
-                Text::new("-- Military --"),
+                text,
+                marker,
                 TextColor(Color::srgb(0.9, 0.7, 0.5)),
                 TextFont {
                     font_size: FontSize::Px(18.0),
@@ -100,9 +110,14 @@ fn setup_military_panel(mut commands: Commands) {
             ));
 
             // パネル内テキスト
+            // NOTE: このパネルは複数の翻訳キーを1行ずつ結合した合成テキストであり、
+            // 単一の翻訳キーで表現できないため、意図的に`LocalizedText`マーカーを付与しない
+            // (汎用の`retranslate_on_locale_change`による上書きを避ける)。
+            // 言語切り替え時の再翻訳は`update_military_panel_ui`自身が
+            // `!state.open && !locale.is_changed()`ガードにより担う。
             parent.spawn((
                 MilitaryPanelText,
-                Text::new("Loading..."),
+                Text::new(t(&catalog, locale.0, "military_panel.loading")),
                 TextColor(Color::srgb(0.85, 0.85, 0.85)),
                 TextFont {
                     font_size: FontSize::Px(13.0),
@@ -146,6 +161,18 @@ fn toggle_military_panel_key(
     }
 }
 
+fn army_status_key(status: ArmyStatus) -> &'static str {
+    match status {
+        ArmyStatus::Idle => "army_status.idle",
+        ArmyStatus::Moving => "army_status.moving",
+        ArmyStatus::Fighting => "army_status.fighting",
+        ArmyStatus::Occupying => "army_status.occupying",
+        ArmyStatus::Retreating => "army_status.retreating",
+        ArmyStatus::Disbanding => "army_status.disbanding",
+        ArmyStatus::Destroyed => "army_status.destroyed",
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_military_panel_ui(
     state: Res<MilitaryPanelState>,
@@ -161,11 +188,12 @@ fn update_military_panel_ui(
     frontline_settings: Res<crate::map::frontline_render::FrontlineRenderSettings>,
     selected_army: Res<SelectedArmy>,
     keys: Res<ButtonInput<KeyCode>>,
+    loc: crate::localization::Loc,
     mut text_q: Query<&mut Text, With<MilitaryPanelText>>,
-    _commands: Commands,
-    _panel_q: Query<Entity, With<MilitaryPanelRoot>>,
 ) {
-    if !state.open {
+    let locale = &loc.locale;
+    let catalog = &loc.catalog;
+    if !state.open && !locale.is_changed() {
         return;
     }
 
@@ -175,6 +203,10 @@ fn update_military_panel_ui(
     let Some(country) = country_registry.get(player_cid) else {
         return;
     };
+
+    let tr = |key: &'static str| t(catalog, locale.0, key);
+    let trf =
+        |key: &'static str, args: Vec<(&'static str, String)>| tf(catalog, locale.0, key, args);
 
     // プレイヤー参加中のアクティブ戦争と前線を取得
     let active_war = war_registry.get_active_war_for_country(player_cid);
@@ -234,79 +266,106 @@ fn update_military_panel_ui(
 
     let mut lines = Vec::new();
 
-    lines.push(format!(
-        "人的資源: {} / 動員済み: {}",
-        country.available_manpower, country.mobilized_manpower
+    lines.push(trf(
+        "military_panel.manpower",
+        vec![
+            ("available", country.available_manpower.to_string()),
+            ("mobilized", country.mobilized_manpower.to_string()),
+        ],
     ));
-    lines.push(format!(
-        "軍維持費: {:.1} G/月",
-        country.monthly_military_expenses
+    lines.push(trf(
+        "military_panel.upkeep",
+        vec![("cost", format!("{:.1}", country.monthly_military_expenses))],
     ));
-    lines.push(format!(
-        "前線表示 [F]: {}",
-        if frontline_settings.visible {
-            "ON"
-        } else {
-            "OFF"
-        }
+    lines.push(trf(
+        "military_panel.frontline_visibility",
+        vec![(
+            "state",
+            tr(if frontline_settings.visible {
+                "common.on"
+            } else {
+                "common.off"
+            }),
+        )],
     ));
-    lines.push("".to_string());
+    lines.push(String::new());
 
     // 前線・作戦命令表示
-    lines.push("── 前線・作戦命令 ──".to_string());
+    lines.push(tr("military_panel.frontline_orders_header"));
     if let (Some(war), Some(fl)) = (active_war, frontline.as_ref()) {
         let is_attacker = war.attackers.contains(&player_cid);
         let atk_name = country_registry
             .get(fl.attacker_country_id)
-            .map(|c| c.name.as_str())
-            .unwrap_or("Attacker");
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| tr("common.unknown"));
         let def_name = country_registry
             .get(fl.defender_country_id)
-            .map(|c| c.name.as_str())
-            .unwrap_or("Defender");
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| tr("common.unknown"));
 
-        lines.push(format!(
-            "前線ID: Frontline #{} (戦争: {})",
-            fl.frontline_id.0, war.name
+        lines.push(trf(
+            "military_panel.frontline_id",
+            vec![
+                ("id", fl.frontline_id.0.to_string()),
+                ("war", war.name.clone()),
+            ],
         ));
-        lines.push(format!(
-            "交戦国: {} vs {} | 国境ペア数: {}",
-            atk_name,
-            def_name,
-            fl.border_region_pairs.len()
+        lines.push(trf(
+            "military_panel.frontline_belligerents",
+            vec![
+                ("attacker", atk_name),
+                ("defender", def_name),
+                ("pairs", fl.border_region_pairs.len().to_string()),
+            ],
         ));
-        lines.push(format!(
-            "自国前線地域: {} 州 | 敵側前線地域: {} 州",
-            if is_attacker {
-                fl.attacker_front_regions.len()
-            } else {
-                fl.defender_front_regions.len()
-            },
-            if is_attacker {
-                fl.defender_front_regions.len()
-            } else {
-                fl.attacker_front_regions.len()
-            }
+        lines.push(trf(
+            "military_panel.frontline_regions",
+            vec![
+                (
+                    "own",
+                    if is_attacker {
+                        fl.attacker_front_regions.len()
+                    } else {
+                        fl.defender_front_regions.len()
+                    }
+                    .to_string(),
+                ),
+                (
+                    "enemy",
+                    if is_attacker {
+                        fl.defender_front_regions.len()
+                    } else {
+                        fl.attacker_front_regions.len()
+                    }
+                    .to_string(),
+                ),
+            ],
         ));
 
         if fl.border_region_pairs.is_empty() {
-            lines.push("【注意】直接接触する国境地域が存在しません (空の前線)".to_string());
+            lines.push(tr("military_panel.frontline_no_border"));
         }
 
         let plan = frontline_registry.get_plan(fl.frontline_id, player_cid);
         let stance = plan.map(|p| p.stance).unwrap_or_default();
         let assigned_ids = plan.map(|p| p.assigned_army_ids.as_slice()).unwrap_or(&[]);
 
-        lines.push(format!("命令状態: [{}]", stance.display_name()));
+        lines.push(trf(
+            "military_panel.order_state",
+            vec![("stance", tr(stance.display_name()))],
+        ));
 
         if let Some(obj_id) = plan.and_then(|p| p.objective_region_id) {
             let obj_name = state_registry
                 .get(obj_id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-            lines.push(format!("攻勢目標地域: {} (#{})", obj_name, obj_id.0));
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| tr("common.unknown"));
+            lines.push(trf(
+                "military_panel.objective_set",
+                vec![("state", obj_name), ("id", obj_id.0.to_string())],
+            ));
         } else {
-            lines.push("攻勢目標地域: 未設定".to_string());
+            lines.push(tr("military_panel.objective_unset"));
         }
 
         // 割当部隊の内訳集計
@@ -323,63 +382,67 @@ fn update_military_panel_ui(
                 }
             }
         }
-        lines.push(format!(
-            "割り当て部隊: {} 部隊 (待機/戦闘可能: {} / 移動中: {} / 戦闘中: {})",
-            assigned_ids.len(),
-            count_idle,
-            count_moving,
-            count_fighting
+        lines.push(trf(
+            "military_panel.assigned_units",
+            vec![
+                ("total", assigned_ids.len().to_string()),
+                ("idle", count_idle.to_string()),
+                ("moving", count_moving.to_string()),
+                ("fighting", count_fighting.to_string()),
+            ],
         ));
 
-        lines.push(
-            "操作キー: [1]選択部隊を割当 [2]割当解除 [3]全解除 [7]停止 [8]防御 [9]攻勢".to_string(),
-        );
+        lines.push(tr("military_panel.controls_hint"));
     } else {
-        lines.push("進行中の戦争がないため、前線は形成されていません。".to_string());
+        lines.push(tr("military_panel.no_active_war"));
     }
-    lines.push("".to_string());
+    lines.push(String::new());
 
     // AI軍事作戦状況
     if !ai_registry.ai_states.is_empty() {
-        lines.push("── 軍事AI作戦状況 (AI国家) ──".to_string());
+        lines.push(tr("military_panel.ai_ops_header"));
         let mut ai_countries: Vec<_> = ai_registry.ai_states.values().collect();
         ai_countries.sort_by_key(|a| a.country_id.0);
 
         for ai in ai_countries {
             let country_name = country_registry
                 .get(ai.country_id)
-                .map(|c| c.name.as_str())
-                .unwrap_or("AI Country");
-            lines.push(format!(
-                "[{}] 自軍戦力:{} / 敵戦力:{} | 判断: {}",
-                country_name,
-                ai.estimated_own_power,
-                ai.estimated_enemy_power,
-                ai.last_decision_reason.display_name()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| tr("common.unknown"));
+            lines.push(trf(
+                "military_panel.ai_ops_line",
+                vec![
+                    ("country", country_name),
+                    ("own_power", ai.estimated_own_power.to_string()),
+                    ("enemy_power", ai.estimated_enemy_power.to_string()),
+                    ("reason", tr(ai.last_decision_reason.display_name())),
+                ],
             ));
         }
-        lines.push("".to_string());
+        lines.push(String::new());
     }
 
     // 国家AI運営状況
     if !country_ai_registry.ai_states.is_empty() {
-        lines.push("── 国家AI運営状況 (AI国家) ──".to_string());
+        lines.push(tr("military_panel.country_ai_header"));
         let mut country_ais: Vec<_> = country_ai_registry.ai_states.values().collect();
         country_ais.sort_by_key(|c| c.country_id.0);
 
         for cai in country_ais {
             let country_name = country_registry
                 .get(cai.country_id)
-                .map(|c| c.name.as_str())
-                .unwrap_or("AI Country");
-            lines.push(format!(
-                "[{}] モード:{} | 判断: {}",
-                country_name,
-                cai.mode.display_name(),
-                cai.decision_reason.display_name()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| tr("common.unknown"));
+            lines.push(trf(
+                "military_panel.country_ai_line",
+                vec![
+                    ("country", country_name),
+                    ("mode", tr(cai.mode.display_name())),
+                    ("reason", tr(cai.decision_reason.display_name())),
+                ],
             ));
         }
-        lines.push("".to_string());
+        lines.push(String::new());
     }
 
     // 選択中ユニット詳細
@@ -387,73 +450,95 @@ fn update_military_panel_ui(
         .army_id
         .and_then(|id| military_registry.armies.get(&id))
     {
-        lines.push("── 選択中ユニット詳細 ──".to_string());
+        lines.push(tr("military_panel.selected_unit_header"));
         let owner_name = country_registry
             .get(army.owner)
-            .map(|c| c.name.as_str())
-            .unwrap_or("Unknown");
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| tr("common.unknown"));
         let current_state_name = state_registry
             .get(army.current_state)
-            .map(|s| s.name.as_str())
-            .unwrap_or("Unknown");
-        lines.push(format!("ID: Army #{} | 所有国: {}", army.id.0, owner_name));
-        lines.push(format!("現在位置: {}", current_state_name));
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| tr("common.unknown"));
+        lines.push(trf(
+            "military_panel.selected_unit_id",
+            vec![("id", army.id.0.to_string()), ("owner", owner_name)],
+        ));
+        lines.push(trf(
+            "military_panel.selected_unit_location",
+            vec![("state", current_state_name)],
+        ));
 
         // 前線割り当て状態
         if let Some(fl_id) = frontline_registry.army_frontline_map.get(&army.id) {
-            lines.push(format!("前線割り当て: Frontline #{}", fl_id.0));
+            lines.push(trf(
+                "military_panel.frontline_assigned",
+                vec![("id", fl_id.0.to_string())],
+            ));
         } else {
-            lines.push("前線割り当て: 未割り当て".to_string());
+            lines.push(tr("military_panel.frontline_unassigned"));
         }
 
         // 割り当て不可理由の判定と表示
         if army.owner != player_cid {
-            lines.push("【操作不可】自国の陸軍ではありません".to_string());
+            lines.push(tr("military_panel.not_own_army"));
         } else if active_war.is_none() {
-            lines.push("【割当不可】進行中の戦争が存在しません".to_string());
+            lines.push(tr("military_panel.no_active_war_assign"));
         } else if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
-            lines.push("【割当不可】部隊が撃破済みまたは戦力0です".to_string());
+            lines.push(tr("military_panel.destroyed_or_no_power"));
         }
 
         // 戦力・組織率
-        lines.push(format!(
-            "戦力: {} / {} ({:.0}%)",
-            army.manpower,
-            army.max_manpower,
-            army.manpower as f32 / army.max_manpower as f32 * 100.0
+        lines.push(trf(
+            "military_panel.strength",
+            vec![
+                ("current", army.manpower.to_string()),
+                ("max", army.max_manpower.to_string()),
+                (
+                    "percent",
+                    format!(
+                        "{:.0}",
+                        army.manpower as f32 / army.max_manpower as f32 * 100.0
+                    ),
+                ),
+            ],
         ));
-        lines.push(format!(
-            "組織率: {:.0} / {:.0} ({:.0}%)",
-            army.organization,
-            army.max_organization,
-            army.organization / army.max_organization * 100.0
+        lines.push(trf(
+            "military_panel.organization",
+            vec![
+                ("current", format!("{:.0}", army.organization)),
+                ("max", format!("{:.0}", army.max_organization)),
+                (
+                    "percent",
+                    format!("{:.0}", army.organization / army.max_organization * 100.0),
+                ),
+            ],
         ));
-        lines.push(format!(
-            "攻撃力: {} | 防御力: {}",
-            army.attack_power, army.defense_power
+        lines.push(trf(
+            "military_panel.power",
+            vec![
+                ("attack", army.attack_power.to_string()),
+                ("defense", army.defense_power.to_string()),
+            ],
         ));
 
-        let status_str = match army.status {
-            ArmyStatus::Idle => "待機中",
-            ArmyStatus::Moving => "移動中",
-            ArmyStatus::Fighting => "戦闘中",
-            ArmyStatus::Occupying => "占領中",
-            ArmyStatus::Retreating => "退却中",
-            ArmyStatus::Disbanding => "解散中",
-            ArmyStatus::Destroyed => "撃破",
-        };
-        lines.push(format!("状態: {}", status_str));
+        lines.push(trf(
+            "military_panel.status_line",
+            vec![("status", tr(army_status_key(army.status)))],
+        ));
 
         if let Some(dest_id) = army.destination {
             let dest_name = state_registry
                 .get(dest_id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-            lines.push(format!("目的地: {}", dest_name));
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| tr("common.unknown"));
+            lines.push(trf(
+                "military_panel.destination_set",
+                vec![("state", dest_name)],
+            ));
         } else {
-            lines.push("目的地: なし".to_string());
+            lines.push(tr("military_panel.destination_none"));
         }
-        lines.push("".to_string());
+        lines.push(String::new());
     }
 
     // 進行中の戦闘一覧
@@ -464,60 +549,72 @@ fn update_military_panel_ui(
         .collect();
 
     if !ongoing_battles.is_empty() {
-        lines.push(format!("── 進行中の戦闘 ({} 件) ──", ongoing_battles.len()));
+        lines.push(trf(
+            "military_panel.ongoing_battles_header",
+            vec![("count", ongoing_battles.len().to_string())],
+        ));
         for battle in &ongoing_battles {
             let battle_state_name = state_registry
                 .get(battle.state_id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("?");
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "?".to_string());
             let atk_name = country_registry
                 .get(battle.attacker_country)
-                .map(|c| c.name.as_str())
-                .unwrap_or("?");
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "?".to_string());
             let def_name = country_registry
                 .get(battle.defender_country)
-                .map(|c| c.name.as_str())
-                .unwrap_or("?");
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "?".to_string());
 
-            lines.push(format!(
-                "[戦闘] {} | {} vs {}",
-                battle_state_name, atk_name, def_name
+            lines.push(trf(
+                "military_panel.battle_line",
+                vec![
+                    ("state", battle_state_name),
+                    ("attacker", atk_name),
+                    ("defender", def_name),
+                ],
             ));
         }
-        lines.push("".to_string());
+        lines.push(String::new());
     }
 
-    lines.push(format!("── 部隊一覧 ({} 部隊) ──", my_armies.len()));
+    lines.push(trf(
+        "military_panel.army_list_header",
+        vec![("count", my_armies.len().to_string())],
+    ));
 
     for army in &my_armies {
         let state_name = state_registry
             .get(army.current_state)
-            .map(|s| s.name.as_str())
-            .unwrap_or("Unknown");
-        let status_str = match army.status {
-            ArmyStatus::Idle => "待機",
-            ArmyStatus::Moving => "移動中",
-            ArmyStatus::Fighting => "戦闘中",
-            ArmyStatus::Occupying => "占領中",
-            ArmyStatus::Retreating => "退却中",
-            ArmyStatus::Disbanding => "解散中",
-            ArmyStatus::Destroyed => "撃破",
-        };
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| tr("common.unknown"));
+        let status_str = tr(army_status_key(army.status));
         let fl_tag = if frontline_registry.army_frontline_map.contains_key(&army.id) {
-            " [前線]"
+            tr("military_panel.frontline_tag")
         } else {
-            ""
+            String::new()
         };
         let selected = selected_army.army_id == Some(army.id);
         let sel_mark = if selected { "► " } else { "  " };
-        lines.push(format!(
-            "{}#{} @ {} | {}{} | 兵力:{}",
-            sel_mark, army.id.0, state_name, status_str, fl_tag, army.manpower,
+        lines.push(trf(
+            "military_panel.army_line",
+            vec![
+                ("mark", sel_mark.to_string()),
+                ("id", army.id.0.to_string()),
+                ("state", state_name),
+                ("status", status_str),
+                ("frontline_tag", fl_tag),
+                ("manpower", army.manpower.to_string()),
+            ],
         ));
     }
 
     if let Ok(mut text) = text_q.single_mut() {
-        text.0 = lines.join("\n");
+        let joined = lines.join("\n");
+        if text.0 != joined {
+            text.0 = joined;
+        }
     }
 }
 

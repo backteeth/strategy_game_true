@@ -12,6 +12,7 @@ use crate::economy::economic_state::{EconomicMetrics, calculate_economic_state};
 use crate::economy::finance::{process_country_finance, update_state_welfare_and_unrest};
 use crate::economy::production::process_country_production;
 use crate::economy::resources::ResourceType;
+use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::logistics::update::update_state_logistics;
 use crate::population::update::update_state_population_and_employment;
 use crate::state::data::StateRegistry;
@@ -22,7 +23,8 @@ pub struct EconomyPlugin;
 
 impl Plugin for EconomyPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(NotificationHistory::default())
+        app.add_plugins(crate::localization::TranslationCorePlugin)
+            .insert_resource(NotificationHistory::default())
             .add_message::<GameNotification>()
             .add_systems(
                 Update,
@@ -41,6 +43,7 @@ impl Plugin for EconomyPlugin {
 }
 
 /// 日次建設キュー進捗システム
+#[allow(clippy::too_many_arguments)]
 pub fn handle_daily_construction(
     mut day_events: MessageReader<DayChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
@@ -48,6 +51,8 @@ pub fn handle_daily_construction(
     _building_registry: Res<BuildingRegistry>,
     player_country: Res<PlayerCountry>,
     mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     for _event in day_events.read() {
         for country in country_registry.countries.iter_mut() {
@@ -66,11 +71,22 @@ pub fn handle_daily_construction(
 
                         if Some(country.id) == player_country.0 {
                             notif_writer.write(GameNotification {
-                                message: format!(
-                                    "Build Complete: {} (State: {}, Lv.{})",
-                                    item.building_type.display_name(),
-                                    state.name,
-                                    current + 1
+                                message: tf(
+                                    &catalog,
+                                    locale.0,
+                                    "notif.build_complete",
+                                    vec![
+                                        (
+                                            "building",
+                                            t(
+                                                &catalog,
+                                                locale.0,
+                                                item.building_type.display_name(),
+                                            ),
+                                        ),
+                                        ("state", state.name.clone()),
+                                        ("level", (current + 1).to_string()),
+                                    ],
                                 ),
                             });
                         }
@@ -86,6 +102,7 @@ pub fn handle_daily_construction(
 }
 
 /// 月次全経済計算システム
+#[allow(clippy::too_many_arguments)]
 pub fn handle_monthly_economy(
     mut month_events: MessageReader<MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
@@ -93,6 +110,8 @@ pub fn handle_monthly_economy(
     building_registry: Res<BuildingRegistry>,
     player_country: Res<PlayerCountry>,
     mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     for _event in month_events.read() {
         for country in country_registry.countries.iter_mut() {
@@ -185,21 +204,22 @@ pub fn handle_monthly_economy(
             if Some(country.id) == player_country.0 {
                 if country.monthly_balance < 0.0 {
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "WARNING: Monthly balance is negative ({:.1} G)",
-                            country.monthly_balance
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "notif.balance_negative",
+                            vec![("balance", format!("{:.1}", country.monthly_balance))],
                         ),
                     });
                 }
                 if is_bankrupt {
                     notif_writer.write(GameNotification {
-                        message: "WARNING: Treasury is negative (Bankrupt)! Efficiency reduced."
-                            .to_string(),
+                        message: t(&catalog, locale.0, "notif.bankrupt"),
                     });
                 }
                 if country.stockpile.get(ResourceType::Food) <= 0.0 {
                     notif_writer.write(GameNotification {
-                        message: "WARNING: Food shortage detected!".to_string(),
+                        message: t(&catalog, locale.0, "notif.food_shortage"),
                     });
                 }
             }

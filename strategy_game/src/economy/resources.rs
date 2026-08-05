@@ -24,16 +24,16 @@ impl ResourceType {
         ResourceType::MilitaryEquipment,
     ];
 
-    /// 表示用英語名
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            ResourceType::Food => "Food",
-            ResourceType::Wood => "Wood",
-            ResourceType::Iron => "Iron",
-            ResourceType::Coal => "Coal",
-            ResourceType::MagicCrystal => "Magic Crystal",
-            ResourceType::IndustrialGoods => "Industrial Goods",
-            ResourceType::MilitaryEquipment => "Military Equipment",
+            ResourceType::Food => "resource.food",
+            ResourceType::Wood => "resource.wood",
+            ResourceType::Iron => "resource.iron",
+            ResourceType::Coal => "resource.coal",
+            ResourceType::MagicCrystal => "resource.magic_crystal",
+            ResourceType::IndustrialGoods => "resource.industrial_goods",
+            ResourceType::MilitaryEquipment => "resource.military_equipment",
         }
     }
 }

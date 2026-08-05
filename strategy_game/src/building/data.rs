@@ -28,17 +28,17 @@ impl BuildingType {
         BuildingType::MagicAcademy,
     ];
 
-    /// 表示用英語名
+    /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
     pub fn display_name(self) -> &'static str {
         match self {
-            BuildingType::Farm => "Farm",
-            BuildingType::LoggingCamp => "Logging Camp",
-            BuildingType::Mine => "Mine",
-            BuildingType::Factory => "Factory",
-            BuildingType::MilitaryFactory => "Military Factory",
-            BuildingType::Railway => "Railway",
-            BuildingType::University => "University",
-            BuildingType::MagicAcademy => "Magic Academy",
+            BuildingType::Farm => "building.farm",
+            BuildingType::LoggingCamp => "building.logging_camp",
+            BuildingType::Mine => "building.mine",
+            BuildingType::Factory => "building.factory",
+            BuildingType::MilitaryFactory => "building.military_factory",
+            BuildingType::Railway => "building.railway",
+            BuildingType::University => "building.university",
+            BuildingType::MagicAcademy => "building.magic_academy",
         }
     }
 }

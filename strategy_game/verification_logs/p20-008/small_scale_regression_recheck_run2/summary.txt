@@ -1,0 +1,165 @@
+P20-008 Profiling Summary
+=========================
+
+warmup_days=10 measured_days=60 seed=0xC0FFEE12345678
+
+--- scale=100 scenario=normal ---
+  states=100 countries=8 armies(init=8 final=16) wars(init=0 active_final=0) frontlines_final=0 battles_final=0 ecs_entity_count=64
+  init_ms=8.869
+  day_tick: mean=0.0846ms median=0.0761ms p95=0.1266ms min=0.0625ms max=0.1875ms ticks/s=11820.1
+  memory_bytes=29872128 peak_memory_bytes=29872128
+  treasury: before=18717.00 after=-4462.52 changed=true
+  population: before=11932672 after=11932672 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.00409ms  p95=   0.00530ms  (  4.8%)
+    Economy          mean=   0.00502ms  p95=   0.00480ms  (  5.9%)
+    Research         mean=   0.00359ms  p95=   0.00460ms  (  4.2%)
+    Diplomacy        mean=   0.00230ms  p95=   0.00360ms  (  2.7%)
+    CountryAi        mean=   0.01176ms  p95=   0.01530ms  ( 13.9%)
+    WarPreparation   mean=   0.00130ms  p95=   0.00180ms  (  1.5%)
+    MilitaryAi       mean=   0.00262ms  p95=   0.00410ms  (  3.1%)
+    FrontlineOrders  mean=   0.00294ms  p95=   0.00460ms  (  3.5%)
+    MilitaryAction   mean=   0.00439ms  p95=   0.00670ms  (  5.2%)
+    WarResolution    mean=   0.00335ms  p95=   0.00520ms  (  4.0%)
+    UiUpdate         mean=   0.00218ms  p95=   0.00410ms  (  2.6%)
+
+--- scale=100 scenario=high_load ---
+  states=100 countries=8 armies(init=16 final=24) wars(init=1 active_final=1) frontlines_final=1 battles_final=0 ecs_entity_count=64
+  init_ms=4.597
+  day_tick: mean=0.5679ms median=0.2960ms p95=2.4666ms min=0.0930ms max=4.6339ms ticks/s=1760.8
+  memory_bytes=30449664 peak_memory_bytes=30449664
+  treasury: before=18717.00 after=-4462.52 changed=true
+  population: before=11932672 after=11932672 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.01822ms  p95=   0.01880ms  (  3.2%)
+    Economy          mean=   0.01496ms  p95=   0.04590ms  (  2.6%)
+    Research         mean=   0.00791ms  p95=   0.02760ms  (  1.4%)
+    Diplomacy        mean=   0.00470ms  p95=   0.01680ms  (  0.8%)
+    CountryAi        mean=   0.03395ms  p95=   0.13020ms  (  6.0%)
+    WarPreparation   mean=   0.02134ms  p95=   0.07650ms  (  3.8%)
+    MilitaryAi       mean=   0.02212ms  p95=   0.07510ms  (  3.9%)
+    FrontlineOrders  mean=   0.03362ms  p95=   0.15280ms  (  5.9%)
+    MilitaryAction   mean=   0.01011ms  p95=   0.04990ms  (  1.8%)
+    WarResolution    mean=   0.02880ms  p95=   0.11270ms  (  5.1%)
+    UiUpdate         mean=   0.00435ms  p95=   0.01350ms  (  0.8%)
+
+--- scale=500 scenario=normal ---
+  states=500 countries=25 armies(init=25 final=50) wars(init=0 active_final=0) frontlines_final=0 battles_final=0 ecs_entity_count=64
+  init_ms=3.497
+  day_tick: mean=0.3406ms median=0.2616ms p95=0.6849ms min=0.0883ms max=1.9601ms ticks/s=2936.2
+  memory_bytes=30957568 peak_memory_bytes=30957568
+  treasury: before=39374.00 after=-75851.29 changed=true
+  population: before=60078306 after=60078306 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.00626ms  p95=   0.01940ms  (  1.8%)
+    Economy          mean=   0.02424ms  p95=   0.01480ms  (  7.1%)
+    Research         mean=   0.00606ms  p95=   0.01360ms  (  1.8%)
+    Diplomacy        mean=   0.00874ms  p95=   0.01660ms  (  2.6%)
+    CountryAi        mean=   0.04932ms  p95=   0.07610ms  ( 14.5%)
+    WarPreparation   mean=   0.00299ms  p95=   0.00800ms  (  0.9%)
+    MilitaryAi       mean=   0.00567ms  p95=   0.01530ms  (  1.7%)
+    FrontlineOrders  mean=   0.00449ms  p95=   0.00840ms  (  1.3%)
+    MilitaryAction   mean=   0.01238ms  p95=   0.02120ms  (  3.6%)
+    WarResolution    mean=   0.00445ms  p95=   0.00960ms  (  1.3%)
+    UiUpdate         mean=   0.00266ms  p95=   0.00400ms  (  0.8%)
+
+--- scale=500 scenario=high_load ---
+  states=500 countries=25 armies(init=41 final=66) wars(init=2 active_final=2) frontlines_final=2 battles_final=0 ecs_entity_count=64
+  init_ms=12.198
+  day_tick: mean=0.5279ms median=0.4751ms p95=0.8140ms min=0.3914ms max=1.0029ms ticks/s=1894.3
+  memory_bytes=31055872 peak_memory_bytes=31055872
+  treasury: before=39374.00 after=-75851.29 changed=true
+  population: before=60078306 after=60078306 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.00556ms  p95=   0.01160ms  (  1.1%)
+    Economy          mean=   0.01548ms  p95=   0.01670ms  (  2.9%)
+    Research         mean=   0.00580ms  p95=   0.01670ms  (  1.1%)
+    Diplomacy        mean=   0.00947ms  p95=   0.01900ms  (  1.8%)
+    CountryAi        mean=   0.05258ms  p95=   0.09830ms  ( 10.0%)
+    WarPreparation   mean=   0.03450ms  p95=   0.04850ms  (  6.5%)
+    MilitaryAi       mean=   0.02081ms  p95=   0.03080ms  (  3.9%)
+    FrontlineOrders  mean=   0.12337ms  p95=   0.16420ms  ( 23.4%)
+    MilitaryAction   mean=   0.00923ms  p95=   0.01440ms  (  1.7%)
+    WarResolution    mean=   0.04009ms  p95=   0.05230ms  (  7.6%)
+    UiUpdate         mean=   0.00155ms  p95=   0.00220ms  (  0.3%)
+
+--- scale=1000 scenario=normal ---
+  states=1000 countries=50 armies(init=50 final=100) wars(init=0 active_final=0) frontlines_final=0 battles_final=0 ecs_entity_count=64
+  init_ms=12.519
+  day_tick: mean=0.3893ms median=0.3431ms p95=0.5691ms min=0.2952ms max=1.0627ms ticks/s=2568.4
+  memory_bytes=31805440 peak_memory_bytes=31805440
+  treasury: before=74568.00 after=-154408.93 changed=true
+  population: before=119261946 after=119261946 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.01193ms  p95=   0.01120ms  (  3.1%)
+    Economy          mean=   0.03163ms  p95=   0.01710ms  (  8.1%)
+    Research         mean=   0.00659ms  p95=   0.01640ms  (  1.7%)
+    Diplomacy        mean=   0.01936ms  p95=   0.02900ms  (  5.0%)
+    CountryAi        mean=   0.07856ms  p95=   0.13120ms  ( 20.2%)
+    WarPreparation   mean=   0.00241ms  p95=   0.00350ms  (  0.6%)
+    MilitaryAi       mean=   0.00633ms  p95=   0.01060ms  (  1.6%)
+    FrontlineOrders  mean=   0.00874ms  p95=   0.01600ms  (  2.2%)
+    MilitaryAction   mean=   0.01725ms  p95=   0.02430ms  (  4.4%)
+    WarResolution    mean=   0.00357ms  p95=   0.00800ms  (  0.9%)
+    UiUpdate         mean=   0.00270ms  p95=   0.00870ms  (  0.7%)
+
+--- scale=1000 scenario=high_load ---
+  states=1000 countries=50 armies(init=90 final=140) wars(init=5 active_final=5) frontlines_final=5 battles_final=0 ecs_entity_count=64
+  init_ms=11.037
+  day_tick: mean=1.0858ms median=1.0100ms p95=1.4379ms min=0.8154ms max=3.0201ms ticks/s=921.0
+  memory_bytes=31911936 peak_memory_bytes=31911936
+  treasury: before=74568.00 after=-154408.93 changed=true
+  population: before=119261946 after=119261946 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.00810ms  p95=   0.00570ms  (  0.7%)
+    Economy          mean=   0.04562ms  p95=   0.01080ms  (  4.2%)
+    Research         mean=   0.00676ms  p95=   0.01380ms  (  0.6%)
+    Diplomacy        mean=   0.02379ms  p95=   0.03940ms  (  2.2%)
+    CountryAi        mean=   0.08924ms  p95=   0.10490ms  (  8.2%)
+    WarPreparation   mean=   0.07961ms  p95=   0.10510ms  (  7.3%)
+    MilitaryAi       mean=   0.05981ms  p95=   0.07440ms  (  5.5%)
+    FrontlineOrders  mean=   0.43667ms  p95=   0.56980ms  ( 40.2%)
+    MilitaryAction   mean=   0.02203ms  p95=   0.04630ms  (  2.0%)
+    WarResolution    mean=   0.10264ms  p95=   0.13150ms  (  9.5%)
+    UiUpdate         mean=   0.00245ms  p95=   0.00280ms  (  0.2%)
+
+--- scale=2000 scenario=normal ---
+  states=2000 countries=100 armies(init=100 final=200) wars(init=0 active_final=0) frontlines_final=0 battles_final=0 ecs_entity_count=64
+  init_ms=11.919
+  day_tick: mean=0.5400ms median=0.4439ms p95=1.0203ms min=0.3963ms max=1.9463ms ticks/s=1852.0
+  memory_bytes=33812480 peak_memory_bytes=34877440
+  treasury: before=164044.00 after=-294250.02 changed=true
+  population: before=238573893 after=238573893 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.01990ms  p95=   0.01610ms  (  3.7%)
+    Economy          mean=   0.05543ms  p95=   0.01720ms  ( 10.3%)
+    Research         mean=   0.00511ms  p95=   0.01500ms  (  0.9%)
+    Diplomacy        mean=   0.06002ms  p95=   0.08830ms  ( 11.1%)
+    CountryAi        mean=   0.15710ms  p95=   0.17680ms  ( 29.1%)
+    WarPreparation   mean=   0.00280ms  p95=   0.00350ms  (  0.5%)
+    MilitaryAi       mean=   0.00898ms  p95=   0.01270ms  (  1.7%)
+    FrontlineOrders  mean=   0.00407ms  p95=   0.00970ms  (  0.8%)
+    MilitaryAction   mean=   0.01989ms  p95=   0.02960ms  (  3.7%)
+    WarResolution    mean=   0.00307ms  p95=   0.00380ms  (  0.6%)
+    UiUpdate         mean=   0.00213ms  p95=   0.00360ms  (  0.4%)
+
+--- scale=2000 scenario=high_load ---
+  states=2000 countries=100 armies(init=180 final=280) wars(init=10 active_final=10) frontlines_final=10 battles_final=0 ecs_entity_count=64
+  init_ms=8.594
+  day_tick: mean=2.3917ms median=2.2775ms p95=3.0316ms min=1.9524ms max=4.3064ms ticks/s=418.1
+  memory_bytes=33865728 peak_memory_bytes=34877440
+  treasury: before=164044.00 after=-294250.02 changed=true
+  population: before=238573893 after=238573893 changed=false
+  per-SystemSet mean(ms) [share of overall mean]:
+    TimeUpdate       mean=   0.01579ms  p95=   0.01570ms  (  0.7%)
+    Economy          mean=   0.05886ms  p95=   0.02860ms  (  2.5%)
+    Research         mean=   0.00696ms  p95=   0.01440ms  (  0.3%)
+    Diplomacy        mean=   0.09868ms  p95=   0.15150ms  (  4.1%)
+    CountryAi        mean=   0.19848ms  p95=   0.23670ms  (  8.3%)
+    WarPreparation   mean=   0.18974ms  p95=   0.24790ms  (  7.9%)
+    MilitaryAi       mean=   0.20077ms  p95=   0.26970ms  (  8.4%)
+    FrontlineOrders  mean=   1.02781ms  p95=   1.25340ms  ( 43.0%)
+    MilitaryAction   mean=   0.04808ms  p95=   0.07640ms  (  2.0%)
+    WarResolution    mean=   0.29929ms  p95=   0.51730ms  ( 12.5%)
+    UiUpdate         mean=   0.00356ms  p95=   0.01580ms  (  0.1%)
+

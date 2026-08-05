@@ -1,0 +1,22 @@
+=== git status --short (作業開始前, 記録済みの再現) ===
+ M audit_report.md
+ M strategy_game/Cargo.toml
+ M strategy_game/src/country/country_ai.rs
+ M strategy_game/src/lib.rs
+ M walkthrough.md
+?? strategy_game/src/bin/
+?? strategy_game/src/profiling.rs
+?? strategy_game/tests/profile_workload_correctness_test.rs
+?? strategy_game/verification_logs/p20-008/
+
+=== git diff --stat (作業開始前) ===
+audit_report.md                         | 449 ++++++++++++++++++++++++++++++++
+strategy_game/Cargo.toml                |   5 +
+strategy_game/src/country/country_ai.rs | 314 ++++++++++++++++++++--
+strategy_game/src/lib.rs                |   1 +
+walkthrough.md                          | 449 ++++++++++++++++++++++++++++++++
+ 5 files changed, 1201 insertions(+), 17 deletions(-)
+
+=== 保護対象 開始時SHA-256 ===
+c5fab07532a6c651a1f54962f78653d3a8518f9041475f52a29507e3ad39dc24  strategy_game/assets/data/states.ron
+06f7cfee9e2413dec6f18b4f5af86b82ff5556152c4f2026ede8c4d3142796a9  strategy_game/tests/land_war_combat_peace_test.rs

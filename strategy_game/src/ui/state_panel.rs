@@ -2,6 +2,9 @@ use crate::app::game_state::GameState;
 use crate::building::construction::{ConstructionQueueItem, ConstructionStatus, REFUND_RATIO};
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::localization::{
+    CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
+};
 use crate::state::SelectedState;
 use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
@@ -33,7 +36,11 @@ impl Plugin for StatePanelPlugin {
     }
 }
 
-fn setup_state_panel(mut commands: Commands) {
+fn setup_state_panel(
+    mut commands: Commands,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
     commands
         .spawn((
             StatePanelRoot,
@@ -52,8 +59,10 @@ fn setup_state_panel(mut commands: Commands) {
             BackgroundColor(Color::srgba(0.05, 0.05, 0.1, 0.9)),
         ))
         .with_children(|parent| {
+            let (text, marker) = localized_text(&catalog, locale.0, "state_panel.title", vec![]);
             parent.spawn((
-                Text::new("-- Province & Construction --"),
+                text,
+                marker,
                 TextLayout {
                     linebreak: LineBreak::AnyCharacter,
                     ..default()
@@ -65,9 +74,12 @@ fn setup_state_panel(mut commands: Commands) {
                 },
             ));
 
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "state_panel.select_prompt", vec![]);
             parent.spawn((
                 StatePanelText,
-                Text::new("Select a province on map"),
+                text,
+                marker,
                 TextLayout {
                     linebreak: LineBreak::AnyCharacter,
                     ..default()
@@ -79,8 +91,11 @@ fn setup_state_panel(mut commands: Commands) {
                 },
             ));
 
+            let (text, marker) =
+                localized_text(&catalog, locale.0, "state_panel.buildings_header", vec![]);
             parent.spawn((
-                Text::new("[ Available Buildings ]"),
+                text,
+                marker,
                 TextLayout {
                     linebreak: LineBreak::AnyCharacter,
                     ..default()
@@ -108,8 +123,15 @@ fn setup_state_panel(mut commands: Commands) {
                         BackgroundColor(Color::srgba(0.2, 0.25, 0.3, 1.0)),
                     ))
                     .with_children(|btn| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "state_panel.build_button",
+                            vec![("building", t(&catalog, locale.0, b_type.display_name()))],
+                        );
                         btn.spawn((
-                            Text::new(format!("Build {}", b_type.display_name())),
+                            text,
+                            marker,
                             TextLayout {
                                 linebreak: LineBreak::AnyCharacter,
                                 ..default()
@@ -129,14 +151,22 @@ fn update_state_panel(
     selected: Res<SelectedState>,
     state_registry: Res<StateRegistry>,
     country_registry: Res<CountryRegistry>,
-    mut text_q: Query<&mut Text, With<StatePanelText>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+    mut text_q: Query<(&mut Text, &mut LocalizedText), With<StatePanelText>>,
 ) {
-    let Ok(mut text) = text_q.single_mut() else {
+    let Ok((mut text, mut marker)) = text_q.single_mut() else {
         return;
     };
 
     let Some(state_id) = selected.0 else {
-        *text = Text::new("Select a province on map");
+        let prompt_key = "state_panel.select_prompt";
+        let rendered = t(&catalog, locale.0, prompt_key);
+        if text.0 != rendered {
+            *text = Text::new(rendered);
+        }
+        marker.key = prompt_key;
+        marker.args = vec![];
         return;
     };
 
@@ -146,64 +176,83 @@ fn update_state_panel(
 
     let country_name = country_registry
         .get(state.owner_country_id)
-        .map(|c| c.name.as_str())
-        .unwrap_or("Unknown");
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+
+    let none_line = t(&catalog, locale.0, "state_panel.none_line");
 
     let mut b_str = String::new();
     for b_type in BuildingType::ALL {
         let lvl = state.building_level(b_type);
         if lvl > 0 {
             let op = state.building_operation(b_type);
-            b_str.push_str(&format!(
-                "  {}: Lv.{} ({:.0}% op)\n",
-                b_type.display_name(),
-                lvl,
-                op * 100.0
+            b_str.push_str(&tf(
+                &catalog,
+                locale.0,
+                "state_panel.building_line",
+                vec![
+                    ("building", t(&catalog, locale.0, b_type.display_name())),
+                    ("level", lvl.to_string()),
+                    ("operation", format!("{:.0}", op * 100.0)),
+                ],
             ));
         }
     }
     if b_str.is_empty() {
-        b_str.push_str("  (None)\n");
+        b_str.push_str(&none_line);
     }
 
     let mut dep_str = String::new();
     for dep in &state.resource_deposits {
         if dep.discovered {
-            dep_str.push_str(&format!(
-                "  {}: Base {:.0}/mo\n",
-                dep.resource_type.display_name(),
-                dep.base_output
+            dep_str.push_str(&tf(
+                &catalog,
+                locale.0,
+                "state_panel.deposit_line",
+                vec![
+                    (
+                        "resource",
+                        t(&catalog, locale.0, dep.resource_type.display_name()),
+                    ),
+                    ("output", format!("{:.0}", dep.base_output)),
+                ],
             ));
         }
     }
     if dep_str.is_empty() {
-        dep_str.push_str("  (None)\n");
+        dep_str.push_str(&none_line);
     }
 
     let total_wf = state.total_workforce();
 
-    let info = format!(
-        "Province: {}\nOwner: {}\nPop: {} | Workforce: {}\nEmployed: {} | Unemployed: {}\nLiving Standard: {:.1} / 100\nUnrest: {:.1} / 100\nLogistics Cap: {:.0} / Usage: {:.0} ({:.0}%)\n\n[Deposits]\n{}\n[Buildings]\n{}",
-        state.name,
-        country_name,
-        format_population(state.population),
-        format_population(total_wf),
-        format_population(state.employed_workforce),
-        format_population(state.unemployed_workforce),
-        state.living_standard,
-        state.unrest,
-        state.logistics_capacity,
-        state.logistics_usage,
-        state.logistics_ratio * 100.0,
-        dep_str,
-        b_str,
-    );
+    let args = vec![
+        ("name", state.name.clone()),
+        ("owner", country_name),
+        ("population", format_population(state.population)),
+        ("workforce", format_population(total_wf)),
+        ("employed", format_population(state.employed_workforce)),
+        ("unemployed", format_population(state.unemployed_workforce)),
+        ("living_standard", format!("{:.1}", state.living_standard)),
+        ("unrest", format!("{:.1}", state.unrest)),
+        ("logistics_cap", format!("{:.0}", state.logistics_capacity)),
+        ("logistics_usage", format!("{:.0}", state.logistics_usage)),
+        (
+            "logistics_ratio",
+            format!("{:.0}", state.logistics_ratio * 100.0),
+        ),
+        ("deposits", dep_str),
+        ("buildings", b_str),
+    ];
+    let info = tf(&catalog, locale.0, "state_panel.info", args.clone());
 
     if text.0 != info {
         *text = Text::new(info);
     }
+    marker.key = "state_panel.info";
+    marker.args = args;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_build_buttons(
     mut interaction_q: Query<
         (&Interaction, &BuildButton, &mut BackgroundColor),
@@ -215,6 +264,8 @@ fn handle_build_buttons(
     state_registry: Res<StateRegistry>,
     building_registry: Res<BuildingRegistry>,
     mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     let Some(state_id) = selected.0 else {
         return;
@@ -235,7 +286,7 @@ fn handle_build_buttons(
 
                 if state.owner_country_id != player_cid {
                     notif_writer.write(GameNotification {
-                        message: "Build Failed: Not your state".to_string(),
+                        message: t(&catalog, locale.0, "state_panel.build_failed_not_owner"),
                     });
                     continue;
                 }
@@ -253,10 +304,14 @@ fn handle_build_buttons(
 
                 if current_level >= def.max_level {
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Build Failed: {} is already at max level (Lv.{})",
-                            btn.0.display_name(),
-                            def.max_level
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "state_panel.build_failed_max_level",
+                            vec![
+                                ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                ("max_level", def.max_level.to_string()),
+                            ],
                         ),
                     });
                     continue;
@@ -268,10 +323,14 @@ fn handle_build_buttons(
                     .any(|item| item.state_id == state_id && item.building_type == btn.0);
                 if in_queue {
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Build Failed: {} in {} is already in queue",
-                            btn.0.display_name(),
-                            state.name
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "state_panel.build_failed_in_queue",
+                            vec![
+                                ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                ("state", state.name.clone()),
+                            ],
                         ),
                     });
                     continue;
@@ -279,9 +338,14 @@ fn handle_build_buttons(
 
                 if country.treasury < def.construction_cost {
                     notif_writer.write(GameNotification {
-                        message: format!(
-                            "Build Failed: Insufficient funds (Req: {:.0} G, Has: {:.0} G)",
-                            def.construction_cost, country.treasury
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "state_panel.build_failed_funds",
+                            vec![
+                                ("cost", format!("{:.0}", def.construction_cost)),
+                                ("treasury", format!("{:.0}", country.treasury)),
+                            ],
                         ),
                     });
                     continue;
@@ -299,11 +363,15 @@ fn handle_build_buttons(
                 });
 
                 notif_writer.write(GameNotification {
-                    message: format!(
-                        "Build Started: {} ({}, Lv.{})",
-                        btn.0.display_name(),
-                        state.name,
-                        current_level + 1
+                    message: tf(
+                        &catalog,
+                        locale.0,
+                        "state_panel.build_started",
+                        vec![
+                            ("building", t(&catalog, locale.0, btn.0.display_name())),
+                            ("state", state.name.clone()),
+                            ("level", (current_level + 1).to_string()),
+                        ],
                     ),
                 });
             }
@@ -322,6 +390,8 @@ fn handle_cancel_queue_buttons(
     mut country_registry: ResMut<CountryRegistry>,
     mut notif_writer: MessageWriter<GameNotification>,
     keys: Res<ButtonInput<KeyCode>>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
 ) {
     if keys.just_pressed(KeyCode::KeyC) {
         let Some(player_cid) = player_country.0 else {
@@ -336,10 +406,17 @@ fn handle_cancel_queue_buttons(
             country.treasury += refund;
 
             notif_writer.write(GameNotification {
-                message: format!(
-                    "Build Cancelled: {} (Refund: {:.0} G)",
-                    item.building_type.display_name(),
-                    refund
+                message: tf(
+                    &catalog,
+                    locale.0,
+                    "state_panel.build_cancelled",
+                    vec![
+                        (
+                            "building",
+                            t(&catalog, locale.0, item.building_type.display_name()),
+                        ),
+                        ("refund", format!("{:.0}", refund)),
+                    ],
                 ),
             });
         }

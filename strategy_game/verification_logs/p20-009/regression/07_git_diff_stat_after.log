@@ -1,0 +1,66 @@
+warning: in the working copy of 'audit_report.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/country/country_ai.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/country/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/debug/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/diplomacy/data.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/diplomacy/update.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/economy/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/data.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/politics/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/country_selection.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/diplomacy_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/economy_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/military_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/peace_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/politics_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/research_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/state_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/top_bar.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/data.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/frontline.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/justification.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/military_ai.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/peace.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/war/tests.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'walkthrough.md', LF will be replaced by CRLF the next time Git touches it
+ audit_report.md                                    | 449 ++++++++++++++++++++
+ strategy_game/Cargo.toml                           |   5 +
+ strategy_game/src/building/data.rs                 |  18 +-
+ strategy_game/src/country/country_ai.rs            | 370 ++++++++++++++--
+ strategy_game/src/country/mod.rs                   |  26 +-
+ strategy_game/src/debug/mod.rs                     |  24 +-
+ strategy_game/src/diplomacy/data.rs                |  10 +-
+ strategy_game/src/diplomacy/mod.rs                 |   3 +-
+ strategy_game/src/diplomacy/update.rs              |  25 +-
+ strategy_game/src/economy/economic_state.rs        |  20 +-
+ strategy_game/src/economy/mod.rs                   |  44 +-
+ strategy_game/src/economy/resources.rs             |  16 +-
+ strategy_game/src/lib.rs                           |   2 +
+ strategy_game/src/military/data.rs                 |  14 +-
+ strategy_game/src/politics/interest_groups.rs      |  17 +-
+ strategy_game/src/politics/mod.rs                  |  21 +-
+ strategy_game/src/politics/values.rs               |   7 +-
+ strategy_game/src/research/data.rs                 |  20 +-
+ strategy_game/src/research/mod.rs                  |  46 +-
+ strategy_game/src/ui/country_selection.rs          | 134 ++++--
+ strategy_game/src/ui/diplomacy_panel.rs            | 470 ++++++++++++++++-----
+ strategy_game/src/ui/economy_panel.rs              | 118 ++++--
+ strategy_game/src/ui/military_panel.rs             | 403 +++++++++++-------
+ strategy_game/src/ui/mod.rs                        |   4 +-
+ strategy_game/src/ui/peace_panel.rs                | 323 ++++++++++----
+ strategy_game/src/ui/politics_panel.rs             | 160 +++++--
+ strategy_game/src/ui/research_panel.rs             | 146 +++++--
+ strategy_game/src/ui/state_panel.rs                | 193 ++++++---
+ strategy_game/src/ui/top_bar.rs                    | 114 ++++-
+ strategy_game/src/war/data.rs                      |  24 +-
+ strategy_game/src/war/frontline.rs                 |   7 +-
+ strategy_game/src/war/justification.rs             |  23 +-
+ strategy_game/src/war/military_ai.rs               |  27 +-
+ strategy_game/src/war/peace.rs                     |  53 ++-
+ strategy_game/src/war/tests.rs                     |  36 +-
+ .../screenshots/01_country_selection_default.png   | Bin 63381 -> 63164 bytes
+ .../02_country_selection_after_click.png           | Bin 59273 -> 58767 bytes
+ .../p20-007/screenshots/03_playing_topbar.png      | Bin 114074 -> 106311 bytes
+ walkthrough.md                                     | 449 ++++++++++++++++++++
+ 39 files changed, 3025 insertions(+), 796 deletions(-)
