@@ -1,0 +1,18 @@
+warning: in the working copy of 'audit_report.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/Cargo.lock', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/diplomacy_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/peace_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/tests/p20_009_localization_headless_render_test.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'walkthrough.md', LF will be replaced by CRLF the next time Git touches it
+ audit_report.md                                    | 120 +++++++++++++++++++++
+ strategy_game/Cargo.lock                           |   2 +
+ strategy_game/Cargo.toml                           |   5 +
+ strategy_game/src/main.rs                          |  30 ++++--
+ strategy_game/src/ui/diplomacy_panel.rs            |   3 +-
+ strategy_game/src/ui/peace_panel.rs                |   3 +-
+ .../p20_009_localization_headless_render_test.rs   |   7 +-
+ .../p20-009/screenshots/04_playing_ja_jp.png       | Bin 106314 -> 106311 bytes
+ .../p20-009/screenshots/05_playing_en_us.png       | Bin 111442 -> 111412 bytes
+ .../p20-009/screenshots/06_playing_ja_jp_again.png | Bin 106314 -> 106311 bytes
+ walkthrough.md                                     | 120 +++++++++++++++++++++
+ 11 files changed, 278 insertions(+), 12 deletions(-)

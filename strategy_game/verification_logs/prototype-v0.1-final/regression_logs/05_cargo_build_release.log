@@ -1,0 +1,20 @@
+   Compiling icu_provider v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling icu_locale v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_segmenter v2.2.0
+   Compiling parley_data v0.9.0
+   Compiling parley v0.9.0
+   Compiling bevy_text v0.19.0
+   Compiling bevy_sprite v0.19.0
+   Compiling bevy_ui v0.19.0
+   Compiling bevy_sprite_render v0.19.0
+   Compiling bevy_ui_widgets v0.19.0
+   Compiling bevy_ui_render v0.19.0
+   Compiling bevy_gizmos_render v0.19.0
+   Compiling bevy_internal v0.19.0
+   Compiling bevy_dylib v0.19.0
+   Compiling bevy v0.19.0
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `release` profile [optimized] target(s) in 2m 44s
+EXIT_CODE=0

@@ -1,0 +1,37 @@
+Prototype v0.1 最終固定監査 — 実行環境
+監査実施日: 2026-08-06
+
+[OS]
+Microsoft Windows 11 Pro 10.0.26200
+
+[CPU]
+12th Gen Intel(R) Core(TM) i7-12700F
+物理コア: 12 / 論理プロセッサ: 20
+
+[メモリ]
+31.79 GB (TotalVisibleMemorySize)
+
+[GPU]
+NVIDIA GeForce RTX 5070 Ti (Vulkanバックエンド, DiscreteGpu, Driver 610.74)
+
+[Rust/Cargo]
+rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo 1.97.1 (c980f4866 2026-06-30)
+
+[主要依存関係バージョン (Cargo.lock)]
+bevy            0.19.0
+bevy_ecs        0.19.0
+bevy_text       0.19.0
+parley          0.9.0
+icu_segmenter   2.2.0
+icu_provider    2.2.0 (本監査でlogging機能を明示有効化)
+ron             0.12.2
+serde           1.0.229
+wgpu            29.0.4
+wgpu-core       29.0.4
+
+[Gitリポジトリルート]
+C:\Users\hirom\Desktop\strategy_game
+
+[Rustクレートルート]
+C:\Users\hirom\Desktop\strategy_game\strategy_game

@@ -1,0 +1,22 @@
+# この監査ターン開始直後に実際に取得した `git status --short` の出力(そのまま転記):
+ M strategy_game/src/main.rs
+ M strategy_game/src/ui/diplomacy_panel.rs
+ M strategy_game/src/ui/peace_panel.rs
+ M strategy_game/tests/p20_009_localization_headless_render_test.rs
+
+# 注記: 上記4ファイルは、本監査の直前ターン(同一セッション内)で実施した
+# 「外交パネルのショートカットキー(D)がWASDカメラ移動と衝突」「講和/政治パネルの
+# ショートカットキー(P)が重複」という別件の修正によるもの。本監査はこの状態を
+# 「開始時点」として扱い、監査対象コードそのものとして扱った(リバートしていない)。
+#
+# git diff --stat (開始時点、同じタイミングで取得):
+ strategy_game/src/main.rs                          | 30 ++++++++++++++++------
+ strategy_game/src/ui/diplomacy_panel.rs            |  3 ++-
+ strategy_game/src/ui/peace_panel.rs                |  3 ++-
+ .../p20_009_localization_headless_render_test.rs   |  7 +++--
+ 4 files changed, 31 insertions(+), 12 deletions(-)
+
+# git log -3 --oneline (開始時点):
+8a8e8f4 Add Japanese localization and font support for P20-009
+df72635 Implement P20-007: Headless UI Rendering Test and Verification
+0eeb79a Add verification logs for Phase 20B-1i audit and testing results

@@ -892,3 +892,123 @@ P20-007の`tests/ui_headless_render_test.rs`のHeadless実GPU・offscreen描画�
 | P20-008 | RESOLVED(維持) |
 | P20-009 | **RESOLVED** |
 | Prototype v0.1 | **READY** |
+
+---
+
+# Prototype v0.1 最終固定監査(追記: 2026-08-06)
+
+**注記: 本セクションは最新状態である。上記までの各フェーズ追記時点の判定表は
+「当時の状態」のスナップショットであり、現在の判定ではない。最終判定は
+本セクション末尾の表、および詳細版
+`strategy_game/verification_logs/prototype-v0.1-final/PROTOTYPE_V0.1_BASELINE.md`
+を参照すること。**
+
+## 結論
+
+P20-001〜P20-009完了後の実コード・テスト・検証証拠を独立に再確認した結果、
+**Prototype v0.1 を READY として固定する。**
+
+本監査は新規ゲーム機能を追加せず、新たなフェーズ(P20-010)としても扱っていない。
+目的はP20-001〜P20-009の完了確認、資料間の矛盾解消、再現可能な基準情報の保存である。
+
+## 開始時状態の記録
+
+- 開始時`git status --short`は、本監査の直前ターン(同一セッション内)で実施した
+  別件修正(外交パネルのショートカットキーがWASDカメラ移動と衝突、講和/政治
+  パネルのショートカットキーが重複していた不具合の修正)により、
+  `src/main.rs`, `src/ui/diplomacy_panel.rs`, `src/ui/peace_panel.rs`,
+  `tests/p20_009_localization_headless_render_test.rs`の4ファイルが
+  変更済みだった。本監査はこれをそのまま開始状態として扱った(リバートしていない)。
+- 保護対象2ファイルのSHA-256は開始時点で基準値と完全一致していた。
+
+## 独立再確認で判明した事項
+
+1. **P20-001〜P20-006の監査証跡がリポジトリに存在しない**: `audit_report.md`/
+   `walkthrough.md`は「Phase 20B-1i」から始まり、それ以前のフェーズ個別の
+   受入条件・判定・証拠ログは存在しない。Gitコミット履歴(全11件)にも
+   フェーズ番号ラベル付きコミットはPhase 20B-1i以降にしか存在しない。
+   本監査はこれを実際の記録に基づき正直に報告し、存在しない判定を
+   捏造していない。該当機能自体は152件のテストで継続的に検証されている。
+2. **P20-008とP20-009が単一コミットに混在**: `profiling.rs`等P20-008の
+   成果物は、P20-009向けコミット`8a8e8f4`にまとめて含まれていた
+   (機能的には無問題)。
+3. **P20-009スクリーンショットのSHA-256記録に鮮度の古さ**:
+   `p20-009/screenshots/png_sha256.txt`の`04`〜`06`(Playing画面)の記録値が、
+   現在Gitにコミットされている実ファイルと一致しなかった(`01`〜`03`は一致)。
+   原因はハッシュ記録後にテストが再実行されファイルだけ更新されたこと。
+   ja→en→ja往復の同一プロセス内での完全一致(SHA-256)自体は本監査で
+   3回の独立実行すべてで再現し、問題なし。既存ログは上書きせず、
+   本監査で新たに整合したハッシュを`prototype-v0.1-final/`に保存した。
+4. **ICU4Xログノイズの真の原因を特定・修正**: 前セッションでのログ抑制の
+   試みが実機では無効であることを発見し(`RUST_LOG`環境変数でも抑制されず)、
+   ベンダーソースを直接調査した結果、`icu_provider`クレートが"logging"機能
+   無効時にdebug buildでのみ`std::eprintln!`へ直接フォールバックする実装
+   であることを特定した。`Cargo.toml`に`icu_provider`の`logging`機能を
+   明示的に有効化し、実機の`cargo run`でメッセージが出力されなくなったことを
+   確認した。ゲームロジック・保護対象ファイルには無関係。
+5. 上記以外、翻訳キー336件(ja-JP/en-US完全一致・重複0・空値0・
+   プレースホルダー完全一致)、ハードコード文字列除外9件、Phase 20B-1iの
+   SystemSet順序(`.chain()`)、P20-007のHeadless実描画閾値、P20-008の
+   Country AI最適化ロジックはいずれも現在のコードと報告書の記載が一致していた。
+
+詳細は`strategy_game/verification_logs/prototype-v0.1-final/known_issues.md`参照。
+
+## 再検証結果
+
+生ログ保存先: `strategy_game/verification_logs/prototype-v0.1-final/regression_logs/`
+(上記の修正適用後、最終状態での再実行)
+
+| コマンド | 結果 |
+|---|---|
+| `cargo check --all-targets` | PASS |
+| `cargo test -- --list` | PASS、152 tests |
+| `cargo test` | PASS、152 passed; 0 failed(修正前後とも複数回再現) |
+| `cargo clippy --all-targets --all-features -- -D warnings` | PASS、0 warnings |
+| `cargo build --release --all-targets` | PASS |
+| `cargo run --release --bin profile_1000_states` | PASS、全8規模×シナリオ完走。2000州normal median 0.33ms(未最適化ベースライン5.06msから90%以上改善を維持) |
+| `cargo run`(GUI起動・日本語UI表示・実クリックによる英語切替・安全終了) | PASS。実スクリーンショット2枚で確認(`prototype-v0.1-final/screenshots/`)。残存プロセスなし |
+| `cargo fmt --check` | **FAIL**。保護対象`tests/land_war_combat_peace_test.rs`の既知rustfmt差分15箇所のみ。新規・変更Rustファイルは個別rustfmt準拠済み |
+| `git diff --check` | PASS(CRLF警告のみ) |
+
+「fmtを含めてすべてPASS」とは記載しない。
+
+## 変更ファイル一覧(本監査分)
+
+- `strategy_game/Cargo.toml`, `Cargo.lock`(`icu_provider`の`logging`機能を
+  明示有効化。ログ抑制のみが目的で、ゲームロジックへの影響なし)
+- `strategy_game/src/main.rs`(直前セッションでのLogPluginフィルタ追加を維持)
+- `strategy_game/src/ui/diplomacy_panel.rs`, `src/ui/peace_panel.rs`
+  (直前セッションでのショートカットキー修正、KeyD→KeyG、KeyP→KeyN)
+- `strategy_game/tests/p20_009_localization_headless_render_test.rs`
+  (上記キー変更に追従したテスト更新)
+- `strategy_game/verification_logs/p20-009/screenshots/04,05,06*.png`
+  (`cargo test`再実行に伴う自動再生成。上記「既知の事項3」参照)
+- `strategy_game/verification_logs/p20-008/prototype_v0_1_final/`,
+  `prototype_v0_1_final_verified/`(新規、本監査での1000州release再計測)
+- `strategy_game/verification_logs/prototype-v0.1-final/`(新規、本監査の
+  基準文書・全証拠一式)
+- 保護対象2ファイルは内容変更なし
+
+## 保護対象SHA-256(本監査開始時・終了時)
+
+| 対象 | 開始時 | 終了時 | 判定 |
+|---|---|---|---|
+| `strategy_game/assets/data/states.ron` | `c5fab07532a6c651a1f54962f78653d3a8518f9041475f52a29507e3ad39dc24` | `c5fab07532a6c651a1f54962f78653d3a8518f9041475f52a29507e3ad39dc24` | PASS |
+| `strategy_game/tests/land_war_combat_peace_test.rs` | `06f7cfee9e2413dec6f18b4f5af86b82ff5556152c4f2026ede8c4d3142796a9` | `06f7cfee9e2413dec6f18b4f5af86b82ff5556152c4f2026ede8c4d3142796a9` | PASS |
+
+## 最終基準文書
+
+`strategy_game/verification_logs/prototype-v0.1-final/PROTOTYPE_V0.1_BASELINE.md`
+(実装済み機能一覧、対応言語、代表性能値、起動・検証方法、既知の制約、
+Phase 21での変更許容範囲と維持すべき回帰基準を記載)
+
+## フェーズ判定(最終・確定)
+
+| 項目 | 判定 |
+|---|---|
+| P20-001〜P20-006 | 監査対象外(記録なし。機能はコード・テストで実在確認、`known_issues.md`参照) |
+| Phase 20B-1i | PASS(維持) |
+| P20-007 | RESOLVED(維持) |
+| P20-008 | RESOLVED(維持) |
+| P20-009 | RESOLVED(維持、証拠の鮮度問題を追加記録) |
+| **Prototype v0.1** | **READY(固定)** |

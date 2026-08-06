@@ -167,7 +167,8 @@ fn toggle_diplomacy_panel_key(
     mut panel_q: Query<&mut Node, With<DiplomacyPanelRoot>>,
 ) {
     let mut toggle = false;
-    if keys.just_pressed(KeyCode::KeyD) {
+    // KeyGを使用(KeyDはWASDカメラ移動の右パンと衝突するため割り当てない)。
+    if keys.just_pressed(KeyCode::KeyG) {
         toggle = true;
     }
     for interaction in btn_q.iter() {

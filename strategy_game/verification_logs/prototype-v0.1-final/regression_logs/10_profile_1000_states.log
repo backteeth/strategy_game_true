@@ -1,0 +1,33 @@
+   Compiling bevy_text v0.19.0
+   Compiling bevy_sprite v0.19.0
+   Compiling bevy_ui v0.19.0
+   Compiling bevy_sprite_render v0.19.0
+   Compiling bevy_ui_widgets v0.19.0
+   Compiling bevy_ui_render v0.19.0
+   Compiling bevy_gizmos_render v0.19.0
+   Compiling bevy_internal v0.19.0
+   Compiling bevy_dylib v0.19.0
+   Compiling bevy v0.19.0
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `release` profile [optimized] target(s) in 1m 39s
+     Running `target\release\profile_1000_states.exe prototype_v0_1_final_verified`
+[P20-008] output_dir = verification_logs/p20-008\prototype_v0_1_final_verified
+[P20-008] running scale=100 scenario=normal ...
+[P20-008] scale=100 scenario=normal done: mean=0.0900ms median=0.0697ms p95=0.1980ms max=0.3135ms ticks/s=11115.6
+[P20-008] running scale=100 scenario=high_load ...
+[P20-008] scale=100 scenario=high_load done: mean=0.1127ms median=0.0997ms p95=0.1678ms max=0.3452ms ticks/s=8876.9
+[P20-008] running scale=500 scenario=normal ...
+[P20-008] scale=500 scenario=normal done: mean=0.1305ms median=0.0922ms p95=0.3153ms max=0.5250ms ticks/s=7664.1
+[P20-008] running scale=500 scenario=high_load ...
+[P20-008] scale=500 scenario=high_load done: mean=0.2400ms median=0.2110ms p95=0.3960ms max=0.5052ms ticks/s=4167.2
+[P20-008] running scale=1000 scenario=normal ...
+[P20-008] scale=1000 scenario=normal done: mean=0.3397ms median=0.3617ms p95=0.6135ms max=1.1333ms ticks/s=2943.9
+[P20-008] running scale=1000 scenario=high_load ...
+[P20-008] scale=1000 scenario=high_load done: mean=0.7802ms median=0.7073ms p95=1.0865ms max=1.2861ms ticks/s=1281.8
+[P20-008] running scale=2000 scenario=normal ...
+[P20-008] scale=2000 scenario=normal done: mean=0.3710ms median=0.3294ms p95=0.7075ms max=1.1187ms ticks/s=2695.3
+[P20-008] running scale=2000 scenario=high_load ...
+[P20-008] scale=2000 scenario=high_load done: mean=1.1742ms median=1.1334ms p95=1.4549ms max=1.9082ms ticks/s=851.7
+[P20-008] All scales/scenarios completed successfully.
+[P20-008] Evidence written to verification_logs/p20-008\prototype_v0_1_final_verified
+EXIT=0

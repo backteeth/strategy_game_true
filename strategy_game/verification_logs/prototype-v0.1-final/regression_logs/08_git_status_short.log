@@ -1,0 +1,10 @@
+ M Cargo.lock
+ M Cargo.toml
+ M src/main.rs
+ M src/ui/diplomacy_panel.rs
+ M src/ui/peace_panel.rs
+ M tests/p20_009_localization_headless_render_test.rs
+ M verification_logs/p20-009/screenshots/04_playing_ja_jp.png
+ M verification_logs/p20-009/screenshots/05_playing_en_us.png
+ M verification_logs/p20-009/screenshots/06_playing_ja_jp_again.png
+?? verification_logs/p20-008/prototype_v0_1_final/

@@ -1,0 +1,4 @@
+warning: in the working copy of 'strategy_game/Cargo.lock', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/diplomacy_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/peace_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/tests/p20_009_localization_headless_render_test.rs', LF will be replaced by CRLF the next time Git touches it

@@ -1,3 +1,4 @@
+use bevy::log::{DEFAULT_FILTER, LogPlugin};
 use bevy::prelude::*;
 use strategy_game::app::AppPlugin;
 use strategy_game::building::BuildingPlugin;
@@ -17,14 +18,27 @@ use strategy_game::war::WarPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Grand Strategy - Prototype v0.3".to_string(),
-                resolution: (1280u32, 720u32).into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Grand Strategy - Prototype v0.3".to_string(),
+                        resolution: (1280u32, 720u32).into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(LogPlugin {
+                    // icu_provider(bevy_textが内部で使うParleyの依存)は、日本語向けの
+                    // 辞書ベース分節(セグメンテーション)モデルが同梱されていないため、
+                    // "No segmentation model for language: ja" という警告をwarnレベルで
+                    // 大量に出力する。これは行分割(word-wrap)がフォールバックに
+                    // なるだけで、文字のグリフ表示自体には影響しない既知の無害な警告
+                    // (P20-009調査済み)なので、ログノイズとして抑制する。
+                    filter: format!("{DEFAULT_FILTER}icu_provider=error,"),
+                    ..default()
+                }),
+        )
         .add_plugins(AppPlugin)
         .add_plugins(CountryPlugin)
         .add_plugins(StatePlugin)

@@ -809,8 +809,11 @@ fn localization_headless_render_ja_en_switch_and_back() {
     // (未開放のままLocalizedText::default()が残らないことを保証し、後続の言語
     // 切り替えテストが全パネルのコンテンツを実際に検証できるようにする)。
     tap_key(&mut app, KeyCode::KeyR); // Research
-    tap_key(&mut app, KeyCode::KeyP); // Politics + Peace (両パネルとも既存実装でPキーを共有)
-    tap_key(&mut app, KeyCode::KeyD); // Diplomacy
+    tap_key(&mut app, KeyCode::KeyP); // Politics
+    tap_key(&mut app, KeyCode::KeyN); // Peace (旧: Politicsと同じKeyPを共有していたが、
+    // 重複解消のためKeyNへ変更)
+    tap_key(&mut app, KeyCode::KeyG); // Diplomacy (旧: WASDカメラ移動のKeyDと衝突していたため
+    // KeyGへ変更)
     tap_key(&mut app, KeyCode::KeyM); // Military
     for _ in 0..SETTLE_FRAMES {
         app.update();

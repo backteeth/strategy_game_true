@@ -134,7 +134,8 @@ fn setup_peace_panel(
 }
 
 fn toggle_peace_panel_key(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<PeacePanelState>) {
-    if keys.just_pressed(KeyCode::KeyP) {
+    // KeyNを使用(KeyPはPoliticsパネルと重複していたため変更)。
+    if keys.just_pressed(KeyCode::KeyN) {
         state.open = !state.open;
     }
 }
