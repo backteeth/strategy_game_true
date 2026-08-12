@@ -20,8 +20,8 @@ pub struct StateVisual {
 
 /// マップ描画の定数
 const SEA_COLOR: Color = Color::srgb(0.1, 0.3, 0.55);
-const MAP_WIDTH: f32 = 1800.0;
-const MAP_HEIGHT: f32 = 1200.0;
+const MAP_WIDTH: f32 = 2400.0;
+const MAP_HEIGHT: f32 = 1600.0;
 
 /// マップ描画プラグイン（MapPlugin から呼び出す）
 pub struct RenderingPlugin;

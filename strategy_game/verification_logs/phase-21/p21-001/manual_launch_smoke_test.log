@@ -1,0 +1,9 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `release` profile [optimized] target(s) in 2.02s
+     Running `target\release\strategy_game.exe`
+[2m2026-08-07T12:19:17.125280Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "610.74", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-08-07T12:19:17.433791Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-08-07T12:19:17.433830Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-08-07T12:19:17.434640Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Creating new window Grand Strategy - Prototype v0.3 (65v0)
+[2m2026-08-07T12:19:17.500623Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DataLoader] Successfully loaded 8 buildings, 22 technologies, 4 countries, 10 states, 3 diplomatic relations
+error: process didn't exit successfully: `target\release\strategy_game.exe` (exit code: 143)

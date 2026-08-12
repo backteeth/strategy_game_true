@@ -1,0 +1,12 @@
+125a126,132
+> ui::military_panel::tests::frontline_command_buttons_are_spawned_in_military_panel_ui_tree
+> ui::military_panel::tests::handle_frontline_command_buttons_assign_success
+> ui::military_panel::tests::handle_frontline_command_buttons_fires_once_per_press
+> ui::military_panel::tests::handle_frontline_command_buttons_no_active_war_does_nothing
+> ui::military_panel::tests::handle_frontline_command_buttons_set_stance
+> ui::military_panel::tests::handle_frontline_command_buttons_unassign_all_only_affects_own_plan
+> ui::military_panel::tests::handle_frontline_command_buttons_unassign_rejects_foreign_army
+135a143
+> war::frontline::tests::test_evaluate_frontline_army_command_feasibility
+139a148
+> war::frontline::tests::test_unassign_army_rejects_non_owner

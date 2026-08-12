@@ -176,7 +176,24 @@ impl FrontlineRegistry {
     }
 
     /// 陸軍の前線割り当てを解除する
-    pub fn unassign_army(&mut self, army_id: ArmyId) {
+    ///
+    /// `country_id`の陸軍であることを検証してから解除する。P21-002以前は所有者検証が
+    /// 存在せず、選択中の陸軍(所有者不問で選択可能、`map::army_selection`参照)が
+    /// 敵国や第三国の陸軍であっても無条件に前線割り当てを解除できてしまっていた。
+    pub fn unassign_army(
+        &mut self,
+        army_id: ArmyId,
+        country_id: CountryId,
+        military_registry: &MilitaryRegistry,
+    ) -> Result<(), &'static str> {
+        let army = military_registry
+            .armies
+            .get(&army_id)
+            .ok_or("Army not found")?;
+        if army.owner != country_id {
+            return Err("Army belongs to a different country");
+        }
+
         if let Some(fl_id) = self.army_frontline_map.remove(&army_id) {
             for plan in self.plans.values_mut() {
                 if plan.frontline_id == fl_id {
@@ -185,6 +202,7 @@ impl FrontlineRegistry {
             }
         }
         self.frontline_generated_movements.remove(&army_id);
+        Ok(())
     }
 
     /// 前線の全陸軍割当を解除する
@@ -282,6 +300,79 @@ impl FrontlineRegistry {
         // frontline_generated_movementsの解除と、該当陸軍の前線移動停止
         let _ = military_registry;
     }
+}
+
+/// P21-002: 前線割当/解除ボタンが実行可能かを副作用なしで判定する結果。
+/// UIの表示更新(ボタン活性/非活性)とクリックハンドラの双方から利用する
+/// (`military::recruitment::RecruitFeasibility`と同型のパターン)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontlineCommandFeasibility {
+    Ready,
+    NoActiveFrontline,
+    NoArmySelected,
+    ArmyNotFound,
+    NotOwnArmy,
+    ArmyDestroyed,
+}
+
+impl FrontlineCommandFeasibility {
+    pub fn is_ready(self) -> bool {
+        matches!(self, FrontlineCommandFeasibility::Ready)
+    }
+}
+
+/// 選択中の陸軍を前線へ割当/解除する操作が可能かを判定する。
+///
+/// `selected_army_id`は所有者を問わず選択され得る(`map::army_selection::handle_army_selection`
+/// 参照)ため、ここで所有者を必ず再検証する。`assign_army`/`unassign_army`実行時にも
+/// 同じ検証を行うため、この関数の結果は表示専用であり実行の可否を最終的に保証するのは
+/// 実行系側(`assign_army`/`unassign_army`自身)である。
+fn evaluate_single_army_command_feasibility(
+    army_id: ArmyId,
+    player_cid: CountryId,
+    military_registry: &MilitaryRegistry,
+) -> FrontlineCommandFeasibility {
+    let Some(army) = military_registry.armies.get(&army_id) else {
+        return FrontlineCommandFeasibility::ArmyNotFound;
+    };
+    if army.owner != player_cid {
+        return FrontlineCommandFeasibility::NotOwnArmy;
+    }
+    if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
+        return FrontlineCommandFeasibility::ArmyDestroyed;
+    }
+    FrontlineCommandFeasibility::Ready
+}
+
+/// P21-003: 複数選択に対応。`selected_army_ids`のうち1件でも実行可能ならReadyを返す
+/// (複数選択時は一部の陸軍だけでも割当/解除が成立すれば十分なため)。全滅なら、
+/// `selected_army_ids`をArmyId昇順に評価した最初の失敗理由を返す(呼び出し側が
+/// ソート済みの配列を渡すことで結果を決定的にする)。
+pub fn evaluate_frontline_army_command_feasibility(
+    selected_army_ids: &[ArmyId],
+    player_cid: CountryId,
+    military_registry: &MilitaryRegistry,
+    frontline: Option<&Frontline>,
+) -> FrontlineCommandFeasibility {
+    if frontline.is_none() {
+        return FrontlineCommandFeasibility::NoActiveFrontline;
+    }
+    if selected_army_ids.is_empty() {
+        return FrontlineCommandFeasibility::NoArmySelected;
+    }
+
+    let mut first_failure = FrontlineCommandFeasibility::NoArmySelected;
+    for &army_id in selected_army_ids {
+        let result =
+            evaluate_single_army_command_feasibility(army_id, player_cid, military_registry);
+        if result == FrontlineCommandFeasibility::Ready {
+            return FrontlineCommandFeasibility::Ready;
+        }
+        if first_failure == FrontlineCommandFeasibility::NoArmySelected {
+            first_failure = result;
+        }
+    }
+    first_failure
 }
 
 /// 前線境界を実効支配地域から決定的に計算する
@@ -1167,8 +1258,205 @@ mod tests {
         );
 
         // 解除
-        frontline_registry.unassign_army(army_id);
+        assert!(
+            frontline_registry
+                .unassign_army(army_id, CountryId(1), &military_registry)
+                .is_ok()
+        );
         assert!(!frontline_registry.army_frontline_map.contains_key(&army_id));
+    }
+
+    /// P21-002回帰テスト: `unassign_army`は所有者と異なる`country_id`を渡すと拒否し、
+    /// 割当状態を一切変更しない。UI経由(選択中陸軍は所有者不問で選択され得る)で
+    /// 他国の前線割当を無断解除できてしまう不具合の修正確認。
+    #[test]
+    fn test_unassign_army_rejects_non_owner() {
+        let (state_registry, war_registry, mut military_registry, mut frontline_registry) =
+            setup_test_environment();
+        update_all_frontlines(
+            &war_registry,
+            &state_registry,
+            &military_registry,
+            &mut frontline_registry,
+        );
+        let fl_id = frontline_registry
+            .get_frontline_for_war(WarId(0))
+            .unwrap()
+            .frontline_id;
+
+        let a1 = ArmyUnit {
+            id: ArmyId(0),
+            owner: CountryId(1),
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: StateId(1),
+            destination: None,
+            current_path: Vec::new(),
+            target_state: None,
+            manpower: 1000,
+            max_manpower: 1000,
+            equipment: 10.0,
+            max_equipment: 10.0,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 1.0,
+            max_morale: 1.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: ArmyStatus::Idle,
+            def_id: DivisionId(1),
+            attack_power: 10,
+            defense_power: 10,
+            combat_id: None,
+        };
+        let army_id = military_registry.add_army(a1);
+        frontline_registry
+            .assign_army(
+                army_id,
+                fl_id,
+                CountryId(1),
+                &military_registry,
+                &war_registry,
+            )
+            .unwrap();
+
+        // CountryId(1)の陸軍を、無関係な第三国CountryId(3)として解除しようとすると拒否される
+        let result = frontline_registry.unassign_army(army_id, CountryId(3), &military_registry);
+        assert!(result.is_err());
+        assert_eq!(
+            frontline_registry.army_frontline_map.get(&army_id),
+            Some(&fl_id),
+            "unauthorized unassign must not change the assignment"
+        );
+        let plan = frontline_registry.get_plan(fl_id, CountryId(1)).unwrap();
+        assert!(plan.assigned_army_ids.contains(&army_id));
+
+        // 存在しない陸軍IDも拒否される
+        let result_missing =
+            frontline_registry.unassign_army(ArmyId(999), CountryId(1), &military_registry);
+        assert!(result_missing.is_err());
+    }
+
+    #[test]
+    fn test_evaluate_frontline_army_command_feasibility() {
+        let (state_registry, war_registry, mut military_registry, mut frontline_registry) =
+            setup_test_environment();
+        update_all_frontlines(
+            &war_registry,
+            &state_registry,
+            &military_registry,
+            &mut frontline_registry,
+        );
+        let frontline = frontline_registry
+            .get_frontline_for_war(WarId(0))
+            .unwrap()
+            .clone();
+
+        // 前線が存在しない場合
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[],
+                CountryId(1),
+                &military_registry,
+                None
+            ),
+            FrontlineCommandFeasibility::NoActiveFrontline
+        );
+
+        // 前線はあるが陸軍未選択
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[],
+                CountryId(1),
+                &military_registry,
+                Some(&frontline),
+            ),
+            FrontlineCommandFeasibility::NoArmySelected
+        );
+
+        let a1 = ArmyUnit {
+            id: ArmyId(0),
+            owner: CountryId(1),
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: StateId(1),
+            destination: None,
+            current_path: Vec::new(),
+            target_state: None,
+            manpower: 1000,
+            max_manpower: 1000,
+            equipment: 10.0,
+            max_equipment: 10.0,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 1.0,
+            max_morale: 1.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: ArmyStatus::Idle,
+            def_id: DivisionId(1),
+            attack_power: 10,
+            defense_power: 10,
+            combat_id: None,
+        };
+        let army_id = military_registry.add_army(a1);
+
+        // 自国の有効な陸軍を選択中 → Ready
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[army_id],
+                CountryId(1),
+                &military_registry,
+                Some(&frontline),
+            ),
+            FrontlineCommandFeasibility::Ready
+        );
+
+        // 他国の陸軍を選択中(所有者不問で選択され得るため) → NotOwnArmy
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[army_id],
+                CountryId(2),
+                &military_registry,
+                Some(&frontline),
+            ),
+            FrontlineCommandFeasibility::NotOwnArmy
+        );
+
+        // 存在しない陸軍IDを選択中 → ArmyNotFound
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[ArmyId(999)],
+                CountryId(1),
+                &military_registry,
+                Some(&frontline),
+            ),
+            FrontlineCommandFeasibility::ArmyNotFound
+        );
+
+        // P21-003: 複数選択のうち1件でも実行可能ならReady
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[ArmyId(999), army_id],
+                CountryId(1),
+                &military_registry,
+                Some(&frontline),
+            ),
+            FrontlineCommandFeasibility::Ready
+        );
+
+        // P21-003: 全滅の場合は先頭(ArmyId昇順)の失敗理由を返す
+        assert_eq!(
+            evaluate_frontline_army_command_feasibility(
+                &[army_id, ArmyId(999)],
+                CountryId(2),
+                &military_registry,
+                Some(&frontline),
+            ),
+            FrontlineCommandFeasibility::NotOwnArmy
+        );
     }
 
     #[test]

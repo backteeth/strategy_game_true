@@ -1,0 +1,22 @@
+=== テスト名前差分比較(最終版: 実装前152件 vs 実装後166件) ===
+
+--- 削除されたテスト ---
+(0件であること = 既存テストは1件も削除されていない)
+
+--- 追加されたテスト(P21-001本体13件+0節の不具合修正回帰テスト1件=計14件) ---
+country::tests::available_manpower_defaults_to_nonzero_when_absent_from_ron
+military::tests::evaluate_recruit_feasibility_definition_unavailable
+military::tests::evaluate_recruit_feasibility_insufficient_funds
+military::tests::evaluate_recruit_feasibility_insufficient_manpower
+military::tests::evaluate_recruit_feasibility_no_state_selected
+military::tests::evaluate_recruit_feasibility_not_own_state
+military::tests::evaluate_recruit_feasibility_ready_when_all_conditions_met
+ui::military_panel::tests::handle_recruit_buttons_foreign_state_does_not_mutate_state
+ui::military_panel::tests::handle_recruit_buttons_insufficient_funds_does_not_mutate_state
+ui::military_panel::tests::handle_recruit_buttons_insufficient_manpower_does_not_mutate_state
+ui::military_panel::tests::handle_recruit_buttons_no_selection_does_not_mutate_state
+ui::military_panel::tests::handle_recruit_buttons_success_queues_recruitment_and_deducts_cost
+ui::military_panel::tests::handle_recruit_buttons_unknown_definition_does_not_mutate_state
+ui::military_panel::tests::recruit_button_is_spawned_in_military_panel_ui_tree
+
+件数: 実装前152件 → 実装後166件(新規+14件、削除0件)

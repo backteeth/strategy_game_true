@@ -1,0 +1,7 @@
+warning: in the working copy of 'strategy_game/assets/localization/en-US.ron', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/assets/localization/ja-JP.ron', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/country/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/recruitment.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/tests.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/military_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/tests/land_war_combat_peace_test.rs', LF will be replaced by CRLF the next time Git touches it

@@ -162,6 +162,7 @@ fn setup_diplomacy_panel(
 
 fn toggle_diplomacy_panel_key(
     mut state: ResMut<DiplomacyPanelState>,
+    mut active_panel: ResMut<crate::ui::ActivePanel>,
     keys: Res<ButtonInput<KeyCode>>,
     btn_q: Query<&Interaction, (With<ToggleDiplomacyPanelButton>, Changed<Interaction>)>,
     mut panel_q: Query<&mut Node, With<DiplomacyPanelRoot>>,
@@ -178,7 +179,13 @@ fn toggle_diplomacy_panel_key(
     }
 
     if toggle {
-        state.open = !state.open;
+        // 他パネル(研究/内政/軍事)と同じくActivePanelを介して排他制御する。
+        // 従来はこのパネル単独のopenフラグでNode.displayを直接書き換えていたため、
+        // 他パネルを開閉した際にsync_panels_to_active(ui/mod.rs)がActivePanelの
+        // 変化を検知してこのパネルのdisplayをNoneへ強制上書きし、openフラグとの
+        // 食い違いが発生していた。
+        active_panel.toggle(crate::ui::PanelKind::Diplomacy);
+        state.open = active_panel.current == crate::ui::PanelKind::Diplomacy;
         if let Ok(mut node) = panel_q.single_mut() {
             node.display = if state.open {
                 Display::Flex

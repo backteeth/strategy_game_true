@@ -1,0 +1,591 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.53s
+     Running unittests src\lib.rs (target\debug\deps\strategy_game-bf01437cdfbb2ed2.exe)
+
+running 107 tests
+test country::country_ai::tests::test_compute_land_states_by_controller_matches_individual_filter ... ok
+test country::country_ai::tests::test_ai_construction_validity_and_cost ... ok
+test country::country_ai::tests::test_compute_total_power_by_country_matches_individual_calculation ... ok
+test diplomacy::tests::test_demand_acceptance ... ok
+test diplomacy::tests::test_crisis_registry ... ok
+test diplomacy::tests::test_claim_registry ... ok
+test country::tests::available_manpower_defaults_to_nonzero_when_absent_from_ron ... ok
+test country::country_ai::tests::test_player_country_not_controlled_by_country_ai ... ok
+test diplomacy::tests::test_diplomatic_pair_normalization ... ok
+test country::country_ai::tests::test_war_preparation_ai_starts_justification_via_optimized_path ... ok
+test diplomacy::tests::test_treaty_addition_and_removal ... ok
+test diplomacy::tests::test_truce_prevents_war ... ok
+test localization::tests::duplicate_key_is_rejected ... ok
+test localization::tests::translate_uses_current_locale_when_key_present ... ok
+test localization::tests::extract_placeholders_finds_all_named_tokens ... ok
+test diplomacy::tests::test_relation_clamping ... ok
+test localization::tests::substitute_replaces_named_placeholders ... ok
+test localization::tests::translate_falls_back_to_en_us_when_ja_jp_key_missing ... ok
+test localization::tests::translate_returns_detectable_marker_when_key_missing_everywhere ... ok
+test localization::tests::empty_value_is_rejected ... ok
+test military::combat_calc::tests::test_combat_is_deterministic ... ok
+test military::combat_calc::tests::test_resolve_combat_day_basic ... ok
+test military::combat_calc::tests::test_terrain_bonus_favors_defender ... ok
+test military::combat_calc::tests::test_zero_manpower_no_damage ... ok
+test military::invasion::tests::test_find_retreat_destination_deterministic ... ok
+test military::invasion::tests::test_no_battle_created_between_same_country ... ok
+test military::invasion::tests::test_no_duplicate_battle_in_same_state ... ok
+test military::invasion::tests::test_occupy_state_changes_controller_not_owner ... ok
+test localization::tests::real_catalog_placeholders_match_between_locales ... ok
+test military::invasion::tests::test_start_battle_creates_exactly_one_battle ... ok
+test military::tests::evaluate_recruit_feasibility_definition_unavailable ... ok
+test military::tests::evaluate_recruit_feasibility_insufficient_funds ... ok
+test localization::tests::real_catalog_loads_and_ja_en_key_sets_match ... ok
+test military::tests::evaluate_recruit_feasibility_insufficient_manpower ... ok
+test military::tests::evaluate_recruit_feasibility_no_state_selected ... ok
+test military::tests::evaluate_recruit_feasibility_not_own_state ... ok
+test military::tests::evaluate_recruit_feasibility_ready_when_all_conditions_met ... ok
+test military::tests::test_combat_strength ... ok
+test military::tests::test_movement ... ok
+test military::tests::test_pathfinding ... ok
+test military::tests::test_phase13_movement_timing_and_arrival ... ok
+test military::tests::test_phase13_own_territory_and_foreign_pathfinding ... ok
+test military::tests::test_phase13_unreachable_destination_and_determinism ... ok
+test military::tests::test_phase15_battle_starts_when_entering_defended_state ... ok
+test military::tests::test_phase15_combat_daily_resolution ... ok
+test military::tests::test_phase15_combat_is_deterministic ... ok
+test military::tests::test_phase15_controller_restored_on_recapture ... ok
+test military::tests::test_phase15_invasion_path_to_enemy_territory ... ok
+test military::tests::test_phase15_manpower_does_not_go_below_zero ... ok
+test military::tests::test_phase15_no_battle_between_same_country ... ok
+test military::tests::test_phase15_no_path_to_neutral_territory ... ok
+test military::tests::test_phase15_occupy_undefended_enemy_state ... ok
+test military::tests::test_phase15_org_recovery_does_not_exceed_max ... ok
+test military::tests::test_phase15_org_recovery_in_own_territory ... ok
+test military::tests::test_phase15_org_recovery_not_during_combat ... ok
+test military::tests::test_phase15_org_recovery_not_when_moving ... ok
+test military::tests::test_phase15_owner_unchanged_after_occupation ... ok
+test military::tests::test_phase15_retreat_is_deterministic ... ok
+test military::tests::test_phase15_terrain_bonus_affects_combat ... ok
+test military::tests::test_recruitment_cancellation ... ok
+test military::tests::test_recruitment_conditions ... ok
+test military::tests::test_recruitment_equipment_shortage ... ok
+test military::tests::test_recruitment_manpower_shortage ... ok
+test military::tests::test_recruitment_progress_and_completion ... ok
+test military::tests::test_supply_processing ... ok
+test war::frontline::tests::test_army_assignment_and_validation ... ok
+test war::frontline::tests::test_frontline_generation_border_calculation ... ok
+test war::frontline::tests::test_defensive_positioning_and_determinism ... ok
+test war::frontline::tests::test_frontline_lifecycle_creation_and_removal ... ok
+test war::military_ai::tests::test_ai_army_assignment_and_power_evaluation ... ok
+test war::frontline::tests::test_offensive_operations_objective_and_attack ... ok
+test war::frontline::tests::test_manual_vs_frontline_priority ... ok
+test war::military_ai::tests::test_ai_decision_thresholds_and_hysteresis ... ok
+test war::military_ai::tests::test_ai_target_country_filtering ... ok
+test war::tests::test_are_countries_at_war_true_for_enemies ... ok
+test war::tests::test_are_countries_at_war_false_for_allies_or_neutrals ... ok
+test war::tests::test_attacker_and_defender_registered_correctly ... ok
+test war::tests::test_are_countries_at_war_handles_invalid_ids ... ok
+test war::tests::test_can_declare_war_after_justification_complete ... ok
+test war::tests::test_cannot_duplicate_justification ... ok
+test war::tests::test_cannot_justify_against_self ... ok
+test war::tests::test_cannot_justify_against_ally ... ok
+test war::tests::test_cannot_start_duplicate_war ... ok
+test war::tests::test_cannot_declare_war_before_justification_complete ... ok
+test war::tests::test_cannot_justify_unowned_state ... ok
+test war::tests::test_cannot_justify_against_nap_partner ... ok
+test war::tests::test_justification_completion_after_required_days ... ok
+test war::tests::test_justification_consumed_on_war_declaration ... ok
+test war::tests::test_combat_resolution ... ok
+test war::tests::test_peace_treaty_basic ... ok
+test war::tests::test_phase16_battle_results_sync_and_deduplication ... ok
+test war::tests::test_phase16_peace_offer_validation ... ok
+test war::tests::test_phase16_capitulation_rules ... ok
+test war::tests::test_phase16_sea_state_exclusion ... ok
+test war::tests::test_phase16_truce_prevents_justification_and_war ... ok
+test war::tests::test_phase16_war_score_breakdown_and_clamping ... ok
+test war::tests::test_justification_progress_timing ... ok
+test war::tests::test_war_data_created_on_declaration ... ok
+test war::tests::test_war_declaration_determinism ... ok
+test war::tests::test_war_score_calculation ... ok
+test ui::military_panel::tests::handle_recruit_buttons_insufficient_funds_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_no_selection_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_unknown_definition_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_insufficient_manpower_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_foreign_state_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_success_queues_recruitment_and_deducts_cost ... ok
+test ui::military_panel::tests::recruit_button_is_spawned_in_military_panel_ui_tree ... ok
+
+test result: ok. 107 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\bin\profile_1000_states.rs (target\debug\deps\profile_1000_states-e46ac5e14124dfd3.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\strategy_game-82cdd471d44e88ec.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\daily_system_integration_test.rs (target\debug\deps\daily_system_integration_test-92c9f57965a8a224.exe)
+
+running 6 tests
+test test_a_daily_processing_order ... ok
+test test_e_player_protection_and_ai_evaluation ... ok
+test test_d_next_day_military_action ... ok
+test test_c_war_declaration_and_frontline_generation ... ok
+test test_f_same_day_battle_result_reflection ... ok
+test test_b_game_paused_no_state_change ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\diplomacy_tests.rs (target\debug\deps\diplomacy_tests-708bd017147de484.exe)
+
+running 5 tests
+test test_deterministic_proposal_score_calculation ... ok
+test test_diplomatic_opinion_clamping ... ok
+test test_diplomatic_pair_key_normalization ... ok
+test test_diplomacy_registry_access ... ok
+test test_treaty_duplication_prevention_and_removal ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\economy_tests.rs (target\debug\deps\economy_tests-48bdb1c3d3d2738e.exe)
+
+running 14 tests
+test tests::test_calculate_actual_output ... ok
+test tests::test_calculate_economic_state ... ok
+test tests::test_calculate_monthly_balance ... ok
+test tests::test_calculate_operation_ratio ... ok
+test tests::test_calculate_logistics_ratio ... ok
+test tests::test_calculate_unemployed_workforce ... ok
+test tests::test_calculate_workforce ... ok
+test tests::test_construction_cancel_refund ... ok
+test tests::test_construction_completion ... ok
+test tests::test_construction_payment ... ok
+test tests::test_operation_ratio_input_shortage ... ok
+test tests::test_reject_exceeding_max_level ... ok
+test tests::test_welfare_and_unrest_clamping ... ok
+test tests::test_calculate_state_tax ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\land_war_combat_peace_test.rs (target\debug\deps\land_war_combat_peace_test-94027c493846be43.exe)
+
+running 2 tests
+test test_all_countries_are_directly_land_connected ... ok
+test test_land_war_declaration_combat_and_peace_flow ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\p20_009_hardcoded_string_scan_test.rs (target\debug\deps\p20_009_hardcoded_string_scan_test-b16845b6e191e984.exe)
+
+running 4 tests
+test target_files_exist ... ok
+test all_exemptions_correspond_to_actual_occurrences ... ok
+test no_hardcoded_text_new_literals_outside_allowlist ... ok
+test no_hardcoded_game_notification_message_literals ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\p20_009_localization_headless_render_test.rs (target\debug\deps\p20_009_localization_headless_render_test-7d5f3f33924c159d.exe)
+
+running 1 test
+[2m2026-08-08T12:43:46.987194Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "610.74", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-08-08T12:43:47.204433Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-08-08T12:43:47.204494Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-08-08T12:43:47.210419Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DataLoader] Successfully loaded 8 buildings, 22 technologies, 4 countries, 10 states, 3 diplomatic relations
+[2m2026-08-08T12:43:47.220656Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220705Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220712Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220717Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220720Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220724Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220728Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220732Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220963Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.220985Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.358666Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419865Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419896Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419903Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419908Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419913Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419918Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419924Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.419929Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.420012Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.420027Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473473Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473502Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473508Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473512Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473515Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473520Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473524Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.473527Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.518278Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DEBUG] Spawned 4 initial armies
+[2m2026-08-08T12:43:47.523035Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523125Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523150Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523162Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523177Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523181Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523195Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523199Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523211Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523215Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523227Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523231Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523245Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523249Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523259Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523263Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523274Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523278Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523305Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523309Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523320Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523337Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523350Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523366Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523392Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523403Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523415Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523428Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523449Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523461Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523470Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523477Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523485Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523495Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523503Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523517Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523525Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523537Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523556Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523570Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523585Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523600Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523658Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523694Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523714Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523719Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523723Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523726Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523730Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523733Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523737Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523781Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523785Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523789Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523793Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523839Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523845Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523849Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523853Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523856Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523860Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523864Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523868Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523872Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523875Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523879Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523882Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523886Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523889Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523893Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523897Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523901Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.523904Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524002Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524006Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524010Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524014Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524017Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524021Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524025Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524029Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524033Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524036Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524041Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524045Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.524127Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653872Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653952Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653961Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653965Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653969Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653973Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653977Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653980Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.653986Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654193Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654208Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654224Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654235Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654246Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654257Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654268Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.654278Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722047Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722114Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722132Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722143Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722157Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722169Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722182Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722207Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722212Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722219Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722224Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722228Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722232Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722235Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722312Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722316Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722320Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722323Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722327Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722331Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722334Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722338Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722344Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722349Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722453Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722470Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722483Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722494Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722505Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722520Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722534Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722544Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722558Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722571Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722584Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722588Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722599Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722603Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722618Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722622Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722633Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722637Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722647Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722651Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722662Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722666Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722676Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722680Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722690Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722693Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722705Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722717Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722727Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722735Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722742Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722750Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722778Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722783Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722788Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722794Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722823Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.722840Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726544Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726631Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726638Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726642Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726651Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726657Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726661Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726664Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726668Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726672Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726676Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726679Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726683Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726687Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726690Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726694Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726697Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726702Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726705Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726800Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726819Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726823Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726827Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726830Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726834Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726838Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726842Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726846Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726849Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726853Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726858Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:47.726861Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+test localization_headless_render_ja_en_switch_and_back ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s
+
+     Running tests\p20_009_localization_resource_test.rs (target\debug\deps\p20_009_localization_resource_test-4e90e8aaad58049e.exe)
+
+running 8 tests
+test no_empty_translations_in_either_locale ... ok
+test fallback_to_en_us_works_for_synthetic_missing_ja_key ... ok
+test missing_key_is_detected_not_silently_hidden ... ok
+test no_duplicate_keys_in_either_locale_file ... ok
+test ja_jp_and_en_us_key_sets_match_exactly ... ok
+test template_substitution_is_exercised_end_to_end_on_real_catalog ... ok
+test required_key_categories_are_present ... ok
+test placeholder_sets_match_between_locales_for_every_key ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\profile_workload_correctness_test.rs (target\debug\deps\profile_workload_correctness_test-4221a9fdb6502904.exe)
+
+running 9 tests
+test generated_state_count_matches_requested ... ok
+test state_country_associations_are_valid ... ok
+test diplomatic_relation_advances_via_real_daily_diplomacy_system ... ok
+test daily_tick_advances_requested_number_of_days ... ok
+test larger_scale_smoke_test_stays_sane ... ok
+test high_load_scenario_produces_real_war_and_military_activity ... ok
+test normal_scenario_produces_real_economic_and_research_activity ... ok
+test same_seed_produces_deterministic_results ... ok
+test research_data_advances_via_real_monthly_research_system ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\research_and_politics_tests.rs (target\debug\deps\research_and_politics_tests-795c86f7952ce047.exe)
+
+running 9 tests
+test test_clergy_resistance_to_secular_reform ... ok
+test test_interest_group_influence_normalization ... ok
+test test_world_civilization_stage_progression ... ok
+test test_political_reform_completion ... ok
+test test_country_values_clamping ... ok
+test test_rebuild_technology_modifiers ... ok
+test test_research_allocation_normalization ... ok
+test test_fusion_efficiency_imbalance_penalty ... ok
+test test_calculate_field_monthly_points ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\ui_headless_render_test.rs (target\debug\deps\ui_headless_render_test-d0583dc3b3116171.exe)
+
+running 1 test
+[2m2026-08-08T12:43:48.296072Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "610.74", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-08-08T12:43:48.505241Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-08-08T12:43:48.505305Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-08-08T12:43:48.511344Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DataLoader] Successfully loaded 8 buildings, 22 technologies, 4 countries, 10 states, 3 diplomatic relations
+[2m2026-08-08T12:43:48.521790Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521835Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521841Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521845Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521849Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521856Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521862Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.521865Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.522101Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.522122Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656102Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656132Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656136Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656140Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656145Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656148Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656153Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.656156Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.715074Z[0m [32m INFO[0m [2mstrategy_game::app::loader[0m[2m:[0m [DEBUG] Spawned 4 initial armies
+[2m2026-08-08T12:43:48.720286Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720397Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720422Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720435Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720450Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720454Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720469Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720474Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720490Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720513Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720579Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720595Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720629Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720634Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720648Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720656Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720675Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720679Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720697Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720701Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720713Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720731Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720748Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720765Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720784Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720795Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720806Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720823Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720840Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720850Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720860Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720882Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720894Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720906Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720927Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720937Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720945Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720958Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720973Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.720987Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721004Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721019Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721084Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721119Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721140Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721144Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721148Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721152Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721155Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721159Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721162Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721209Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721214Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721218Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721222Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721260Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721264Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721267Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721271Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721275Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721279Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721282Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721286Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721290Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721293Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721297Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721301Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721305Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721308Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721312Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721315Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721321Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721325Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721446Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721451Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721455Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721459Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721463Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721466Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721471Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721475Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721478Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721482Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721486Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721490Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+[2m2026-08-08T12:43:48.721581Z[0m [33m WARN[0m [2micu_provider::error[0m[2m:[0m ICU4X data error: No segmentation model for language: ja
+test ui_headless_render_produces_real_pixels ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s
+
+   Doc-tests strategy_game
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

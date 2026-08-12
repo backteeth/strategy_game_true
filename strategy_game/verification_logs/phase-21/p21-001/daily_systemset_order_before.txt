@@ -1,0 +1,39 @@
+=== app/time.rs DailySimulationSet enum + configure_sets ===
+use crate::app::game_state::GameState;
+use bevy::prelude::*;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub enum DailySimulationSet {
+    TimeUpdate,
+    Economy,
+    Research,
+    Diplomacy,
+    CountryAi,
+    WarPreparation,
+    MilitaryAi,
+    FrontlineOrders,
+    MilitaryAction,
+    WarResolution,
+    UiUpdate,
+}
+
+        // SystemSet の実行順序を保証
+        app.configure_sets(
+            Update,
+            (
+                DailySimulationSet::TimeUpdate,
+                DailySimulationSet::Economy,
+                DailySimulationSet::Research,
+                DailySimulationSet::Diplomacy,
+                DailySimulationSet::CountryAi,
+                DailySimulationSet::WarPreparation,
+                DailySimulationSet::MilitaryAi,
+                DailySimulationSet::FrontlineOrders,
+                DailySimulationSet::MilitaryAction,
+                DailySimulationSet::WarResolution,
+                DailySimulationSet::UiUpdate,
+            )
+                .chain()
+                .run_if(in_state(GameState::Playing)),
+=== SHA256 of full app/time.rs ===
+4faecaeca84fbcd593c2382e03fa3769df18f768acc27114290080f4e3179bae *src/app/time.rs

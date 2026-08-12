@@ -1,0 +1,176 @@
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.51s
+     Running unittests src\lib.rs (target\debug\deps\strategy_game-bf01437cdfbb2ed2.exe)
+
+running 121 tests
+test country::country_ai::tests::test_compute_land_states_by_controller_matches_individual_filter ... ok
+test country::country_ai::tests::test_ai_construction_validity_and_cost ... ok
+test diplomacy::tests::test_crisis_registry ... ok
+test country::country_ai::tests::test_war_preparation_ai_starts_justification_via_optimized_path ... ok
+test country::country_ai::tests::test_player_country_not_controlled_by_country_ai ... ok
+test diplomacy::tests::test_claim_registry ... ok
+test country::country_ai::tests::test_compute_total_power_by_country_matches_individual_calculation ... ok
+test localization::tests::duplicate_key_is_rejected ... ok
+test diplomacy::tests::test_demand_acceptance ... ok
+test diplomacy::tests::test_diplomatic_pair_normalization ... ok
+test diplomacy::tests::test_relation_clamping ... ok
+test diplomacy::tests::test_treaty_addition_and_removal ... ok
+test diplomacy::tests::test_truce_prevents_war ... ok
+test localization::tests::empty_value_is_rejected ... ok
+test country::tests::available_manpower_defaults_to_nonzero_when_absent_from_ron ... ok
+test localization::tests::extract_placeholders_finds_all_named_tokens ... ok
+test localization::tests::substitute_replaces_named_placeholders ... ok
+test localization::tests::translate_uses_current_locale_when_key_present ... ok
+test localization::tests::translate_falls_back_to_en_us_when_ja_jp_key_missing ... ok
+test localization::tests::translate_returns_detectable_marker_when_key_missing_everywhere ... ok
+test map::army_selection::tests::army_display_positions_offsets_stacked_armies ... ok
+test localization::tests::real_catalog_loads_and_ja_en_key_sets_match ... ok
+test military::combat_calc::tests::test_zero_manpower_no_damage ... ok
+test military::combat_calc::tests::test_resolve_combat_day_basic ... ok
+test military::combat_calc::tests::test_combat_is_deterministic ... ok
+test military::invasion::tests::test_start_battle_creates_exactly_one_battle ... ok
+test military::invasion::tests::test_find_retreat_destination_deterministic ... ok
+test military::invasion::tests::test_no_battle_created_between_same_country ... ok
+test military::combat_calc::tests::test_terrain_bonus_favors_defender ... ok
+test military::invasion::tests::test_occupy_state_changes_controller_not_owner ... ok
+test military::invasion::tests::test_no_duplicate_battle_in_same_state ... ok
+test military::tests::evaluate_recruit_feasibility_definition_unavailable ... ok
+test military::tests::evaluate_recruit_feasibility_ready_when_all_conditions_met ... ok
+test military::tests::evaluate_recruit_feasibility_insufficient_manpower ... ok
+test military::tests::evaluate_recruit_feasibility_insufficient_funds ... ok
+test military::tests::evaluate_recruit_feasibility_not_own_state ... ok
+test localization::tests::real_catalog_placeholders_match_between_locales ... ok
+test military::tests::evaluate_recruit_feasibility_no_state_selected ... ok
+test military::tests::test_combat_strength ... ok
+test military::tests::test_movement ... ok
+test military::tests::test_pathfinding ... ok
+test military::tests::test_phase13_movement_timing_and_arrival ... ok
+test military::tests::test_phase13_own_territory_and_foreign_pathfinding ... ok
+test military::tests::test_phase13_unreachable_destination_and_determinism ... ok
+test military::tests::test_phase15_combat_is_deterministic ... ok
+test military::tests::test_phase15_battle_starts_when_entering_defended_state ... ok
+test military::tests::test_phase15_combat_daily_resolution ... ok
+test military::tests::test_phase15_invasion_path_to_enemy_territory ... ok
+test military::tests::test_phase15_controller_restored_on_recapture ... ok
+test military::tests::test_phase15_manpower_does_not_go_below_zero ... ok
+test military::tests::test_phase15_no_battle_between_same_country ... ok
+test military::tests::test_phase15_no_path_to_neutral_territory ... ok
+test military::tests::test_phase15_occupy_undefended_enemy_state ... ok
+test military::tests::test_phase15_org_recovery_in_own_territory ... ok
+test military::tests::test_phase15_org_recovery_does_not_exceed_max ... ok
+test military::tests::test_phase15_org_recovery_not_during_combat ... ok
+test military::tests::test_phase15_org_recovery_not_when_moving ... ok
+test military::tests::test_phase15_retreat_is_deterministic ... ok
+test military::tests::test_phase15_terrain_bonus_affects_combat ... ok
+test military::tests::test_phase15_owner_unchanged_after_occupation ... ok
+test military::tests::test_recruitment_cancellation ... ok
+test military::tests::test_recruitment_progress_and_completion ... ok
+test military::tests::test_recruitment_conditions ... ok
+test military::tests::test_supply_processing ... ok
+test military::tests::test_recruitment_manpower_shortage ... ok
+test military::tests::test_recruitment_equipment_shortage ... ok
+test war::frontline::tests::test_army_assignment_and_validation ... ok
+test war::frontline::tests::test_defensive_positioning_and_determinism ... ok
+test war::frontline::tests::test_evaluate_frontline_army_command_feasibility ... ok
+test war::frontline::tests::test_frontline_generation_border_calculation ... ok
+test war::frontline::tests::test_frontline_lifecycle_creation_and_removal ... ok
+test war::frontline::tests::test_manual_vs_frontline_priority ... ok
+test war::frontline::tests::test_unassign_army_rejects_non_owner ... ok
+test war::frontline::tests::test_offensive_operations_objective_and_attack ... ok
+test war::military_ai::tests::test_ai_army_assignment_and_power_evaluation ... ok
+test war::military_ai::tests::test_ai_decision_thresholds_and_hysteresis ... ok
+test war::military_ai::tests::test_ai_target_country_filtering ... ok
+test war::tests::test_are_countries_at_war_false_for_allies_or_neutrals ... ok
+test war::tests::test_are_countries_at_war_handles_invalid_ids ... ok
+test war::tests::test_are_countries_at_war_true_for_enemies ... ok
+test war::tests::test_attacker_and_defender_registered_correctly ... ok
+test war::tests::test_can_declare_war_after_justification_complete ... ok
+test war::tests::test_cannot_declare_war_before_justification_complete ... ok
+test war::tests::test_cannot_duplicate_justification ... ok
+test war::tests::test_cannot_justify_against_ally ... ok
+test war::tests::test_cannot_justify_against_self ... ok
+test war::tests::test_cannot_justify_against_nap_partner ... ok
+test war::tests::test_cannot_start_duplicate_war ... ok
+test war::tests::test_cannot_justify_unowned_state ... ok
+test war::tests::test_combat_resolution ... ok
+test war::tests::test_justification_completion_after_required_days ... ok
+test war::tests::test_justification_consumed_on_war_declaration ... ok
+test war::tests::test_justification_progress_timing ... ok
+test war::tests::test_peace_treaty_basic ... ok
+test war::tests::test_phase16_battle_results_sync_and_deduplication ... ok
+test war::tests::test_phase16_capitulation_rules ... ok
+test war::tests::test_phase16_peace_offer_validation ... ok
+test war::tests::test_phase16_sea_state_exclusion ... ok
+test war::tests::test_phase16_truce_prevents_justification_and_war ... ok
+test war::tests::test_phase16_war_score_breakdown_and_clamping ... ok
+test war::tests::test_war_data_created_on_declaration ... ok
+test war::tests::test_war_declaration_determinism ... ok
+test war::tests::test_war_score_calculation ... ok
+test ui::military_panel::tests::handle_frontline_command_buttons_unassign_all_only_affects_own_plan ... ok
+test ui::military_panel::tests::handle_frontline_command_buttons_assign_success ... ok
+test ui::military_panel::tests::handle_frontline_command_buttons_fires_once_per_press ... ok
+test ui::military_panel::tests::handle_frontline_command_buttons_no_active_war_does_nothing ... ok
+test ui::military_panel::tests::handle_frontline_command_buttons_set_stance ... ok
+test ui::military_panel::tests::handle_frontline_command_buttons_unassign_rejects_foreign_army ... ok
+test map::army_selection::tests::handle_movement_order_applies_to_all_selected_armies ... ok
+test ui::military_panel::tests::handle_recruit_buttons_no_selection_does_not_mutate_state ... ok
+test map::army_selection::tests::drag_select_picks_up_all_armies_in_rectangle ... ok
+test map::army_selection::tests::ctrl_click_toggles_multi_selection ... ok
+test ui::military_panel::tests::handle_recruit_buttons_foreign_state_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_unknown_definition_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_success_queues_recruitment_and_deducts_cost ... ok
+test ui::military_panel::tests::handle_recruit_buttons_insufficient_funds_does_not_mutate_state ... ok
+test ui::military_panel::tests::handle_recruit_buttons_insufficient_manpower_does_not_mutate_state ... ok
+test ui::military_panel::tests::recruit_button_is_spawned_in_military_panel_ui_tree ... ok
+test ui::military_panel::tests::frontline_command_buttons_are_spawned_in_military_panel_ui_tree ... ok
+test map::army_selection::tests::handle_army_selection_can_pick_either_stacked_army ... ok
+
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+=== economy_tests ===
+test tests::test_welfare_and_unrest_clamping ... ok
+test tests::test_construction_cancel_refund ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== diplomacy_tests ===
+test test_diplomatic_pair_key_normalization ... ok
+test test_diplomatic_opinion_clamping ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== research_and_politics_tests ===
+test test_country_values_clamping ... ok
+test test_fusion_efficiency_imbalance_penalty ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== daily_system_integration_test ===
+test test_d_next_day_military_action ... ok
+test test_b_game_paused_no_state_change ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+=== profile_workload_correctness_test ===
+test same_seed_produces_deterministic_results ... ok
+test research_data_advances_via_real_monthly_research_system ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+=== p20_009_hardcoded_string_scan_test ===
+test no_hardcoded_game_notification_message_literals ... ok
+test no_hardcoded_text_new_literals_outside_allowlist ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== p20_009_localization_resource_test ===
+test placeholder_sets_match_between_locales_for_every_key ... ok
+test required_key_categories_are_present ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+=== land_war_combat_peace_test ===
+test test_all_countries_are_directly_land_connected ... ok
+test test_land_war_declaration_combat_and_peace_flow ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

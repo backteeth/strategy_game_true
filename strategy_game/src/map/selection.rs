@@ -1,4 +1,5 @@
 use crate::app::game_state::GameState;
+use crate::map::army_selection::DragSelectState;
 use crate::map::camera::GameCamera;
 use crate::map::rendering::StateVisual;
 use crate::state::{SelectedState, StateSelectionChanged};
@@ -26,11 +27,21 @@ fn handle_state_click(
     ui_interactions_q: Query<&Interaction>,
     military_registry: Res<crate::military::data::MilitaryRegistry>,
     state_registry: Res<crate::state::data::StateRegistry>,
+    drag_state: Res<DragSelectState>,
     mut selected: ResMut<SelectedState>,
     mut selection_changed: MessageWriter<StateSelectionChanged>,
 ) {
-    // 左クリックが押された瞬間のみ処理
-    if !mouse_buttons.just_pressed(MouseButton::Left) {
+    // 左クリックが離された瞬間のみ処理(押下瞬間ではない)。
+    // P21-004: army_selectionの矩形選択は「押下→ドラッグ→解放」で確定するため、
+    // 押下瞬間に反応すると、ドラッグ選択の開始点がたまたま州の上だった場合に
+    // 意図せずその州を選択してしまう。解放時点でドラッグ中だったかを判定できる
+    // よう、州クリックも解放イベントで統一する。
+    if !mouse_buttons.just_released(MouseButton::Left) {
+        return;
+    }
+
+    // 直前の操作がドラッグ選択だった場合は州選択を行わない
+    if drag_state.is_dragging {
         return;
     }
 

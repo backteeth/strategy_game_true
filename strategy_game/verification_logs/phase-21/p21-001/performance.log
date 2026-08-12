@@ -1,0 +1,56 @@
+P21-001 パフォーマンス確認ログ
+================================
+
+## 調査結果: profile_1000_states.rs はUIプラグインを一切含まない
+
+`src/bin/profile_1000_states.rs` を確認したところ、UiPlugin/MilitaryPanelPlugin等の
+UI関連プラグインは一切追加しておらず、日次シミュレーション処理(DailySimulationSet配下の
+Economy/Research/Diplomacy/CountryAi/WarPreparation/MilitaryAi/FrontlineOrders/
+MilitaryAction/WarResolution)のみを直接呼び出す構成になっている
+(grep "add_plugins|MilitaryPanelPlugin|UiPlugin" で0件ヒット)。
+
+P21-001の変更(military_panel.rsへのUI追加、military/recruitment.rsへの純粋関数追加)は
+このベンチマークのコードパスに一切含まれないため、理論上パフォーマンスへの影響はゼロで
+あることが事前調査の時点で判明していた。以下は実測による裏付け。
+
+## 実行コマンド(既存のCLI引数仕様をそのまま使用、変更なし)
+
+    cargo run --release --bin profile_1000_states -- p21_001_after
+
+出力先: `verification_logs/p20-008/p21_001_after/`
+(出力先パスは `src/bin/profile_1000_states.rs:486` で
+`verification_logs/p20-008/<引数>` にハードコードされており、ツール自体を変更しない
+という指示に従い、そのまま使用した。Phase 21向けの新規サブディレクトリとして
+`p21_001_after` を指定した。)
+
+## 実測結果 (P21-001実装後、本セッションでの計測)
+
+| 規模 | シナリオ | mean(ms) | median(ms) | p95(ms) | ticks/秒 |
+|---|---|---|---|---|---|
+| 1000 | normal | 0.1283 | 0.1020 | 0.3465 | 7797.2 |
+| 1000 | high_load | 0.4772 | 0.4484 | 0.6297 | 2095.6 |
+| 2000 | normal | 0.2214 | 0.1708 | 0.4652 | 4516.1 |
+| 2000 | high_load | 1.1244 | 1.0350 | 1.5575 | 889.4 |
+
+## baseline(Prototype v0.1最終監査時点)との比較
+
+| 規模 | シナリオ | baseline median(ms) | P21-001後 median(ms) |
+|---|---|---|---|
+| 1000 | normal | 0.3617 | 0.1020 |
+| 1000 | high_load | 0.7073 | 0.4484 |
+| 2000 | normal | 0.3294 | 0.1708 |
+| 2000 | high_load | 1.1334 | 1.0350 |
+
+すべての規模・シナリオで悪化は確認されなかった(むしろ数値上は改善しているが、これは
+P21-001の変更による改善ではなく、実行時のマシン負荷状況・CPUブースト状態等による
+通常の測定誤差・環境差と考えられる。P21-001はこのベンチマークのコードパスに
+一切含まれないため、コード変更による性能改善という解釈はしていない)。
+
+## 結論
+
+日次処理性能への悪化は確認されなかった。P21-001はプレイヤー操作時にのみ発生する
+UIシステム(Update側、DailySimulationSet外)であり、この期待通りの結果となった。
+
+生データ: `verification_logs/p20-008/p21_001_after/results.csv`,
+`set_timings.csv`, `results.json`, `summary.txt`, `environment.txt`
+標準出力ログ: `performance_run_stdout.log`(同ディレクトリ)

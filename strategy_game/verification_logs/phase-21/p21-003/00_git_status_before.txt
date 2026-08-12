@@ -1,0 +1,20 @@
+ M assets/localization/en-US.ron
+ M assets/localization/ja-JP.ron
+ M src/country/mod.rs
+ M src/map/army_render.rs
+ M src/map/army_selection.rs
+ M src/map/selection.rs
+ M src/military/combat_calc.rs
+ M src/military/recruitment.rs
+ M src/military/tests.rs
+ M src/military/update.rs
+ M src/ui/diplomacy_panel.rs
+ M src/ui/military_panel.rs
+ M src/war/frontline.rs
+ M tests/land_war_combat_peace_test.rs
+ M verification_logs/p20-007/screenshots/03_playing_topbar.png
+ M verification_logs/p20-009/screenshots/04_playing_ja_jp.png
+ M verification_logs/p20-009/screenshots/05_playing_en_us.png
+ M verification_logs/p20-009/screenshots/06_playing_ja_jp_again.png
+?? verification_logs/p20-008/p21_001_after/
+?? verification_logs/phase-21/

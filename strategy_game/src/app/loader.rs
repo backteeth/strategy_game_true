@@ -241,6 +241,20 @@ fn validate_data(
         }
     }
 
+    for c in countries {
+        match states.iter().find(|s| s.id == c.capital_state_id) {
+            None => panic!(
+                "[DataLoader] Country '{}' (id={}) capital_state_id={} does not reference an existing state",
+                c.name, c.id.0, c.capital_state_id.0
+            ),
+            Some(capital) if capital.owner_country_id != c.id => panic!(
+                "[DataLoader] Country '{}' (id={}) capital_state_id={} is owned by CountryId {}, not itself",
+                c.name, c.id.0, c.capital_state_id.0, capital.owner_country_id.0
+            ),
+            Some(_) => {}
+        }
+    }
+
     for (tech_id, def) in tech_defs {
         for pre in &def.prerequisites {
             if !tech_defs.contains_key(pre) {

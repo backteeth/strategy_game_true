@@ -1,6 +1,7 @@
-use crate::common::{DivisionId, StateId};
+use crate::common::{CountryId, DivisionId, StateId};
 use crate::country::CountryRegistry;
 use crate::military::data::{ArmyStatus, ArmyUnit, MilitaryRegistry};
+use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -122,4 +123,61 @@ pub fn cancel_recruitment(
     }
 
     Ok(())
+}
+
+/// P21-001: UIが募兵ボタンの表示・押下可否を判定するための副作用のない事前評価結果。
+///
+/// `request_recruitment`自体は対象州の所有権を検証しない(呼び出し元の責務)ため、
+/// この関数がUI層向けに所有権チェックを含めた一段階手前の判定として提供する。
+/// 実際の資金・人的資源消費は`request_recruitment`が改めて原子的に検証・実行する
+/// (この関数の結果が`Ready`でも、呼び出し間に状態が変化した場合は
+/// `request_recruitment`側の再検証で安全に拒否される)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecruitFeasibility {
+    Ready,
+    NoStateSelected,
+    NotOwnState,
+    DefinitionUnavailable,
+    InsufficientManpower,
+    InsufficientFunds,
+}
+
+impl RecruitFeasibility {
+    pub fn is_ready(self) -> bool {
+        matches!(self, RecruitFeasibility::Ready)
+    }
+}
+
+/// 指定した州・部隊定義に対して募兵操作が実行可能かを判定する(副作用なし)。
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_recruit_feasibility(
+    selected_state: Option<StateId>,
+    player_country_id: CountryId,
+    state_registry: &StateRegistry,
+    country: &crate::country::CountryData,
+    military_registry: &MilitaryRegistry,
+    division_id: DivisionId,
+) -> RecruitFeasibility {
+    let Some(state_id) = selected_state else {
+        return RecruitFeasibility::NoStateSelected;
+    };
+    let Some(state) = state_registry.get(state_id) else {
+        return RecruitFeasibility::NoStateSelected;
+    };
+    if state.owner_country_id != player_country_id {
+        return RecruitFeasibility::NotOwnState;
+    }
+
+    let Some(def) = military_registry.definitions.get(&division_id) else {
+        return RecruitFeasibility::DefinitionUnavailable;
+    };
+
+    if country.available_manpower < def.required_manpower {
+        return RecruitFeasibility::InsufficientManpower;
+    }
+    if country.treasury < def.required_equipment {
+        return RecruitFeasibility::InsufficientFunds;
+    }
+
+    RecruitFeasibility::Ready
 }

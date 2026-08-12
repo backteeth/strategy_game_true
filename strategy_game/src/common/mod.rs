@@ -41,3 +41,8 @@ pub struct BattleId(pub usize);
 /// 前線を一意に識別するID型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FrontlineId(pub usize);
+
+/// 編成(複数師団の永続的な集合、いわゆる「軍」)を一意に識別するID型。
+/// 既存の`ArmyId`(1師団)と紛らわしいため、複数師団の集合は「ArmyGroup」と呼ぶ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ArmyGroupId(pub usize);

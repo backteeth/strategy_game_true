@@ -1,0 +1,60 @@
+=== war/frontline.rs declare-day guard (approx L800-815) ===
+        military_registry,
+        frontline_registry,
+    );
+
+    let frontline_ids: Vec<FrontlineId> = frontline_registry.frontlines.keys().copied().collect();
+
+    for fl_id in frontline_ids {
+        let frontline = match frontline_registry.frontlines.get(&fl_id).cloned() {
+            Some(fl) => fl,
+            None => continue,
+        };
+
+        // 宣戦布告当日は前線命令による自動移動命令の生成をスキップ
+        if let Some(curr) = current_date
+            && let Some(war) = war_registry.wars.get(&frontline.war_id)
+            && war.start_date == curr
+        {
+            continue;
+        }
+
+        // 攻撃側・防御側のPlanを処理
+=== SHA256 of full war/frontline.rs ===
+f0a7562fa4840fc4bc4c93066015654e96360fac88df05d57678128b8b831ac8 *src/war/frontline.rs
+
+=== war/military_ai.rs declare-day guard (approx L405-420, L580-595) ===
+    // 進行中戦争の前線を取得 (WarId昇順, FrontlineId昇順)
+    let mut target_frontlines: Vec<Frontline> = frontline_registry
+        .frontlines
+        .values()
+        .filter(|fl| {
+            if fl.attacker_country_id != country_id && fl.defender_country_id != country_id {
+                return false;
+            }
+            if let Some(curr) = current_date
+                && let Some(war) = war_registry.wars.get(&fl.war_id)
+                && war.start_date == curr
+            {
+                return false;
+            }
+            war_registry
+                .wars
+
+        let mut total_own_power: u64 = 0;
+        let mut total_enemy_power: u64 = 0;
+        let mut last_reason = MilitaryAiDecisionReason::NoValidFrontline;
+        let mut skipped_due_to_start_date = false;
+
+        for war in &active_wars {
+            // 宣戦布告当日は軍事AIの移動命令を発行しない（プレイヤー保護と不意打ち防止）
+            if war.start_date == current_date {
+                skipped_due_to_start_date = true;
+                continue;
+            }
+
+            if let Some(fl) = frontline_registry.get_frontline_for_war(war.id).cloned() {
+                let mut plan = match frontline_registry
+                    .get_plan(fl.frontline_id, country_id)
+=== SHA256 of full war/military_ai.rs ===
+9bb9cbc035bb8d6a2ab1dd1b8b34dabf49fa0506efa8033314bfae6d882dd688 *src/war/military_ai.rs

@@ -1,0 +1,22 @@
+warning: in the working copy of 'strategy_game/assets/localization/en-US.ron', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/assets/localization/ja-JP.ron', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/country/mod.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/map/army_render.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/map/army_selection.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/recruitment.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/military/tests.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/src/ui/military_panel.rs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'strategy_game/tests/land_war_combat_peace_test.rs', LF will be replaced by CRLF the next time Git touches it
+ strategy_game/assets/localization/en-US.ron        |  10 +
+ strategy_game/assets/localization/ja-JP.ron        |  10 +
+ strategy_game/src/country/mod.rs                   |  37 +-
+ strategy_game/src/map/army_render.rs               |  83 ++--
+ strategy_game/src/map/army_selection.rs            | 180 ++++++++-
+ strategy_game/src/military/recruitment.rs          |  60 ++-
+ strategy_game/src/military/tests.rs                | 135 ++++++-
+ strategy_game/src/ui/military_panel.rs             | 437 ++++++++++++++++++++-
+ .../p20-007/screenshots/03_playing_topbar.png      | Bin 106311 -> 106223 bytes
+ .../p20-009/screenshots/04_playing_ja_jp.png       | Bin 106311 -> 106223 bytes
+ .../p20-009/screenshots/05_playing_en_us.png       | Bin 111412 -> 111409 bytes
+ .../p20-009/screenshots/06_playing_ja_jp_again.png | Bin 106311 -> 106223 bytes
+ 12 files changed, 878 insertions(+), 74 deletions(-)

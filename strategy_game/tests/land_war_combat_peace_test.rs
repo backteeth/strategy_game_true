@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use strategy_game::common::{ArmyId, CountryId, DivisionId, StateId};
 use strategy_game::country::CountryData;
 use strategy_game::diplomacy::data::DiplomacyRegistry;
@@ -16,53 +17,122 @@ use strategy_game::war::justification::WarJustificationRegistry;
 use strategy_game::war::peace::{execute_peace_settlement, PeaceTerm};
 use strategy_game::war::war_score::process_war_score;
 
-/// RONファイルからロードして全4国家が相互に陸続き（直接隣接）になっているかをテストする
+/// RONファイルからロードして、国家数が期待どおりであり、かつ全州（海域を除く）が
+/// 単一の陸塊として連結していることをテストする。
+///
+/// P21-MAP-001(6か国・28州への拡張)以前は「全国家ペアが直接隣接する」という、より
+/// 強い不変量を検証していたが、要衝・袋小路・突出部を含む地形では成立し得ない要求
+/// だったため、より一般的な「大陸全体が単一連結成分をなす」という不変量に置き換えた
+/// (隣接関係そのものは§`test_all_state_neighbors_are_bidirectional`等で別途検証する)。
 #[test]
-fn test_all_countries_are_directly_land_connected() {
+fn test_country_count_and_landmass_connectivity() {
     let states_ron = std::fs::read_to_string("assets/data/states.ron")
         .expect("assets/data/states.ron should exist");
-    let states: Vec<StateData> = ron::from_str(&states_ron)
-        .expect("assets/data/states.ron should parse cleanly");
+    let states: Vec<StateData> =
+        ron::from_str(&states_ron).expect("assets/data/states.ron should parse cleanly");
     let state_reg = StateRegistry::build(states);
 
     let countries_ron = std::fs::read_to_string("assets/data/countries.ron")
         .expect("assets/data/countries.ron should exist");
-    let countries: Vec<CountryData> = ron::from_str(&countries_ron)
-        .expect("assets/data/countries.ron should parse cleanly");
+    let countries: Vec<CountryData> =
+        ron::from_str(&countries_ron).expect("assets/data/countries.ron should parse cleanly");
 
     let country_ids: Vec<CountryId> = countries.iter().map(|c| c.id).collect();
 
-    // 4国家存在することを確認
-    assert_eq!(country_ids.len(), 4, "Expected 4 countries in countries.ron");
+    // 6国家存在することを確認 (P21-MAP-001: 4か国 + 新興2か国)
+    assert_eq!(
+        country_ids.len(),
+        6,
+        "Expected 6 countries in countries.ron"
+    );
 
-    // 全ての国家ペア (c1, c2) について、直接隣接する州が存在するか確認
-    for i in 0..country_ids.len() {
-        for j in (i + 1)..country_ids.len() {
-            let c1 = country_ids[i];
-            let c2 = country_ids[j];
+    // 大陸全体(海域州を除く)が単一の連結成分をなすことをBFSで確認する
+    let land_state_ids: Vec<StateId> = state_reg
+        .states
+        .iter()
+        .filter(|s| !s.is_sea)
+        .map(|s| s.id)
+        .collect();
+    assert!(
+        !land_state_ids.is_empty(),
+        "There should be at least one land state"
+    );
 
-            let c1_states = state_reg.get_owned_states(c1);
-            let c2_states = state_reg.get_owned_states(c2);
-
-            let mut has_direct_border = false;
-            for s1 in &c1_states {
-                for s2 in &c2_states {
-                    if s1.neighbors.contains(&s2.id) || s2.neighbors.contains(&s1.id) {
-                        has_direct_border = true;
-                        break;
-                    }
-                }
-                if has_direct_border {
-                    break;
-                }
+    let mut visited: HashSet<StateId> = HashSet::new();
+    let mut queue: VecDeque<StateId> = VecDeque::new();
+    let start = land_state_ids[0];
+    visited.insert(start);
+    queue.push_back(start);
+    while let Some(current) = queue.pop_front() {
+        let state = state_reg.get(current).expect("state must exist");
+        for &neighbor in &state.neighbors {
+            let neighbor_state = match state_reg.get(neighbor) {
+                Some(s) => s,
+                None => continue,
+            };
+            if neighbor_state.is_sea {
+                continue;
             }
+            if visited.insert(neighbor) {
+                queue.push_back(neighbor);
+            }
+        }
+    }
 
+    let unreached: Vec<StateId> = land_state_ids
+        .iter()
+        .filter(|id| !visited.contains(id))
+        .copied()
+        .collect();
+    assert!(
+        unreached.is_empty(),
+        "All land states should form a single connected landmass, unreached: {:?}",
+        unreached
+    );
+}
+
+/// 全州の隣接関係が双方向(A→BならB→Aも成立)であることをテストする。
+#[test]
+fn test_all_state_neighbors_are_bidirectional() {
+    let states_ron = std::fs::read_to_string("assets/data/states.ron")
+        .expect("assets/data/states.ron should exist");
+    let states: Vec<StateData> =
+        ron::from_str(&states_ron).expect("assets/data/states.ron should parse cleanly");
+    let state_reg = StateRegistry::build(states);
+
+    for state in &state_reg.states {
+        for &neighbor_id in &state.neighbors {
+            let neighbor = state_reg.get(neighbor_id).unwrap_or_else(|| {
+                panic!(
+                    "State {:?} references unknown neighbor {:?}",
+                    state.id, neighbor_id
+                )
+            });
             assert!(
-                has_direct_border,
-                "Country {:?} and Country {:?} should be directly connected by land border",
-                c1, c2
+                neighbor.neighbors.contains(&state.id),
+                "Adjacency between {:?} and {:?} must be bidirectional",
+                state.id,
+                neighbor_id
             );
         }
+    }
+}
+
+/// 州が自分自身を隣接州として持たない(不正な自己隣接がない)ことをテストする。
+#[test]
+fn test_no_state_has_self_adjacency() {
+    let states_ron = std::fs::read_to_string("assets/data/states.ron")
+        .expect("assets/data/states.ron should exist");
+    let states: Vec<StateData> =
+        ron::from_str(&states_ron).expect("assets/data/states.ron should parse cleanly");
+    let state_reg = StateRegistry::build(states);
+
+    for state in &state_reg.states {
+        assert!(
+            !state.neighbors.contains(&state.id),
+            "State {:?} must not list itself as a neighbor",
+            state.id
+        );
     }
 }
 
@@ -236,8 +306,13 @@ fn test_land_war_declaration_combat_and_peace_flow() {
     sync_battle_results_to_wars(&battle_reg, &mut war_reg);
 
     // 5. 占領と戦勝点算定 (Occupation & War Score)
+    // Oceanic Magic Empireは6州(8,9,23,24,25,27)を所有する(P21-MAP-001)。
+    // 降伏条件(60%以上の占領)を満たすため、8,9に加えて隣接する23,24も占領する
+    // (4/6 ≈ 66.7% >= 60%)。
     occupy_state(target_state, attacker_country, &mut state_reg);
     occupy_state(StateId(9), attacker_country, &mut state_reg);
+    occupy_state(StateId(23), attacker_country, &mut state_reg);
+    occupy_state(StateId(24), attacker_country, &mut state_reg);
     let state_8 = state_reg.get(target_state).unwrap();
     assert_eq!(state_8.controller_country, Some(attacker_country), "Target state should now be controlled by attacker");
 

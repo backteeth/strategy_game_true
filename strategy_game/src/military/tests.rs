@@ -6,7 +6,10 @@ use crate::country::{CountryData, CountryRegistry};
 use crate::military::data::{
     ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
 };
-use crate::military::recruitment::{cancel_recruitment, process_recruitment, request_recruitment};
+use crate::military::recruitment::{
+    RecruitFeasibility, cancel_recruitment, evaluate_recruit_feasibility, process_recruitment,
+    request_recruitment,
+};
 
 fn setup_registry() -> MilitaryRegistry {
     let mut registry = MilitaryRegistry::default();
@@ -149,10 +152,138 @@ fn test_recruitment_cancellation() {
     assert_eq!(country.treasury, 500.0);
 }
 
+// P21-001: evaluate_recruit_feasibility (副作用のない募兵可否判定)
+
+fn owned_state(id: usize, owner: CountryId) -> StateData {
+    let mut state = StateData::default();
+    state.id = StateId(id);
+    state.owner_country_id = owner;
+    state
+}
+
+#[test]
+fn evaluate_recruit_feasibility_ready_when_all_conditions_met() {
+    let registry = setup_registry();
+    let mut country = CountryData::default();
+    country.id = CountryId(1);
+    country.available_manpower = 20_000;
+    country.treasury = 500.0;
+    let state_registry = StateRegistry::build(vec![owned_state(5, CountryId(1))]);
+
+    let feasibility = evaluate_recruit_feasibility(
+        Some(StateId(5)),
+        CountryId(1),
+        &state_registry,
+        &country,
+        &registry,
+        DivisionId(1),
+    );
+    assert_eq!(feasibility, RecruitFeasibility::Ready);
+    assert!(feasibility.is_ready());
+}
+
+#[test]
+fn evaluate_recruit_feasibility_no_state_selected() {
+    let registry = setup_registry();
+    let country = CountryData::default();
+    let state_registry = StateRegistry::build(vec![]);
+
+    let feasibility = evaluate_recruit_feasibility(
+        None,
+        CountryId(1),
+        &state_registry,
+        &country,
+        &registry,
+        DivisionId(1),
+    );
+    assert_eq!(feasibility, RecruitFeasibility::NoStateSelected);
+    assert!(!feasibility.is_ready());
+}
+
+#[test]
+fn evaluate_recruit_feasibility_not_own_state() {
+    let registry = setup_registry();
+    let mut country = CountryData::default();
+    country.id = CountryId(1);
+    country.available_manpower = 20_000;
+    country.treasury = 500.0;
+    // 州はCountryId(2)が所有(他国州)
+    let state_registry = StateRegistry::build(vec![owned_state(5, CountryId(2))]);
+
+    let feasibility = evaluate_recruit_feasibility(
+        Some(StateId(5)),
+        CountryId(1),
+        &state_registry,
+        &country,
+        &registry,
+        DivisionId(1),
+    );
+    assert_eq!(feasibility, RecruitFeasibility::NotOwnState);
+}
+
+#[test]
+fn evaluate_recruit_feasibility_definition_unavailable() {
+    let registry = setup_registry(); // DivisionId(1)のみ定義済み
+    let mut country = CountryData::default();
+    country.id = CountryId(1);
+    country.available_manpower = 20_000;
+    country.treasury = 500.0;
+    let state_registry = StateRegistry::build(vec![owned_state(5, CountryId(1))]);
+
+    let feasibility = evaluate_recruit_feasibility(
+        Some(StateId(5)),
+        CountryId(1),
+        &state_registry,
+        &country,
+        &registry,
+        DivisionId(999), // 未定義の部隊ID
+    );
+    assert_eq!(feasibility, RecruitFeasibility::DefinitionUnavailable);
+}
+
+#[test]
+fn evaluate_recruit_feasibility_insufficient_manpower() {
+    let registry = setup_registry();
+    let mut country = CountryData::default();
+    country.id = CountryId(1);
+    country.available_manpower = 100; // 不足 (必要10,000)
+    country.treasury = 500.0;
+    let state_registry = StateRegistry::build(vec![owned_state(5, CountryId(1))]);
+
+    let feasibility = evaluate_recruit_feasibility(
+        Some(StateId(5)),
+        CountryId(1),
+        &state_registry,
+        &country,
+        &registry,
+        DivisionId(1),
+    );
+    assert_eq!(feasibility, RecruitFeasibility::InsufficientManpower);
+}
+
+#[test]
+fn evaluate_recruit_feasibility_insufficient_funds() {
+    let registry = setup_registry();
+    let mut country = CountryData::default();
+    country.id = CountryId(1);
+    country.available_manpower = 20_000;
+    country.treasury = 1.0; // 不足 (必要100.0)
+    let state_registry = StateRegistry::build(vec![owned_state(5, CountryId(1))]);
+
+    let feasibility = evaluate_recruit_feasibility(
+        Some(StateId(5)),
+        CountryId(1),
+        &state_registry,
+        &country,
+        &registry,
+        DivisionId(1),
+    );
+    assert_eq!(feasibility, RecruitFeasibility::InsufficientFunds);
+}
+
 #[test]
 fn test_pathfinding() {
     use crate::military::pathfinding::find_path;
-    use crate::state::data::StateRegistry;
 
     let mut s1 = crate::state::data::StateData::default();
     s1.id = StateId(1);

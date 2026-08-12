@@ -3,7 +3,8 @@ use crate::common::{ArmyId, BattleId};
 use crate::country::CountryRegistry;
 use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::combat_calc::{
-    ORG_RECOVERY_PER_DAY, calculate_terrain_defense_bonus, resolve_combat_day,
+    ORG_RECOVERY_PER_DAY, RETREAT_MANPOWER_LOSS_RATIO, calculate_terrain_defense_bonus,
+    resolve_combat_day,
 };
 use crate::military::data::{ArmyStatus, MilitaryRegistry};
 use crate::military::invasion::{find_retreat_destination, occupy_state};
@@ -286,8 +287,19 @@ fn handle_attacker_victory(
             military_registry.remove_army(defender_id);
             info!("[Battle] Defender Army {:?} destroyed", defender_id);
         } else if let Some(dest) = retreat_dest {
-            // 撤退可能な地域あり
-            if let Some(army) = military_registry.armies.get_mut(&defender_id) {
+            // 撤退可能な地域あり。ただし撤退時にも追加のmanpower損失を与え、
+            // 同じ師団が「撤退→組織率回復→再戦」を無限に繰り返せないようにする
+            let retreat_loss = (def.max_manpower as f32 * RETREAT_MANPOWER_LOSS_RATIO) as u64;
+            let remaining_manpower = def.manpower.saturating_sub(retreat_loss);
+
+            if remaining_manpower == 0 {
+                military_registry.remove_army(defender_id);
+                info!(
+                    "[Battle] Defender Army {:?} destroyed during retreat",
+                    defender_id
+                );
+            } else if let Some(army) = military_registry.armies.get_mut(&defender_id) {
+                army.manpower = remaining_manpower;
                 army.current_state = dest;
                 army.status = ArmyStatus::Idle;
                 army.combat_id = None;
@@ -295,11 +307,11 @@ fn handle_attacker_victory(
                 army.destination = None;
                 army.current_path.clear();
                 army.movement_progress = 0.0;
+                info!(
+                    "[Battle] Defender Army {:?} retreated to {:?} (manpower: {})",
+                    defender_id, dest, remaining_manpower
+                );
             }
-            info!(
-                "[Battle] Defender Army {:?} retreated to {:?}",
-                defender_id, dest
-            );
         } else {
             // 撤退先なし → 包囲・撃破
             military_registry.remove_army(defender_id);
@@ -354,8 +366,19 @@ fn handle_defender_victory(
             military_registry.remove_army(attacker_id);
             info!("[Battle] Attacker Army {:?} destroyed", attacker_id);
         } else {
-            // 出発地点へ戻る（既に出発地点にいる想定だが念のため）
-            if let Some(army) = military_registry.armies.get_mut(&attacker_id) {
+            // 出発地点へ撤退。ただしここでも追加のmanpower損失を与え、
+            // 同じ師団が「撤退→組織率回復→再戦」を無限に繰り返せないようにする
+            let retreat_loss = (atk.max_manpower as f32 * RETREAT_MANPOWER_LOSS_RATIO) as u64;
+            let remaining_manpower = atk.manpower.saturating_sub(retreat_loss);
+
+            if remaining_manpower == 0 {
+                military_registry.remove_army(attacker_id);
+                info!(
+                    "[Battle] Attacker Army {:?} destroyed during retreat",
+                    attacker_id
+                );
+            } else if let Some(army) = military_registry.armies.get_mut(&attacker_id) {
+                army.manpower = remaining_manpower;
                 army.current_state = attacker_origin;
                 army.status = ArmyStatus::Idle;
                 army.combat_id = None;
@@ -363,11 +386,11 @@ fn handle_defender_victory(
                 army.current_path.clear();
                 army.target_state = None;
                 army.movement_progress = 0.0;
+                info!(
+                    "[Battle] Attacker Army {:?} repelled, returns to {:?} (manpower: {})",
+                    attacker_id, attacker_origin, remaining_manpower
+                );
             }
-            info!(
-                "[Battle] Attacker Army {:?} repelled, returns to {:?}",
-                attacker_id, attacker_origin
-            );
         }
     }
 

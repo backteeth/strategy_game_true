@@ -1,0 +1,22 @@
+=== 保護対象ファイル SHA-256 比較(実装前 vs 実装後) ===
+
+tests/land_war_combat_peace_test.rs           before=06f7cfee9e2413dec6f18b4f5af86b82ff5556152c4f2026ede8c4d3142796a9
+                                              after =06f7cfee9e2413dec6f18b4f5af86b82ff5556152c4f2026ede8c4d3142796a9  [MATCH (不変)]
+
+assets/data/states.ron                        before=c5fab07532a6c651a1f54962f78653d3a8518f9041475f52a29507e3ad39dc24
+                                              after =c5fab07532a6c651a1f54962f78653d3a8518f9041475f52a29507e3ad39dc24  [MATCH (不変)]
+
+assets/data/divisions.ron                     before=c39404fefd5fef2718789deaf7a54572c5a31eb6b6b7cb2c78fb25c94bc81102
+                                              after =c39404fefd5fef2718789deaf7a54572c5a31eb6b6b7cb2c78fb25c94bc81102  [MATCH (不変)]
+
+=== 補足: tests/land_war_combat_peace_test.rs について ===
+git status では core.autocrlf=true (Windows環境) の影響で一時的に M(modified)と
+表示される場合があるが、上記の通り生バイトのSHA-256は完全一致し、
+'git diff -- tests/land_war_combat_peace_test.rs' も差分ゼロ(空)であることを確認済み。
+実内容は一切変更されていない。
+
+=== DailySimulationSet定義・宣戦当日ガード対象ファイルのSHA-256 (不変確認) ===
+4faecaeca84fbcd593c2382e03fa3769df18f768acc27114290080f4e3179bae *src/app/time.rs
+f0a7562fa4840fc4bc4c93066015654e96360fac88df05d57678128b8b831ac8 *src/war/frontline.rs
+9bb9cbc035bb8d6a2ab1dd1b8b34dabf49fa0506efa8033314bfae6d882dd688 *src/war/military_ai.rs
+(実装前記録: daily_systemset_order_before.txt / war_declaration_day_guard_before.txt と完全一致)

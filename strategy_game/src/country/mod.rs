@@ -70,6 +70,14 @@ fn default_tax_rate() -> f32 {
     0.15
 }
 
+/// P21-001: `assets/data/countries.ron`は`available_manpower`を明示しないため、
+/// 素の`#[serde(default)]`(=`u64::default()`=0)では募兵が常に不可能になってしまう
+/// (募兵導線が接続されるまで顕在化していなかった潜在バグ)。`CountryData::default()`と
+/// 同じ値を明示的なデフォルトとして使う。
+fn default_available_manpower() -> u64 {
+    100_000
+}
+
 /// 1国家分のゲームデータ（RONデシリアライズ対応）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CountryData {
@@ -127,7 +135,7 @@ pub struct CountryData {
 
     // ── 軍事データ ────────────────────────────────────────────────────────
     /// 募集可能な人的資源
-    #[serde(default)]
+    #[serde(default = "default_available_manpower")]
     pub available_manpower: u64,
     /// 動員済みの人的資源（軍隊に所属している合計）
     #[serde(default)]
@@ -182,6 +190,33 @@ impl CountryData {
     /// bevy::Color として国家色を取得する
     pub fn bevy_color(&self) -> Color {
         Color::srgb(self.map_color[0], self.map_color[1], self.map_color[2])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P21-001回帰テスト: `assets/data/countries.ron`は`available_manpower`を
+    /// 明示しない(実データで確認済み)。素の`#[serde(default)]`だと`u64::default()`=0に
+    /// なり、募兵UIが接続されるまで発覚しなかった「全国家が常に募兵不可能」という
+    /// 潜在バグの原因だった。RONデシリアライズ時に`CountryData::default()`と
+    /// 同じ100_000が使われることを固定する。
+    #[test]
+    fn available_manpower_defaults_to_nonzero_when_absent_from_ron() {
+        // countries.ron の実際のエントリ形式(available_manpower省略)を再現
+        let ron = r#"(
+            id: (0),
+            name: "Test Country",
+            map_color: (0.5, 0.5, 0.5),
+            capital_state_id: (0),
+            treasury: 5000.0,
+            government_type: Monarchy,
+            economic_system: Mercantilism,
+            stockpile: (amounts: {}),
+        )"#;
+        let country: CountryData = ron::from_str(ron).expect("minimal country RON must parse");
+        assert_eq!(country.available_manpower, 100_000);
     }
 }
 

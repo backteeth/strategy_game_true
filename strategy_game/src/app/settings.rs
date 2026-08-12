@@ -28,8 +28,8 @@ impl Default for CameraSettings {
             min_scale: 0.3,
             max_scale: 5.0,
             drag_sensitivity: 1.0,
-            map_bound_x: 1200.0,
-            map_bound_y: 900.0,
+            map_bound_x: 1600.0,
+            map_bound_y: 1200.0,
         }
     }
 }
