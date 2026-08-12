@@ -1,19 +1,19 @@
-use crate::military::data::{ArmyUnit, MilitaryRegistry};
+use crate::military::data::{Division, MilitaryRegistry};
 
-pub fn calculate_combat_strength(army: &ArmyUnit, registry: &MilitaryRegistry) -> f32 {
-    let def = registry.definitions.get(&army.def_id).unwrap();
-    let manpower_ratio = army.manpower as f32 / army.max_manpower as f32;
-    let equip_ratio = if army.max_equipment > 0.0 {
-        army.equipment as f32 / army.max_equipment as f32
+pub fn calculate_combat_strength(division: &Division, registry: &MilitaryRegistry) -> f32 {
+    let def = registry.definitions.get(&division.def_id).unwrap();
+    let manpower_ratio = division.manpower as f32 / division.max_manpower as f32;
+    let equip_ratio = if division.max_equipment > 0.0 {
+        division.equipment as f32 / division.max_equipment as f32
     } else {
         1.0
     };
-    let org_ratio = army.organization / army.max_organization;
+    let org_ratio = division.organization / division.max_organization;
 
     let base_attack = def.attack;
-    base_attack * manpower_ratio.min(equip_ratio) * org_ratio * army.supply_ratio
+    base_attack * manpower_ratio.min(equip_ratio) * org_ratio * division.supply_ratio
 }
 
 pub fn process_combat() {
-    // TODO: Full combat resolution between armies in same state
+    // TODO: Full combat resolution between divisions in same state
 }

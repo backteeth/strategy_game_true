@@ -1,11 +1,11 @@
 use crate::app::game_state::GameState;
-use crate::common::ArmyId;
+use crate::common::DivisionId;
 use crate::country::PlayerCountry;
-use crate::map::army_render::army_visual_clusters;
+use crate::map::division_render::division_visual_clusters;
 use crate::map::camera::GameCamera;
-use crate::military::army_group::ArmyGroupRegistry;
+use crate::military::army::ArmyRegistry;
 use crate::military::battle::BattleRegistry;
-use crate::military::data::{ArmyStatus, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::state::SelectedState;
 use crate::state::data::StateRegistry;
 use crate::war::data::WarRegistry;
@@ -14,45 +14,45 @@ use std::collections::HashSet;
 
 /// 選択中の陸軍(複数可)。Ctrl+クリックで追加/解除できる。
 #[derive(Resource, Default, Debug)]
-pub struct SelectedArmy {
-    pub army_ids: HashSet<ArmyId>,
+pub struct SelectedDivision {
+    pub division_ids: HashSet<DivisionId>,
 }
 
-impl SelectedArmy {
-    pub fn is_selected(&self, id: ArmyId) -> bool {
-        self.army_ids.contains(&id)
+impl SelectedDivision {
+    pub fn is_selected(&self, id: DivisionId) -> bool {
+        self.division_ids.contains(&id)
     }
 
     /// 選択を`id`単体へ置き換える(通常クリック)。
-    pub fn select_only(&mut self, id: ArmyId) {
-        self.army_ids.clear();
-        self.army_ids.insert(id);
+    pub fn select_only(&mut self, id: DivisionId) {
+        self.division_ids.clear();
+        self.division_ids.insert(id);
     }
 
     /// `id`が選択中なら解除し、未選択なら追加する(Ctrl+クリック)。
-    pub fn toggle(&mut self, id: ArmyId) {
-        if !self.army_ids.remove(&id) {
-            self.army_ids.insert(id);
+    pub fn toggle(&mut self, id: DivisionId) {
+        if !self.division_ids.remove(&id) {
+            self.division_ids.insert(id);
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.army_ids.is_empty()
+        self.division_ids.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.army_ids.len()
+        self.division_ids.len()
     }
 
-    /// 単一選択を前提とする従来コードとの互換用: 選択中で最小のArmyIdを返す。
+    /// 単一選択を前提とする従来コードとの互換用: 選択中で最小のDivisionIdを返す。
     /// 複数選択時は代表として1件だけ表示・判定したい箇所で使う。
-    pub fn primary(&self) -> Option<ArmyId> {
-        self.army_ids.iter().min_by_key(|id| id.0).copied()
+    pub fn primary(&self) -> Option<DivisionId> {
+        self.division_ids.iter().min_by_key(|id| id.0).copied()
     }
 
-    /// ArmyId昇順でソート済みのVecを返す(表示・判定の決定性を保つため)。
-    pub fn sorted_ids(&self) -> Vec<ArmyId> {
-        let mut ids: Vec<ArmyId> = self.army_ids.iter().copied().collect();
+    /// DivisionId昇順でソート済みのVecを返す(表示・判定の決定性を保つため)。
+    pub fn sorted_ids(&self) -> Vec<DivisionId> {
+        let mut ids: Vec<DivisionId> = self.division_ids.iter().copied().collect();
         ids.sort_by_key(|id| id.0);
         ids
     }
@@ -65,7 +65,7 @@ impl SelectedArmy {
 /// 誤って州が選ばれてしまうのを防ぐ)。
 #[derive(Resource, Default, Debug)]
 pub struct DragSelectState {
-    /// `map::army_render::draw_drag_select_rect`がドラッグ中の矩形を描画するために参照する。
+    /// `map::division_render::draw_drag_select_rect`がドラッグ中の矩形を描画するために参照する。
     pub(crate) press_start_screen: Option<Vec2>,
     pub is_dragging: bool,
 }
@@ -73,7 +73,7 @@ pub struct DragSelectState {
 /// ドラッグとみなす最小移動量(スクリーンピクセル)。単発クリックの手ブレを吸収する。
 const DRAG_THRESHOLD_PX: f32 = 6.0;
 
-/// P21-004: `map::army_render::draw_drag_select_rect`からも同じ変換式を使うため`pub(crate)`。
+/// P21-004: `map::division_render::draw_drag_select_rect`からも同じ変換式を使うため`pub(crate)`。
 pub(crate) fn screen_to_world(screen: Vec2, window_size: Vec2, cam_transform: &Transform) -> Vec2 {
     let ndc = (screen / window_size) * 2.0 - Vec2::ONE;
     let ndc = Vec2::new(ndc.x, -ndc.y);
@@ -82,37 +82,37 @@ pub(crate) fn screen_to_world(screen: Vec2, window_size: Vec2, cam_transform: &T
     cam_transform.translation.xy() + ndc * half_size
 }
 
-pub struct ArmySelectionPlugin;
+pub struct DivisionSelectionPlugin;
 
-impl Plugin for ArmySelectionPlugin {
+impl Plugin for DivisionSelectionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SelectedArmy>()
+        app.init_resource::<SelectedDivision>()
             .init_resource::<DragSelectState>()
             .add_systems(
                 Update,
                 (
-                    handle_army_selection,
+                    handle_division_selection,
                     handle_movement_order,
-                    prune_selected_army,
+                    prune_selected_division,
                 )
                     .run_if(in_state(GameState::Playing)),
             );
     }
 }
 
-/// P21-003監査で発見: 撃破・消滅した師団のArmyIdが`SelectedArmy`に残り続け、
+/// P21-003監査で発見: 撃破・消滅した師団のDivisionIdが`SelectedDivision`に残り続け、
 /// UI上の選択数表示が実際より多くなる不具合の修正。`war::frontline::FrontlineRegistry::
 /// sanitize_references`と同じ考え方で、`MilitaryRegistry`に存在しないIDを毎フレーム除去する。
-fn prune_selected_army(
+fn prune_selected_division(
     military_registry: Res<MilitaryRegistry>,
-    mut selected_army: ResMut<SelectedArmy>,
+    mut selected_division: ResMut<SelectedDivision>,
 ) {
     if !military_registry.is_changed() {
         return;
     }
-    selected_army
-        .army_ids
-        .retain(|id| military_registry.armies.contains_key(id));
+    selected_division
+        .division_ids
+        .retain(|id| military_registry.divisions.contains_key(id));
 }
 
 /// 左クリック/左ドラッグで師団を選択する。
@@ -122,7 +122,7 @@ fn prune_selected_army(
 ///   (Ctrl押下時は既存選択に追加、非押下時は矩形内の師団だけに置き換える。
 ///   矩形内が空でCtrl非押下なら選択解除になる)。
 #[allow(clippy::too_many_arguments)]
-fn handle_army_selection(
+fn handle_division_selection(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
@@ -130,9 +130,9 @@ fn handle_army_selection(
     player_country: Res<PlayerCountry>,
     military_registry: Res<MilitaryRegistry>,
     state_registry: Res<StateRegistry>,
-    army_group_registry: Res<ArmyGroupRegistry>,
+    army_registry: Res<ArmyRegistry>,
     ui_interactions_q: Query<&Interaction>,
-    mut selected_army: ResMut<SelectedArmy>,
+    mut selected_division: ResMut<SelectedDivision>,
     mut selected_state: ResMut<SelectedState>,
     mut drag_state: ResMut<DragSelectState>,
 ) {
@@ -173,7 +173,7 @@ fn handle_army_selection(
         if !drag_state.is_dragging && start.distance(current) > DRAG_THRESHOLD_PX {
             drag_state.is_dragging = true;
         }
-        // ドラッグ中の矩形の可視化は`army_render::draw_drag_select_rect`が担う
+        // ドラッグ中の矩形の可視化は`division_render::draw_drag_select_rect`が担う
         // (`Gizmos`はGizmoPluginの提供するリソースを要求しMinimalPluginsに
         // 含まれないため、単体テスト可能なこのSystemからは分離している)。
         return;
@@ -200,16 +200,16 @@ fn handle_army_selection(
 
     let ctrl_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
 
-    // 同一州に複数師団が駐留する場合、描画側 (army_render::army_visual_clusters) と
+    // 同一州に複数師団が駐留する場合、描画側 (division_render::division_visual_clusters) と
     // 同じ座標を使って判定することで、地図上に見えているアイコンとクリック判定を一致させる。
-    // P21-004: 編成(ArmyGroup)所属かつ同州の師団は1アイコンにまとめられているため、
+    // P21-004: 編成(Army)所属かつ同州の師団は1アイコンにまとめられているため、
     // それをクリックすると所属師団がまとめて選択される(=見た目通り「1個の師団」として扱える)。
-    let clusters = army_visual_clusters(&military_registry, &state_registry, &army_group_registry);
-    let cluster_is_own = |cluster: &crate::map::army_render::ArmyVisualCluster| {
+    let clusters = division_visual_clusters(&military_registry, &state_registry, &army_registry);
+    let cluster_is_own = |cluster: &crate::map::division_render::DivisionVisualCluster| {
         cluster
             .members
             .first()
-            .and_then(|id| military_registry.armies.get(id))
+            .and_then(|id| military_registry.divisions.get(id))
             .is_some_and(|a| a.owner == player_cid)
     };
 
@@ -220,7 +220,7 @@ fn handle_army_selection(
         let min = start_world.min(end_world);
         let max = start_world.max(end_world);
 
-        let hit_members: Vec<ArmyId> = clusters
+        let hit_members: Vec<DivisionId> = clusters
             .values()
             .filter(|cluster| {
                 cluster_is_own(cluster)
@@ -233,16 +233,16 @@ fn handle_army_selection(
             .collect();
 
         if !ctrl_held {
-            selected_army.army_ids.clear();
+            selected_division.division_ids.clear();
         }
-        for army_id in hit_members {
-            selected_army.army_ids.insert(army_id);
+        for division_id in hit_members {
+            selected_division.division_ids.insert(division_id);
         }
         selected_state.0 = None;
     } else {
         // 単発クリック: クリック位置に最も近いクラスタ(アイコン)を選ぶ
         let world_pos = screen_to_world(end_screen, window_size, cam_transform);
-        let army_radius = 16.0;
+        let division_radius = 16.0;
 
         let mut hit_cluster = None;
         let mut hit_distance = f32::MAX;
@@ -253,7 +253,7 @@ fn handle_army_selection(
                 continue;
             }
             let distance = world_pos.distance(cluster.position);
-            if distance < army_radius && distance < hit_distance {
+            if distance < division_radius && distance < hit_distance {
                 hit_distance = distance;
                 hit_cluster = Some(cluster);
             }
@@ -267,19 +267,19 @@ fn handle_army_selection(
                 let all_selected = cluster
                     .members
                     .iter()
-                    .all(|id| selected_army.is_selected(*id));
-                for &army_id in &cluster.members {
+                    .all(|id| selected_division.is_selected(*id));
+                for &division_id in &cluster.members {
                     if all_selected {
-                        selected_army.army_ids.remove(&army_id);
+                        selected_division.division_ids.remove(&division_id);
                     } else {
-                        selected_army.army_ids.insert(army_id);
+                        selected_division.division_ids.insert(division_id);
                     }
                 }
             } else {
                 // 通常クリック: 選択をクリックしたクラスタのメンバーへ置き換え
-                selected_army.army_ids.clear();
-                for &army_id in &cluster.members {
-                    selected_army.army_ids.insert(army_id);
+                selected_division.division_ids.clear();
+                for &division_id in &cluster.members {
+                    selected_division.division_ids.insert(division_id);
                 }
             }
             selected_state.0 = None;
@@ -297,7 +297,7 @@ fn handle_movement_order(
     player_country: Res<PlayerCountry>,
     state_registry: Res<StateRegistry>,
     war_registry: Res<WarRegistry>,
-    selected_army: Res<SelectedArmy>,
+    selected_division: Res<SelectedDivision>,
     mut military_registry: ResMut<MilitaryRegistry>,
     battle_registry: Res<BattleRegistry>,
     ui_interactions_q: Query<&Interaction>,
@@ -312,7 +312,7 @@ fn handle_movement_order(
         }
     }
 
-    if selected_army.is_empty() {
+    if selected_division.is_empty() {
         return;
     }
 
@@ -361,9 +361,9 @@ fn handle_movement_order(
 
     // 選択中の各陸軍へ独立に移動命令を発行する。1個の失敗(所有者不一致・戦闘中・
     // 経路なし等)は他の陸軍の命令発行を妨げない(P21-003の複数選択調査で決めた方針)。
-    for army_id in selected_army.sorted_ids() {
+    for division_id in selected_division.sorted_ids() {
         try_issue_move_order(
-            army_id,
+            division_id,
             target,
             player_cid,
             &state_registry,
@@ -378,7 +378,7 @@ fn handle_movement_order(
 /// 経路の検証込み)。`handle_movement_order`が選択中の全陸軍に対して呼び出す。
 #[allow(clippy::too_many_arguments)]
 fn try_issue_move_order(
-    army_id: ArmyId,
+    division_id: DivisionId,
     target: crate::common::StateId,
     player_cid: crate::common::CountryId,
     state_registry: &StateRegistry,
@@ -387,45 +387,45 @@ fn try_issue_move_order(
     battle_registry: &BattleRegistry,
 ) {
     // ユニット存在確認（撃破済み選択防止）
-    let Some(army) = military_registry.armies.get(&army_id) else {
+    let Some(division) = military_registry.divisions.get(&division_id) else {
         warn!(
-            "[ArmyMovement] Selected army {:?} no longer exists",
-            army_id
+            "[DivisionMovement] Selected division {:?} no longer exists",
+            division_id
         );
         return;
     };
 
     // 他国ユニットへの命令防止
-    if army.owner != player_cid {
+    if division.owner != player_cid {
         warn!(
-            "[ArmyMovement] Cannot command Army {}: Unit belongs to country {:?}",
-            army.id.0, army.owner
+            "[DivisionMovement] Cannot command Division {}: Unit belongs to country {:?}",
+            division.id.0, division.owner
         );
         return;
     }
 
     // 戦闘中ユニットへの移動命令を拒否
-    if army.status == ArmyStatus::Fighting {
+    if division.status == DivisionStatus::Fighting {
         warn!(
-            "[ArmyMovement] Army {} is in combat, cannot move",
-            army.id.0
+            "[DivisionMovement] Division {} is in combat, cannot move",
+            division.id.0
         );
         return;
     }
 
     // 撃破済みユニットへの命令を拒否
-    if army.manpower == 0 {
+    if division.manpower == 0 {
         warn!(
-            "[ArmyMovement] Army {} has no manpower, cannot move",
-            army.id.0
+            "[DivisionMovement] Division {} has no manpower, cannot move",
+            division.id.0
         );
         return;
     }
 
-    let army_current = army.current_state;
-    let army_owner = army.owner;
+    let division_current = division.current_state;
+    let division_owner = division.owner;
 
-    if army_current == target && army.destination == Some(target) {
+    if division_current == target && division.destination == Some(target) {
         return;
     }
 
@@ -438,15 +438,15 @@ fn try_issue_move_order(
     let target_controller = target_state_data.controller();
 
     // 移動先が自国支配地域か確認
-    let is_own_territory = target_controller == army_owner;
+    let is_own_territory = target_controller == division_owner;
 
     // 移動先が敵国支配地域（戦争中）か確認
-    let is_enemy_territory = war_registry.are_countries_at_war(army_owner, target_controller);
+    let is_enemy_territory = war_registry.are_countries_at_war(division_owner, target_controller);
 
     if !is_own_territory && !is_enemy_territory {
         warn!(
-            "[ArmyMovement] Army {} cannot move to state {:?}: neutral or non-hostile territory",
-            army.id.0, target
+            "[DivisionMovement] Division {} cannot move to state {:?}: neutral or non-hostile territory",
+            division.id.0, target
         );
         return;
     }
@@ -456,8 +456,8 @@ fn try_issue_move_order(
         && !is_own_territory
     {
         warn!(
-            "[ArmyMovement] Army {} cannot move to state {:?}: battle already ongoing",
-            army.id.0, target
+            "[DivisionMovement] Division {} cannot move to state {:?}: battle already ongoing",
+            division.id.0, target
         );
         return;
     }
@@ -468,10 +468,10 @@ fn try_issue_move_order(
         .values()
         .filter(|w| {
             w.status == crate::war::data::WarStatus::Active
-                && (w.attackers.contains(&army_owner) || w.defenders.contains(&army_owner))
+                && (w.attackers.contains(&division_owner) || w.defenders.contains(&division_owner))
         })
         .flat_map(|w| {
-            if w.attackers.contains(&army_owner) {
+            if w.attackers.contains(&division_owner) {
                 w.defenders.iter().copied().collect::<Vec<_>>()
             } else {
                 w.attackers.iter().copied().collect::<Vec<_>>()
@@ -481,32 +481,32 @@ fn try_issue_move_order(
 
     // 経路探索（自国 + 交戦中の敵国を通過可能）
     let path = crate::military::pathfinding::find_path(
-        army_current,
+        division_current,
         target,
         state_registry,
-        &[army_owner],
+        &[division_owner],
         &hostile_countries,
     );
 
     if let Some(path) = path {
-        let Some(army) = military_registry.armies.get_mut(&army_id) else {
+        let Some(division) = military_registry.divisions.get_mut(&division_id) else {
             return;
         };
-        army.destination = Some(target);
-        army.current_path = path;
-        army.target_state = None;
-        army.movement_progress = 0.0;
-        army.status = ArmyStatus::Moving;
+        division.destination = Some(target);
+        division.current_path = path;
+        division.target_state = None;
+        division.movement_progress = 0.0;
+        division.status = DivisionStatus::Moving;
         info!(
-            "[ArmyMovement] Army {} path set to {:?} ({} steps)",
-            army.id.0,
+            "[DivisionMovement] Division {} path set to {:?} ({} steps)",
+            division.id.0,
             target,
-            army.current_path.len()
+            division.current_path.len()
         );
     } else {
         warn!(
-            "[ArmyMovement] Army {} cannot reach state {:?}: No valid path",
-            army.id.0, target
+            "[DivisionMovement] Division {} cannot reach state {:?}: No valid path",
+            division.id.0, target
         );
     }
 }
@@ -514,15 +514,15 @@ fn try_issue_move_order(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{CountryId, DivisionId, StateId};
-    use crate::map::army_render::army_display_positions;
-    use crate::military::data::{ArmyStatus, ArmyUnit, DivisionSize, DivisionType};
+    use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
+    use crate::map::division_render::division_display_positions;
+    use crate::military::data::{DivisionStatus, Division, DivisionSize, DivisionType};
     use crate::state::data::StateData;
     use bevy::window::WindowResolution;
 
-    fn make_test_army(id: usize, owner: CountryId, state: StateId) -> ArmyUnit {
-        ArmyUnit {
-            id: ArmyId(id),
+    fn make_test_division(id: usize, owner: CountryId, state: StateId) -> Division {
+        Division {
+            id: DivisionId(id),
             owner,
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -541,8 +541,8 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
@@ -557,28 +557,28 @@ mod tests {
         }
     }
 
-    /// 州の中心座標が同一でも、`army_display_positions`のスタックオフセットにより
+    /// 州の中心座標が同一でも、`division_display_positions`のスタックオフセットにより
     /// 同一州にいる2師団は異なる表示座標を持つ（=クリックで区別できる前提条件）。
     #[test]
-    fn army_display_positions_offsets_stacked_armies() {
+    fn division_display_positions_offsets_stacked_divisions() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
-        let a2 = make_test_army(2, CountryId(1), StateId(1));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        let a2 = make_test_division(2, CountryId(1), StateId(1));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
 
         let state_registry = StateRegistry::build(vec![state_at(1, Vec2::ZERO)]);
 
-        let positions = army_display_positions(&military_registry, &state_registry);
+        let positions = division_display_positions(&military_registry, &state_registry);
         assert_ne!(
-            positions[&ArmyId(1)],
-            positions[&ArmyId(2)],
-            "stacked armies in the same state must get distinct display positions"
+            positions[&DivisionId(1)],
+            positions[&DivisionId(2)],
+            "stacked divisions in the same state must get distinct display positions"
         );
     }
 
     /// 画面座標→ワールド座標の逆算(カメラ位置(0,0)・scale=1.0前提)。
-    /// `handle_army_selection`内の`screen_to_world`と対になるテスト用ヘルパー。
+    /// `handle_division_selection`内の`screen_to_world`と対になるテスト用ヘルパー。
     fn screen_for_world(world: Vec2, window_size: Vec2) -> Vec2 {
         let half_size = window_size * 0.5;
         let ndc = world / half_size;
@@ -649,18 +649,18 @@ mod tests {
     /// それぞれ個別に選択できることを検証する（従来は州中心の同一座標で
     /// 判定していたため、常に走査順で決まる片方しか選べなかった）。
     #[test]
-    fn handle_army_selection_can_pick_either_stacked_army() {
+    fn handle_division_selection_can_pick_either_stacked_division() {
         fn build_app(military_registry: MilitaryRegistry, state_registry: &StateRegistry) -> App {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins);
-            app.add_systems(Update, handle_army_selection);
+            app.add_systems(Update, handle_division_selection);
 
             app.insert_resource(military_registry);
             app.insert_resource(StateRegistry::build(state_registry.states.clone()));
             app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-            app.init_resource::<SelectedArmy>();
+            app.init_resource::<SelectedDivision>();
             app.init_resource::<DragSelectState>();
-            app.init_resource::<ArmyGroupRegistry>();
+            app.init_resource::<ArmyRegistry>();
             app.init_resource::<crate::state::SelectedState>();
             app.init_resource::<ButtonInput<KeyCode>>();
             app.init_resource::<ButtonInput<MouseButton>>();
@@ -671,40 +671,40 @@ mod tests {
             app
         }
 
-        fn make_two_army_registry() -> MilitaryRegistry {
+        fn make_two_division_registry() -> MilitaryRegistry {
             let mut military_registry = MilitaryRegistry::default();
-            let a1 = make_test_army(1, CountryId(1), StateId(1));
-            let a2 = make_test_army(2, CountryId(1), StateId(1));
-            military_registry.armies.insert(a1.id, a1);
-            military_registry.armies.insert(a2.id, a2);
+            let a1 = make_test_division(1, CountryId(1), StateId(1));
+            let a2 = make_test_division(2, CountryId(1), StateId(1));
+            military_registry.divisions.insert(a1.id, a1);
+            military_registry.divisions.insert(a2.id, a2);
             military_registry
         }
 
         let state_registry = StateRegistry::build(vec![state_at(1, Vec2::ZERO)]);
         let window_size = Vec2::new(800.0, 600.0);
 
-        // army_display_positions と同じロジックで、それぞれの師団の
+        // division_display_positions と同じロジックで、それぞれの師団の
         // 実際の表示座標(スタックオフセット込み)を求めておく。
-        let positions = army_display_positions(&make_two_army_registry(), &state_registry);
-        let pos_army1 = positions[&ArmyId(1)];
-        let pos_army2 = positions[&ArmyId(2)];
-        assert_ne!(pos_army1, pos_army2);
+        let positions = division_display_positions(&make_two_division_registry(), &state_registry);
+        let pos_division1 = positions[&DivisionId(1)];
+        let pos_division2 = positions[&DivisionId(2)];
+        assert_ne!(pos_division1, pos_division2);
 
         // 師団1の座標をクリック → 師団1が選択される
         {
-            let mut app = build_app(make_two_army_registry(), &state_registry);
-            simulate_click(&mut app, screen_for_world(pos_army1, window_size));
-            let selected = app.world().resource::<SelectedArmy>();
-            assert!(selected.is_selected(ArmyId(1)));
+            let mut app = build_app(make_two_division_registry(), &state_registry);
+            simulate_click(&mut app, screen_for_world(pos_division1, window_size));
+            let selected = app.world().resource::<SelectedDivision>();
+            assert!(selected.is_selected(DivisionId(1)));
             assert_eq!(selected.len(), 1);
         }
 
         // 師団2の座標をクリック → 師団2が選択される
         {
-            let mut app = build_app(make_two_army_registry(), &state_registry);
-            simulate_click(&mut app, screen_for_world(pos_army2, window_size));
-            let selected = app.world().resource::<SelectedArmy>();
-            assert!(selected.is_selected(ArmyId(2)));
+            let mut app = build_app(make_two_division_registry(), &state_registry);
+            simulate_click(&mut app, screen_for_world(pos_division2, window_size));
+            let selected = app.world().resource::<SelectedDivision>();
+            assert!(selected.is_selected(DivisionId(2)));
             assert_eq!(selected.len(), 1);
         }
     }
@@ -715,10 +715,10 @@ mod tests {
     #[test]
     fn ctrl_click_toggles_multi_selection() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
-        let a2 = make_test_army(2, CountryId(1), StateId(2));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        let a2 = make_test_division(2, CountryId(1), StateId(2));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
 
         let state_registry = StateRegistry::build(vec![
             state_at(1, Vec2::new(0.0, 0.0)),
@@ -728,13 +728,13 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, handle_army_selection);
+        app.add_systems(Update, handle_division_selection);
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-        app.init_resource::<SelectedArmy>();
+        app.init_resource::<SelectedDivision>();
         app.init_resource::<DragSelectState>();
-        app.init_resource::<ArmyGroupRegistry>();
+        app.init_resource::<ArmyRegistry>();
         app.init_resource::<crate::state::SelectedState>();
         app.init_resource::<ButtonInput<MouseButton>>();
         app.init_resource::<ButtonInput<KeyCode>>();
@@ -743,11 +743,11 @@ mod tests {
 
         // 1. 通常クリックで師団1のみ選択
         simulate_click(&mut app, screen_for_world(Vec2::new(0.0, 0.0), window_size));
-        assert_eq!(app.world().resource::<SelectedArmy>().len(), 1);
+        assert_eq!(app.world().resource::<SelectedDivision>().len(), 1);
         assert!(
             app.world()
-                .resource::<SelectedArmy>()
-                .is_selected(ArmyId(1))
+                .resource::<SelectedDivision>()
+                .is_selected(DivisionId(1))
         );
 
         // 2. Ctrl+クリックで師団2を追加選択(師団1は選択されたまま)
@@ -758,10 +758,10 @@ mod tests {
             &mut app,
             screen_for_world(Vec2::new(300.0, 0.0), window_size),
         );
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(selected.len(), 2);
-        assert!(selected.is_selected(ArmyId(1)));
-        assert!(selected.is_selected(ArmyId(2)));
+        assert!(selected.is_selected(DivisionId(1)));
+        assert!(selected.is_selected(DivisionId(2)));
 
         // 3. 既に選択中の師団2を再度Ctrl+クリック → 解除(師団1のみ残る)
         app.world_mut()
@@ -771,24 +771,24 @@ mod tests {
             &mut app,
             screen_for_world(Vec2::new(300.0, 0.0), window_size),
         );
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(selected.len(), 1);
-        assert!(selected.is_selected(ArmyId(1)));
-        assert!(!selected.is_selected(ArmyId(2)));
+        assert!(selected.is_selected(DivisionId(1)));
+        assert!(!selected.is_selected(DivisionId(2)));
     }
 
     /// P21-004: 左ドラッグで矩形を作り、矩形内の複数師団をまとめて選択できる。
     /// Ctrl非押下の空振りドラッグ(矩形内に師団なし)では選択が解除されることも確認する。
     #[test]
-    fn drag_select_picks_up_all_armies_in_rectangle() {
+    fn drag_select_picks_up_all_divisions_in_rectangle() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
-        let a2 = make_test_army(2, CountryId(1), StateId(2));
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        let a2 = make_test_division(2, CountryId(1), StateId(2));
         // 矩形の外にいる師団3は選択されないはず
-        let a3 = make_test_army(3, CountryId(1), StateId(3));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
-        military_registry.armies.insert(a3.id, a3);
+        let a3 = make_test_division(3, CountryId(1), StateId(3));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
+        military_registry.divisions.insert(a3.id, a3);
 
         let state_registry = StateRegistry::build(vec![
             state_at(1, Vec2::new(0.0, 0.0)),
@@ -799,13 +799,13 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, handle_army_selection);
+        app.add_systems(Update, handle_division_selection);
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-        app.init_resource::<SelectedArmy>();
+        app.init_resource::<SelectedDivision>();
         app.init_resource::<DragSelectState>();
-        app.init_resource::<ArmyGroupRegistry>();
+        app.init_resource::<ArmyRegistry>();
         app.init_resource::<crate::state::SelectedState>();
         app.init_resource::<ButtonInput<MouseButton>>();
         app.init_resource::<ButtonInput<KeyCode>>();
@@ -824,15 +824,15 @@ mod tests {
         );
         release_left(&mut app);
 
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(
             selected.len(),
             2,
-            "drag rectangle must select both armies inside it"
+            "drag rectangle must select both divisions inside it"
         );
-        assert!(selected.is_selected(ArmyId(1)));
-        assert!(selected.is_selected(ArmyId(2)));
-        assert!(!selected.is_selected(ArmyId(3)));
+        assert!(selected.is_selected(DivisionId(1)));
+        assert!(selected.is_selected(DivisionId(2)));
+        assert!(!selected.is_selected(DivisionId(3)));
 
         // 師団のいない場所への空振りドラッグ(Ctrl非押下) → 選択解除
         // (座標はウィンドウ範囲内(800x600、カメラ原点中心)に収まるよう選ぶ。
@@ -849,7 +849,7 @@ mod tests {
         release_left(&mut app);
 
         assert!(
-            app.world().resource::<SelectedArmy>().is_empty(),
+            app.world().resource::<SelectedDivision>().is_empty(),
             "an empty drag box without Ctrl must clear the selection"
         );
     }
@@ -857,23 +857,23 @@ mod tests {
     /// P21-003監査で発見した不具合の回帰テスト: 単発クリックでは自国師団のみ選択でき、
     /// 敵国師団はクリック位置に最も近くても選択されない(誤って選択できてしまう不具合の修正確認)。
     #[test]
-    fn handle_army_selection_ignores_foreign_army_on_click() {
+    fn handle_division_selection_ignores_foreign_division_on_click() {
         let mut military_registry = MilitaryRegistry::default();
-        let enemy = make_test_army(1, CountryId(2), StateId(1));
-        military_registry.armies.insert(enemy.id, enemy);
+        let enemy = make_test_division(1, CountryId(2), StateId(1));
+        military_registry.divisions.insert(enemy.id, enemy);
 
         let state_registry = StateRegistry::build(vec![state_at(1, Vec2::ZERO)]);
         let window_size = Vec2::new(800.0, 600.0);
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, handle_army_selection);
+        app.add_systems(Update, handle_division_selection);
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-        app.init_resource::<SelectedArmy>();
+        app.init_resource::<SelectedDivision>();
         app.init_resource::<DragSelectState>();
-        app.init_resource::<ArmyGroupRegistry>();
+        app.init_resource::<ArmyRegistry>();
         app.init_resource::<crate::state::SelectedState>();
         app.init_resource::<ButtonInput<MouseButton>>();
         app.init_resource::<ButtonInput<KeyCode>>();
@@ -883,20 +883,20 @@ mod tests {
         simulate_click(&mut app, screen_for_world(Vec2::ZERO, window_size));
 
         assert!(
-            app.world().resource::<SelectedArmy>().is_empty(),
-            "clicking directly on an enemy-owned army must not select it"
+            app.world().resource::<SelectedDivision>().is_empty(),
+            "clicking directly on an enemy-owned division must not select it"
         );
     }
 
     /// P21-003監査で発見した不具合の回帰テスト: ドラッグ矩形選択でも敵国師団は
     /// 矩形内に含まれていても選択されず、自国師団だけが選択される。
     #[test]
-    fn drag_select_ignores_foreign_armies_in_rectangle() {
+    fn drag_select_ignores_foreign_divisions_in_rectangle() {
         let mut military_registry = MilitaryRegistry::default();
-        let own = make_test_army(1, CountryId(1), StateId(1));
-        let enemy = make_test_army(2, CountryId(2), StateId(2));
-        military_registry.armies.insert(own.id, own);
-        military_registry.armies.insert(enemy.id, enemy);
+        let own = make_test_division(1, CountryId(1), StateId(1));
+        let enemy = make_test_division(2, CountryId(2), StateId(2));
+        military_registry.divisions.insert(own.id, own);
+        military_registry.divisions.insert(enemy.id, enemy);
 
         let state_registry = StateRegistry::build(vec![
             state_at(1, Vec2::new(0.0, 0.0)),
@@ -906,13 +906,13 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, handle_army_selection);
+        app.add_systems(Update, handle_division_selection);
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-        app.init_resource::<SelectedArmy>();
+        app.init_resource::<SelectedDivision>();
         app.init_resource::<DragSelectState>();
-        app.init_resource::<ArmyGroupRegistry>();
+        app.init_resource::<ArmyRegistry>();
         app.init_resource::<crate::state::SelectedState>();
         app.init_resource::<ButtonInput<MouseButton>>();
         app.init_resource::<ButtonInput<KeyCode>>();
@@ -931,29 +931,29 @@ mod tests {
         );
         release_left(&mut app);
 
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(selected.len(), 1);
-        assert!(selected.is_selected(ArmyId(1)));
-        assert!(!selected.is_selected(ArmyId(2)));
+        assert!(selected.is_selected(DivisionId(1)));
+        assert!(!selected.is_selected(DivisionId(2)));
     }
 
-    /// P21-004: 編成(ArmyGroup)所属かつ同じ州にいる師団は地図上で1アイコンにまとまるため、
+    /// P21-004: 編成(Army)所属かつ同じ州にいる師団は地図上で1アイコンにまとまるため、
     /// そのアイコンをクリックすると所属師団がまとめて選択される
     /// (「編成したら一個の師団に見える」要望への対応確認)。
     #[test]
     fn clicking_merged_group_icon_selects_all_members_in_same_state() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
-        let a2 = make_test_army(2, CountryId(1), StateId(1));
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        let a2 = make_test_division(2, CountryId(1), StateId(1));
         // 同じ州にいるが編成には属さない師団3は、まとめられずクリック対象外のまま
-        let a3 = make_test_army(3, CountryId(1), StateId(1));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
-        military_registry.armies.insert(a3.id, a3);
+        let a3 = make_test_division(3, CountryId(1), StateId(1));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
+        military_registry.divisions.insert(a3.id, a3);
 
-        let mut army_group_registry = ArmyGroupRegistry::default();
-        army_group_registry
-            .create_group(CountryId(1), &[ArmyId(1), ArmyId(2)], &military_registry)
+        let mut army_registry = ArmyRegistry::default();
+        army_registry
+            .create_army(CountryId(1), &[DivisionId(1), DivisionId(2)], &military_registry)
             .unwrap();
 
         let state_registry = StateRegistry::build(vec![state_at(1, Vec2::ZERO)]);
@@ -961,12 +961,12 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, handle_army_selection);
+        app.add_systems(Update, handle_division_selection);
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
-        app.insert_resource(army_group_registry);
+        app.insert_resource(army_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-        app.init_resource::<SelectedArmy>();
+        app.init_resource::<SelectedDivision>();
         app.init_resource::<DragSelectState>();
         app.init_resource::<crate::state::SelectedState>();
         app.init_resource::<ButtonInput<MouseButton>>();
@@ -975,45 +975,45 @@ mod tests {
             .spawn((Camera2d, GameCamera, Transform::default()));
 
         // クラスタの代表(師団1、まとまった編成アイコン)の実際の表示座標をクリックする
-        let clusters = army_visual_clusters(
+        let clusters = division_visual_clusters(
             app.world().resource::<MilitaryRegistry>(),
             app.world().resource::<StateRegistry>(),
-            app.world().resource::<ArmyGroupRegistry>(),
+            app.world().resource::<ArmyRegistry>(),
         );
-        let cluster_pos = clusters[&ArmyId(1)].position;
+        let cluster_pos = clusters[&DivisionId(1)].position;
         assert_eq!(
-            clusters[&ArmyId(1)].members,
-            vec![ArmyId(1), ArmyId(2)],
-            "grouped armies in the same state must merge into one cluster"
+            clusters[&DivisionId(1)].members,
+            vec![DivisionId(1), DivisionId(2)],
+            "grouped divisions in the same state must merge into one cluster"
         );
 
         simulate_click(&mut app, screen_for_world(cluster_pos, window_size));
 
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(
             selected.len(),
             2,
             "clicking the merged icon selects both members"
         );
-        assert!(selected.is_selected(ArmyId(1)));
-        assert!(selected.is_selected(ArmyId(2)));
-        assert!(!selected.is_selected(ArmyId(3)));
+        assert!(selected.is_selected(DivisionId(1)));
+        assert!(selected.is_selected(DivisionId(2)));
+        assert!(!selected.is_selected(DivisionId(3)));
     }
 
     /// P21-004: 同じ編成に属していても、州が異なる(移動などではぐれた)師団は
     /// 1アイコンにまとめられず、個別に選択できたままであることを確認する
     /// (でないと、はぐれた師団が地図上から見えなくなってしまう)。
     #[test]
-    fn grouped_armies_in_different_states_remain_separately_selectable() {
+    fn grouped_divisions_in_different_states_remain_separately_selectable() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
-        let a2 = make_test_army(2, CountryId(1), StateId(2));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        let a2 = make_test_division(2, CountryId(1), StateId(2));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
 
-        let mut army_group_registry = ArmyGroupRegistry::default();
-        army_group_registry
-            .create_group(CountryId(1), &[ArmyId(1), ArmyId(2)], &military_registry)
+        let mut army_registry = ArmyRegistry::default();
+        army_registry
+            .create_army(CountryId(1), &[DivisionId(1), DivisionId(2)], &military_registry)
             .unwrap();
 
         let state_registry = StateRegistry::build(vec![
@@ -1024,12 +1024,12 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, handle_army_selection);
+        app.add_systems(Update, handle_division_selection);
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
-        app.insert_resource(army_group_registry);
+        app.insert_resource(army_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
-        app.init_resource::<SelectedArmy>();
+        app.init_resource::<SelectedDivision>();
         app.init_resource::<DragSelectState>();
         app.init_resource::<crate::state::SelectedState>();
         app.init_resource::<ButtonInput<MouseButton>>();
@@ -1040,57 +1040,57 @@ mod tests {
         // 師団1(State 1)だけをクリック → 同じ編成の師団2(State 2)は選択されない
         simulate_click(&mut app, screen_for_world(Vec2::new(0.0, 0.0), window_size));
 
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(selected.len(), 1);
-        assert!(selected.is_selected(ArmyId(1)));
-        assert!(!selected.is_selected(ArmyId(2)));
+        assert!(selected.is_selected(DivisionId(1)));
+        assert!(!selected.is_selected(DivisionId(2)));
     }
 
-    /// P21-003監査で発見した不具合の回帰テスト: 撃破・消滅した師団のArmyIdが
-    /// `SelectedArmy`に残り続けないこと(`prune_selected_army`の動作確認)。
+    /// P21-003監査で発見した不具合の回帰テスト: 撃破・消滅した師団のDivisionIdが
+    /// `SelectedDivision`に残り続けないこと(`prune_selected_division`の動作確認)。
     #[test]
-    fn prune_selected_army_removes_destroyed_army_ids() {
+    fn prune_selected_division_removes_destroyed_division_ids() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
-        let a2 = make_test_army(2, CountryId(1), StateId(1));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        let a2 = make_test_division(2, CountryId(1), StateId(1));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, prune_selected_army);
+        app.add_systems(Update, prune_selected_division);
         app.insert_resource(military_registry);
-        app.insert_resource(SelectedArmy {
-            army_ids: [ArmyId(1), ArmyId(2)].into_iter().collect(),
+        app.insert_resource(SelectedDivision {
+            division_ids: [DivisionId(1), DivisionId(2)].into_iter().collect(),
         });
 
         // 師団1が戦闘等で撃破され、MilitaryRegistryから削除された想定
         app.world_mut()
             .resource_mut::<MilitaryRegistry>()
-            .armies
-            .remove(&ArmyId(1));
+            .divisions
+            .remove(&DivisionId(1));
 
         app.update();
 
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(selected.len(), 1);
-        assert!(!selected.is_selected(ArmyId(1)));
-        assert!(selected.is_selected(ArmyId(2)));
+        assert!(!selected.is_selected(DivisionId(1)));
+        assert!(selected.is_selected(DivisionId(2)));
     }
 
     /// P21-003: 複数選択中に右クリック移動命令を出すと、選択中の全陸軍が独立に
     /// 移動命令を受け取る(1個の失敗が他を妨げない設計の確認も兼ねる: 師団2は
     /// 他国の陸軍のため移動命令を拒否されるが、師団1は正常に移動する)。
     #[test]
-    fn handle_movement_order_applies_to_all_selected_armies() {
+    fn handle_movement_order_applies_to_all_selected_divisions() {
         let mut military_registry = MilitaryRegistry::default();
-        let a1 = make_test_army(1, CountryId(1), StateId(1));
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
         // CountryId(2)所有の陸軍(選択されても所有者チェックで移動命令は拒否されるはず)
-        let a2 = make_test_army(2, CountryId(2), StateId(1));
-        let a3 = make_test_army(3, CountryId(1), StateId(1));
-        military_registry.armies.insert(a1.id, a1);
-        military_registry.armies.insert(a2.id, a2);
-        military_registry.armies.insert(a3.id, a3);
+        let a2 = make_test_division(2, CountryId(2), StateId(1));
+        let a3 = make_test_division(3, CountryId(1), StateId(1));
+        military_registry.divisions.insert(a1.id, a1);
+        military_registry.divisions.insert(a2.id, a2);
+        military_registry.divisions.insert(a3.id, a3);
 
         let s1 = StateData {
             id: StateId(1),
@@ -1120,8 +1120,8 @@ mod tests {
         app.insert_resource(WarRegistry::default());
         app.insert_resource(BattleRegistry::default());
         app.init_resource::<crate::state::SelectedState>();
-        app.insert_resource(SelectedArmy {
-            army_ids: [ArmyId(1), ArmyId(2), ArmyId(3)].into_iter().collect(),
+        app.insert_resource(SelectedDivision {
+            division_ids: [DivisionId(1), DivisionId(2), DivisionId(3)].into_iter().collect(),
         });
 
         let mut mouse = ButtonInput::<MouseButton>::default();
@@ -1148,17 +1148,17 @@ mod tests {
         app.update();
 
         let military_registry = app.world().resource::<MilitaryRegistry>();
-        let army1 = military_registry.armies.get(&ArmyId(1)).unwrap();
-        assert_eq!(army1.destination, Some(StateId(2)));
-        assert_eq!(army1.status, ArmyStatus::Moving);
+        let division1 = military_registry.divisions.get(&DivisionId(1)).unwrap();
+        assert_eq!(division1.destination, Some(StateId(2)));
+        assert_eq!(division1.status, DivisionStatus::Moving);
 
-        let army3 = military_registry.armies.get(&ArmyId(3)).unwrap();
-        assert_eq!(army3.destination, Some(StateId(2)));
-        assert_eq!(army3.status, ArmyStatus::Moving);
+        let division3 = military_registry.divisions.get(&DivisionId(3)).unwrap();
+        assert_eq!(division3.destination, Some(StateId(2)));
+        assert_eq!(division3.status, DivisionStatus::Moving);
 
         // 他国の陸軍(師団2)は選択されていても移動命令が発行されない
-        let army2 = military_registry.armies.get(&ArmyId(2)).unwrap();
-        assert_eq!(army2.destination, None);
-        assert_eq!(army2.status, ArmyStatus::Idle);
+        let division2 = military_registry.divisions.get(&DivisionId(2)).unwrap();
+        assert_eq!(division2.destination, None);
+        assert_eq!(division2.status, DivisionStatus::Idle);
     }
 }

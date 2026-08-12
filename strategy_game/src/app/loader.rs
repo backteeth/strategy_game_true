@@ -7,7 +7,7 @@ use crate::diplomacy::data::{
     InitialDiplomaticRelation,
 };
 use crate::economy::resources::StateResourceDeposit;
-use crate::military::data::{ArmyStatus, ArmyUnit, DivisionDefinition, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, Division, DivisionDefinition, MilitaryRegistry};
 use crate::research::data::{TechnologyDefinition, TechnologyRegistry};
 use crate::research::world_stage::{WorldCivilizationState, WorldStageDefinition};
 use crate::state::data::{StateData, StateRegistry};
@@ -24,7 +24,7 @@ impl Plugin for DataLoaderPlugin {
             load_game_data.before(crate::app::loader::transition_to_country_selection),
         )
         .add_systems(Startup, transition_to_country_selection)
-        .add_systems(OnEnter(GameState::Playing), spawn_debug_armies);
+        .add_systems(OnEnter(GameState::Playing), spawn_debug_divisions);
     }
 }
 
@@ -296,18 +296,18 @@ pub fn transition_to_country_selection(mut next_state: ResMut<NextState<GameStat
 }
 
 /// ゲーム開始時にデバッグ用の部隊を各国首都に1部隊ずつ配置する
-pub fn spawn_debug_armies(
+pub fn spawn_debug_divisions(
     mut military_registry: ResMut<MilitaryRegistry>,
     country_registry: Res<crate::country::CountryRegistry>,
 ) {
-    // Infantry (DivisionId=0) を各国首都に配置
-    let infantry_def_id = crate::common::DivisionId(0);
+    // Infantry (DivisionDefinitionId=0) を各国首都に配置
+    let infantry_def_id = crate::common::DivisionDefinitionId(0);
 
     for country in country_registry.countries.iter() {
         if let Some(def) = military_registry.definitions.get(&infantry_def_id) {
             let def_id = infantry_def_id;
-            let new_army = ArmyUnit {
-                id: crate::common::ArmyId(0), // add_army で上書きされる
+            let new_division = Division {
+                id: crate::common::DivisionId(0), // add_division で上書きされる
                 owner: country.id,
                 division_type: def.division_type,
                 size: def.size,
@@ -326,18 +326,18 @@ pub fn spawn_debug_armies(
                 experience: 0.0,
                 supply_ratio: 1.0,
                 movement_progress: 0.0,
-                status: ArmyStatus::Idle,
+                status: DivisionStatus::Idle,
                 def_id,
                 attack_power: def.attack as i32,
                 defense_power: def.defense as i32,
                 combat_id: None,
             };
-            military_registry.add_army(new_army);
+            military_registry.add_division(new_division);
         }
     }
 
     info!(
-        "[DEBUG] Spawned {} initial armies",
-        military_registry.armies.len()
+        "[DEBUG] Spawned {} initial divisions",
+        military_registry.divisions.len()
     );
 }

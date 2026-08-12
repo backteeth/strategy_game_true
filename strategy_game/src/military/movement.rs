@@ -1,5 +1,5 @@
 use crate::military::battle::BattleRegistry;
-use crate::military::data::{ArmyStatus, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use crate::war::data::WarRegistry;
 
@@ -13,52 +13,52 @@ pub fn process_movement(
     let base_days = 5.0; // 1セグメントあたりの基本移動日数
 
     // 処理するユニットのIDリストを事前収集（借用衝突を避けるため）
-    let army_ids: Vec<_> = military_registry.armies.keys().copied().collect();
+    let division_ids: Vec<_> = military_registry.divisions.keys().copied().collect();
 
-    for army_id in army_ids {
+    for division_id in division_ids {
         // 戦闘中ユニットは移動しない
         {
-            let army = match military_registry.armies.get(&army_id) {
+            let division = match military_registry.divisions.get(&division_id) {
                 Some(a) => a,
                 None => continue,
             };
-            if army.status == ArmyStatus::Fighting || army.status == ArmyStatus::Retreating {
+            if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating {
                 continue;
             }
-            if army.status != ArmyStatus::Moving {
+            if division.status != DivisionStatus::Moving {
                 continue;
             }
         }
 
         // target_stateが未設定だが current_path が残っている場合、最初のノードをセット
         {
-            let army = match military_registry.armies.get_mut(&army_id) {
+            let division = match military_registry.divisions.get_mut(&division_id) {
                 Some(a) => a,
                 None => continue,
             };
 
-            if army.target_state.is_none() {
-                if !army.current_path.is_empty() {
-                    let next_state = army.current_path.remove(0);
-                    army.target_state = Some(next_state);
-                    army.movement_progress = 0.0;
+            if division.target_state.is_none() {
+                if !division.current_path.is_empty() {
+                    let next_state = division.current_path.remove(0);
+                    division.target_state = Some(next_state);
+                    division.movement_progress = 0.0;
                 } else {
                     // 目的地に到達
-                    army.status = ArmyStatus::Idle;
-                    army.destination = None;
-                    army.movement_progress = 0.0;
+                    division.status = DivisionStatus::Idle;
+                    division.destination = None;
+                    division.movement_progress = 0.0;
                     continue;
                 }
             }
         }
 
         let (target, current_state, owner) = {
-            let army = match military_registry.armies.get(&army_id) {
+            let division = match military_registry.divisions.get(&division_id) {
                 Some(a) => a,
                 None => continue,
             };
-            match army.target_state {
-                Some(t) => (t, army.current_state, army.owner),
+            match division.target_state {
+                Some(t) => (t, division.current_state, division.owner),
                 None => continue,
             }
         };
@@ -68,12 +68,12 @@ pub fn process_movement(
             Some(s) => s.controller(),
             None => {
                 // 無効な地域 → 移動停止
-                if let Some(army) = military_registry.armies.get_mut(&army_id) {
-                    army.status = ArmyStatus::Idle;
-                    army.target_state = None;
-                    army.destination = None;
-                    army.current_path.clear();
-                    army.movement_progress = 0.0;
+                if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+                    division.status = DivisionStatus::Idle;
+                    division.target_state = None;
+                    division.destination = None;
+                    division.current_path.clear();
+                    division.movement_progress = 0.0;
                 }
                 continue;
             }
@@ -86,28 +86,28 @@ pub fn process_movement(
         // 通過可能か判定（自国 or 交戦中の敵国）
         if !is_own_territory && !is_at_war_with_controller {
             // 通過不可（中立国・非交戦国）→ 移動停止
-            if let Some(army) = military_registry.armies.get_mut(&army_id) {
-                army.status = ArmyStatus::Idle;
-                army.target_state = None;
-                army.destination = None;
-                army.current_path.clear();
-                army.movement_progress = 0.0;
+            if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+                division.status = DivisionStatus::Idle;
+                division.target_state = None;
+                division.destination = None;
+                division.current_path.clear();
+                division.movement_progress = 0.0;
             }
             continue;
         }
 
         // 移動速度計算
         let (def_speed, movement_progress) = {
-            let army = match military_registry.armies.get(&army_id) {
+            let division = match military_registry.divisions.get(&division_id) {
                 Some(a) => a,
                 None => continue,
             };
             let speed = military_registry
                 .definitions
-                .get(&army.def_id)
+                .get(&division.def_id)
                 .map(|d| d.movement_speed)
                 .unwrap_or(1.0);
-            (speed, army.movement_progress)
+            (speed, division.movement_progress)
         };
 
         let step_cost = crate::military::pathfinding::calculate_step_cost(
@@ -116,12 +116,12 @@ pub fn process_movement(
             state_registry,
         ) as f32;
         let supply_mod = {
-            let army = military_registry
-                .armies
-                .get(&army_id)
+            let division = military_registry
+                .divisions
+                .get(&division_id)
                 .map(|a| a.supply_ratio)
                 .unwrap_or(0.5);
-            army.max(0.5)
+            division.max(0.5)
         };
         let movement_days = (base_days * step_cost / (def_speed * supply_mod)).max(1.0);
         let daily_progress = 1.0 / movement_days;
@@ -132,26 +132,26 @@ pub fn process_movement(
             // セグメント移動完了 → 到着処理
             // まず現在地を更新
             {
-                let army = match military_registry.armies.get_mut(&army_id) {
+                let division = match military_registry.divisions.get_mut(&division_id) {
                     Some(a) => a,
                     None => continue,
                 };
-                army.current_state = target;
-                army.movement_progress = 0.0;
+                division.current_state = target;
+                division.movement_progress = 0.0;
             }
 
             // 次のセグメントをセット（または到達完了）
             {
-                let army = match military_registry.armies.get_mut(&army_id) {
+                let division = match military_registry.divisions.get_mut(&division_id) {
                     Some(a) => a,
                     None => continue,
                 };
-                if !army.current_path.is_empty() {
-                    let next = army.current_path.remove(0);
-                    army.target_state = Some(next);
+                if !division.current_path.is_empty() {
+                    let next = division.current_path.remove(0);
+                    division.target_state = Some(next);
                 } else {
-                    army.target_state = None;
-                    army.destination = None;
+                    division.target_state = None;
+                    division.destination = None;
                     // ステータスはinvasionで決定するため、ここでIdleにしない
                 }
             }
@@ -160,19 +160,19 @@ pub fn process_movement(
             if is_own_territory {
                 // 自国領への移動完了 → Idle（目的地到着時のみ）
                 let arrived_at_destination = {
-                    let army = military_registry.armies.get(&army_id);
-                    army.map(|a| a.target_state.is_none() && a.destination.is_none())
+                    let division = military_registry.divisions.get(&division_id);
+                    division.map(|a| a.target_state.is_none() && a.destination.is_none())
                         .unwrap_or(false)
                 };
                 if arrived_at_destination
-                    && let Some(army) = military_registry.armies.get_mut(&army_id)
+                    && let Some(division) = military_registry.divisions.get_mut(&division_id)
                 {
-                    army.status = ArmyStatus::Idle;
+                    division.status = DivisionStatus::Idle;
                 }
             } else {
                 // 敵支配地域への到着 → 侵攻処理
-                crate::military::invasion::process_army_arrival(
-                    army_id,
+                crate::military::invasion::process_division_arrival(
+                    division_id,
                     target,
                     current_state,
                     current_date,
@@ -184,8 +184,8 @@ pub fn process_movement(
             }
         } else {
             // まだ移動中
-            if let Some(army) = military_registry.armies.get_mut(&army_id) {
-                army.movement_progress = new_progress;
+            if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+                division.movement_progress = new_progress;
             }
         }
     }
@@ -198,36 +198,36 @@ pub fn validate_and_stop_invalid_movements(
     state_registry: &StateRegistry,
     war_registry: &WarRegistry,
 ) {
-    for army in military_registry.armies.values_mut() {
-        if army.status != ArmyStatus::Moving {
+    for division in military_registry.divisions.values_mut() {
+        if division.status != DivisionStatus::Moving {
             continue;
         }
 
         // 現在の target_state が通過可能か確認
-        if let Some(target) = army.target_state
+        if let Some(target) = division.target_state
             && let Some(target_state) = state_registry.get(target)
         {
             let controller = target_state.controller();
-            let is_own = controller == army.owner;
-            let is_enemy = war_registry.are_countries_at_war(army.owner, controller);
+            let is_own = controller == division.owner;
+            let is_enemy = war_registry.are_countries_at_war(division.owner, controller);
 
             if !is_own && !is_enemy {
                 // 無効になった → 停止
-                army.status = ArmyStatus::Idle;
-                army.target_state = None;
-                army.destination = None;
-                army.current_path.clear();
-                army.movement_progress = 0.0;
+                division.status = DivisionStatus::Idle;
+                division.target_state = None;
+                division.destination = None;
+                division.current_path.clear();
+                division.movement_progress = 0.0;
             }
         }
 
         // 残りの経路を検証
-        if army.status == ArmyStatus::Moving {
-            let path_valid = army.current_path.iter().all(|&sid| {
+        if division.status == DivisionStatus::Moving {
+            let path_valid = division.current_path.iter().all(|&sid| {
                 if let Some(s) = state_registry.get(sid) {
                     let controller = s.controller();
-                    controller == army.owner
-                        || war_registry.are_countries_at_war(army.owner, controller)
+                    controller == division.owner
+                        || war_registry.are_countries_at_war(division.owner, controller)
                 } else {
                     false
                 }
@@ -235,8 +235,8 @@ pub fn validate_and_stop_invalid_movements(
 
             if !path_valid {
                 // 経路の一部が無効 → 安全停止（現在地で待機）
-                army.current_path.clear();
-                army.destination = None;
+                division.current_path.clear();
+                division.destination = None;
                 // target_stateへの移動は継続（既に進行中の場合）
                 // 次の到着時に再判定される
             }

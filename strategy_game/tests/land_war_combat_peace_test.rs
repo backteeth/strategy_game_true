@@ -1,13 +1,13 @@
 use std::collections::{HashSet, VecDeque};
-use strategy_game::common::{ArmyId, CountryId, DivisionId, StateId};
+use strategy_game::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use strategy_game::country::CountryData;
 use strategy_game::diplomacy::data::DiplomacyRegistry;
 use strategy_game::military::battle::BattleRegistry;
 use strategy_game::military::combat_calc::resolve_combat_day;
 use strategy_game::military::data::{
-    ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
 };
-use strategy_game::military::invasion::{occupy_state, process_army_arrival};
+use strategy_game::military::invasion::{occupy_state, process_division_arrival};
 use strategy_game::state::data::{StateData, StateRegistry};
 use strategy_game::war::capitulation::{evaluate_war_capitulation, CapitulationResult};
 use strategy_game::war::combat::sync_battle_results_to_wars;
@@ -157,7 +157,7 @@ fn test_land_war_declaration_combat_and_peace_flow() {
 
     // 師団定義の追加
     let div_def = DivisionDefinition {
-        id: DivisionId(1),
+        id: DivisionDefinitionId(1),
         name: "Standard Infantry".to_string(),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -173,7 +173,7 @@ fn test_land_war_declaration_combat_and_peace_flow() {
         supply_usage: 1.0,
         maintenance_cost: 1.0,
     };
-    military_reg.definitions.insert(DivisionId(1), div_def);
+    military_reg.definitions.insert(DivisionDefinitionId(1), div_def);
 
     let attacker_country = CountryId(0); // Kingdom of Arcadia
     let defender_country = CountryId(3); // Oceanic Magic Empire (今回直接接続した国家)
@@ -225,9 +225,9 @@ fn test_land_war_declaration_combat_and_peace_flow() {
     let fl = frontline.unwrap();
     assert!(fl.border_region_pairs.contains(&(attacker_border_state, target_state)));
 
-    // 4. 部隊配置と戦闘の開始 (Army Placement & Combat)
-    let atk_army = ArmyUnit {
-        id: ArmyId(1),
+    // 4. 部隊配置と戦闘の開始 (Division Placement & Combat)
+    let atk_division = Division {
+        id: DivisionId(1),
         owner: attacker_country,
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -246,15 +246,15 @@ fn test_land_war_declaration_combat_and_peace_flow() {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Idle,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Idle,
+        def_id: DivisionDefinitionId(1),
         attack_power: 15,
         defense_power: 12,
         combat_id: None,
     };
 
-    let def_army = ArmyUnit {
-        id: ArmyId(2),
+    let def_division = Division {
+        id: DivisionId(2),
         owner: defender_country,
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -273,19 +273,19 @@ fn test_land_war_declaration_combat_and_peace_flow() {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Idle,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Idle,
+        def_id: DivisionDefinitionId(1),
         attack_power: 15,
         defense_power: 12,
         combat_id: None,
     };
 
-    military_reg.armies.insert(atk_army.id, atk_army.clone());
-    military_reg.armies.insert(def_army.id, def_army.clone());
+    military_reg.divisions.insert(atk_division.id, atk_division.clone());
+    military_reg.divisions.insert(def_division.id, def_division.clone());
 
     // 攻撃部隊が防御側のいる目標州に到着し、戦闘が自動開始されることを検証
-    process_army_arrival(
-        atk_army.id,
+    process_division_arrival(
+        atk_division.id,
         target_state,
         attacker_border_state,
         "1936/01/31",
@@ -299,7 +299,7 @@ fn test_land_war_declaration_combat_and_peace_flow() {
     assert!(ongoing_battle.is_some(), "Battle should be successfully started on target state");
 
     // 戦闘計算 (Resolve Combat Day)
-    let (atk_loss, _, def_loss, _) = resolve_combat_day(&atk_army, &def_army, 0);
+    let (atk_loss, _, def_loss, _) = resolve_combat_day(&atk_division, &def_division, 0);
     assert!(atk_loss > 0 || def_loss > 0, "Combat should deal damage to forces");
 
     // 戦闘勝利のシミュレーションと戦争ログ集計

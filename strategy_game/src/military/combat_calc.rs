@@ -1,7 +1,9 @@
 /// 陸上戦闘の計算ロジックモジュール
 /// 乱数を使わず、整数演算で決定的な戦闘計算を行う
-use crate::military::data::ArmyUnit;
+use crate::common::DivisionId;
+use crate::military::data::Division;
 use crate::state::data::StateData;
+use std::collections::HashMap;
 
 // ─── 戦闘定数 ────────────────────────────────────────────────────────────────
 /// 1日あたりの基準ダメージスケール（実効攻撃力を100倍してから適用）
@@ -72,8 +74,8 @@ pub fn calculate_terrain_defense_bonus(_state: &StateData) -> i32 {
 /// * `defender` - 防御側ユニット
 /// * `terrain_defense_bonus` - 地形による防御補正（整数）
 pub fn resolve_combat_day(
-    attacker: &ArmyUnit,
-    defender: &ArmyUnit,
+    attacker: &Division,
+    defender: &Division,
     terrain_defense_bonus: i32,
 ) -> (u64, f32, u64, f32) {
     // ゼロ除算防止
@@ -127,15 +129,156 @@ pub fn resolve_combat_day(
     )
 }
 
+/// 実効戦力(atk_power×manpower比率×組織率比率、固定小数点×1000)を算出する。
+/// `resolve_combat_day`内のインライン計算と同一の式を共有部品として切り出したもの。
+fn effective_power_1000(
+    power: i32,
+    manpower: u64,
+    max_manpower: u64,
+    organization: f32,
+    max_organization: f32,
+) -> i64 {
+    if max_manpower == 0 || max_organization <= 0.0 {
+        return 0;
+    }
+    let manpower_ratio_1000 = (manpower as i64 * 1000) / max_manpower as i64;
+    let org_ratio_1000 = (organization * 1000.0 / max_organization) as i64;
+    (power as i64 * manpower_ratio_1000 * org_ratio_1000) / 1_000_000
+}
+
+/// 複数師団が参加する戦闘の1日分を計算する(P21-siege: 複数師団の共同参戦対応)。
+///
+/// 各陣営の実効戦力は参加する全師団の実効値の合計として算出し、`resolve_combat_day`と
+/// 同じ被害率の式を陣営合計に対して適用したうえで、生じた被害を各師団の実効戦力の
+/// 貢献度に応じて配分する(貢献度が大きい師団ほど多くの被害を受け持つ)。
+/// 攻撃側・防御側とも参加師団が1体ずつの場合は`resolve_combat_day`をそのまま呼び出し、
+/// 既存の1体対1体の戦闘結果と完全に同一になることを保証する。
+///
+/// # 返り値
+/// (攻撃側の`DivisionId`→(manpower損失, organization損失)、防御側の同上)
+pub fn resolve_combat_day_multi(
+    attackers: &[&Division],
+    defenders: &[&Division],
+    terrain_defense_bonus: i32,
+) -> (CombatDamageByDivision, CombatDamageByDivision) {
+    if attackers.len() == 1 && defenders.len() == 1 {
+        // 1体対1体は既存の`resolve_combat_day`に完全委譲し、既存の戦闘バランスを保つ
+        let (atk_loss, atk_org, def_loss, def_org) =
+            resolve_combat_day(attackers[0], defenders[0], terrain_defense_bonus);
+        let mut atk_result = HashMap::new();
+        atk_result.insert(attackers[0].id, (atk_loss, atk_org));
+        let mut def_result = HashMap::new();
+        def_result.insert(defenders[0].id, (def_loss, def_org));
+        return (atk_result, def_result);
+    }
+
+    let atk_effectives: Vec<(DivisionId, i64)> = attackers
+        .iter()
+        .map(|a| {
+            (
+                a.id,
+                effective_power_1000(
+                    a.attack_power,
+                    a.manpower,
+                    a.max_manpower,
+                    a.organization,
+                    a.max_organization,
+                ),
+            )
+        })
+        .collect();
+    let def_effectives: Vec<(DivisionId, i64)> = defenders
+        .iter()
+        .map(|d| {
+            (
+                d.id,
+                effective_power_1000(
+                    d.defense_power,
+                    d.manpower,
+                    d.max_manpower,
+                    d.organization,
+                    d.max_organization,
+                ),
+            )
+        })
+        .collect();
+
+    let atk_total: i64 = atk_effectives.iter().map(|(_, v)| v).sum();
+    let def_total: i64 = def_effectives.iter().map(|(_, v)| v).sum();
+    let def_total_with_terrain = def_total + terrain_defense_bonus as i64;
+
+    // 防御側全体が受けるmanpower損失合計
+    let def_total_loss = if def_total_with_terrain < 1 {
+        (atk_total * DAMAGE_SCALE as i64 / 1000).max(0)
+    } else {
+        (atk_total * DAMAGE_SCALE as i64 / def_total_with_terrain.max(1)).max(0)
+    } as u64;
+
+    // 攻撃側全体が受けるmanpower損失合計
+    let atk_total_loss = if atk_total < 1 {
+        (def_total_with_terrain * DAMAGE_SCALE as i64 / 1000).max(0)
+    } else {
+        (def_total_with_terrain * DAMAGE_SCALE as i64 / atk_total.max(1)).max(0)
+    } as u64;
+
+    (
+        distribute_damage(&atk_effectives, atk_total, atk_total_loss),
+        distribute_damage(&def_effectives, def_total, def_total_loss),
+    )
+}
+
+/// 師団ID→(manpower損失, organization損失)のマップ。`resolve_combat_day_multi`の
+/// 陣営ごとの結果を表す型(clippy::type_complexity対策の型エイリアス)。
+pub type CombatDamageByDivision = HashMap<DivisionId, (u64, f32)>;
+
+/// 陣営全体の損失合計を、各師団の実効戦力の貢献度に応じて配分する。
+/// 端数はIDの大きい参加者(決定的な順序の末尾)にまとめて渡し、配分合計が
+/// `total_loss`と一致するようにする。実効戦力の合計が0(陣営全滅済み)の場合は
+/// 誰にも被害を配分しない。
+fn distribute_damage(
+    effectives: &[(DivisionId, i64)],
+    total_effective: i64,
+    total_loss: u64,
+) -> CombatDamageByDivision {
+    let mut result = HashMap::new();
+    if effectives.is_empty() {
+        return result;
+    }
+    if total_effective <= 0 {
+        for (id, _) in effectives {
+            result.insert(*id, (0, 0.0));
+        }
+        return result;
+    }
+
+    let mut sorted = effectives.to_vec();
+    sorted.sort_by_key(|(id, _)| id.0);
+
+    let mut distributed = 0u64;
+    let last_index = sorted.len() - 1;
+    for (i, (id, eff)) in sorted.iter().enumerate() {
+        let share = if i == last_index {
+            total_loss.saturating_sub(distributed)
+        } else {
+            let s = ((total_loss as i64 * eff) / total_effective).max(0) as u64;
+            distributed += s;
+            s
+        };
+        let org_loss = share as f32 * ORG_DAMAGE_NUMERATOR as f32 / ORG_DAMAGE_DENOMINATOR as f32;
+        result.insert(*id, (share, org_loss));
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{ArmyId, BattleId, CountryId, DivisionId, StateId};
-    use crate::military::data::{ArmyStatus, ArmyUnit, DivisionSize, DivisionType};
+    use crate::common::{BattleId, CountryId, DivisionDefinitionId, DivisionId, StateId};
+    use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
 
-    fn make_army(owner: CountryId, manpower: u64, org: f32, atk: i32, def: i32) -> ArmyUnit {
-        ArmyUnit {
-            id: ArmyId(0),
+    fn make_division(owner: CountryId, manpower: u64, org: f32, atk: i32, def: i32) -> Division {
+        Division {
+            id: DivisionId(0),
             owner,
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -154,8 +297,8 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Fighting,
-            def_id: DivisionId(0),
+            status: DivisionStatus::Fighting,
+            def_id: DivisionDefinitionId(0),
             attack_power: atk,
             defense_power: def,
             combat_id: Some(BattleId(0)),
@@ -164,8 +307,8 @@ mod tests {
 
     #[test]
     fn test_resolve_combat_day_basic() {
-        let attacker = make_army(CountryId(1), 10000, 100.0, 10, 10);
-        let defender = make_army(CountryId(2), 10000, 100.0, 10, 10);
+        let attacker = make_division(CountryId(1), 10000, 100.0, 10, 10);
+        let defender = make_division(CountryId(2), 10000, 100.0, 10, 10);
 
         let (atk_loss, _atk_org, def_loss, _def_org) =
             resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_PLAIN);
@@ -177,8 +320,8 @@ mod tests {
 
     #[test]
     fn test_terrain_bonus_favors_defender() {
-        let attacker = make_army(CountryId(1), 10000, 100.0, 10, 10);
-        let defender = make_army(CountryId(2), 10000, 100.0, 10, 10);
+        let attacker = make_division(CountryId(1), 10000, 100.0, 10, 10);
+        let defender = make_division(CountryId(2), 10000, 100.0, 10, 10);
 
         let (atk_loss_plain, _, def_loss_plain, _) =
             resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_PLAIN);
@@ -192,8 +335,8 @@ mod tests {
 
     #[test]
     fn test_combat_is_deterministic() {
-        let attacker = make_army(CountryId(1), 8000, 75.0, 12, 8);
-        let defender = make_army(CountryId(2), 6000, 60.0, 9, 14);
+        let attacker = make_division(CountryId(1), 8000, 75.0, 12, 8);
+        let defender = make_division(CountryId(2), 6000, 60.0, 9, 14);
 
         let result1 = resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_HILLS);
         let result2 = resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_HILLS);
@@ -203,8 +346,8 @@ mod tests {
 
     #[test]
     fn test_zero_manpower_no_damage() {
-        let attacker = make_army(CountryId(1), 0, 100.0, 10, 10);
-        let defender = make_army(CountryId(2), 10000, 100.0, 10, 10);
+        let attacker = make_division(CountryId(1), 0, 100.0, 10, 10);
+        let defender = make_division(CountryId(2), 10000, 100.0, 10, 10);
 
         let (atk_loss, _, def_loss, _) =
             resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_PLAIN);
@@ -213,5 +356,104 @@ mod tests {
         assert_eq!(def_loss, 0);
         // 攻撃側はダメージを受ける
         let _ = atk_loss;
+    }
+
+    fn make_division_with_id(
+        id: usize,
+        owner: CountryId,
+        manpower: u64,
+        org: f32,
+        atk: i32,
+        def: i32,
+    ) -> Division {
+        let mut d = make_division(owner, manpower, org, atk, def);
+        d.id = DivisionId(id);
+        d
+    }
+
+    #[test]
+    fn test_resolve_combat_day_multi_matches_single_when_1v1() {
+        let attacker = make_division_with_id(0, CountryId(1), 8000, 75.0, 12, 8);
+        let defender = make_division_with_id(1, CountryId(2), 6000, 60.0, 9, 14);
+
+        let (single_atk_loss, single_atk_org, single_def_loss, single_def_org) =
+            resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_HILLS);
+
+        let (atk_result, def_result) =
+            resolve_combat_day_multi(&[&attacker], &[&defender], TERRAIN_BONUS_HILLS);
+
+        // 1体対1体の場合、既存のresolve_combat_dayと完全に同一の結果になる
+        assert_eq!(
+            atk_result.get(&attacker.id),
+            Some(&(single_atk_loss, single_atk_org))
+        );
+        assert_eq!(
+            def_result.get(&defender.id),
+            Some(&(single_def_loss, single_def_org))
+        );
+    }
+
+    #[test]
+    fn test_resolve_combat_day_multi_combined_attackers_deal_more_total_damage() {
+        // 単独の攻撃側1体 vs 防御側1体
+        let solo_attacker = make_division_with_id(0, CountryId(1), 10000, 100.0, 10, 10);
+        let defender_vs_solo = make_division_with_id(1, CountryId(2), 10000, 100.0, 10, 15);
+        let (_, def_result_solo) =
+            resolve_combat_day_multi(&[&solo_attacker], &[&defender_vs_solo], TERRAIN_BONUS_PLAIN);
+        let solo_def_loss = def_result_solo[&defender_vs_solo.id].0;
+
+        // 同条件の攻撃側3体が合流した場合
+        let attacker_a = make_division_with_id(10, CountryId(1), 10000, 100.0, 10, 10);
+        let attacker_b = make_division_with_id(11, CountryId(1), 10000, 100.0, 10, 10);
+        let attacker_c = make_division_with_id(12, CountryId(1), 10000, 100.0, 10, 10);
+        let defender_vs_group = make_division_with_id(1, CountryId(2), 10000, 100.0, 10, 15);
+
+        let (_, def_result_group) = resolve_combat_day_multi(
+            &[&attacker_a, &attacker_b, &attacker_c],
+            &[&defender_vs_group],
+            TERRAIN_BONUS_PLAIN,
+        );
+        let group_def_loss = def_result_group[&defender_vs_group.id].0;
+
+        // 3体で合流した方が、単独攻撃よりも防御側に大きな被害を与える
+        // (複数師団による共同攻撃が根本的に強くなることの直接的な検証)
+        assert!(group_def_loss > solo_def_loss * 2);
+    }
+
+    #[test]
+    fn test_resolve_combat_day_multi_distributes_damage_across_defenders() {
+        let attacker = make_division_with_id(0, CountryId(1), 10000, 100.0, 10, 10);
+        let defender_a = make_division_with_id(1, CountryId(2), 10000, 100.0, 10, 10);
+        let defender_b = make_division_with_id(2, CountryId(2), 10000, 100.0, 10, 10);
+
+        let (_, def_result) = resolve_combat_day_multi(
+            &[&attacker],
+            &[&defender_a, &defender_b],
+            TERRAIN_BONUS_PLAIN,
+        );
+
+        // 実効戦力が同じ2体の防御側には、被害がほぼ均等(端数のみ)に配分される
+        let loss_a = def_result[&defender_a.id].0;
+        let loss_b = def_result[&defender_b.id].0;
+        assert!(loss_a > 0 && loss_b > 0);
+        assert!(loss_a.abs_diff(loss_b) <= 1);
+    }
+
+    #[test]
+    fn test_resolve_combat_day_multi_defeated_participant_takes_no_further_damage() {
+        // organization/manpowerが0の師団は実効戦力0となり、被害を受け持たない
+        let attacker = make_division_with_id(0, CountryId(1), 10000, 100.0, 10, 10);
+        let mut defeated_defender = make_division_with_id(1, CountryId(2), 10000, 0.0, 10, 10);
+        defeated_defender.organization = 0.0;
+        let alive_defender = make_division_with_id(2, CountryId(2), 10000, 100.0, 10, 10);
+
+        let (_, def_result) = resolve_combat_day_multi(
+            &[&attacker],
+            &[&defeated_defender, &alive_defender],
+            TERRAIN_BONUS_PLAIN,
+        );
+
+        assert_eq!(def_result[&defeated_defender.id].0, 0);
+        assert!(def_result[&alive_defender.id].0 > 0);
     }
 }

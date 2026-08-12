@@ -1,7 +1,7 @@
 //! P20-008: 1000州以上規模での本番日次シミュレーション性能プロファイリング用モジュール。
 //!
 //! `strategy_game/assets/data/states.ron` / `countries.ron` は一切変更・複製・巨大化せず、
-//! ここでは決定論的に合成した大規模ワールド（State/Country/Army/War/Frontline）を
+//! ここでは決定論的に合成した大規模ワールド（State/Country/Division/War/Frontline）を
 //! 本番のプラグイン構成・`DailySimulationSet` 実行順序へ直接注入する。
 //! `src/bin/profile_1000_states.rs`（計測用バイナリ）と
 //! `tests/profile_workload_correctness_test.rs`（正しさの回帰テスト）の両方から
@@ -12,7 +12,7 @@ use crate::app::game_state::GameState;
 use crate::app::time::{GameDate, GamePaused};
 use crate::building::BuildingPlugin;
 use crate::building::data::BuildingType;
-use crate::common::{ArmyId, CountryId, DivisionId, StateId, WarId};
+use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId, WarId};
 use crate::country::{
     CountryData, CountryPlugin, CountryRegistry, EconomicSystem, GovernmentType, PlayerCountry,
 };
@@ -23,7 +23,7 @@ use crate::economy::EconomyPlugin;
 use crate::economy::resources::{CountryStockpile, ResourceType, StateResourceDeposit};
 use crate::military::MilitaryPlugin;
 use crate::military::battle::BattleRegistry;
-use crate::military::data::{ArmyStatus, ArmyUnit, DivisionDefinition, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, Division, DivisionDefinition, MilitaryRegistry};
 use crate::politics::PoliticsPlugin;
 use crate::research::ResearchPlugin;
 use crate::state::StatePlugin;
@@ -75,22 +75,22 @@ pub struct WorkloadConfig {
 pub struct WorkloadCounts {
     pub state_count: usize,
     pub country_count: usize,
-    pub initial_army_count: usize,
+    pub initial_division_count: usize,
     pub initial_war_count: usize,
 }
 
 /// 実行時（Tick後）に観測するワールド統計
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeCounts {
-    pub army_count: usize,
+    pub division_count: usize,
     pub active_war_count: usize,
     pub frontline_count: usize,
     pub battle_count: usize,
     /// BevyのECS World上に実在するEntity数。
-    /// 本ゲームのState/Country/Army/War/FrontlineデータはECS Entityではなく
+    /// 本ゲームのState/Country/Division/War/FrontlineデータはECS Entityではなく
     /// Registry Resource内のVec/HashMapとして保持されるため、この値は
     /// ワールド規模に応じて増加しない(常に少数)。規模の指標としては
-    /// State/Country/Army/War/Frontline件数を参照すること。
+    /// State/Country/Division/War/Frontline件数を参照すること。
     pub ecs_entity_count: usize,
 }
 
@@ -271,12 +271,12 @@ fn inject_synthetic_world(app: &mut App, config: &WorkloadConfig) -> WorkloadCou
     // ── 4. 高負荷シナリオ用: 隣接国ブロックペアで戦争を準備 ──────────────────────
     let mut wars: Vec<War> = Vec::new();
     // (country, state, is_attacker) の初期陸軍配置リスト
-    let mut army_placements: Vec<(CountryId, StateId)> = Vec::new();
+    let mut division_placements: Vec<(CountryId, StateId)> = Vec::new();
 
     // 平時ガリソン: 全国家に首都1個師団
     for (cidx, cap) in capital_of_country.iter().enumerate() {
         if let Some(cap) = cap {
-            army_placements.push((CountryId(cidx), *cap));
+            division_placements.push((CountryId(cidx), *cap));
         }
     }
 
@@ -377,14 +377,14 @@ fn inject_synthetic_world(app: &mut App, config: &WorkloadConfig) -> WorkloadCou
 
             // 交戦国双方に追加の陸軍を国境州・首都へ配置
             for _ in 0..4 {
-                army_placements.push((CountryId(a), atk_state));
-                army_placements.push((CountryId(b), def_state));
+                division_placements.push((CountryId(a), atk_state));
+                division_placements.push((CountryId(b), def_state));
             }
         }
     }
 
     let initial_war_count = wars.len();
-    let initial_army_count = army_placements.len();
+    let initial_division_count = division_placements.len();
 
     // ── 5. Diplomacy: 全国家ペアの関係を生成 ────────────────────────────────
     let mut diplomacy = DiplomacyRegistry::default();
@@ -417,17 +417,17 @@ fn inject_synthetic_world(app: &mut App, config: &WorkloadConfig) -> WorkloadCou
             let military = app.world().resource::<MilitaryRegistry>();
             military
                 .definitions
-                .get(&DivisionId(0))
+                .get(&DivisionDefinitionId(0))
                 .cloned()
-                .expect("divisions.ron に DivisionId(0) が定義されていること")
+                .expect("divisions.ron に DivisionDefinitionId(0) が定義されていること")
         };
-        let def_id = DivisionId(0);
+        let def_id = DivisionDefinitionId(0);
 
         let mut military = app.world_mut().resource_mut::<MilitaryRegistry>();
-        military.armies.clear();
-        for (owner, state) in army_placements {
-            let army = ArmyUnit {
-                id: ArmyId(0), // add_army 時に採番される
+        military.divisions.clear();
+        for (owner, state) in division_placements {
+            let division = Division {
+                id: DivisionId(0), // add_division 時に採番される
                 owner,
                 division_type: def.division_type,
                 size: def.size,
@@ -446,20 +446,20 @@ fn inject_synthetic_world(app: &mut App, config: &WorkloadConfig) -> WorkloadCou
                 experience: 0.0,
                 supply_ratio: 1.0,
                 movement_progress: 0.0,
-                status: ArmyStatus::Idle,
+                status: DivisionStatus::Idle,
                 def_id,
                 attack_power: def.attack as i32,
                 defense_power: def.defense as i32,
                 combat_id: None,
             };
-            military.add_army(army);
+            military.add_division(division);
         }
     }
 
     WorkloadCounts {
         state_count,
         country_count,
-        initial_army_count,
+        initial_division_count,
         initial_war_count,
     }
 }
@@ -484,7 +484,7 @@ pub fn snapshot_runtime_counts(app: &App) -> RuntimeCounts {
     let battle_registry = world.resource::<BattleRegistry>();
 
     RuntimeCounts {
-        army_count: military.armies.len(),
+        division_count: military.divisions.len(),
         active_war_count: war_registry
             .wars
             .values()
@@ -646,21 +646,21 @@ pub fn validate_world_sanity(app: &App) -> Result<(), String> {
         }
     }
 
-    for army in military.armies.values() {
-        if country_registry.get(army.owner).is_none() {
+    for division in military.divisions.values() {
+        if country_registry.get(division.owner).is_none() {
             return Err(format!(
-                "Army {:?} owner {:?} does not reference an existing country",
-                army.id, army.owner
+                "Division {:?} owner {:?} does not reference an existing country",
+                division.id, division.owner
             ));
         }
-        if state_registry.get(army.current_state).is_none() {
+        if state_registry.get(division.current_state).is_none() {
             return Err(format!(
-                "Army {:?} current_state {:?} does not reference an existing state",
-                army.id, army.current_state
+                "Division {:?} current_state {:?} does not reference an existing state",
+                division.id, division.current_state
             ));
         }
-        if !army.organization.is_finite() || !army.morale.is_finite() {
-            return Err(format!("Army {:?} has non-finite derived value", army.id));
+        if !division.organization.is_finite() || !division.morale.is_finite() {
+            return Err(format!("Division {:?} has non-finite derived value", division.id));
         }
     }
 

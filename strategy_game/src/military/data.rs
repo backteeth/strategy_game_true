@@ -1,4 +1,4 @@
-use crate::common::{ArmyId, BattleId, CountryId, DivisionId, StateId};
+use crate::common::{BattleId, CountryId, DivisionDefinitionId, DivisionId, StateId};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ impl DivisionSize {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DivisionDefinition {
-    pub id: DivisionId,
+    pub id: DivisionDefinitionId,
     pub name: String,
     pub division_type: DivisionType,
     pub size: DivisionSize,
@@ -59,7 +59,7 @@ pub struct DivisionDefinition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ArmyStatus {
+pub enum DivisionStatus {
     #[default]
     Idle,
     Moving,
@@ -71,8 +71,8 @@ pub enum ArmyStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArmyUnit {
-    pub id: ArmyId,
+pub struct Division {
+    pub id: DivisionId,
     pub owner: CountryId,
     pub division_type: DivisionType,
     pub size: DivisionSize,
@@ -93,8 +93,8 @@ pub struct ArmyUnit {
     pub experience: f32,
     pub supply_ratio: f32,
     pub movement_progress: f32,
-    pub status: ArmyStatus,
-    pub def_id: DivisionId,
+    pub status: DivisionStatus,
+    pub def_id: DivisionDefinitionId,
     /// 攻撃力（整数、決定的な戦闘計算に使用）
     #[serde(default = "default_attack_power")]
     pub attack_power: i32,
@@ -108,29 +108,29 @@ pub struct ArmyUnit {
 
 #[derive(Resource, Default, Debug)]
 pub struct MilitaryRegistry {
-    pub definitions: HashMap<DivisionId, DivisionDefinition>,
-    pub armies: HashMap<ArmyId, ArmyUnit>,
-    next_army_id: usize,
+    pub definitions: HashMap<DivisionDefinitionId, DivisionDefinition>,
+    pub divisions: HashMap<DivisionId, Division>,
+    next_division_id: usize,
 }
 
 impl MilitaryRegistry {
-    pub fn next_army_id(&self) -> usize {
-        self.next_army_id
+    pub fn next_division_id(&self) -> usize {
+        self.next_division_id
     }
 
-    pub fn add_army(&mut self, mut army: ArmyUnit) -> ArmyId {
-        army.id = ArmyId(self.next_army_id);
-        self.next_army_id += 1;
-        self.armies.insert(army.id, army.clone());
-        army.id
+    pub fn add_division(&mut self, mut division: Division) -> DivisionId {
+        division.id = DivisionId(self.next_division_id);
+        self.next_division_id += 1;
+        self.divisions.insert(division.id, division.clone());
+        division.id
     }
 
-    pub fn remove_army(&mut self, id: ArmyId) {
-        self.armies.remove(&id);
+    pub fn remove_division(&mut self, id: DivisionId) {
+        self.divisions.remove(&id);
     }
 
-    pub fn get_armies_in_state(&self, state: StateId) -> Vec<&ArmyUnit> {
-        self.armies
+    pub fn get_divisions_in_state(&self, state: StateId) -> Vec<&Division> {
+        self.divisions
             .values()
             .filter(|a| a.current_state == state)
             .collect()

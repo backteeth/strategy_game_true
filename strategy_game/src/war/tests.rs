@@ -1,8 +1,8 @@
 #![cfg(test)]
 
-use crate::common::{ArmyId, CountryId, DivisionId, StateId};
+use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use crate::military::data::{
-    ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
 };
 use crate::state::data::{StateData, StateRegistry};
 use crate::war::data::{War, WarRegistry};
@@ -11,7 +11,7 @@ use crate::war::war_score::process_war_score;
 fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
     let mut mil_reg = MilitaryRegistry::default();
     let def = DivisionDefinition {
-        id: DivisionId(1),
+        id: DivisionDefinitionId(1),
         name: "Inf".to_string(),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -27,7 +27,7 @@ fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
         supply_usage: 1.0,
         maintenance_cost: 1.0,
     };
-    mil_reg.definitions.insert(DivisionId(1), def);
+    mil_reg.definitions.insert(DivisionDefinitionId(1), def);
 
     let mut war_reg = WarRegistry::default();
     let war = War {
@@ -77,9 +77,9 @@ fn test_combat_resolution() {
 
     let (mil_reg, _, _) = setup();
 
-    // Two armies
-    let a1 = ArmyUnit {
-        id: ArmyId(1),
+    // Two divisions
+    let a1 = Division {
+        id: DivisionId(1),
         owner: CountryId(1),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -98,15 +98,15 @@ fn test_combat_resolution() {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Idle,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Idle,
+        def_id: DivisionDefinitionId(1),
         attack_power: 10,
         defense_power: 10,
         combat_id: None,
     };
 
     let mut a2 = a1.clone();
-    a2.id = ArmyId(2);
+    a2.id = DivisionId(2);
     a2.owner = CountryId(2);
 
     // 1日分の戦闘計算で損失が発生する
@@ -862,12 +862,14 @@ fn test_phase16_battle_results_sync_and_deduplication() {
         state_id: StateId(2),
         attacker_country: CountryId(1),
         defender_country: CountryId(2),
-        attacker_army_id: crate::common::ArmyId(1),
-        defender_army_id: crate::common::ArmyId(2),
+        attacker_division_ids: vec![crate::common::DivisionId(1)],
+        defender_division_ids: vec![crate::common::DivisionId(2)],
+        attacker_origins: [(crate::common::DivisionId(1), StateId(1))]
+            .into_iter()
+            .collect(),
         start_date: "1936/01/01".to_string(),
         elapsed_days: 2,
         status: BattleStatus::AttackerWon,
-        attacker_origin_state: StateId(1),
     };
     battle_reg.battles.insert(b1.id, b1);
 
@@ -886,7 +888,7 @@ fn test_phase16_battle_results_sync_and_deduplication() {
 #[test]
 fn test_phase16_capitulation_rules() {
     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
-    use crate::military::data::{ArmyStatus, ArmyUnit, DivisionSize, DivisionType};
+    use crate::military::data::{DivisionStatus, Division, DivisionSize, DivisionType};
     use crate::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
 
     let goal = WarGoal {
@@ -915,9 +917,9 @@ fn test_phase16_capitulation_rules() {
     let state_reg = StateRegistry::build(vec![s1, s2]);
 
     let mut mil_reg = MilitaryRegistry::default();
-    // Country 1 has an active army
-    let a1 = ArmyUnit {
-        id: crate::common::ArmyId(1),
+    // Country 1 has an active division
+    let a1 = Division {
+        id: crate::common::DivisionId(1),
         owner: CountryId(1),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -936,13 +938,13 @@ fn test_phase16_capitulation_rules() {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Idle,
-        def_id: crate::common::DivisionId(1),
+        status: DivisionStatus::Idle,
+        def_id: crate::common::DivisionDefinitionId(1),
         attack_power: 10,
         defense_power: 10,
         combat_id: None,
     };
-    mil_reg.armies.insert(a1.id, a1);
+    mil_reg.divisions.insert(a1.id, a1);
 
     let war = War {
         id: crate::common::WarId(1),
@@ -966,7 +968,7 @@ fn test_phase16_capitulation_rules() {
         processed_battle_ids: std::collections::HashSet::new(),
     };
 
-    // Target state is occupied AND Country 2 has no ready army -> Defender Capitulates
+    // Target state is occupied AND Country 2 has no ready division -> Defender Capitulates
     let res = evaluate_war_capitulation(&war, &state_reg, &mil_reg);
     assert_eq!(res, CapitulationResult::DefenderCapitulated);
 }

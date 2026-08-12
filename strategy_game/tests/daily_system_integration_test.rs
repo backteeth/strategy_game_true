@@ -9,7 +9,9 @@ use strategy_game::app::time::{DailySimulationSet, GameDate, GamePaused};
 use strategy_game::building::BuildingPlugin;
 use strategy_game::building::construction::{ConstructionQueueItem, ConstructionStatus};
 use strategy_game::building::data::BuildingType;
-use strategy_game::common::{ArmyId, BattleId, CountryId, DivisionId, FrontlineId, StateId, WarId};
+use strategy_game::common::{
+    BattleId, CountryId, DivisionDefinitionId, DivisionId, FrontlineId, StateId, WarId,
+};
 use strategy_game::country::country_ai::{
     CountryAiDecisionReason, CountryAiMode, CountryAiRegistry,
 };
@@ -27,7 +29,7 @@ use strategy_game::economy::resources::{ResourceType, StateResourceDeposit};
 use strategy_game::military::MilitaryPlugin;
 use strategy_game::military::battle::{BattleRegistry, BattleStatus};
 use strategy_game::military::data::{
-    ArmyStatus, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+    DivisionStatus, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
 };
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::politics::interest_groups::{InterestGroupState, InterestGroupType};
@@ -101,7 +103,7 @@ pub struct PoliticalReformSnapshot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecruitmentQueueItemSnapshot {
-    pub division_id: DivisionId,
+    pub division_id: DivisionDefinitionId,
     pub target_state: StateId,
     pub days_remaining: u32,
     pub total_days: u32,
@@ -215,10 +217,10 @@ pub struct FrontlinePlanSnapshot {
     pub commanding_country_id: CountryId,
     pub stance: FrontlineStance,
     pub objective_region_id: Option<StateId>,
-    pub assigned_army_ids: Vec<ArmyId>,
+    pub assigned_division_ids: Vec<DivisionId>,
 }
 
-/// 前線スナップショット (Frontline 全フィールド + plans + army_frontline_map)
+/// 前線スナップショット (Frontline 全フィールド + plans + division_frontline_map)
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrontlineDetailSnapshot {
     pub frontline_id: FrontlineId,
@@ -232,10 +234,10 @@ pub struct FrontlineDetailSnapshot {
     pub plans: Vec<FrontlinePlanSnapshot>,
 }
 
-/// 陸軍スナップショット (ArmyUnit 全フィールド)
+/// 陸軍スナップショット (Division 全フィールド)
 #[derive(Debug, Clone, PartialEq)]
-pub struct ArmyDetailSnapshot {
-    pub id: ArmyId,
+pub struct DivisionDetailSnapshot {
+    pub id: DivisionId,
     pub owner: CountryId,
     pub division_type: DivisionType,
     pub size: DivisionSize,
@@ -254,8 +256,8 @@ pub struct ArmyDetailSnapshot {
     pub experience: f32,
     pub supply_ratio: f32,
     pub movement_progress: f32,
-    pub status: ArmyStatus,
-    pub def_id: DivisionId,
+    pub status: DivisionStatus,
+    pub def_id: DivisionDefinitionId,
     pub attack_power: i32,
     pub defense_power: i32,
     pub combat_id: Option<BattleId>,
@@ -263,7 +265,7 @@ pub struct ArmyDetailSnapshot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DivisionDefinitionSnapshot {
-    pub id: DivisionId,
+    pub id: DivisionDefinitionId,
     pub name: String,
     pub division_type: DivisionType,
     pub size: DivisionSize,
@@ -288,12 +290,12 @@ pub struct BattleDetailSnapshot {
     pub state_id: StateId,
     pub attacker_country: CountryId,
     pub defender_country: CountryId,
-    pub attacker_army_id: ArmyId,
-    pub defender_army_id: ArmyId,
+    pub attacker_division_ids: Vec<DivisionId>,
+    pub defender_division_ids: Vec<DivisionId>,
     pub start_date: String,
     pub elapsed_days: u32,
     pub status: BattleStatus,
-    pub attacker_origin_state: StateId,
+    pub attacker_origins: Vec<(DivisionId, StateId)>,
 }
 
 /// 戦争スナップショット (War 全関連フィールド)
@@ -387,8 +389,8 @@ pub struct GameStateSnapshot {
     pub military_ai: Vec<MilitaryAiDetailSnapshot>,
     pub military_ai_registry_dirty: bool,
     pub division_definitions: Vec<DivisionDefinitionSnapshot>,
-    pub armies: Vec<ArmyDetailSnapshot>,
-    pub military_next_army_id: usize,
+    pub divisions: Vec<DivisionDetailSnapshot>,
+    pub military_next_division_id: usize,
     pub battles: Vec<BattleDetailSnapshot>,
     pub battle_next_id: usize,
     pub wars: Vec<WarDetailSnapshot>,
@@ -396,8 +398,8 @@ pub struct GameStateSnapshot {
     pub frontlines: Vec<FrontlineDetailSnapshot>,
     pub frontline_plans: Vec<FrontlinePlanSnapshot>,
     pub next_frontline_id: usize,
-    pub army_frontline_map: Vec<(ArmyId, FrontlineId)>,
-    pub frontline_generated_movements: Vec<ArmyId>,
+    pub division_frontline_map: Vec<(DivisionId, FrontlineId)>,
+    pub frontline_generated_movements: Vec<DivisionId>,
     pub states: Vec<StateDetailSnapshot>,
     pub state_index_entries: Vec<(usize, usize)>,
 }
@@ -417,10 +419,10 @@ pub struct SetBoundarySnapshot {
     pub war_record_count: usize,
     pub active_war_count: usize,
     pub frontline_count: usize,
-    pub ai_army_destinations: Vec<Option<StateId>>,
-    pub ai_army_paths: Vec<Vec<StateId>>,
-    pub ai_army_positions: Vec<StateId>,
-    pub ai_army_progresses: Vec<f32>,
+    pub ai_division_destinations: Vec<Option<StateId>>,
+    pub ai_division_paths: Vec<Vec<StateId>>,
+    pub ai_division_positions: Vec<StateId>,
+    pub ai_division_progresses: Vec<f32>,
     pub occupied_states_count: usize,
     pub war_score: f32,
     pub war_status: Option<WarStatus>,
@@ -432,15 +434,15 @@ pub struct SetBoundarySnapshot {
     pub military_ai_dirty: Option<bool>,
     pub military_ai_decision_reason: Option<MilitaryAiDecisionReason>,
     pub military_ai_stance: Option<FrontlineStance>,
-    pub military_ai_assigned_army_ids: Vec<ArmyId>,
-    pub military_ai_assigned_army_owners: Vec<(ArmyId, Option<CountryId>)>,
+    pub military_ai_assigned_division_ids: Vec<DivisionId>,
+    pub military_ai_assigned_division_owners: Vec<(DivisionId, Option<CountryId>)>,
     pub frontline_plan_count: usize,
     pub capitulation_result: Option<CapitulationResult>,
     pub military_ai_estimated_own_power: Option<u64>,
     pub military_ai_estimated_enemy_power: Option<u64>,
     pub player_construction_queue: Vec<ConstructionQueueItemSnapshot>,
     pub player_research_state: Option<ResearchStateSnapshot>,
-    pub player_armies: Vec<ArmyDetailSnapshot>,
+    pub player_divisions: Vec<DivisionDetailSnapshot>,
 }
 
 /// Set境界観測の全結果を蓄積するリソース
@@ -530,32 +532,32 @@ fn snapshot_interest_group(
     }
 }
 
-fn snapshot_army(army: &strategy_game::military::data::ArmyUnit) -> ArmyDetailSnapshot {
-    ArmyDetailSnapshot {
-        id: army.id,
-        owner: army.owner,
-        division_type: army.division_type,
-        size: army.size,
-        current_state: army.current_state,
-        destination: army.destination,
-        current_path: army.current_path.clone(),
-        target_state: army.target_state,
-        manpower: army.manpower,
-        max_manpower: army.max_manpower,
-        equipment: army.equipment,
-        max_equipment: army.max_equipment,
-        organization: army.organization,
-        max_organization: army.max_organization,
-        morale: army.morale,
-        max_morale: army.max_morale,
-        experience: army.experience,
-        supply_ratio: army.supply_ratio,
-        movement_progress: army.movement_progress,
-        status: army.status,
-        def_id: army.def_id,
-        attack_power: army.attack_power,
-        defense_power: army.defense_power,
-        combat_id: army.combat_id,
+fn snapshot_division_detail(division: &strategy_game::military::data::Division) -> DivisionDetailSnapshot {
+    DivisionDetailSnapshot {
+        id: division.id,
+        owner: division.owner,
+        division_type: division.division_type,
+        size: division.size,
+        current_state: division.current_state,
+        destination: division.destination,
+        current_path: division.current_path.clone(),
+        target_state: division.target_state,
+        manpower: division.manpower,
+        max_manpower: division.max_manpower,
+        equipment: division.equipment,
+        max_equipment: division.max_equipment,
+        organization: division.organization,
+        max_organization: division.max_organization,
+        morale: division.morale,
+        max_morale: division.max_morale,
+        experience: division.experience,
+        supply_ratio: division.supply_ratio,
+        movement_progress: division.movement_progress,
+        status: division.status,
+        def_id: division.def_id,
+        attack_power: division.attack_power,
+        defense_power: division.defense_power,
+        combat_id: division.combat_id,
     }
 }
 
@@ -701,12 +703,12 @@ fn capture_snapshot(
     just_reg: &WarJustificationRegistry,
     military_ai_reg: &MilitaryAiRegistry,
 ) -> SetBoundarySnapshot {
-    let mut ai_armies: Vec<_> = military_reg
-        .armies
+    let mut ai_divisions: Vec<_> = military_reg
+        .divisions
         .values()
         .filter(|a| a.owner == CountryId(1))
         .collect();
-    ai_armies.sort_by_key(|a| a.id.0);
+    ai_divisions.sort_by_key(|a| a.id.0);
 
     let occupied = state_reg
         .states
@@ -758,19 +760,19 @@ fn capture_snapshot(
 
     let total_plans_count = frontline_reg.plans.len();
 
-    let mut assigned_ids: Vec<ArmyId> = c1_plans
+    let mut assigned_ids: Vec<DivisionId> = c1_plans
         .iter()
-        .flat_map(|plan| plan.assigned_army_ids.iter().copied())
+        .flat_map(|plan| plan.assigned_division_ids.iter().copied())
         .collect();
     assigned_ids.sort_by_key(|id| id.0);
     assigned_ids.dedup();
 
-    let assigned_army_owners: Vec<(ArmyId, Option<CountryId>)> = assigned_ids
+    let assigned_division_owners: Vec<(DivisionId, Option<CountryId>)> = assigned_ids
         .iter()
-        .map(|&army_id| {
+        .map(|&division_id| {
             (
-                army_id,
-                military_reg.armies.get(&army_id).map(|army| army.owner),
+                division_id,
+                military_reg.divisions.get(&division_id).map(|division| division.owner),
             )
         })
         .collect();
@@ -782,22 +784,22 @@ fn capture_snapshot(
     let player_research_state = country_reg
         .get(CountryId(0))
         .map(|country| snapshot_research_state(&country.research_state));
-    let mut player_armies: Vec<ArmyDetailSnapshot> = military_reg
-        .armies
+    let mut player_divisions: Vec<DivisionDetailSnapshot> = military_reg
+        .divisions
         .values()
-        .filter(|army| army.owner == CountryId(0))
-        .map(snapshot_army)
+        .filter(|division| division.owner == CountryId(0))
+        .map(snapshot_division_detail)
         .collect();
-    player_armies.sort_by_key(|army| army.id.0);
+    player_divisions.sort_by_key(|division| division.id.0);
 
     SetBoundarySnapshot {
         war_record_count: war_reg.wars.len(),
         active_war_count: active_count,
         frontline_count: frontline_reg.frontlines.len(),
-        ai_army_destinations: ai_armies.iter().map(|a| a.destination).collect(),
-        ai_army_paths: ai_armies.iter().map(|a| a.current_path.clone()).collect(),
-        ai_army_positions: ai_armies.iter().map(|a| a.current_state).collect(),
-        ai_army_progresses: ai_armies.iter().map(|a| a.movement_progress).collect(),
+        ai_division_destinations: ai_divisions.iter().map(|a| a.destination).collect(),
+        ai_division_paths: ai_divisions.iter().map(|a| a.current_path.clone()).collect(),
+        ai_division_positions: ai_divisions.iter().map(|a| a.current_state).collect(),
+        ai_division_progresses: ai_divisions.iter().map(|a| a.movement_progress).collect(),
         occupied_states_count: occupied,
         war_score: first_war.map(|w| w.war_score).unwrap_or(0.0),
         war_status: first_war.map(|w| w.status),
@@ -810,14 +812,14 @@ fn capture_snapshot(
         military_ai_dirty: ai_state_c1.map(|s| s.dirty),
         military_ai_decision_reason: ai_state_c1.map(|s| s.last_decision_reason),
         military_ai_stance: first_c1_plan.map(|p| p.stance),
-        military_ai_assigned_army_ids: assigned_ids,
-        military_ai_assigned_army_owners: assigned_army_owners,
+        military_ai_assigned_division_ids: assigned_ids,
+        military_ai_assigned_division_owners: assigned_division_owners,
         frontline_plan_count: total_plans_count,
         military_ai_estimated_own_power: ai_state_c1.map(|s| s.estimated_own_power),
         military_ai_estimated_enemy_power: ai_state_c1.map(|s| s.estimated_enemy_power),
         player_construction_queue,
         player_research_state,
-        player_armies,
+        player_divisions,
     }
 }
 
@@ -1022,9 +1024,9 @@ pub fn observe_war_resolution_boundary(
 ///
 /// - CountryRegistry: CountryData、建設キュー全7フィールド、研究状態全フィールドを保存
 /// - DiplomacyRegistry: 全関係・条約・cooldown・活動を保存
-/// - FrontlineRegistry: frontlines 全フィールド・plans 全フィールド・army_frontline_map を保存
+/// - FrontlineRegistry: frontlines 全フィールド・plans 全フィールド・division_frontline_map を保存
 /// - WarRegistry: War、war_goals、processed_battle_idsを含む全フィールドを保存
-/// - MilitaryRegistry: definitions と ArmyUnit の全フィールドを保存
+/// - MilitaryRegistry: definitions と Division の全フィールドを保存
 /// - BattleRegistry: Battle 全フィールドを保存
 /// - StateRegistry: StateData 全フィールドを保存
 /// - 全 HashMap は対応キーで昇順ソートして決定論的比較を保証
@@ -1125,7 +1127,7 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
     military_ai.sort_by_key(|s| s.country_id.0);
 
     let military_registry = app.world().resource::<MilitaryRegistry>();
-    let military_next_army_id = military_registry.next_army_id();
+    let military_next_division_id = military_registry.next_division_id();
     let mut division_definitions: Vec<DivisionDefinitionSnapshot> = military_registry
         .definitions
         .values()
@@ -1133,30 +1135,40 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         .collect();
     division_definitions.sort_by_key(|definition| definition.id.0);
 
-    let mut armies: Vec<ArmyDetailSnapshot> = military_registry
-        .armies
+    let mut divisions: Vec<DivisionDetailSnapshot> = military_registry
+        .divisions
         .values()
-        .map(snapshot_army)
+        .map(snapshot_division_detail)
         .collect();
-    armies.sort_by_key(|a| a.id.0);
+    divisions.sort_by_key(|a| a.id.0);
 
     let battle_registry = app.world().resource::<BattleRegistry>();
     let battle_next_id = battle_registry.next_id();
     let mut battles: Vec<BattleDetailSnapshot> = battle_registry
         .battles
         .values()
-        .map(|b| BattleDetailSnapshot {
-            id: b.id,
-            war_id: b.war_id,
-            state_id: b.state_id,
-            attacker_country: b.attacker_country,
-            defender_country: b.defender_country,
-            attacker_army_id: b.attacker_army_id,
-            defender_army_id: b.defender_army_id,
-            start_date: b.start_date.clone(),
-            elapsed_days: b.elapsed_days,
-            status: b.status,
-            attacker_origin_state: b.attacker_origin_state,
+        .map(|b| {
+            let mut attacker_division_ids = b.attacker_division_ids.clone();
+            attacker_division_ids.sort_by_key(|id| id.0);
+            let mut defender_division_ids = b.defender_division_ids.clone();
+            defender_division_ids.sort_by_key(|id| id.0);
+            let mut attacker_origins: Vec<(DivisionId, StateId)> =
+                b.attacker_origins.iter().map(|(k, v)| (*k, *v)).collect();
+            attacker_origins.sort_by_key(|(id, _)| id.0);
+
+            BattleDetailSnapshot {
+                id: b.id,
+                war_id: b.war_id,
+                state_id: b.state_id,
+                attacker_country: b.attacker_country,
+                defender_country: b.defender_country,
+                attacker_division_ids,
+                defender_division_ids,
+                start_date: b.start_date.clone(),
+                elapsed_days: b.elapsed_days,
+                status: b.status,
+                attacker_origins,
+            }
         })
         .collect();
     battles.sort_by_key(|b| b.id.0);
@@ -1218,14 +1230,14 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
                 .values()
                 .filter(|p| p.frontline_id == f.frontline_id)
                 .map(|p| {
-                    let mut assigned = p.assigned_army_ids.clone();
+                    let mut assigned = p.assigned_division_ids.clone();
                     assigned.sort_by_key(|id| id.0);
                     FrontlinePlanSnapshot {
                         frontline_id: p.frontline_id,
                         commanding_country_id: p.commanding_country_id,
                         stance: p.stance,
                         objective_region_id: p.objective_region_id,
-                        assigned_army_ids: assigned,
+                        assigned_division_ids: assigned,
                     }
                 })
                 .collect();
@@ -1249,33 +1261,33 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         .plans
         .values()
         .map(|plan| {
-            let mut assigned_army_ids = plan.assigned_army_ids.clone();
-            assigned_army_ids.sort_by_key(|army_id| army_id.0);
+            let mut assigned_division_ids = plan.assigned_division_ids.clone();
+            assigned_division_ids.sort_by_key(|division_id| division_id.0);
             FrontlinePlanSnapshot {
                 frontline_id: plan.frontline_id,
                 commanding_country_id: plan.commanding_country_id,
                 stance: plan.stance,
                 objective_region_id: plan.objective_region_id,
-                assigned_army_ids,
+                assigned_division_ids,
             }
         })
         .collect();
     frontline_plans.sort_by_key(|plan| (plan.frontline_id.0, plan.commanding_country_id.0));
     let next_frontline_id = frontline_reg.next_frontline_id;
 
-    let mut army_frontline_map: Vec<(ArmyId, FrontlineId)> = frontline_reg
-        .army_frontline_map
+    let mut division_frontline_map: Vec<(DivisionId, FrontlineId)> = frontline_reg
+        .division_frontline_map
         .iter()
-        .map(|(&army_id, &fl_id)| (army_id, fl_id))
+        .map(|(&division_id, &fl_id)| (division_id, fl_id))
         .collect();
-    army_frontline_map.sort_by_key(|(aid, _)| aid.0);
+    division_frontline_map.sort_by_key(|(aid, _)| aid.0);
 
-    let mut frontline_generated_movements: Vec<ArmyId> = frontline_reg
+    let mut frontline_generated_movements: Vec<DivisionId> = frontline_reg
         .frontline_generated_movements
         .iter()
         .copied()
         .collect();
-    frontline_generated_movements.sort_by_key(|army_id| army_id.0);
+    frontline_generated_movements.sort_by_key(|division_id| division_id.0);
 
     let state_registry = app.world().resource::<StateRegistry>();
     let state_index_entries = state_registry.sorted_index_entries();
@@ -1346,8 +1358,8 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         military_ai,
         military_ai_registry_dirty,
         division_definitions,
-        armies,
-        military_next_army_id,
+        divisions,
+        military_next_division_id,
         battles,
         battle_next_id,
         wars,
@@ -1355,7 +1367,7 @@ pub fn capture_game_state_snapshot(app: &App) -> GameStateSnapshot {
         frontlines,
         frontline_plans,
         next_frontline_id,
-        army_frontline_map,
+        division_frontline_map,
         frontline_generated_movements,
         states,
         state_index_entries,
@@ -1437,12 +1449,12 @@ fn advance_day_by_system(app: &mut App) {
     app.update();
 }
 
-fn boundary_army(snapshot: &SetBoundarySnapshot, army_id: ArmyId) -> ArmyDetailSnapshot {
+fn boundary_division(snapshot: &SetBoundarySnapshot, division_id: DivisionId) -> DivisionDetailSnapshot {
     snapshot
-        .player_armies
+        .player_divisions
         .iter()
-        .find(|army| army.id == army_id)
-        .unwrap_or_else(|| panic!("境界SnapshotにArmyId({:?})が存在すること", army_id))
+        .find(|division| division.id == division_id)
+        .unwrap_or_else(|| panic!("境界SnapshotにDivisionId({:?})が存在すること", division_id))
         .clone()
 }
 
@@ -1584,10 +1596,10 @@ fn test_b_game_paused_no_state_change() {
         snapshot_before.division_definitions, snapshot_after.division_definitions,
         "5c. MilitaryRegistry.definitions の全フィールドが完全不変であること"
     );
-    // (6) MilitaryRegistry: 全ArmyUnit 全フィールド
+    // (6) MilitaryRegistry: 全Division 全フィールド
     assert_eq!(
-        snapshot_before.armies, snapshot_after.armies,
-        "6. MilitaryRegistry (全ArmyUnit全フィールド) が完全不変であること"
+        snapshot_before.divisions, snapshot_after.divisions,
+        "6. MilitaryRegistry (全Division全フィールド) が完全不変であること"
     );
     // (7) BattleRegistry: 全Battle 全フィールド
     assert_eq!(
@@ -1612,10 +1624,10 @@ fn test_b_game_paused_no_state_change() {
         snapshot_before.next_frontline_id, snapshot_after.next_frontline_id,
         "9aa. FrontlineRegistry.next_frontline_id が完全不変であること"
     );
-    // (9b) FrontlineRegistry.army_frontline_map
+    // (9b) FrontlineRegistry.division_frontline_map
     assert_eq!(
-        snapshot_before.army_frontline_map, snapshot_after.army_frontline_map,
-        "9b. FrontlineRegistry.army_frontline_map が完全不変であること"
+        snapshot_before.division_frontline_map, snapshot_after.division_frontline_map,
+        "9b. FrontlineRegistry.division_frontline_map が完全不変であること"
     );
     assert_eq!(
         snapshot_before.frontline_generated_movements, snapshot_after.frontline_generated_movements,
@@ -1629,14 +1641,14 @@ fn test_b_game_paused_no_state_change() {
     assert_eq!(
         (
             snapshot_before.justification_next_id,
-            snapshot_before.military_next_army_id,
+            snapshot_before.military_next_division_id,
             snapshot_before.battle_next_id,
             snapshot_before.war_next_id,
             &snapshot_before.state_index_entries,
         ),
         (
             snapshot_after.justification_next_id,
-            snapshot_after.military_next_army_id,
+            snapshot_after.military_next_division_id,
             snapshot_after.battle_next_id,
             snapshot_after.war_next_id,
             &snapshot_after.state_index_entries,
@@ -1719,20 +1731,20 @@ fn test_c_war_declaration_and_frontline_generation() {
     );
 
     // 5. 宣戦布告当日のFrontlineOrders直後: 移動命令なし
-    for dest in &orders_snap.ai_army_destinations {
+    for dest in &orders_snap.ai_division_destinations {
         assert_eq!(*dest, None, "宣戦布告当日はdestinationがNoneであること");
     }
-    for path in &orders_snap.ai_army_paths {
+    for path in &orders_snap.ai_division_paths {
         assert!(path.is_empty(), "宣戦布告当日はcurrent_pathが空であること");
     }
 
     // 6. 宣戦布告当日のMilitaryAction直後: 部隊位置・進捗が変わらない
     assert_eq!(
-        orders_snap.ai_army_positions, action_snap.ai_army_positions,
+        orders_snap.ai_division_positions, action_snap.ai_division_positions,
         "宣戦布告当日は部隊位置が不変であること"
     );
     assert_eq!(
-        orders_snap.ai_army_progresses, action_snap.ai_army_progresses,
+        orders_snap.ai_division_progresses, action_snap.ai_division_progresses,
         "宣戦布告当日は移動進捗が不変であること"
     );
 
@@ -1758,7 +1770,7 @@ fn test_c_war_declaration_and_frontline_generation() {
 //   - dirty (== false)
 //   - decision_reason (== SufficientAdvantage)
 //   - stance (== Offensive)
-//   - assigned_army_ids (実行前から更新・全割当IDがCountryId(1)所有の実在部隊)
+//   - assigned_division_ids (実行前から更新・全割当IDがCountryId(1)所有の実在部隊)
 //
 // FrontlineOrders や MilitaryAction による後続状態とは明確に分離する。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1772,13 +1784,13 @@ fn test_d_next_day_military_action() {
     // AI 陸軍の兵力を 50000 に増強し SufficientAdvantage (130%以上の優勢) を確定
     {
         let mut military_registry = app.world_mut().resource_mut::<MilitaryRegistry>();
-        if let Some(army) = military_registry
-            .armies
+        if let Some(division) = military_registry
+            .divisions
             .values_mut()
             .find(|a| a.owner == CountryId(1))
         {
-            army.manpower = 50000;
-            army.max_manpower = 50000;
+            division.manpower = 50000;
+            division.max_manpower = 50000;
         }
     }
 
@@ -1812,7 +1824,7 @@ fn test_d_next_day_military_action() {
     let decision_reason_before = before_military_ai_snap.military_ai_decision_reason;
     let stance_before = before_military_ai_snap.military_ai_stance;
     let assigned_ids_before = before_military_ai_snap
-        .military_ai_assigned_army_ids
+        .military_ai_assigned_division_ids
         .clone();
 
     // (1) last_evaluated_day > eval_day_before (MilitaryAi 境界での厳密な実行証明)
@@ -1857,35 +1869,35 @@ fn test_d_next_day_military_action() {
         "MilitaryAi境界でstanceが実行前から更新されること"
     );
 
-    // (5) assigned_army_ids が実行前から更新されていること
-    let assigned_ids_after = mil_ai_snap.military_ai_assigned_army_ids.clone();
+    // (5) assigned_division_ids が実行前から更新されていること
+    let assigned_ids_after = mil_ai_snap.military_ai_assigned_division_ids.clone();
     assert!(
         !assigned_ids_after.is_empty(),
-        "MilitaryAi直後のassigned_army_idsが空ではないこと"
+        "MilitaryAi直後のassigned_division_idsが空ではないこと"
     );
     assert_ne!(
         assigned_ids_after, assigned_ids_before,
-        "MilitaryAi直後のassigned_army_ids ({:?}) が実行前 ({:?}) から更新されていること",
+        "MilitaryAi直後のassigned_division_ids ({:?}) が実行前 ({:?}) から更新されていること",
         assigned_ids_after, assigned_ids_before
     );
 
     // (6) MilitaryAi Observer が同じ境界で記録した所有国により、全IDの実在・所有を検証
-    let assigned_owners = &mil_ai_snap.military_ai_assigned_army_owners;
+    let assigned_owners = &mil_ai_snap.military_ai_assigned_division_owners;
     assert_eq!(
         assigned_owners.len(),
         assigned_ids_after.len(),
-        "MilitaryAi直後: 全assigned_army_idsに所有国観測値があること"
+        "MilitaryAi直後: 全assigned_division_idsに所有国観測値があること"
     );
-    for (&army_id, &(observed_id, owner)) in assigned_ids_after.iter().zip(assigned_owners) {
+    for (&division_id, &(observed_id, owner)) in assigned_ids_after.iter().zip(assigned_owners) {
         assert_eq!(
-            observed_id, army_id,
-            "MilitaryAi直後: assigned_army_idsと所有国観測のIDが一致すること"
+            observed_id, division_id,
+            "MilitaryAi直後: assigned_division_idsと所有国観測のIDが一致すること"
         );
         assert_eq!(
             owner,
             Some(CountryId(1)),
-            "MilitaryAi直後: ArmyId({:?})がCountryId(1)所有の実在部隊であること",
-            army_id
+            "MilitaryAi直後: DivisionId({:?})がCountryId(1)所有の実在部隊であること",
+            division_id
         );
     }
 
@@ -1906,8 +1918,8 @@ fn test_d_next_day_military_action() {
 
     // ─── FrontlineOrders 境界 (MilitaryAi の後続) ────────────────────────────
     // FrontlineOrders直後: AI由来の移動命令が生成されていること (destination or path)
-    let has_dest = orders_snap.ai_army_destinations.iter().any(|d| d.is_some());
-    let has_path = orders_snap.ai_army_paths.iter().any(|p| !p.is_empty());
+    let has_dest = orders_snap.ai_division_destinations.iter().any(|d| d.is_some());
+    let has_path = orders_snap.ai_division_paths.iter().any(|p| !p.is_empty());
     assert!(
         has_dest || has_path,
         "N+1日のFrontlineOrders直後にAI移動命令が生成されていること"
@@ -1927,11 +1939,11 @@ fn test_d_next_day_military_action() {
     // ─── MilitaryAction 境界 (FrontlineOrders の後続) ─────────────────────────
     // MilitaryAction直後: 移動処理が行われたこと (進捗増加または位置変化)
     let mut is_movement_processed = false;
-    for i in 0..orders_snap.ai_army_progresses.len() {
-        let p_before = orders_snap.ai_army_progresses[i];
-        let p_after = action_snap.ai_army_progresses[i];
-        let pos_before = orders_snap.ai_army_positions[i];
-        let pos_after = action_snap.ai_army_positions[i];
+    for i in 0..orders_snap.ai_division_progresses.len() {
+        let p_before = orders_snap.ai_division_progresses[i];
+        let p_after = action_snap.ai_division_progresses[i];
+        let pos_before = orders_snap.ai_division_positions[i];
+        let pos_after = action_snap.ai_division_positions[i];
         if p_after > p_before || pos_after != pos_before {
             is_movement_processed = true;
             break;
@@ -1966,23 +1978,23 @@ fn test_e_player_protection_and_ai_evaluation() {
     let mut app = setup_test_app();
 
     // プレイヤー陸軍 ID を取得し、手動移動経路を設定する
-    let player_army_id: ArmyId = {
+    let player_division_id: DivisionId = {
         let mut military_registry = app.world_mut().resource_mut::<MilitaryRegistry>();
-        let army_id = military_registry
-            .armies
+        let division_id = military_registry
+            .divisions
             .values()
             .find(|a| a.owner == CountryId(0))
             .map(|a| a.id)
             .expect("CountryId(0) 所有の陸軍が存在すること");
-        if let Some(army) = military_registry.armies.get_mut(&army_id) {
-            army.current_state = StateId(0);
-            army.destination = Some(StateId(1));
-            army.current_path = vec![StateId(1)];
-            army.target_state = None;
-            army.movement_progress = 0.0;
-            army.status = ArmyStatus::Moving;
+        if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+            division.current_state = StateId(0);
+            division.destination = Some(StateId(1));
+            division.current_path = vec![StateId(1)];
+            division.target_state = None;
+            division.movement_progress = 0.0;
+            division.status = DivisionStatus::Moving;
         }
-        army_id
+        division_id
     };
 
     // プレイヤー国に建設キュー (Farm, state_id=0, level=1) を明示的にセット
@@ -2126,26 +2138,26 @@ fn test_e_player_protection_and_ai_evaluation() {
         "Test Eでは戦争なし: stanceが存在しないこと"
     );
     assert!(
-        mil_ai_snap.military_ai_assigned_army_ids.is_empty(),
-        "Test Eでは戦争なし: assigned_army_idsが空であること"
+        mil_ai_snap.military_ai_assigned_division_ids.is_empty(),
+        "Test Eでは戦争なし: assigned_division_idsが空であること"
     );
     assert!(
-        mil_ai_snap.military_ai_assigned_army_owners.is_empty(),
-        "Test Eでは戦争なし: assigned_army_idsの所有国観測も空であること"
+        mil_ai_snap.military_ai_assigned_division_owners.is_empty(),
+        "Test Eでは戦争なし: assigned_division_idsの所有国観測も空であること"
     );
 
-    let research_player_army = boundary_army(&research_snap, player_army_id);
-    let military_ai_player_army = boundary_army(&mil_ai_snap, player_army_id);
+    let research_player_division = boundary_division(&research_snap, player_division_id);
+    let military_ai_player_division = boundary_division(&mil_ai_snap, player_division_id);
     assert_eq!(
-        military_ai_player_army, research_player_army,
-        "Research直後とMilitaryAi直後: プレイヤー手動移動命令を含むArmy全フィールドが完全不変であること"
+        military_ai_player_division, research_player_division,
+        "Research直後とMilitaryAi直後: プレイヤー手動移動命令を含むDivision全フィールドが完全不変であること"
     );
-    assert_eq!(military_ai_player_army.current_state, StateId(0));
-    assert_eq!(military_ai_player_army.destination, Some(StateId(1)));
-    assert_eq!(military_ai_player_army.current_path, vec![StateId(1)]);
-    assert_eq!(military_ai_player_army.target_state, None);
-    assert_eq!(military_ai_player_army.movement_progress, 0.0);
-    assert_eq!(military_ai_player_army.status, ArmyStatus::Moving);
+    assert_eq!(military_ai_player_division.current_state, StateId(0));
+    assert_eq!(military_ai_player_division.destination, Some(StateId(1)));
+    assert_eq!(military_ai_player_division.current_path, vec![StateId(1)]);
+    assert_eq!(military_ai_player_division.target_state, None);
+    assert_eq!(military_ai_player_division.movement_progress, 0.0);
+    assert_eq!(military_ai_player_division.status, DivisionStatus::Moving);
 
     // プレイヤーは MilitaryAiRegistry に登録されていないこと
     let mil_ai_reg = app.world().resource::<MilitaryAiRegistry>();
@@ -2155,37 +2167,37 @@ fn test_e_player_protection_and_ai_evaluation() {
     );
 
     // ─── FrontlineOrders 直後の検証 ──────────────────────────────────────────
-    let orders_player_army = boundary_army(&orders_snap, player_army_id);
+    let orders_player_division = boundary_division(&orders_snap, player_division_id);
     assert_eq!(
-        orders_player_army, military_ai_player_army,
-        "MilitaryAi直後とFrontlineOrders直後: プレイヤー手動移動命令を含むArmy全フィールドが完全不変であること"
+        orders_player_division, military_ai_player_division,
+        "MilitaryAi直後とFrontlineOrders直後: プレイヤー手動移動命令を含むDivision全フィールドが完全不変であること"
     );
-    assert_eq!(orders_player_army.current_state, StateId(0));
-    assert_eq!(orders_player_army.destination, Some(StateId(1)));
-    assert_eq!(orders_player_army.current_path, vec![StateId(1)]);
-    assert_eq!(orders_player_army.target_state, None);
-    assert_eq!(orders_player_army.movement_progress, 0.0);
-    assert_eq!(orders_player_army.status, ArmyStatus::Moving);
+    assert_eq!(orders_player_division.current_state, StateId(0));
+    assert_eq!(orders_player_division.destination, Some(StateId(1)));
+    assert_eq!(orders_player_division.current_path, vec![StateId(1)]);
+    assert_eq!(orders_player_division.target_state, None);
+    assert_eq!(orders_player_division.movement_progress, 0.0);
+    assert_eq!(orders_player_division.status, DivisionStatus::Moving);
 
     // ─── MilitaryAction 直後の検証 ──────────────────────────────────────────
-    let action_player_army = boundary_army(&action_snap, player_army_id);
+    let action_player_division = boundary_division(&action_snap, player_division_id);
     assert_eq!(
-        action_player_army.current_state,
+        action_player_division.current_state,
         StateId(0),
         "MilitaryAction直後: 1日ではStateId(1)へ未到着で位置はStateId(0)"
     );
-    assert_eq!(action_player_army.destination, Some(StateId(1)));
+    assert_eq!(action_player_division.destination, Some(StateId(1)));
     assert_eq!(
-        action_player_army.current_path,
+        action_player_division.current_path,
         Vec::<StateId>::new(),
         "MilitaryAction直後: StateId(1)がcurrent_pathからtarget_stateへ移されたこと"
     );
-    assert_eq!(action_player_army.target_state, Some(StateId(1)));
+    assert_eq!(action_player_division.target_state, Some(StateId(1)));
     assert_eq!(
-        action_player_army.movement_progress, 0.2,
+        action_player_division.movement_progress, 0.2,
         "MilitaryAction直後: base_days=5、step_cost=1、speed=1、supply=1なので進捗は正確に0.2"
     );
-    assert_eq!(action_player_army.status, ArmyStatus::Moving);
+    assert_eq!(action_player_division.status, DivisionStatus::Moving);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2208,25 +2220,25 @@ fn test_f_same_day_battle_result_reflection() {
     // テスト専用の occupy_state は呼ばず、MilitaryAction による本番移動フローを通す
     {
         let mut mil_reg = app.world_mut().resource_mut::<MilitaryRegistry>();
-        if let Some(army) = mil_reg
-            .armies
+        if let Some(division) = mil_reg
+            .divisions
             .values_mut()
             .find(|a| a.owner == CountryId(1))
         {
-            army.current_state = StateId(3);
-            army.destination = Some(StateId(0));
-            army.target_state = Some(StateId(0));
-            army.current_path = Vec::new();
-            army.movement_progress = 0.99;
-            army.status = ArmyStatus::Moving;
+            division.current_state = StateId(3);
+            division.destination = Some(StateId(0));
+            division.target_state = Some(StateId(0));
+            division.current_path = Vec::new();
+            division.movement_progress = 0.99;
+            division.status = DivisionStatus::Moving;
         }
-        for army in mil_reg
-            .armies
+        for division in mil_reg
+            .divisions
             .values_mut()
             .filter(|a| a.owner == CountryId(0))
         {
-            army.manpower = 0;
-            army.status = ArmyStatus::Destroyed;
+            division.manpower = 0;
+            division.status = DivisionStatus::Destroyed;
         }
     }
 
@@ -2416,26 +2428,26 @@ fn test_f_same_day_battle_result_reflection() {
         "WarResolution直後: frontline_reg.plans.is_empty() であること"
     );
     assert!(
-        frontline_reg.army_frontline_map.is_empty(),
-        "WarResolution直後: frontline_reg.army_frontline_map.is_empty() であること"
+        frontline_reg.division_frontline_map.is_empty(),
+        "WarResolution直後: frontline_reg.division_frontline_map.is_empty() であること"
     );
     assert!(
         frontline_reg.frontline_generated_movements.is_empty(),
         "WarResolution直後: frontline_generated_movements.is_empty() であること"
     );
-    // army_frontline_map に関係部隊が残っていないこと
-    let war_related_army_ids: Vec<ArmyId> = app
+    // division_frontline_map に関係部隊が残っていないこと
+    let war_related_division_ids: Vec<DivisionId> = app
         .world()
         .resource::<MilitaryRegistry>()
-        .armies
+        .divisions
         .keys()
         .copied()
         .collect();
-    for army_id in &war_related_army_ids {
+    for division_id in &war_related_division_ids {
         assert!(
-            !frontline_reg.army_frontline_map.contains_key(army_id),
-            "WarResolution直後: army_frontline_map に ArmyId({:?}) が残っていないこと",
-            army_id
+            !frontline_reg.division_frontline_map.contains_key(division_id),
+            "WarResolution直後: division_frontline_map に DivisionId({:?}) が残っていないこと",
+            division_id
         );
     }
 }

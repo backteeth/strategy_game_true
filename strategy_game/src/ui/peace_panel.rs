@@ -9,7 +9,7 @@ use crate::military::data::MilitaryRegistry;
 use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
 use crate::war::capitulation::{
-    check_attacker_capitulation, check_defender_capitulation, has_combat_ready_armies,
+    check_attacker_capitulation, check_defender_capitulation, has_combat_ready_divisions,
 };
 use crate::war::data::{WarRegistry, WarStatus};
 use crate::war::peace::{PeaceOffer, PeaceTerm, can_accept_peace_offer, execute_peace_settlement};
@@ -408,14 +408,14 @@ fn update_peace_panel_ui(
             // 降伏進捗状況
             let def_cap = check_defender_capitulation(war, &state_registry, &military_registry);
             let atk_cap = check_attacker_capitulation(war, &state_registry, &military_registry);
-            let def_has_army = has_combat_ready_armies(def_id, &military_registry);
-            let atk_has_army = has_combat_ready_armies(atk_id, &military_registry);
+            let def_has_division = has_combat_ready_divisions(def_id, &military_registry);
+            let atk_has_division = has_combat_ready_divisions(atk_id, &military_registry);
 
             let ready_key = |ready: bool| {
                 if ready {
-                    "peace_panel.army_ready"
+                    "peace_panel.division_ready"
                 } else {
-                    "peace_panel.army_none"
+                    "peace_panel.division_none"
                 }
             };
             let cap_key = |cap: bool| {
@@ -432,12 +432,12 @@ fn update_peace_panel_ui(
                 "peace_panel.capitulation_status",
                 vec![
                     ("defender", def_name.clone()),
-                    ("def_army", t(&catalog, locale.0, ready_key(def_has_army))),
+                    ("def_division", t(&catalog, locale.0, ready_key(def_has_division))),
                     ("atk_occ", atk_occ_def.to_string()),
                     ("def_total", def_owned.len().to_string()),
                     ("def_cap", t(&catalog, locale.0, cap_key(def_cap))),
                     ("attacker", atk_name.clone()),
-                    ("atk_army", t(&catalog, locale.0, ready_key(atk_has_army))),
+                    ("atk_division", t(&catalog, locale.0, ready_key(atk_has_division))),
                     ("def_occ", def_occ_atk.to_string()),
                     ("atk_total", atk_owned.len().to_string()),
                     ("atk_cap", t(&catalog, locale.0, cap_key(atk_cap))),

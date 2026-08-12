@@ -169,7 +169,7 @@ fn high_load_scenario_produces_real_war_and_military_activity() {
     );
 
     let before = snapshot_runtime_counts(&app);
-    assert!(before.army_count > 0, "軍隊が1件以上生成されること");
+    assert!(before.division_count > 0, "軍隊が1件以上生成されること");
 
     for _ in 0..15 {
         profiling::advance_one_day(&mut app);
@@ -198,7 +198,7 @@ fn same_seed_produces_deterministic_results() {
 
     assert_eq!(counts_a.state_count, counts_b.state_count);
     assert_eq!(counts_a.country_count, counts_b.country_count);
-    assert_eq!(counts_a.initial_army_count, counts_b.initial_army_count);
+    assert_eq!(counts_a.initial_division_count, counts_b.initial_division_count);
     assert_eq!(counts_a.initial_war_count, counts_b.initial_war_count);
 
     for _ in 0..20 {
@@ -219,7 +219,7 @@ fn same_seed_produces_deterministic_results() {
 
     let runtime_a = snapshot_runtime_counts(&app_a);
     let runtime_b = snapshot_runtime_counts(&app_b);
-    assert_eq!(runtime_a.army_count, runtime_b.army_count);
+    assert_eq!(runtime_a.division_count, runtime_b.division_count);
     assert_eq!(runtime_a.active_war_count, runtime_b.active_war_count);
     assert_eq!(runtime_a.frontline_count, runtime_b.frontline_count);
     assert_eq!(runtime_a.battle_count, runtime_b.battle_count);

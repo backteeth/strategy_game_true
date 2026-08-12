@@ -155,7 +155,7 @@ fn required_key_categories_are_present() {
         "peace_term.",
         "frontline_stance.",
         "war_status.",
-        "army_status.",
+        "division_status.",
         "country_ai_mode.",
         "country_ai_reason.",
         "military_ai_reason.",

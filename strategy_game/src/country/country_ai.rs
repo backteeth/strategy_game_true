@@ -1,23 +1,32 @@
 use crate::app::time::DayChangedMessage;
 use crate::building::construction::{ConstructionQueueItem, ConstructionStatus};
 use crate::building::data::BuildingType;
-use crate::common::{CountryId, StateId};
+use crate::common::{CountryId, StateId, WarId};
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::diplomacy::data::DiplomacyRegistry;
 use crate::economy::resources::ResourceType;
+use crate::localization::{Loc, tf};
 use crate::military::data::MilitaryRegistry;
 use crate::military::pathfinding::find_path;
 use crate::research::allocation::InProgressTech;
 use crate::research::data::{TechnologyDefinition, TechnologyRegistry};
 use crate::research::world_stage::WorldCivilizationState;
 use crate::state::data::StateRegistry;
+use crate::ui::notification::GameNotification;
 use crate::war::data::{WarRegistry, WarStatus};
 use crate::war::frontline::update_all_frontlines;
 use crate::war::justification::WarJustificationRegistry;
-use crate::war::military_ai::{MilitaryAiRegistry, evaluate_army_power};
+use crate::war::military_ai::{MilitaryAiRegistry, evaluate_division_power};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// AI発の宣戦布告のうち、まだ通知(GameNotification)を発行していないもののキュー。
+/// `process_war_declaration_ai`は純粋関数として保つため、直接通知を書かず
+/// ここに積むだけにし、実際の翻訳・発行は`emit_ai_war_declaration_notifications`
+/// システム(Bevyへのアクセスが必要)側で行う。
+#[derive(Resource, Default)]
+pub struct PendingAiWarDeclarations(pub Vec<(CountryId, CountryId, StateId, WarId)>);
 
 /// 高位国家AIモード
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -55,7 +64,7 @@ pub enum CountryAiDecisionReason {
     NoBuildableState,
     NoResearchableTech,
     PostWarCooldown,
-    NoAvailableArmies,
+    NoAvailableDivisions,
     NoReachableTargetCountry,
     InsufficientPowerAdvantage,
     TruceInEffect,
@@ -85,7 +94,7 @@ impl CountryAiDecisionReason {
             CountryAiDecisionReason::NoBuildableState => "country_ai_reason.no_buildable_state",
             CountryAiDecisionReason::NoResearchableTech => "country_ai_reason.no_researchable_tech",
             CountryAiDecisionReason::PostWarCooldown => "country_ai_reason.post_war_cooldown",
-            CountryAiDecisionReason::NoAvailableArmies => "country_ai_reason.no_available_armies",
+            CountryAiDecisionReason::NoAvailableDivisions => "country_ai_reason.no_available_divisions",
             CountryAiDecisionReason::NoReachableTargetCountry => {
                 "country_ai_reason.no_reachable_target_country"
             }
@@ -169,18 +178,18 @@ pub fn calculate_country_total_power(
     state_registry: &StateRegistry,
 ) -> u64 {
     military_registry
-        .armies
+        .divisions
         .values()
         .filter(|a| {
             a.owner == country_id
                 && a.manpower > 0
-                && a.status != crate::military::data::ArmyStatus::Destroyed
+                && a.status != crate::military::data::DivisionStatus::Destroyed
                 && state_registry
                     .get(a.current_state)
                     .map(|s| !s.is_sea)
                     .unwrap_or(false)
         })
-        .map(evaluate_army_power)
+        .map(evaluate_division_power)
         .sum()
 }
 
@@ -200,22 +209,22 @@ fn compute_total_power_by_country(
     state_registry: &StateRegistry,
 ) -> Vec<u64> {
     let mut power_by_country: Vec<u64> = Vec::new();
-    for army in military_registry.armies.values() {
-        if army.manpower == 0 || army.status == crate::military::data::ArmyStatus::Destroyed {
+    for division in military_registry.divisions.values() {
+        if division.manpower == 0 || division.status == crate::military::data::DivisionStatus::Destroyed {
             continue;
         }
         let is_land = state_registry
-            .get(army.current_state)
+            .get(division.current_state)
             .map(|s| !s.is_sea)
             .unwrap_or(false);
         if !is_land {
             continue;
         }
-        let idx = army.owner.0;
+        let idx = division.owner.0;
         if idx >= power_by_country.len() {
             power_by_country.resize(idx + 1, 0);
         }
-        power_by_country[idx] += evaluate_army_power(army);
+        power_by_country[idx] += evaluate_division_power(division);
     }
     power_by_country
 }
@@ -390,9 +399,9 @@ pub fn process_research_ai(
     // 優先順位ソート (コスト昇順 -> ID昇順)
     available_techs.sort_by(|a, b| {
         let a_is_military =
-            a.id.contains("military") || a.id.contains("weapon") || a.id.contains("army");
+            a.id.contains("military") || a.id.contains("weapon") || a.id.contains("division");
         let b_is_military =
-            b.id.contains("military") || b.id.contains("weapon") || b.id.contains("army");
+            b.id.contains("military") || b.id.contains("weapon") || b.id.contains("division");
 
         if is_at_war && a_is_military != b_is_military {
             return b_is_military.cmp(&a_is_military);
@@ -456,7 +465,7 @@ pub fn process_war_preparation_ai(
     // 自国の総有効戦力
     let own_power = total_power_for(power_by_country, country_id);
     if own_power == 0 {
-        ai_state.decision_reason = CountryAiDecisionReason::NoAvailableArmies;
+        ai_state.decision_reason = CountryAiDecisionReason::NoAvailableDivisions;
         return;
     }
 
@@ -554,6 +563,7 @@ pub fn process_war_declaration_ai(
     frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
     ai_registry: &mut MilitaryAiRegistry,
     ai_state: &mut CountryAiState,
+    pending_ai_wars: &mut Vec<(CountryId, CountryId, StateId, WarId)>,
 ) {
     let completed_justifications: Vec<(usize, CountryId, StateId)> = justification_registry
         .justifications
@@ -588,7 +598,7 @@ pub fn process_war_declaration_ai(
                 justification_registry,
             );
 
-            if res.is_ok() {
+            if let Ok(war_id) = res {
                 // 正当化の削除
                 justification_registry.justifications.remove(&j_id);
 
@@ -603,6 +613,7 @@ pub fn process_war_declaration_ai(
 
                 ai_state.mode = CountryAiMode::AtWar;
                 ai_state.decision_reason = CountryAiDecisionReason::WarInProgress;
+                pending_ai_wars.push((country_id, target_cid, target_sid, war_id));
                 break;
             }
         }
@@ -627,6 +638,7 @@ pub fn process_daily_country_ai(
     frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
     military_ai_registry: &mut MilitaryAiRegistry,
     country_ai_registry: &mut CountryAiRegistry,
+    pending_ai_wars: &mut Vec<(CountryId, CountryId, StateId, WarId)>,
 ) {
     let player_cid = player_country.0;
 
@@ -680,6 +692,7 @@ pub fn process_daily_country_ai(
             frontline_registry,
             military_ai_registry,
             ai_state,
+            pending_ai_wars,
         );
 
         // 2. 週次評価 (game_day % 7 == country_id.0 % 7 または dirty)
@@ -753,6 +766,7 @@ pub fn handle_daily_country_ai(
     mut frontline_registry: ResMut<crate::war::frontline::FrontlineRegistry>,
     mut military_ai_registry: ResMut<MilitaryAiRegistry>,
     mut country_ai_registry: ResMut<CountryAiRegistry>,
+    mut pending_ai_wars: ResMut<PendingAiWarDeclarations>,
 ) {
     for event in day_events.read() {
         let current_date = format!("{:04}/{:02}/{:02}", event.year, event.month, event.day);
@@ -775,7 +789,54 @@ pub fn handle_daily_country_ai(
             &mut frontline_registry,
             &mut military_ai_registry,
             &mut country_ai_registry,
+            &mut pending_ai_wars.0,
         );
+    }
+}
+
+/// AI国家同士(またはAI国家がプレイヤーに対して)宣戦布告した際に、
+/// プレイヤーの宣戦布告(`diplomacy_panel.rs`)と同様の通知/ログを発行する。
+/// `handle_daily_country_ai`本体とは別Systemに分離しているのは、既にSystemParamの
+/// タプル数上限に近い同Systemへローカライズ関連の追加パラメータを増やさないため
+/// (詳細は`Loc`のdocコメントを参照)。
+pub fn emit_ai_war_declaration_notifications(
+    mut pending: ResMut<PendingAiWarDeclarations>,
+    country_registry: Res<CountryRegistry>,
+    state_registry: Res<StateRegistry>,
+    loc: Loc,
+    mut notif_writer: MessageWriter<GameNotification>,
+) {
+    if pending.0.is_empty() {
+        return;
+    }
+
+    for (attacker, defender, target_state, war_id) in std::mem::take(&mut pending.0) {
+        let attacker_name = country_registry
+            .get(attacker)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| loc.t("common.unknown"));
+        let defender_name = country_registry
+            .get(defender)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| loc.t("common.unknown"));
+        let state_name = state_registry
+            .get(target_state)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| loc.t("common.unknown"));
+
+        notif_writer.write(GameNotification {
+            message: tf(
+                &loc.catalog,
+                loc.locale.0,
+                "notif.ai_war_declared",
+                vec![
+                    ("attacker", attacker_name),
+                    ("defender", defender_name),
+                    ("state", state_name),
+                    ("war_id", format!("{:?}", war_id)),
+                ],
+            ),
+        });
     }
 }
 
@@ -908,6 +969,7 @@ mod tests {
             mut country_ai_registry,
         ) = setup_test_env();
 
+        let mut pending_ai_wars = Vec::new();
         process_daily_country_ai(
             1,
             "1800/01/01",
@@ -924,6 +986,7 @@ mod tests {
             &mut frontline_registry,
             &mut military_ai_registry,
             &mut country_ai_registry,
+            &mut pending_ai_wars,
         );
 
         // プレイヤー国家 (CountryId(1)) は国家AI状態が作成されない
@@ -973,14 +1036,14 @@ mod tests {
     // 置き換えた最適化(P20-008)が、既存の`calculate_country_total_power`単体呼び出し
     // および州支配フィルタと完全に同一の値を返すことを検証する。
 
-    fn make_test_army(
+    fn make_test_division(
         owner: CountryId,
         current_state: StateId,
         manpower: u64,
-    ) -> crate::military::data::ArmyUnit {
-        use crate::military::data::{ArmyStatus, DivisionSize, DivisionType};
-        crate::military::data::ArmyUnit {
-            id: crate::common::ArmyId(0),
+    ) -> crate::military::data::Division {
+        use crate::military::data::{DivisionStatus, DivisionSize, DivisionType};
+        crate::military::data::Division {
+            id: crate::common::DivisionId(0),
             owner,
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -999,8 +1062,8 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: crate::common::DivisionId(0),
+            status: DivisionStatus::Idle,
+            def_id: crate::common::DivisionDefinitionId(0),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
@@ -1024,9 +1087,9 @@ mod tests {
         let state_registry = StateRegistry::build(vec![s1, s2]);
 
         let mut military_registry = MilitaryRegistry::default();
-        military_registry.add_army(make_test_army(CountryId(1), StateId(1), 1000));
-        military_registry.add_army(make_test_army(CountryId(1), StateId(1), 500));
-        military_registry.add_army(make_test_army(CountryId(2), StateId(2), 2000));
+        military_registry.add_division(make_test_division(CountryId(1), StateId(1), 1000));
+        military_registry.add_division(make_test_division(CountryId(1), StateId(1), 500));
+        military_registry.add_division(make_test_division(CountryId(2), StateId(2), 2000));
 
         let precomputed = compute_total_power_by_country(&military_registry, &state_registry);
 
@@ -1104,8 +1167,8 @@ mod tests {
 
         let mut military_registry = MilitaryRegistry::default();
         // Strong(0) は Weak(1) に対し130%以上の戦力優位を持つ
-        military_registry.add_army(make_test_army(CountryId(0), StateId(0), 10_000));
-        military_registry.add_army(make_test_army(CountryId(1), StateId(1), 1_000));
+        military_registry.add_division(make_test_division(CountryId(0), StateId(0), 10_000));
+        military_registry.add_division(make_test_division(CountryId(1), StateId(1), 1_000));
 
         let building_registry = crate::building::data::BuildingRegistry::default();
         let mut war_registry = WarRegistry::default();
@@ -1118,6 +1181,7 @@ mod tests {
         let mut country_ai_registry = CountryAiRegistry::default();
 
         // day=7: 週次評価 (day % 7 == country_id % 7) を Strong(0) に対して成立させる
+        let mut pending_ai_wars = Vec::new();
         process_daily_country_ai(
             7,
             "1800/01/08",
@@ -1134,6 +1198,7 @@ mod tests {
             &mut frontline_registry,
             &mut military_ai_registry,
             &mut country_ai_registry,
+            &mut pending_ai_wars,
         );
 
         assert!(

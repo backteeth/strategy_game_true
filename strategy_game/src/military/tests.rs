@@ -1,10 +1,10 @@
 #![cfg(test)]
 #![allow(clippy::field_reassign_with_default)]
 
-use crate::common::{ArmyId, CountryId, DivisionId, StateId};
+use crate::common::{DivisionId, DivisionDefinitionId, CountryId, StateId};
 use crate::country::{CountryData, CountryRegistry};
 use crate::military::data::{
-    ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
 };
 use crate::military::recruitment::{
     RecruitFeasibility, cancel_recruitment, evaluate_recruit_feasibility, process_recruitment,
@@ -14,7 +14,7 @@ use crate::military::recruitment::{
 fn setup_registry() -> MilitaryRegistry {
     let mut registry = MilitaryRegistry::default();
     let def = DivisionDefinition {
-        id: DivisionId(1),
+        id: DivisionDefinitionId(1),
         name: "Test Infantry".to_string(),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -30,14 +30,14 @@ fn setup_registry() -> MilitaryRegistry {
         supply_usage: 1.0,
         maintenance_cost: 1.0,
     };
-    registry.definitions.insert(DivisionId(1), def);
+    registry.definitions.insert(DivisionDefinitionId(1), def);
     registry
 }
 
-/// テスト用 ArmyUnit ヘルパー
-fn make_test_army(id: usize, owner: CountryId, state: StateId) -> ArmyUnit {
-    ArmyUnit {
-        id: ArmyId(id),
+/// テスト用 Division ヘルパー
+fn make_test_division(id: usize, owner: CountryId, state: StateId) -> Division {
+    Division {
+        id: DivisionId(id),
         owner,
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -56,8 +56,8 @@ fn make_test_army(id: usize, owner: CountryId, state: StateId) -> ArmyUnit {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Idle,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Idle,
+        def_id: DivisionDefinitionId(1),
         attack_power: 10,
         defense_power: 10,
         combat_id: None,
@@ -71,7 +71,7 @@ fn test_recruitment_conditions() {
     country.available_manpower = 20_000;
     country.treasury = 500.0;
 
-    let result = request_recruitment(&mut country, &registry, DivisionId(1), StateId(1));
+    let result = request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1));
     assert!(result.is_ok());
     assert_eq!(country.available_manpower, 10_000);
     assert_eq!(country.mobilized_manpower, 10_000);
@@ -85,7 +85,7 @@ fn test_recruitment_manpower_shortage() {
     country.available_manpower = 5_000; // Not enough
     country.treasury = 500.0;
 
-    let result = request_recruitment(&mut country, &registry, DivisionId(1), StateId(1));
+    let result = request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1));
     assert!(result.is_err());
     assert_eq!(country.recruitment_queue.len(), 0);
 }
@@ -97,7 +97,7 @@ fn test_recruitment_equipment_shortage() {
     country.available_manpower = 20_000;
     country.treasury = 50.0; // Not enough
 
-    let result = request_recruitment(&mut country, &registry, DivisionId(1), StateId(1));
+    let result = request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1));
     assert!(result.is_err());
     assert_eq!(country.recruitment_queue.len(), 0);
 }
@@ -112,7 +112,7 @@ fn test_recruitment_progress_and_completion() {
     country.available_manpower = 20_000;
     country.treasury = 500.0;
 
-    request_recruitment(&mut country, &military_registry, DivisionId(1), StateId(1)).unwrap();
+    request_recruitment(&mut country, &military_registry, DivisionDefinitionId(1), StateId(1)).unwrap();
     country_registry.countries.push(country);
 
     // Progress 1 day
@@ -121,7 +121,7 @@ fn test_recruitment_progress_and_completion() {
         country_registry.countries[0].recruitment_queue[0].days_remaining,
         29
     );
-    assert_eq!(military_registry.armies.len(), 0);
+    assert_eq!(military_registry.divisions.len(), 0);
 
     // Fast forward 29 days
     for _ in 0..29 {
@@ -129,7 +129,7 @@ fn test_recruitment_progress_and_completion() {
     }
 
     assert_eq!(country_registry.countries[0].recruitment_queue.len(), 0);
-    assert_eq!(military_registry.armies.len(), 1);
+    assert_eq!(military_registry.divisions.len(), 1);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn test_recruitment_cancellation() {
     country.available_manpower = 20_000;
     country.treasury = 500.0;
 
-    request_recruitment(&mut country, &registry, DivisionId(1), StateId(1)).unwrap();
+    request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1)).unwrap();
 
     assert_eq!(country.available_manpower, 10_000);
     assert_eq!(country.treasury, 400.0);
@@ -176,7 +176,7 @@ fn evaluate_recruit_feasibility_ready_when_all_conditions_met() {
         &state_registry,
         &country,
         &registry,
-        DivisionId(1),
+        DivisionDefinitionId(1),
     );
     assert_eq!(feasibility, RecruitFeasibility::Ready);
     assert!(feasibility.is_ready());
@@ -194,7 +194,7 @@ fn evaluate_recruit_feasibility_no_state_selected() {
         &state_registry,
         &country,
         &registry,
-        DivisionId(1),
+        DivisionDefinitionId(1),
     );
     assert_eq!(feasibility, RecruitFeasibility::NoStateSelected);
     assert!(!feasibility.is_ready());
@@ -216,7 +216,7 @@ fn evaluate_recruit_feasibility_not_own_state() {
         &state_registry,
         &country,
         &registry,
-        DivisionId(1),
+        DivisionDefinitionId(1),
     );
     assert_eq!(feasibility, RecruitFeasibility::NotOwnState);
 }
@@ -236,7 +236,7 @@ fn evaluate_recruit_feasibility_definition_unavailable() {
         &state_registry,
         &country,
         &registry,
-        DivisionId(999), // 未定義の部隊ID
+        DivisionDefinitionId(999), // 未定義の部隊ID
     );
     assert_eq!(feasibility, RecruitFeasibility::DefinitionUnavailable);
 }
@@ -256,7 +256,7 @@ fn evaluate_recruit_feasibility_insufficient_manpower() {
         &state_registry,
         &country,
         &registry,
-        DivisionId(1),
+        DivisionDefinitionId(1),
     );
     assert_eq!(feasibility, RecruitFeasibility::InsufficientManpower);
 }
@@ -276,7 +276,7 @@ fn evaluate_recruit_feasibility_insufficient_funds() {
         &state_registry,
         &country,
         &registry,
-        DivisionId(1),
+        DivisionDefinitionId(1),
     );
     assert_eq!(feasibility, RecruitFeasibility::InsufficientFunds);
 }
@@ -348,8 +348,8 @@ fn test_movement() {
     use crate::war::data::WarRegistry;
 
     let mut registry = setup_registry();
-    let army = ArmyUnit {
-        id: ArmyId(0),
+    let division = Division {
+        id: DivisionId(0),
         owner: CountryId(1),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -368,13 +368,13 @@ fn test_movement() {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Moving,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Moving,
+        def_id: DivisionDefinitionId(1),
         attack_power: 10,
         defense_power: 10,
         combat_id: None,
     };
-    registry.add_army(army);
+    registry.add_division(division);
 
     let mut s1 = crate::state::data::StateData::default();
     s1.id = StateId(1);
@@ -398,11 +398,11 @@ fn test_movement() {
         "1800/01/01",
     );
 
-    let army_ref = registry.armies.get(&ArmyId(0)).unwrap();
-    assert_eq!(army_ref.status, ArmyStatus::Moving);
-    assert_eq!(army_ref.current_state, StateId(1));
-    assert_eq!(army_ref.target_state, Some(StateId(2)));
-    assert!(army_ref.movement_progress > 0.79 && army_ref.movement_progress < 0.81);
+    let division_ref = registry.divisions.get(&DivisionId(0)).unwrap();
+    assert_eq!(division_ref.status, DivisionStatus::Moving);
+    assert_eq!(division_ref.current_state, StateId(1));
+    assert_eq!(division_ref.target_state, Some(StateId(2)));
+    assert!(division_ref.movement_progress > 0.79 && division_ref.movement_progress < 0.81);
 
     // Next day
     process_movement(
@@ -413,11 +413,11 @@ fn test_movement() {
         "1800/01/02",
     );
 
-    let army_ref2 = registry.armies.get(&ArmyId(0)).unwrap();
-    assert_eq!(army_ref2.status, ArmyStatus::Idle);
-    assert_eq!(army_ref2.current_state, StateId(2));
-    assert_eq!(army_ref2.target_state, None);
-    assert_eq!(army_ref2.movement_progress, 0.0);
+    let division_ref2 = registry.divisions.get(&DivisionId(0)).unwrap();
+    assert_eq!(division_ref2.status, DivisionStatus::Idle);
+    assert_eq!(division_ref2.current_state, StateId(2));
+    assert_eq!(division_ref2.target_state, None);
+    assert_eq!(division_ref2.movement_progress, 0.0);
 }
 
 #[test]
@@ -426,16 +426,16 @@ fn test_supply_processing() {
     use crate::state::data::StateRegistry;
 
     let mut registry = setup_registry();
-    let army1 = make_test_army(0, CountryId(1), StateId(1));
-    let mut army2 = army1.clone();
-    army2.id = ArmyId(1);
+    let division1 = make_test_division(0, CountryId(1), StateId(1));
+    let mut division2 = division1.clone();
+    division2.id = DivisionId(1);
 
-    registry.add_army(army1);
-    registry.add_army(army2);
+    registry.add_division(division1);
+    registry.add_division(division2);
 
     let mut s1 = crate::state::data::StateData::default();
     s1.id = StateId(1);
-    s1.logistics_capacity = 1.5; // Only enough for 1.5 usage, but we have 2 armies (total 2.0)
+    s1.logistics_capacity = 1.5; // Only enough for 1.5 usage, but we have 2 divisions (total 2.0)
 
     let mut state_registry = StateRegistry::build(vec![s1]);
 
@@ -446,8 +446,8 @@ fn test_supply_processing() {
     assert_eq!(state_ref.logistics_usage, 2.0);
     assert_eq!(state_ref.logistics_ratio, 0.75);
 
-    let army_ref = registry.armies.get(&ArmyId(0)).unwrap();
-    assert_eq!(army_ref.supply_ratio, 0.75);
+    let division_ref = registry.divisions.get(&DivisionId(0)).unwrap();
+    assert_eq!(division_ref.supply_ratio, 0.75);
 }
 
 #[test]
@@ -455,8 +455,8 @@ fn test_combat_strength() {
     use crate::military::combat::calculate_combat_strength;
 
     let registry = setup_registry();
-    let army = ArmyUnit {
-        id: ArmyId(0),
+    let division = Division {
+        id: DivisionId(0),
         owner: CountryId(1),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -475,8 +475,8 @@ fn test_combat_strength() {
         experience: 0.0,
         supply_ratio: 0.8, // 80% supply
         movement_progress: 0.0,
-        status: ArmyStatus::Idle,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Idle,
+        def_id: DivisionDefinitionId(1),
         attack_power: 10,
         defense_power: 10,
         combat_id: None,
@@ -486,7 +486,7 @@ fn test_combat_strength() {
     // equip_ratio = 1.0, manpower_ratio = 0.5
     // org_ratio = 0.5
     // base_attack * min(0.5, 1.0) * 0.5 * 0.8 = 10 * 0.5 * 0.5 * 0.8 = 2.0
-    let strength = calculate_combat_strength(&army, &registry);
+    let strength = calculate_combat_strength(&division, &registry);
     assert!((strength - 2.0).abs() < 0.001);
 }
 
@@ -598,8 +598,8 @@ fn test_phase13_movement_timing_and_arrival() {
     use crate::war::data::WarRegistry;
 
     let mut registry = setup_registry();
-    let army = ArmyUnit {
-        id: ArmyId(0),
+    let division = Division {
+        id: DivisionId(0),
         owner: CountryId(1),
         division_type: DivisionType::Infantry,
         size: DivisionSize::Standard,
@@ -618,13 +618,13 @@ fn test_phase13_movement_timing_and_arrival() {
         experience: 0.0,
         supply_ratio: 1.0,
         movement_progress: 0.0,
-        status: ArmyStatus::Moving,
-        def_id: DivisionId(1),
+        status: DivisionStatus::Moving,
+        def_id: DivisionDefinitionId(1),
         attack_power: 10,
         defense_power: 10,
         combat_id: None,
     };
-    registry.add_army(army);
+    registry.add_division(division);
 
     let s1 = StateData {
         id: StateId(1),
@@ -646,8 +646,8 @@ fn test_phase13_movement_timing_and_arrival() {
     let mut battle_registry = BattleRegistry::default();
 
     // 一時停止中/時間進行イベントなし（process_movementを呼ばない）時は進行度が変化しないことを検証
-    let army_before = registry.armies.get(&ArmyId(0)).unwrap();
-    assert_eq!(army_before.movement_progress, 0.0);
+    let division_before = registry.divisions.get(&DivisionId(0)).unwrap();
+    assert_eq!(division_before.movement_progress, 0.0);
 
     // 日数が経過（process_movement実行）
     // def_speed = 4.0, base_days = 5.0 => daily_progress = 0.8 / day
@@ -659,7 +659,7 @@ fn test_phase13_movement_timing_and_arrival() {
         &mut battle_registry,
         "1800/01/01",
     );
-    let a1 = registry.armies.get(&ArmyId(0)).unwrap();
+    let a1 = registry.divisions.get(&DivisionId(0)).unwrap();
     assert_eq!(a1.current_state, StateId(1));
     assert_eq!(a1.target_state, Some(StateId(2)));
 
@@ -671,7 +671,7 @@ fn test_phase13_movement_timing_and_arrival() {
         &mut battle_registry,
         "1800/01/02",
     );
-    let a2 = registry.armies.get(&ArmyId(0)).unwrap();
+    let a2 = registry.divisions.get(&DivisionId(0)).unwrap();
     assert_eq!(a2.current_state, StateId(2));
     assert_eq!(a2.target_state, Some(StateId(3)));
 
@@ -692,9 +692,9 @@ fn test_phase13_movement_timing_and_arrival() {
         &mut battle_registry,
         "1800/01/04",
     );
-    let a_final = registry.armies.get(&ArmyId(0)).unwrap();
+    let a_final = registry.divisions.get(&DivisionId(0)).unwrap();
     assert_eq!(a_final.current_state, StateId(3));
-    assert_eq!(a_final.status, ArmyStatus::Idle);
+    assert_eq!(a_final.status, DivisionStatus::Idle);
     assert_eq!(a_final.destination, None);
     assert_eq!(a_final.target_state, None);
 }
@@ -801,7 +801,7 @@ fn test_phase15_no_path_to_neutral_territory() {
 
 #[test]
 fn test_phase15_battle_starts_when_entering_defended_state() {
-    use crate::military::invasion::process_army_arrival;
+    use crate::military::invasion::process_division_arrival;
 
     let c1 = CountryId(1);
     let c2 = CountryId(2);
@@ -809,11 +809,11 @@ fn test_phase15_battle_starts_when_entering_defended_state() {
 
     let mut mil = MilitaryRegistry::default();
     // C1の攻撃ユニット（S2に到着済み）
-    let army1 = make_test_army(0, c1, StateId(2));
+    let division1 = make_test_division(0, c1, StateId(2));
     // C2の防御ユニット（S2にいる）
-    let army2 = make_test_army(1, c2, StateId(2));
-    mil.armies.insert(ArmyId(0), army1);
-    mil.armies.insert(ArmyId(1), army2);
+    let division2 = make_test_division(1, c2, StateId(2));
+    mil.divisions.insert(DivisionId(0), division1);
+    mil.divisions.insert(DivisionId(1), division2);
 
     let s1 = StateData {
         id: StateId(1),
@@ -829,8 +829,8 @@ fn test_phase15_battle_starts_when_entering_defended_state() {
     let mut state_reg = StateRegistry::build(vec![s1, s2]);
     let mut battle_reg = BattleRegistry::default();
 
-    process_army_arrival(
-        ArmyId(0),
+    process_division_arrival(
+        DivisionId(0),
         StateId(2),
         StateId(1),
         "1800/01/01",
@@ -847,13 +847,13 @@ fn test_phase15_battle_starts_when_entering_defended_state() {
         "Exactly one battle should be created"
     );
     // 両ユニットが戦闘中
-    assert_eq!(mil.armies[&ArmyId(0)].status, ArmyStatus::Fighting);
-    assert_eq!(mil.armies[&ArmyId(1)].status, ArmyStatus::Fighting);
+    assert_eq!(mil.divisions[&DivisionId(0)].status, DivisionStatus::Fighting);
+    assert_eq!(mil.divisions[&DivisionId(1)].status, DivisionStatus::Fighting);
 }
 
 #[test]
 fn test_phase15_occupy_undefended_enemy_state() {
-    use crate::military::invasion::process_army_arrival;
+    use crate::military::invasion::process_division_arrival;
 
     let c1 = CountryId(1);
     let c2 = CountryId(2);
@@ -861,8 +861,8 @@ fn test_phase15_occupy_undefended_enemy_state() {
 
     let mut mil = MilitaryRegistry::default();
     // C1の攻撃ユニット（S2へ到着）
-    let army1 = make_test_army(0, c1, StateId(2));
-    mil.armies.insert(ArmyId(0), army1);
+    let division1 = make_test_division(0, c1, StateId(2));
+    mil.divisions.insert(DivisionId(0), division1);
     // C2のユニットはいない
 
     let s1 = StateData {
@@ -879,8 +879,8 @@ fn test_phase15_occupy_undefended_enemy_state() {
     let mut state_reg = StateRegistry::build(vec![s1, s2]);
     let mut battle_reg = BattleRegistry::default();
 
-    process_army_arrival(
-        ArmyId(0),
+    process_division_arrival(
+        DivisionId(0),
         StateId(2),
         StateId(1),
         "1800/01/01",
@@ -922,8 +922,8 @@ fn test_phase15_owner_unchanged_after_occupation() {
 fn test_phase15_combat_daily_resolution() {
     use crate::military::combat_calc::resolve_combat_day;
 
-    let attacker = make_test_army(0, CountryId(1), StateId(1));
-    let defender = make_test_army(1, CountryId(2), StateId(1));
+    let attacker = make_test_division(0, CountryId(1), StateId(1));
+    let defender = make_test_division(1, CountryId(2), StateId(1));
 
     let (atk_loss, atk_org_loss, def_loss, def_org_loss) =
         resolve_combat_day(&attacker, &defender, 0);
@@ -941,8 +941,8 @@ fn test_phase15_combat_daily_resolution() {
 fn test_phase15_combat_is_deterministic() {
     use crate::military::combat_calc::resolve_combat_day;
 
-    let attacker = make_test_army(0, CountryId(1), StateId(1));
-    let defender = make_test_army(1, CountryId(2), StateId(1));
+    let attacker = make_test_division(0, CountryId(1), StateId(1));
+    let defender = make_test_division(1, CountryId(2), StateId(1));
 
     let result1 = resolve_combat_day(&attacker, &defender, 5);
     let result2 = resolve_combat_day(&attacker, &defender, 5);
@@ -957,8 +957,8 @@ fn test_phase15_terrain_bonus_affects_combat() {
         TERRAIN_BONUS_MOUNTAIN, TERRAIN_BONUS_PLAIN, resolve_combat_day,
     };
 
-    let attacker = make_test_army(0, CountryId(1), StateId(1));
-    let defender = make_test_army(1, CountryId(2), StateId(1));
+    let attacker = make_test_division(0, CountryId(1), StateId(1));
+    let defender = make_test_division(1, CountryId(2), StateId(1));
 
     let (atk_loss_plain, _, def_loss_plain, _) =
         resolve_combat_day(&attacker, &defender, TERRAIN_BONUS_PLAIN);
@@ -980,9 +980,9 @@ fn test_phase15_terrain_bonus_affects_combat() {
 fn test_phase15_manpower_does_not_go_below_zero() {
     use crate::military::combat_calc::resolve_combat_day;
 
-    let mut attacker = make_test_army(0, CountryId(1), StateId(1));
+    let mut attacker = make_test_division(0, CountryId(1), StateId(1));
     attacker.manpower = 1; // 極限まで消耗
-    let defender = make_test_army(1, CountryId(2), StateId(1));
+    let defender = make_test_division(1, CountryId(2), StateId(1));
 
     let (atk_loss, _, _, _) = resolve_combat_day(&attacker, &defender, 0);
 
@@ -998,9 +998,9 @@ fn test_phase15_org_recovery_in_own_territory() {
     use crate::military::update::process_org_recovery;
 
     let mut mil = MilitaryRegistry::default();
-    let mut army = make_test_army(0, CountryId(1), StateId(1));
-    army.organization = 50.0; // 50/100
-    mil.armies.insert(ArmyId(0), army);
+    let mut division = make_test_division(0, CountryId(1), StateId(1));
+    division.organization = 50.0; // 50/100
+    mil.divisions.insert(DivisionId(0), division);
 
     let mut s1 = StateData::default();
     s1.id = StateId(1);
@@ -1010,7 +1010,7 @@ fn test_phase15_org_recovery_in_own_territory() {
 
     process_org_recovery(&mut mil, &state_reg);
 
-    let after_org = mil.armies[&ArmyId(0)].organization;
+    let after_org = mil.divisions[&DivisionId(0)].organization;
     assert!(
         after_org > 50.0,
         "Organization should recover in own territory"
@@ -1022,10 +1022,10 @@ fn test_phase15_org_recovery_not_during_combat() {
     use crate::military::update::process_org_recovery;
 
     let mut mil = MilitaryRegistry::default();
-    let mut army = make_test_army(0, CountryId(1), StateId(1));
-    army.organization = 50.0;
-    army.status = ArmyStatus::Fighting; // 戦闘中
-    mil.armies.insert(ArmyId(0), army);
+    let mut division = make_test_division(0, CountryId(1), StateId(1));
+    division.organization = 50.0;
+    division.status = DivisionStatus::Fighting; // 戦闘中
+    mil.divisions.insert(DivisionId(0), division);
 
     let mut s1 = StateData::default();
     s1.id = StateId(1);
@@ -1035,7 +1035,7 @@ fn test_phase15_org_recovery_not_during_combat() {
 
     process_org_recovery(&mut mil, &state_reg);
 
-    let after_org = mil.armies[&ArmyId(0)].organization;
+    let after_org = mil.divisions[&DivisionId(0)].organization;
     assert_eq!(
         after_org, 50.0,
         "Organization should NOT recover during combat"
@@ -1047,10 +1047,10 @@ fn test_phase15_org_recovery_not_when_moving() {
     use crate::military::update::process_org_recovery;
 
     let mut mil = MilitaryRegistry::default();
-    let mut army = make_test_army(0, CountryId(1), StateId(1));
-    army.organization = 50.0;
-    army.status = ArmyStatus::Moving; // 移動中
-    mil.armies.insert(ArmyId(0), army);
+    let mut division = make_test_division(0, CountryId(1), StateId(1));
+    division.organization = 50.0;
+    division.status = DivisionStatus::Moving; // 移動中
+    mil.divisions.insert(DivisionId(0), division);
 
     let mut s1 = StateData::default();
     s1.id = StateId(1);
@@ -1060,7 +1060,7 @@ fn test_phase15_org_recovery_not_when_moving() {
 
     process_org_recovery(&mut mil, &state_reg);
 
-    let after_org = mil.armies[&ArmyId(0)].organization;
+    let after_org = mil.divisions[&DivisionId(0)].organization;
     assert_eq!(
         after_org, 50.0,
         "Organization should NOT recover while moving"
@@ -1072,10 +1072,10 @@ fn test_phase15_org_recovery_does_not_exceed_max() {
     use crate::military::update::process_org_recovery;
 
     let mut mil = MilitaryRegistry::default();
-    let mut army = make_test_army(0, CountryId(1), StateId(1));
-    army.organization = 99.0; // 最大に近い
-    army.max_organization = 100.0;
-    mil.armies.insert(ArmyId(0), army);
+    let mut division = make_test_division(0, CountryId(1), StateId(1));
+    division.organization = 99.0; // 最大に近い
+    division.max_organization = 100.0;
+    mil.divisions.insert(DivisionId(0), division);
 
     let mut s1 = StateData::default();
     s1.id = StateId(1);
@@ -1085,7 +1085,7 @@ fn test_phase15_org_recovery_does_not_exceed_max() {
 
     process_org_recovery(&mut mil, &state_reg);
 
-    let after_org = mil.armies[&ArmyId(0)].organization;
+    let after_org = mil.divisions[&DivisionId(0)].organization;
     assert!(
         after_org <= 100.0,
         "Organization should not exceed max_organization"
@@ -1094,16 +1094,16 @@ fn test_phase15_org_recovery_does_not_exceed_max() {
 
 #[test]
 fn test_phase15_no_battle_between_same_country() {
-    use crate::military::invasion::process_army_arrival;
+    use crate::military::invasion::process_division_arrival;
 
     let c1 = CountryId(1);
     let war_reg = WarRegistry::default(); // 戦争なし
 
     let mut mil = MilitaryRegistry::default();
-    let army1 = make_test_army(0, c1, StateId(1));
-    let army2 = make_test_army(1, c1, StateId(1));
-    mil.armies.insert(ArmyId(0), army1);
-    mil.armies.insert(ArmyId(1), army2);
+    let division1 = make_test_division(0, c1, StateId(1));
+    let division2 = make_test_division(1, c1, StateId(1));
+    mil.divisions.insert(DivisionId(0), division1);
+    mil.divisions.insert(DivisionId(1), division2);
 
     let s1 = StateData {
         id: StateId(1),
@@ -1118,8 +1118,8 @@ fn test_phase15_no_battle_between_same_country() {
     let mut state_reg = StateRegistry::build(vec![s1, s2]);
     let mut battle_reg = BattleRegistry::default();
 
-    process_army_arrival(
-        ArmyId(0),
+    process_division_arrival(
+        DivisionId(0),
         StateId(1),
         StateId(0),
         "1800/01/01",
@@ -1162,10 +1162,10 @@ fn test_phase15_retreat_is_deterministic() {
     let battle_reg = BattleRegistry::default();
 
     let mut mil = MilitaryRegistry::default();
-    let army = make_test_army(0, CountryId(2), StateId(1));
-    mil.armies.insert(ArmyId(0), army);
+    let division = make_test_division(0, CountryId(2), StateId(1));
+    mil.divisions.insert(DivisionId(0), division);
 
-    let dest = find_retreat_destination(ArmyId(0), StateId(1), &mil, &state_reg, &battle_reg);
+    let dest = find_retreat_destination(DivisionId(0), StateId(1), &mil, &state_reg, &battle_reg);
 
     // StateId昇順で最小（StateId(3)）が選ばれる
     assert_eq!(

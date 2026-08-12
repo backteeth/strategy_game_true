@@ -1,5 +1,5 @@
 use crate::app::game_state::GameState;
-use crate::map::army_selection::DragSelectState;
+use crate::map::division_selection::DragSelectState;
 use crate::map::camera::GameCamera;
 use crate::map::rendering::StateVisual;
 use crate::state::{SelectedState, StateSelectionChanged};
@@ -32,7 +32,7 @@ fn handle_state_click(
     mut selection_changed: MessageWriter<StateSelectionChanged>,
 ) {
     // 左クリックが離された瞬間のみ処理(押下瞬間ではない)。
-    // P21-004: army_selectionの矩形選択は「押下→ドラッグ→解放」で確定するため、
+    // P21-004: division_selectionの矩形選択は「押下→ドラッグ→解放」で確定するため、
     // 押下瞬間に反応すると、ドラッグ選択の開始点がたまたま州の上だった場合に
     // 意図せずその州を選択してしまう。解放時点でドラッグ中だったかを判定できる
     // よう、州クリックも解放イベントで統一する。
@@ -72,22 +72,22 @@ fn handle_state_click(
     let world_pos = cam_transform.translation.xy() + cursor_ndc * half_size;
 
     // 陸軍ユニットをクリックした場合は州選択をスキップ
-    let army_radius = 16.0;
-    for army in military_registry.armies.values() {
+    let division_radius = 16.0;
+    for division in military_registry.divisions.values() {
         let mut pos = state_registry
-            .get(army.current_state)
+            .get(division.current_state)
             .map(|s| s.position())
             .unwrap_or(Vec2::ZERO);
 
-        if let Some(target_state) = army.target_state {
+        if let Some(target_state) = division.target_state {
             let target_pos = state_registry
                 .get(target_state)
                 .map(|s| s.position())
                 .unwrap_or(Vec2::ZERO);
-            pos = pos.lerp(target_pos, army.movement_progress);
+            pos = pos.lerp(target_pos, division.movement_progress);
         }
 
-        if world_pos.distance(pos) < army_radius {
+        if world_pos.distance(pos) < division_radius {
             return;
         }
     }
@@ -135,7 +135,7 @@ fn update_state_visuals(
     }
 }
 
-fn brighten_color(color: Color, factor: f32) -> Color {
+pub(crate) fn brighten_color(color: Color, factor: f32) -> Color {
     let linear = color.to_linear();
     Color::linear_rgb(
         (linear.red * factor).min(1.0),

@@ -1,11 +1,11 @@
 use crate::app::game_state::GameState;
-use crate::common::{ArmyId, CountryId, DivisionId, FrontlineId};
+use crate::common::{CountryId, DivisionDefinitionId, DivisionId, FrontlineId};
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::localization::{CurrentLocale, TranslationCatalog, localized_text, t, tf};
-use crate::map::army_selection::SelectedArmy;
-use crate::military::army_group::{ArmyGroup, ArmyGroupRegistry};
+use crate::map::division_selection::SelectedDivision;
+use crate::military::army::{Army, ArmyRegistry};
 use crate::military::battle::{BattleRegistry, BattleStatus};
-use crate::military::data::{ArmyStatus, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::military::recruitment::{
     RecruitFeasibility, evaluate_recruit_feasibility, request_recruitment,
 };
@@ -15,16 +15,16 @@ use crate::ui::notification::GameNotification;
 use crate::war::data::WarRegistry;
 use crate::war::frontline::{
     FrontlineCommandFeasibility, FrontlineRegistry, FrontlineStance,
-    evaluate_frontline_army_command_feasibility,
+    evaluate_frontline_division_command_feasibility,
 };
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
 /// P21-001: 募兵UIが常に対象とする基本部隊定義。
-/// `app/loader.rs`の`spawn_debug_armies`が初期軍配置に使う`DivisionId(0)`
+/// `app/loader.rs`の`spawn_debug_divisions`が初期軍配置に使う`DivisionId(0)`
 /// (`assets/data/divisions.ron`の"Standard Infantry")と同一のIDを再利用する。
 /// 新規IDは発行しない。
-const RECRUIT_DIVISION_ID: DivisionId = DivisionId(0);
+const RECRUIT_DIVISION_ID: DivisionDefinitionId = DivisionDefinitionId(0);
 
 /// 募兵ボタンの背景色(実行可能時)。
 const RECRUIT_READY_COLOR: Color = Color::srgba(0.2, 0.5, 0.2, 1.0);
@@ -36,9 +36,9 @@ const FRONTLINE_CMD_READY_COLOR: Color = Color::srgba(0.2, 0.35, 0.55, 1.0);
 const FRONTLINE_CMD_DISABLED_COLOR: Color = RECRUIT_DISABLED_COLOR;
 /// P21-002: 現在選択中のスタンスを示すボタンの背景色。
 const FRONTLINE_STANCE_ACTIVE_COLOR: Color = Color::srgba(0.15, 0.55, 0.25, 1.0);
-/// P21-004: 編成(ArmyGroup)コマンドボタンの背景色(実行可能時)。
+/// P21-004: 編成(Army)コマンドボタンの背景色(実行可能時)。
 const ARMY_GROUP_CMD_READY_COLOR: Color = Color::srgba(0.5, 0.3, 0.55, 1.0);
-/// P21-004: 編成(ArmyGroup)コマンドボタンの背景色(実行不可時)。
+/// P21-004: 編成(Army)コマンドボタンの背景色(実行不可時)。
 const ARMY_GROUP_CMD_DISABLED_COLOR: Color = RECRUIT_DISABLED_COLOR;
 
 #[derive(Component)]
@@ -48,7 +48,7 @@ pub struct MilitaryPanelRoot;
 pub struct MilitaryPanelText;
 
 #[derive(Component)]
-pub struct RecruitButton(pub DivisionId);
+pub struct RecruitButton(pub DivisionDefinitionId);
 
 /// P21-001: 募兵ボタンに付随するコスト・実行可否表示のTextマーカー。
 #[derive(Component)]
@@ -76,11 +76,11 @@ pub struct FrontlineCommandButton(pub FrontlineCommand);
 #[derive(Component)]
 pub struct FrontlineCommandInfoText;
 
-/// P21-004: 編成(ArmyGroup)ボタンが発行する命令の種類。「対象編成」は常に
-/// `ArmyGroupRegistry::target_group_for_selection`が選択中陸軍から動的に決定する
+/// P21-004: 編成(Army)ボタンが発行する命令の種類。「対象編成」は常に
+/// `ArmyRegistry::target_army_for_selection`が選択中陸軍から動的に決定する
 /// (選択中のいずれかの陸軍が既に所属している編成、なければ対象なし)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArmyGroupCommand {
+pub enum ArmyCommand {
     /// 選択中陸軍から新しい編成を作成
     Create,
     /// 選択中陸軍を対象編成へ追加
@@ -88,21 +88,21 @@ pub enum ArmyGroupCommand {
     /// 選択中陸軍を(所属する編成があれば)そこから除外
     RemoveSelection,
     /// 対象編成の全所属師団を選択に反映
-    SelectGroup,
+    SelectArmy,
     /// 対象編成を解散
     Disband,
 }
 
 #[derive(Component)]
-pub struct ArmyGroupCommandButton(pub ArmyGroupCommand);
+pub struct ArmyCommandButton(pub ArmyCommand);
 
 /// P21-004: 編成コマンドボタンに付随する対象編成の表示のTextマーカー。
 #[derive(Component)]
-pub struct ArmyGroupStatusText;
+pub struct ArmyStatusText;
 
 /// P21-004: 編成一覧の表示のTextマーカー。
 #[derive(Component)]
-pub struct ArmyGroupListText;
+pub struct ArmyListText;
 
 #[derive(Resource, Default)]
 pub struct MilitaryPanelState {
@@ -128,8 +128,8 @@ impl Plugin for MilitaryPanelPlugin {
                     handle_recruit_buttons,
                     update_frontline_command_buttons_ui,
                     handle_frontline_command_buttons,
-                    update_army_group_ui,
-                    handle_army_group_command_buttons,
+                    update_army_ui,
+                    handle_army_command_buttons,
                 )
                     .run_if(in_state(GameState::Playing)),
             );
@@ -409,12 +409,12 @@ fn setup_military_panel(
                     ));
                 });
 
-            // P21-004: 編成(ArmyGroup)セクション。「対象編成」は選択中陸軍から動的に
+            // P21-004: 編成(Army)セクション。「対象編成」は選択中陸軍から動的に
             // 決まる(いずれかが所属する編成)ため、専用のUI要素で編成を選ぶ操作は設けない。
             let (ag_header_text, ag_header_marker) = localized_text(
                 &catalog,
                 locale.0,
-                "military_panel.army_group_header",
+                "military_panel.army_header",
                 vec![],
             );
             parent.spawn((
@@ -437,30 +437,30 @@ fn setup_military_panel(
                 .with_children(|row| {
                     for (cmd, key) in [
                         (
-                            ArmyGroupCommand::Create,
-                            "military_panel.army_group_create_button",
+                            ArmyCommand::Create,
+                            "military_panel.army_create_button",
                         ),
                         (
-                            ArmyGroupCommand::AddSelection,
-                            "military_panel.army_group_add_button",
+                            ArmyCommand::AddSelection,
+                            "military_panel.army_add_button",
                         ),
                         (
-                            ArmyGroupCommand::RemoveSelection,
-                            "military_panel.army_group_remove_button",
+                            ArmyCommand::RemoveSelection,
+                            "military_panel.army_remove_button",
                         ),
                         (
-                            ArmyGroupCommand::SelectGroup,
-                            "military_panel.army_group_select_button",
+                            ArmyCommand::SelectArmy,
+                            "military_panel.army_select_button",
                         ),
                         (
-                            ArmyGroupCommand::Disband,
-                            "military_panel.army_group_disband_button",
+                            ArmyCommand::Disband,
+                            "military_panel.army_disband_button",
                         ),
                     ] {
                         let (btn_text, btn_marker) =
                             localized_text(&catalog, locale.0, key, vec![]);
                         row.spawn((
-                            ArmyGroupCommandButton(cmd),
+                            ArmyCommandButton(cmd),
                             Button,
                             Node {
                                 padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
@@ -483,8 +483,8 @@ fn setup_military_panel(
                 });
 
             parent.spawn((
-                ArmyGroupStatusText,
-                Text::new(t(&catalog, locale.0, "military_panel.army_group_no_target")),
+                ArmyStatusText,
+                Text::new(t(&catalog, locale.0, "military_panel.army_no_target")),
                 TextColor(Color::srgb(0.8, 0.8, 0.8)),
                 TextFont {
                     font_size: FontSize::Px(11.0),
@@ -497,11 +497,11 @@ fn setup_military_panel(
             ));
 
             parent.spawn((
-                ArmyGroupListText,
+                ArmyListText,
                 Text::new(t(
                     &catalog,
                     locale.0,
-                    "military_panel.army_group_list_empty",
+                    "military_panel.army_list_empty",
                 )),
                 TextColor(Color::srgb(0.85, 0.85, 0.85)),
                 TextFont {
@@ -596,15 +596,15 @@ fn handle_military_panel_scroll(
     }
 }
 
-fn army_status_key(status: ArmyStatus) -> &'static str {
+fn division_status_key(status: DivisionStatus) -> &'static str {
     match status {
-        ArmyStatus::Idle => "army_status.idle",
-        ArmyStatus::Moving => "army_status.moving",
-        ArmyStatus::Fighting => "army_status.fighting",
-        ArmyStatus::Occupying => "army_status.occupying",
-        ArmyStatus::Retreating => "army_status.retreating",
-        ArmyStatus::Disbanding => "army_status.disbanding",
-        ArmyStatus::Destroyed => "army_status.destroyed",
+        DivisionStatus::Idle => "division_status.idle",
+        DivisionStatus::Moving => "division_status.moving",
+        DivisionStatus::Fighting => "division_status.fighting",
+        DivisionStatus::Occupying => "division_status.occupying",
+        DivisionStatus::Retreating => "division_status.retreating",
+        DivisionStatus::Disbanding => "division_status.disbanding",
+        DivisionStatus::Destroyed => "division_status.destroyed",
     }
 }
 
@@ -695,7 +695,7 @@ fn update_military_panel_ui(
     ai_registry: Res<crate::war::military_ai::MilitaryAiRegistry>,
     country_ai_registry: Res<crate::country::country_ai::CountryAiRegistry>,
     frontline_settings: Res<crate::map::frontline_render::FrontlineRenderSettings>,
-    selected_army: Res<SelectedArmy>,
+    selected_division: Res<SelectedDivision>,
     keys: Res<ButtonInput<KeyCode>>,
     loc: crate::localization::Loc,
     mut text_q: Query<&mut Text, With<MilitaryPanelText>>,
@@ -733,7 +733,7 @@ fn update_military_panel_ui(
                 &mut frontline_registry,
                 &military_registry,
                 &war_registry,
-                &selected_army.sorted_ids(),
+                &selected_division.sorted_ids(),
                 fl.frontline_id,
                 player_cid,
             );
@@ -743,13 +743,13 @@ fn update_military_panel_ui(
             execute_frontline_unassign(
                 &mut frontline_registry,
                 &military_registry,
-                &selected_army.sorted_ids(),
+                &selected_division.sorted_ids(),
                 player_cid,
             );
         }
         // [Key3] 全部隊の割り当て解除
         if keys.just_pressed(KeyCode::Digit3) {
-            frontline_registry.unassign_all_armies_for_plan(fl.frontline_id, player_cid);
+            frontline_registry.unassign_all_divisions_for_plan(fl.frontline_id, player_cid);
         }
         // [Key7] 停止 (Stopped)
         if keys.just_pressed(KeyCode::Digit7) {
@@ -781,8 +781,8 @@ fn update_military_panel_ui(
     }
 
     // 自国の軍隊を集計
-    let my_armies: Vec<_> = military_registry
-        .armies
+    let my_divisions: Vec<_> = military_registry
+        .divisions
         .values()
         .filter(|a| a.owner == player_cid)
         .collect();
@@ -871,7 +871,7 @@ fn update_military_panel_ui(
 
         let plan = frontline_registry.get_plan(fl.frontline_id, player_cid);
         let stance = plan.map(|p| p.stance).unwrap_or_default();
-        let assigned_ids = plan.map(|p| p.assigned_army_ids.as_slice()).unwrap_or(&[]);
+        let assigned_ids = plan.map(|p| p.assigned_division_ids.as_slice()).unwrap_or(&[]);
 
         lines.push(trf(
             "military_panel.order_state",
@@ -896,11 +896,11 @@ fn update_military_panel_ui(
         let mut count_moving = 0;
         let mut count_fighting = 0;
         for &id in assigned_ids {
-            if let Some(a) = military_registry.armies.get(&id) {
+            if let Some(a) = military_registry.divisions.get(&id) {
                 match a.status {
-                    ArmyStatus::Idle => count_idle += 1,
-                    ArmyStatus::Moving => count_moving += 1,
-                    ArmyStatus::Fighting => count_fighting += 1,
+                    DivisionStatus::Idle => count_idle += 1,
+                    DivisionStatus::Moving => count_moving += 1,
+                    DivisionStatus::Fighting => count_fighting += 1,
                     _ => {}
                 }
             }
@@ -969,44 +969,44 @@ fn update_military_panel_ui(
     }
 
     // 選択中ユニット詳細(複数選択時は簡易一覧、単一選択時は従来通り詳細表示)
-    if selected_army.len() > 1 {
+    if selected_division.len() > 1 {
         lines.push(trf(
             "military_panel.multi_selected_header",
-            vec![("count", selected_army.len().to_string())],
+            vec![("count", selected_division.len().to_string())],
         ));
-        for army_id in selected_army.sorted_ids() {
-            if let Some(army) = military_registry.armies.get(&army_id) {
+        for division_id in selected_division.sorted_ids() {
+            if let Some(division) = military_registry.divisions.get(&division_id) {
                 let state_name = state_registry
-                    .get(army.current_state)
+                    .get(division.current_state)
                     .map(|s| s.name.clone())
                     .unwrap_or_else(|| tr("common.unknown"));
                 lines.push(trf(
                     "military_panel.multi_selected_line",
                     vec![
-                        ("id", army.id.0.to_string()),
+                        ("id", division.id.0.to_string()),
                         ("state", state_name),
-                        ("status", tr(army_status_key(army.status))),
+                        ("status", tr(division_status_key(division.status))),
                     ],
                 ));
             }
         }
         lines.push(String::new());
-    } else if let Some(army) = selected_army
+    } else if let Some(division) = selected_division
         .primary()
-        .and_then(|id| military_registry.armies.get(&id))
+        .and_then(|id| military_registry.divisions.get(&id))
     {
         lines.push(tr("military_panel.selected_unit_header"));
         let owner_name = country_registry
-            .get(army.owner)
+            .get(division.owner)
             .map(|c| c.name.clone())
             .unwrap_or_else(|| tr("common.unknown"));
         let current_state_name = state_registry
-            .get(army.current_state)
+            .get(division.current_state)
             .map(|s| s.name.clone())
             .unwrap_or_else(|| tr("common.unknown"));
         lines.push(trf(
             "military_panel.selected_unit_id",
-            vec![("id", army.id.0.to_string()), ("owner", owner_name)],
+            vec![("id", division.id.0.to_string()), ("owner", owner_name)],
         ));
         lines.push(trf(
             "military_panel.selected_unit_location",
@@ -1014,7 +1014,7 @@ fn update_military_panel_ui(
         ));
 
         // 前線割り当て状態
-        if let Some(fl_id) = frontline_registry.army_frontline_map.get(&army.id) {
+        if let Some(fl_id) = frontline_registry.division_frontline_map.get(&division.id) {
             lines.push(trf(
                 "military_panel.frontline_assigned",
                 vec![("id", fl_id.0.to_string())],
@@ -1024,11 +1024,11 @@ fn update_military_panel_ui(
         }
 
         // 割り当て不可理由の判定と表示
-        if army.owner != player_cid {
-            lines.push(tr("military_panel.not_own_army"));
+        if division.owner != player_cid {
+            lines.push(tr("military_panel.not_own_division"));
         } else if active_war.is_none() {
             lines.push(tr("military_panel.no_active_war_assign"));
-        } else if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
+        } else if division.manpower == 0 || division.status == DivisionStatus::Destroyed {
             lines.push(tr("military_panel.destroyed_or_no_power"));
         }
 
@@ -1036,13 +1036,13 @@ fn update_military_panel_ui(
         lines.push(trf(
             "military_panel.strength",
             vec![
-                ("current", army.manpower.to_string()),
-                ("max", army.max_manpower.to_string()),
+                ("current", division.manpower.to_string()),
+                ("max", division.max_manpower.to_string()),
                 (
                     "percent",
                     format!(
                         "{:.0}",
-                        army.manpower as f32 / army.max_manpower as f32 * 100.0
+                        division.manpower as f32 / division.max_manpower as f32 * 100.0
                     ),
                 ),
             ],
@@ -1050,28 +1050,28 @@ fn update_military_panel_ui(
         lines.push(trf(
             "military_panel.organization",
             vec![
-                ("current", format!("{:.0}", army.organization)),
-                ("max", format!("{:.0}", army.max_organization)),
+                ("current", format!("{:.0}", division.organization)),
+                ("max", format!("{:.0}", division.max_organization)),
                 (
                     "percent",
-                    format!("{:.0}", army.organization / army.max_organization * 100.0),
+                    format!("{:.0}", division.organization / division.max_organization * 100.0),
                 ),
             ],
         ));
         lines.push(trf(
             "military_panel.power",
             vec![
-                ("attack", army.attack_power.to_string()),
-                ("defense", army.defense_power.to_string()),
+                ("attack", division.attack_power.to_string()),
+                ("defense", division.defense_power.to_string()),
             ],
         ));
 
         lines.push(trf(
             "military_panel.status_line",
-            vec![("status", tr(army_status_key(army.status)))],
+            vec![("status", tr(division_status_key(division.status)))],
         ));
 
-        if let Some(dest_id) = army.destination {
+        if let Some(dest_id) = division.destination {
             let dest_name = state_registry
                 .get(dest_id)
                 .map(|s| s.name.clone())
@@ -1125,32 +1125,32 @@ fn update_military_panel_ui(
     }
 
     lines.push(trf(
-        "military_panel.army_list_header",
-        vec![("count", my_armies.len().to_string())],
+        "military_panel.division_list_header",
+        vec![("count", my_divisions.len().to_string())],
     ));
 
-    for army in &my_armies {
+    for division in &my_divisions {
         let state_name = state_registry
-            .get(army.current_state)
+            .get(division.current_state)
             .map(|s| s.name.clone())
             .unwrap_or_else(|| tr("common.unknown"));
-        let status_str = tr(army_status_key(army.status));
-        let fl_tag = if frontline_registry.army_frontline_map.contains_key(&army.id) {
+        let status_str = tr(division_status_key(division.status));
+        let fl_tag = if frontline_registry.division_frontline_map.contains_key(&division.id) {
             tr("military_panel.frontline_tag")
         } else {
             String::new()
         };
-        let selected = selected_army.is_selected(army.id);
+        let selected = selected_division.is_selected(division.id);
         let sel_mark = if selected { "► " } else { "  " };
         lines.push(trf(
-            "military_panel.army_line",
+            "military_panel.division_line",
             vec![
                 ("mark", sel_mark.to_string()),
-                ("id", army.id.0.to_string()),
+                ("id", division.id.0.to_string()),
                 ("state", state_name),
                 ("status", status_str),
                 ("frontline_tag", fl_tag),
-                ("manpower", army.manpower.to_string()),
+                ("manpower", division.manpower.to_string()),
             ],
         ));
     }
@@ -1238,21 +1238,21 @@ fn handle_recruit_buttons(
 
 /// P21-002: 選択中陸軍を前線へ割り当てる。`FrontlineAssignButton`のクリックと
 /// `Digit1`キーの両方から呼ばれる唯一の実行経路(ロジックの二重実装を避ける)。
-/// `assign_army`自身が所有者・戦争状態・撃破済みかを再検証するため、ここでは
+/// `assign_division`自身が所有者・戦争状態・撃破済みかを再検証するため、ここでは
 /// 追加の検証を行わない。
 fn execute_frontline_assign(
     frontline_registry: &mut FrontlineRegistry,
     military_registry: &MilitaryRegistry,
     war_registry: &WarRegistry,
-    selected_army_ids: &[ArmyId],
+    selected_division_ids: &[DivisionId],
     frontline_id: FrontlineId,
     player_cid: CountryId,
 ) {
     // 選択中の各陸軍へ独立に割当を試みる。1個の失敗(所有者不一致・撃破済み等)は
     // 他の陸軍の割当を妨げない(P21-003の複数選択調査で決めた方針)。
-    for &army_id in selected_army_ids {
-        let _ = frontline_registry.assign_army(
-            army_id,
+    for &division_id in selected_division_ids {
+        let _ = frontline_registry.assign_division(
+            division_id,
             frontline_id,
             player_cid,
             military_registry,
@@ -1262,17 +1262,17 @@ fn execute_frontline_assign(
 }
 
 /// P21-002: 選択中陸軍を前線から解除する。`FrontlineUnassignButton`のクリックと
-/// `Digit2`キーの両方から呼ばれる唯一の実行経路。`unassign_army`が所有者を再検証する
+/// `Digit2`キーの両方から呼ばれる唯一の実行経路。`unassign_division`が所有者を再検証する
 /// ため、選択中陸軍が他国のものであっても(選択自体は所有者不問のため起こり得る)、
 /// ここで解除が実行されることはない。
 fn execute_frontline_unassign(
     frontline_registry: &mut FrontlineRegistry,
     military_registry: &MilitaryRegistry,
-    selected_army_ids: &[ArmyId],
+    selected_division_ids: &[DivisionId],
     player_cid: CountryId,
 ) {
-    for &army_id in selected_army_ids {
-        let _ = frontline_registry.unassign_army(army_id, player_cid, military_registry);
+    for &division_id in selected_division_ids {
+        let _ = frontline_registry.unassign_division(division_id, player_cid, military_registry);
     }
 }
 
@@ -1298,7 +1298,7 @@ fn update_frontline_command_buttons_ui(
     military_registry: Res<MilitaryRegistry>,
     war_registry: Res<WarRegistry>,
     frontline_registry: Res<FrontlineRegistry>,
-    selected_army: Res<SelectedArmy>,
+    selected_division: Res<SelectedDivision>,
     loc: crate::localization::Loc,
     mut btn_q: Query<(&FrontlineCommandButton, &mut BackgroundColor)>,
     mut info_text_q: Query<&mut Text, With<FrontlineCommandInfoText>>,
@@ -1321,8 +1321,8 @@ fn update_frontline_command_buttons_ui(
             .map(|p| p.stance)
     });
 
-    let army_feasibility = evaluate_frontline_army_command_feasibility(
-        &selected_army.sorted_ids(),
+    let division_feasibility = evaluate_frontline_division_command_feasibility(
+        &selected_division.sorted_ids(),
         player_cid,
         &military_registry,
         frontline,
@@ -1331,7 +1331,7 @@ fn update_frontline_command_buttons_ui(
     for (btn, mut bg) in btn_q.iter_mut() {
         *bg = BackgroundColor(match btn.0 {
             FrontlineCommand::Assign | FrontlineCommand::Unassign => {
-                if army_feasibility.is_ready() {
+                if division_feasibility.is_ready() {
                     FRONTLINE_CMD_READY_COLOR
                 } else {
                     FRONTLINE_CMD_DISABLED_COLOR
@@ -1359,17 +1359,17 @@ fn update_frontline_command_buttons_ui(
     let status_key = if frontline.is_none() {
         "military_panel.frontline_cmd_status_no_frontline"
     } else {
-        match army_feasibility {
+        match division_feasibility {
             FrontlineCommandFeasibility::Ready => "military_panel.frontline_cmd_status_ready",
-            FrontlineCommandFeasibility::NoArmySelected
-            | FrontlineCommandFeasibility::ArmyNotFound => {
-                "military_panel.frontline_cmd_status_no_army"
+            FrontlineCommandFeasibility::NoDivisionSelected
+            | FrontlineCommandFeasibility::DivisionNotFound => {
+                "military_panel.frontline_cmd_status_no_division"
             }
-            FrontlineCommandFeasibility::NotOwnArmy => {
-                "military_panel.frontline_cmd_status_not_own_army"
+            FrontlineCommandFeasibility::NotOwnDivision => {
+                "military_panel.frontline_cmd_status_not_own_division"
             }
-            FrontlineCommandFeasibility::ArmyDestroyed => {
-                "military_panel.frontline_cmd_status_army_destroyed"
+            FrontlineCommandFeasibility::DivisionDestroyed => {
+                "military_panel.frontline_cmd_status_division_destroyed"
             }
             FrontlineCommandFeasibility::NoActiveFrontline => {
                 "military_panel.frontline_cmd_status_no_frontline"
@@ -1393,7 +1393,7 @@ fn handle_frontline_command_buttons(
     player_country: Res<PlayerCountry>,
     war_registry: Res<WarRegistry>,
     military_registry: Res<MilitaryRegistry>,
-    selected_army: Res<SelectedArmy>,
+    selected_division: Res<SelectedDivision>,
     mut frontline_registry: ResMut<FrontlineRegistry>,
 ) {
     let Some(player_cid) = player_country.0 else {
@@ -1418,18 +1418,18 @@ fn handle_frontline_command_buttons(
                 &mut frontline_registry,
                 &military_registry,
                 &war_registry,
-                &selected_army.sorted_ids(),
+                &selected_division.sorted_ids(),
                 frontline_id,
                 player_cid,
             ),
             FrontlineCommand::Unassign => execute_frontline_unassign(
                 &mut frontline_registry,
                 &military_registry,
-                &selected_army.sorted_ids(),
+                &selected_division.sorted_ids(),
                 player_cid,
             ),
             FrontlineCommand::UnassignAll => {
-                frontline_registry.unassign_all_armies_for_plan(frontline_id, player_cid);
+                frontline_registry.unassign_all_divisions_for_plan(frontline_id, player_cid);
             }
             FrontlineCommand::SetStance(stance) => execute_frontline_set_stance(
                 &mut frontline_registry,
@@ -1442,69 +1442,69 @@ fn handle_frontline_command_buttons(
 }
 
 /// P21-004: 選択中陸軍から新しい編成を作成する。所有者不一致・撃破済み陸軍は
-/// `ArmyGroupRegistry::create_group`が黙って除外する。
-fn execute_army_group_create(
-    army_group_registry: &mut ArmyGroupRegistry,
+/// `ArmyRegistry::create_army`が黙って除外する。
+fn execute_army_create(
+    army_registry: &mut ArmyRegistry,
     military_registry: &MilitaryRegistry,
-    selected_army_ids: &[ArmyId],
+    selected_division_ids: &[DivisionId],
     player_cid: CountryId,
 ) {
-    army_group_registry.create_group(player_cid, selected_army_ids, military_registry);
+    army_registry.create_army(player_cid, selected_division_ids, military_registry);
 }
 
 /// P21-004: 選択中陸軍を対象編成(選択中のいずれかが既に所属する編成)へ追加する。
-fn execute_army_group_add_selection(
-    army_group_registry: &mut ArmyGroupRegistry,
+fn execute_army_add_selection(
+    army_registry: &mut ArmyRegistry,
     military_registry: &MilitaryRegistry,
-    selected_army_ids: &[ArmyId],
+    selected_division_ids: &[DivisionId],
     player_cid: CountryId,
 ) {
-    let Some(target) = army_group_registry.target_group_for_selection(selected_army_ids) else {
+    let Some(target) = army_registry.target_army_for_selection(selected_division_ids) else {
         return;
     };
-    for &army_id in selected_army_ids {
-        let _ = army_group_registry.add_army(target, army_id, player_cid, military_registry);
+    for &division_id in selected_division_ids {
+        let _ = army_registry.add_division(target, division_id, player_cid, military_registry);
     }
 }
 
 /// P21-004: 選択中陸軍を、それぞれの所属編成(あれば)から除外する(未所属へ戻す)。
-fn execute_army_group_remove_selection(
-    army_group_registry: &mut ArmyGroupRegistry,
+fn execute_army_remove_selection(
+    army_registry: &mut ArmyRegistry,
     military_registry: &MilitaryRegistry,
-    selected_army_ids: &[ArmyId],
+    selected_division_ids: &[DivisionId],
     player_cid: CountryId,
 ) {
-    for &army_id in selected_army_ids {
-        let _ = army_group_registry.remove_army(army_id, player_cid, military_registry);
+    for &division_id in selected_division_ids {
+        let _ = army_registry.remove_division(division_id, player_cid, military_registry);
     }
 }
 
-/// P21-004: 対象編成の全所属師団を選択(`SelectedArmy`)に反映する(「軍を選択」ボタン)。
-fn execute_army_group_select(
-    army_group_registry: &ArmyGroupRegistry,
-    selected_army: &mut SelectedArmy,
-    selected_army_ids: &[ArmyId],
+/// P21-004: 対象編成の全所属師団を選択(`SelectedDivision`)に反映する(「軍を選択」ボタン)。
+fn execute_army_select(
+    army_registry: &ArmyRegistry,
+    selected_division: &mut SelectedDivision,
+    selected_division_ids: &[DivisionId],
 ) {
-    let Some(target) = army_group_registry.target_group_for_selection(selected_army_ids) else {
+    let Some(target) = army_registry.target_army_for_selection(selected_division_ids) else {
         return;
     };
-    if let Some(group) = army_group_registry.groups.get(&target) {
-        for &army_id in &group.member_army_ids {
-            selected_army.army_ids.insert(army_id);
+    if let Some(group) = army_registry.armies.get(&target) {
+        for &division_id in &group.member_division_ids {
+            selected_division.division_ids.insert(division_id);
         }
     }
 }
 
 /// P21-004: 対象編成を解散する。所属していた師団は全員未所属へ戻る。
-fn execute_army_group_disband(
-    army_group_registry: &mut ArmyGroupRegistry,
-    selected_army_ids: &[ArmyId],
+fn execute_army_disband(
+    army_registry: &mut ArmyRegistry,
+    selected_division_ids: &[DivisionId],
     player_cid: CountryId,
 ) {
-    let Some(target) = army_group_registry.target_group_for_selection(selected_army_ids) else {
+    let Some(target) = army_registry.target_army_for_selection(selected_division_ids) else {
         return;
     };
-    let _ = army_group_registry.disband(target, player_cid);
+    let _ = army_registry.disband(target, player_cid);
 }
 
 /// P21-004: 編成コマンドボタンの背景色・対象編成表示・編成一覧を更新する。
@@ -1512,16 +1512,16 @@ fn execute_army_group_disband(
 /// (`update_recruit_button_ui`/`update_frontline_command_buttons_ui`と同じ理由)、
 /// 独立したSystemとして切り出す。
 #[allow(clippy::too_many_arguments)]
-fn update_army_group_ui(
+fn update_army_ui(
     state: Res<MilitaryPanelState>,
     player_country: Res<PlayerCountry>,
     military_registry: Res<MilitaryRegistry>,
-    army_group_registry: Res<ArmyGroupRegistry>,
-    selected_army: Res<SelectedArmy>,
+    army_registry: Res<ArmyRegistry>,
+    selected_division: Res<SelectedDivision>,
     loc: crate::localization::Loc,
-    mut btn_q: Query<(&ArmyGroupCommandButton, &mut BackgroundColor)>,
-    mut status_text_q: Query<&mut Text, (With<ArmyGroupStatusText>, Without<ArmyGroupListText>)>,
-    mut list_text_q: Query<&mut Text, (With<ArmyGroupListText>, Without<ArmyGroupStatusText>)>,
+    mut btn_q: Query<(&ArmyCommandButton, &mut BackgroundColor)>,
+    mut status_text_q: Query<&mut Text, (With<ArmyStatusText>, Without<ArmyListText>)>,
+    mut list_text_q: Query<&mut Text, (With<ArmyListText>, Without<ArmyStatusText>)>,
 ) {
     let locale = &loc.locale;
     let catalog = &loc.catalog;
@@ -1537,22 +1537,22 @@ fn update_army_group_ui(
     let trf =
         |key: &'static str, args: Vec<(&'static str, String)>| tf(catalog, locale.0, key, args);
 
-    let selected_ids = selected_army.sorted_ids();
-    let is_own = |id: &ArmyId| {
+    let selected_ids = selected_division.sorted_ids();
+    let is_own = |id: &DivisionId| {
         military_registry
-            .armies
+            .divisions
             .get(id)
             .map(|a| a.owner == player_cid)
             .unwrap_or(false)
     };
     let has_own_selection = selected_ids.iter().any(is_own);
-    let target_group = army_group_registry.target_group_for_selection(&selected_ids);
+    let target_group = army_registry.target_army_for_selection(&selected_ids);
     let has_selection_outside_target = selected_ids
         .iter()
-        .any(|id| is_own(id) && army_group_registry.group_for_army(*id) != target_group);
+        .any(|id| is_own(id) && army_registry.army_for_division(*id) != target_group);
     let has_grouped_selection = selected_ids
         .iter()
-        .any(|id| army_group_registry.group_for_army(*id).is_some());
+        .any(|id| army_registry.army_for_division(*id).is_some());
 
     let can_create = has_own_selection;
     let can_add = target_group.is_some() && has_selection_outside_target;
@@ -1562,11 +1562,11 @@ fn update_army_group_ui(
 
     for (btn, mut bg) in btn_q.iter_mut() {
         let ready = match btn.0 {
-            ArmyGroupCommand::Create => can_create,
-            ArmyGroupCommand::AddSelection => can_add,
-            ArmyGroupCommand::RemoveSelection => can_remove,
-            ArmyGroupCommand::SelectGroup => can_select,
-            ArmyGroupCommand::Disband => can_disband,
+            ArmyCommand::Create => can_create,
+            ArmyCommand::AddSelection => can_add,
+            ArmyCommand::RemoveSelection => can_remove,
+            ArmyCommand::SelectArmy => can_select,
+            ArmyCommand::Disband => can_disband,
         };
         *bg = BackgroundColor(if ready {
             ARMY_GROUP_CMD_READY_COLOR
@@ -1576,49 +1576,49 @@ fn update_army_group_ui(
     }
 
     let status_line = target_group
-        .and_then(|group_id| army_group_registry.groups.get(&group_id))
+        .and_then(|group_id| army_registry.armies.get(&group_id))
         .map(|group| {
             trf(
-                "military_panel.army_group_target_line",
+                "military_panel.army_target_line",
                 vec![
                     ("name", group.name.clone()),
-                    ("count", group.member_army_ids.len().to_string()),
+                    ("count", group.member_division_ids.len().to_string()),
                 ],
             )
         })
-        .unwrap_or_else(|| tr("military_panel.army_group_no_target"));
+        .unwrap_or_else(|| tr("military_panel.army_no_target"));
     if let Ok(mut text) = status_text_q.single_mut()
         && text.0 != status_line
     {
         text.0 = status_line;
     }
 
-    let mut groups: Vec<&ArmyGroup> = army_group_registry
-        .groups
+    let mut groups: Vec<&Army> = army_registry
+        .armies
         .values()
         .filter(|g| g.owner == player_cid)
         .collect();
     groups.sort_by_key(|g| g.id.0);
 
     let list_text = if groups.is_empty() {
-        tr("military_panel.army_group_list_empty")
+        tr("military_panel.army_list_empty")
     } else {
         let mut lines = vec![trf(
-            "military_panel.army_group_list_header",
+            "military_panel.army_list_header",
             vec![("count", groups.len().to_string())],
         )];
         for group in groups {
             let ids = group
-                .member_army_ids
+                .member_division_ids
                 .iter()
                 .map(|id| id.0.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(trf(
-                "military_panel.army_group_list_line",
+                "military_panel.army_list_line",
                 vec![
                     ("name", group.name.clone()),
-                    ("count", group.member_army_ids.len().to_string()),
+                    ("count", group.member_division_ids.len().to_string()),
                     ("ids", ids),
                 ],
             ));
@@ -1635,12 +1635,12 @@ fn update_army_group_ui(
 /// P21-004: 編成コマンドボタン(作成/追加/除外/軍を選択/解散)のクリックを処理する。
 /// `Changed<Interaction>`+`Pressed`によりクリック1回につき1回だけ命令を発行する
 /// (前線命令ボタンと同型のパターン)。
-fn handle_army_group_command_buttons(
-    btn_q: Query<(&Interaction, &ArmyGroupCommandButton), Changed<Interaction>>,
+fn handle_army_command_buttons(
+    btn_q: Query<(&Interaction, &ArmyCommandButton), Changed<Interaction>>,
     player_country: Res<PlayerCountry>,
     military_registry: Res<MilitaryRegistry>,
-    mut selected_army: ResMut<SelectedArmy>,
-    mut army_group_registry: ResMut<ArmyGroupRegistry>,
+    mut selected_division: ResMut<SelectedDivision>,
+    mut army_registry: ResMut<ArmyRegistry>,
 ) {
     let Some(player_cid) = player_country.0 else {
         return;
@@ -1650,31 +1650,31 @@ fn handle_army_group_command_buttons(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        let selected_ids = selected_army.sorted_ids();
+        let selected_ids = selected_division.sorted_ids();
         match btn.0 {
-            ArmyGroupCommand::Create => execute_army_group_create(
-                &mut army_group_registry,
+            ArmyCommand::Create => execute_army_create(
+                &mut army_registry,
                 &military_registry,
                 &selected_ids,
                 player_cid,
             ),
-            ArmyGroupCommand::AddSelection => execute_army_group_add_selection(
-                &mut army_group_registry,
+            ArmyCommand::AddSelection => execute_army_add_selection(
+                &mut army_registry,
                 &military_registry,
                 &selected_ids,
                 player_cid,
             ),
-            ArmyGroupCommand::RemoveSelection => execute_army_group_remove_selection(
-                &mut army_group_registry,
+            ArmyCommand::RemoveSelection => execute_army_remove_selection(
+                &mut army_registry,
                 &military_registry,
                 &selected_ids,
                 player_cid,
             ),
-            ArmyGroupCommand::SelectGroup => {
-                execute_army_group_select(&army_group_registry, &mut selected_army, &selected_ids)
+            ArmyCommand::SelectArmy => {
+                execute_army_select(&army_registry, &mut selected_division, &selected_ids)
             }
-            ArmyGroupCommand::Disband => {
-                execute_army_group_disband(&mut army_group_registry, &selected_ids, player_cid)
+            ArmyCommand::Disband => {
+                execute_army_disband(&mut army_registry, &selected_ids, player_cid)
             }
         }
     }
@@ -1685,14 +1685,14 @@ mod tests {
     use super::*;
     use crate::common::StateId;
     use crate::country::CountryData;
-    use crate::military::data::{ArmyUnit, DivisionDefinition, DivisionSize, DivisionType};
+    use crate::military::data::{Division, DivisionDefinition, DivisionSize, DivisionType};
     use crate::state::data::StateData;
     use crate::war::data::{War, WarStatus};
     use crate::war::frontline::{Frontline, FrontlinePlan};
 
     fn test_division() -> DivisionDefinition {
         DivisionDefinition {
-            id: DivisionId(1),
+            id: DivisionDefinitionId(1),
             name: "Test Infantry".to_string(),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1728,7 +1728,7 @@ mod tests {
         let mut military_registry = MilitaryRegistry::default();
         military_registry
             .definitions
-            .insert(DivisionId(1), test_division());
+            .insert(DivisionDefinitionId(1), test_division());
         app.insert_resource(military_registry);
 
         let country = CountryData {
@@ -1753,7 +1753,7 @@ mod tests {
         app
     }
 
-    fn press_recruit_button(app: &mut App, division_id: DivisionId) {
+    fn press_recruit_button(app: &mut App, division_id: DivisionDefinitionId) {
         app.world_mut()
             .spawn((RecruitButton(division_id), Interaction::Pressed));
     }
@@ -1769,7 +1769,7 @@ mod tests {
     fn handle_recruit_buttons_success_queues_recruitment_and_deducts_cost() {
         let mut app = build_test_app();
         app.add_systems(Update, handle_recruit_buttons);
-        press_recruit_button(&mut app, DivisionId(1));
+        press_recruit_button(&mut app, DivisionDefinitionId(1));
 
         app.update();
 
@@ -1789,7 +1789,7 @@ mod tests {
             .unwrap()
             .treasury = 1.0;
         app.add_systems(Update, handle_recruit_buttons);
-        press_recruit_button(&mut app, DivisionId(1));
+        press_recruit_button(&mut app, DivisionDefinitionId(1));
 
         app.update();
 
@@ -1808,7 +1808,7 @@ mod tests {
             .unwrap()
             .available_manpower = 100;
         app.add_systems(Update, handle_recruit_buttons);
-        press_recruit_button(&mut app, DivisionId(1));
+        press_recruit_button(&mut app, DivisionDefinitionId(1));
 
         app.update();
 
@@ -1824,7 +1824,7 @@ mod tests {
         *app.world_mut().resource_mut::<StateRegistry>() =
             StateRegistry::build(vec![owned_state(5, crate::common::CountryId(2))]);
         app.add_systems(Update, handle_recruit_buttons);
-        press_recruit_button(&mut app, DivisionId(1));
+        press_recruit_button(&mut app, DivisionDefinitionId(1));
 
         app.update();
 
@@ -1839,7 +1839,7 @@ mod tests {
         let mut app = build_test_app();
         app.insert_resource(SelectedState(None));
         app.add_systems(Update, handle_recruit_buttons);
-        press_recruit_button(&mut app, DivisionId(1));
+        press_recruit_button(&mut app, DivisionDefinitionId(1));
 
         app.update();
 
@@ -1853,7 +1853,7 @@ mod tests {
     fn handle_recruit_buttons_unknown_definition_does_not_mutate_state() {
         let mut app = build_test_app();
         app.add_systems(Update, handle_recruit_buttons);
-        press_recruit_button(&mut app, DivisionId(999)); // 未定義の部隊ID
+        press_recruit_button(&mut app, DivisionDefinitionId(999)); // 未定義の部隊ID
 
         app.update();
 
@@ -1884,13 +1884,13 @@ mod tests {
 
     // ── P21-002: 前線命令ボタンのテスト ──────────────────────────
 
-    fn make_frontline_test_army(
+    fn make_frontline_test_division(
         id: usize,
         owner: crate::common::CountryId,
         state: StateId,
-    ) -> ArmyUnit {
-        ArmyUnit {
-            id: ArmyId(id),
+    ) -> Division {
+        Division {
+            id: DivisionId(id),
             owner,
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1909,8 +1909,8 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
@@ -1920,8 +1920,8 @@ mod tests {
     /// 自国(CountryId(1))・敵国(CountryId(2))それぞれの陸軍を1個ずつ配置し、
     /// 両国のFrontlinePlanを持つ前線をあらかじめ生成したテスト環境を構築する。
     /// 敵国の陸軍は敵国自身のプランへあらかじめ割当済みにしておく(6-1回帰テスト用)。
-    /// 返り値は (App, 自国army_id, 敵国army_id, frontline_id)。
-    fn build_frontline_command_test_app() -> (App, ArmyId, ArmyId, FrontlineId) {
+    /// 返り値は (App, 自国division_id, 敵国division_id, frontline_id)。
+    fn build_frontline_command_test_app() -> (App, DivisionId, DivisionId, FrontlineId) {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
@@ -1929,10 +1929,10 @@ mod tests {
         let enemy_cid = CountryId(2);
 
         let mut military_registry = MilitaryRegistry::default();
-        let own_army_id =
-            military_registry.add_army(make_frontline_test_army(0, player_cid, StateId(1)));
-        let enemy_army_id =
-            military_registry.add_army(make_frontline_test_army(1, enemy_cid, StateId(2)));
+        let own_division_id =
+            military_registry.add_division(make_frontline_test_division(0, player_cid, StateId(1)));
+        let enemy_division_id =
+            military_registry.add_division(make_frontline_test_division(1, enemy_cid, StateId(2)));
         app.insert_resource(military_registry);
 
         let war_id = crate::common::WarId(0);
@@ -1987,19 +1987,19 @@ mod tests {
             .plans
             .get_mut(&(fl_id, enemy_cid))
             .unwrap()
-            .assigned_army_ids
-            .push(enemy_army_id);
+            .assigned_division_ids
+            .push(enemy_division_id);
         frontline_registry
-            .army_frontline_map
-            .insert(enemy_army_id, fl_id);
+            .division_frontline_map
+            .insert(enemy_division_id, fl_id);
         app.insert_resource(frontline_registry);
 
         app.insert_resource(PlayerCountry(Some(player_cid)));
-        app.insert_resource(SelectedArmy {
-            army_ids: [own_army_id].into_iter().collect(),
+        app.insert_resource(SelectedDivision {
+            division_ids: [own_division_id].into_iter().collect(),
         });
 
-        (app, own_army_id, enemy_army_id, fl_id)
+        (app, own_division_id, enemy_division_id, fl_id)
     }
 
     fn press_frontline_command_button(app: &mut App, cmd: FrontlineCommand) {
@@ -2035,7 +2035,7 @@ mod tests {
 
     #[test]
     fn handle_frontline_command_buttons_assign_success() {
-        let (mut app, own_army_id, _enemy_army_id, fl_id) = build_frontline_command_test_app();
+        let (mut app, own_division_id, _enemy_division_id, fl_id) = build_frontline_command_test_app();
         app.add_systems(Update, handle_frontline_command_buttons);
         press_frontline_command_button(&mut app, FrontlineCommand::Assign);
 
@@ -2043,21 +2043,21 @@ mod tests {
 
         let frontline_registry = app.world().resource::<FrontlineRegistry>();
         assert_eq!(
-            frontline_registry.army_frontline_map.get(&own_army_id),
+            frontline_registry.division_frontline_map.get(&own_division_id),
             Some(&fl_id)
         );
     }
 
     /// P21-002最重要回帰テスト: 選択中陸軍が敵国のものであっても
-    /// (`SelectedArmy`は所有者を問わず選択され得るため)、解除ボタンを押しても
+    /// (`SelectedDivision`は所有者を問わず選択され得るため)、解除ボタンを押しても
     /// 敵国の前線割当は一切変化しない(6-1のバグ修正確認)。
     #[test]
-    fn handle_frontline_command_buttons_unassign_rejects_foreign_army() {
-        let (mut app, _own_army_id, enemy_army_id, fl_id) = build_frontline_command_test_app();
+    fn handle_frontline_command_buttons_unassign_rejects_foreign_division() {
+        let (mut app, _own_division_id, enemy_division_id, fl_id) = build_frontline_command_test_app();
         // 選択中陸軍を敵国のものに差し替える(左クリックで選択され得る状態を再現)
         app.world_mut()
-            .resource_mut::<SelectedArmy>()
-            .select_only(enemy_army_id);
+            .resource_mut::<SelectedDivision>()
+            .select_only(enemy_division_id);
         app.add_systems(Update, handle_frontline_command_buttons);
         press_frontline_command_button(&mut app, FrontlineCommand::Unassign);
 
@@ -2065,28 +2065,28 @@ mod tests {
 
         let frontline_registry = app.world().resource::<FrontlineRegistry>();
         assert_eq!(
-            frontline_registry.army_frontline_map.get(&enemy_army_id),
+            frontline_registry.division_frontline_map.get(&enemy_division_id),
             Some(&fl_id),
             "unassign button must not remove another country's frontline assignment"
         );
         let enemy_plan = frontline_registry.get_plan(fl_id, CountryId(2)).unwrap();
-        assert!(enemy_plan.assigned_army_ids.contains(&enemy_army_id));
+        assert!(enemy_plan.assigned_division_ids.contains(&enemy_division_id));
     }
 
     #[test]
     fn handle_frontline_command_buttons_unassign_all_only_affects_own_plan() {
-        let (mut app, own_army_id, enemy_army_id, fl_id) = build_frontline_command_test_app();
+        let (mut app, own_division_id, enemy_division_id, fl_id) = build_frontline_command_test_app();
         {
             let mut frontline_registry = app.world_mut().resource_mut::<FrontlineRegistry>();
             frontline_registry
                 .plans
                 .get_mut(&(fl_id, CountryId(1)))
                 .unwrap()
-                .assigned_army_ids
-                .push(own_army_id);
+                .assigned_division_ids
+                .push(own_division_id);
             frontline_registry
-                .army_frontline_map
-                .insert(own_army_id, fl_id);
+                .division_frontline_map
+                .insert(own_division_id, fl_id);
         }
         app.add_systems(Update, handle_frontline_command_buttons);
         press_frontline_command_button(&mut app, FrontlineCommand::UnassignAll);
@@ -2096,12 +2096,12 @@ mod tests {
         let frontline_registry = app.world().resource::<FrontlineRegistry>();
         assert!(
             !frontline_registry
-                .army_frontline_map
-                .contains_key(&own_army_id),
-            "own army must be unassigned"
+                .division_frontline_map
+                .contains_key(&own_division_id),
+            "own division must be unassigned"
         );
         assert_eq!(
-            frontline_registry.army_frontline_map.get(&enemy_army_id),
+            frontline_registry.division_frontline_map.get(&enemy_division_id),
             Some(&fl_id),
             "enemy country's plan must not be affected by the player's unassign-all"
         );
@@ -2109,7 +2109,7 @@ mod tests {
 
     #[test]
     fn handle_frontline_command_buttons_set_stance() {
-        let (mut app, _own_army_id, _enemy_army_id, fl_id) = build_frontline_command_test_app();
+        let (mut app, _own_division_id, _enemy_division_id, fl_id) = build_frontline_command_test_app();
         app.add_systems(Update, handle_frontline_command_buttons);
         press_frontline_command_button(
             &mut app,
@@ -2131,7 +2131,7 @@ mod tests {
 
     #[test]
     fn handle_frontline_command_buttons_no_active_war_does_nothing() {
-        let (mut app, own_army_id, _enemy_army_id, _fl_id) = build_frontline_command_test_app();
+        let (mut app, own_division_id, _enemy_division_id, _fl_id) = build_frontline_command_test_app();
         app.insert_resource(WarRegistry::default());
         app.add_systems(Update, handle_frontline_command_buttons);
         press_frontline_command_button(&mut app, FrontlineCommand::Assign);
@@ -2141,15 +2141,15 @@ mod tests {
         let frontline_registry = app.world().resource::<FrontlineRegistry>();
         assert!(
             !frontline_registry
-                .army_frontline_map
-                .contains_key(&own_army_id),
+                .division_frontline_map
+                .contains_key(&own_division_id),
             "no active war means no frontline command should have any effect"
         );
     }
 
     #[test]
     fn handle_frontline_command_buttons_fires_once_per_press() {
-        let (mut app, own_army_id, _enemy_army_id, fl_id) = build_frontline_command_test_app();
+        let (mut app, own_division_id, _enemy_division_id, fl_id) = build_frontline_command_test_app();
         app.add_systems(Update, handle_frontline_command_buttons);
         press_frontline_command_button(&mut app, FrontlineCommand::Assign);
 
@@ -2157,8 +2157,8 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<FrontlineRegistry>()
-                .army_frontline_map
-                .get(&own_army_id),
+                .division_frontline_map
+                .get(&own_division_id),
             Some(&fl_id)
         );
 
@@ -2166,21 +2166,21 @@ mod tests {
         // 再度Assignは実行されない(Changed<Interaction>により1回のPressにつき1回だけ発行)
         app.world_mut()
             .resource_mut::<FrontlineRegistry>()
-            .unassign_all_armies_for_plan(fl_id, CountryId(1));
+            .unassign_all_divisions_for_plan(fl_id, CountryId(1));
         app.update();
 
         assert!(
             !app.world()
                 .resource::<FrontlineRegistry>()
-                .army_frontline_map
-                .contains_key(&own_army_id),
+                .division_frontline_map
+                .contains_key(&own_division_id),
             "without a new Interaction change, the button must not fire again"
         );
     }
 
-    /// 自国(CountryId(1))2陸軍・敵国(CountryId(2))1陸軍を配置した編成(ArmyGroup)
-    /// テスト環境を構築する。返り値は(App, own_army_1, own_army_2, enemy_army)。
-    fn build_army_group_command_test_app() -> (App, ArmyId, ArmyId, ArmyId) {
+    /// 自国(CountryId(1))2陸軍・敵国(CountryId(2))1陸軍を配置した編成(Army)
+    /// テスト環境を構築する。返り値は(App, own_division_1, own_division_2, enemy_division)。
+    fn build_army_command_test_app() -> (App, DivisionId, DivisionId, DivisionId) {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
@@ -2188,56 +2188,56 @@ mod tests {
         let enemy_cid = CountryId(2);
 
         let mut military_registry = MilitaryRegistry::default();
-        let own_army_1 =
-            military_registry.add_army(make_frontline_test_army(0, player_cid, StateId(1)));
-        let own_army_2 =
-            military_registry.add_army(make_frontline_test_army(1, player_cid, StateId(1)));
-        let enemy_army =
-            military_registry.add_army(make_frontline_test_army(2, enemy_cid, StateId(2)));
+        let own_division_1 =
+            military_registry.add_division(make_frontline_test_division(0, player_cid, StateId(1)));
+        let own_division_2 =
+            military_registry.add_division(make_frontline_test_division(1, player_cid, StateId(1)));
+        let enemy_division =
+            military_registry.add_division(make_frontline_test_division(2, enemy_cid, StateId(2)));
         app.insert_resource(military_registry);
 
-        app.insert_resource(ArmyGroupRegistry::default());
+        app.insert_resource(ArmyRegistry::default());
         app.insert_resource(PlayerCountry(Some(player_cid)));
-        app.insert_resource(SelectedArmy {
-            army_ids: [own_army_1].into_iter().collect(),
+        app.insert_resource(SelectedDivision {
+            division_ids: [own_division_1].into_iter().collect(),
         });
 
-        (app, own_army_1, own_army_2, enemy_army)
+        (app, own_division_1, own_division_2, enemy_division)
     }
 
-    fn press_army_group_command_button(app: &mut App, cmd: ArmyGroupCommand) {
+    fn press_army_command_button(app: &mut App, cmd: ArmyCommand) {
         app.world_mut()
-            .spawn((ArmyGroupCommandButton(cmd), Interaction::Pressed));
+            .spawn((ArmyCommandButton(cmd), Interaction::Pressed));
     }
 
     /// UI接続確認: 編成コマンドボタン5個(作成/追加/除外/軍を選択/解散)と、
     /// 対象編成表示・編成一覧のテキストが軍事パネルUIツリーへspawnされていること。
     #[test]
-    fn army_group_command_buttons_are_spawned_in_military_panel_ui_tree() {
+    fn army_command_buttons_are_spawned_in_military_panel_ui_tree() {
         let mut app = build_test_app();
         app.add_systems(Startup, setup_military_panel);
         app.update();
 
         let count = app
             .world_mut()
-            .query::<&ArmyGroupCommandButton>()
+            .query::<&ArmyCommandButton>()
             .iter(app.world())
             .count();
         assert_eq!(
             count, 5,
-            "all 5 army group command buttons must be present in the spawned military panel UI tree"
+            "all 5 division group command buttons must be present in the spawned military panel UI tree"
         );
 
         assert_eq!(
             app.world_mut()
-                .query::<&ArmyGroupStatusText>()
+                .query::<&ArmyStatusText>()
                 .iter(app.world())
                 .count(),
             1
         );
         assert_eq!(
             app.world_mut()
-                .query::<&ArmyGroupListText>()
+                .query::<&ArmyListText>()
                 .iter(app.world())
                 .count(),
             1
@@ -2245,146 +2245,146 @@ mod tests {
     }
 
     #[test]
-    fn handle_army_group_command_buttons_create_success() {
-        let (mut app, own_army_1, own_army_2, _enemy_army) = build_army_group_command_test_app();
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1, own_army_2].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::Create);
+    fn handle_army_command_buttons_create_success() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) = build_army_command_test_app();
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1, own_division_2].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::Create);
 
         app.update();
 
-        let registry = app.world().resource::<ArmyGroupRegistry>();
-        assert_eq!(registry.groups.len(), 1);
-        let group = registry.groups.values().next().unwrap();
-        assert_eq!(group.member_army_ids, vec![own_army_1, own_army_2]);
+        let registry = app.world().resource::<ArmyRegistry>();
+        assert_eq!(registry.armies.len(), 1);
+        let group = registry.armies.values().next().unwrap();
+        assert_eq!(group.member_division_ids, vec![own_division_1, own_division_2]);
         assert_eq!(group.owner, CountryId(1));
     }
 
     /// P21-003監査で発見した「選択が所有者を問わない」不具合が編成側に波及しないことの
     /// 回帰テスト: 敵国陸軍が選択に混ざっていても、編成には自国陸軍だけが入る。
     #[test]
-    fn handle_army_group_command_buttons_create_ignores_foreign_army() {
-        let (mut app, own_army_1, _own_army_2, enemy_army) = build_army_group_command_test_app();
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1, enemy_army].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::Create);
+    fn handle_army_command_buttons_create_ignores_foreign_division() {
+        let (mut app, own_division_1, _own_division_2, enemy_division) = build_army_command_test_app();
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1, enemy_division].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::Create);
 
         app.update();
 
-        let registry = app.world().resource::<ArmyGroupRegistry>();
-        let group = registry.groups.values().next().unwrap();
-        assert_eq!(group.member_army_ids, vec![own_army_1]);
-        assert_eq!(registry.group_for_army(enemy_army), None);
+        let registry = app.world().resource::<ArmyRegistry>();
+        let group = registry.armies.values().next().unwrap();
+        assert_eq!(group.member_division_ids, vec![own_division_1]);
+        assert_eq!(registry.army_for_division(enemy_division), None);
     }
 
-    /// テスト内で`ArmyGroupRegistry`(可変)と`MilitaryRegistry`(不変)を同時に必要とする
-    /// `create_group`呼び出し用のヘルパー。`app.world_mut()`と`app.world()`を同一式内で
+    /// テスト内で`ArmyRegistry`(可変)と`MilitaryRegistry`(不変)を同時に必要とする
+    /// `create_army`呼び出し用のヘルパー。`app.world_mut()`と`app.world()`を同一式内で
     /// 借用できないため、`resource_scope`で安全に両方へアクセスする。
     fn create_test_group(
         app: &mut App,
         owner: CountryId,
-        member_ids: &[ArmyId],
-    ) -> crate::common::ArmyGroupId {
+        member_ids: &[DivisionId],
+    ) -> crate::common::ArmyId {
         app.world_mut()
-            .resource_scope(|world, mut registry: Mut<ArmyGroupRegistry>| {
+            .resource_scope(|world, mut registry: Mut<ArmyRegistry>| {
                 registry
-                    .create_group(owner, member_ids, world.resource::<MilitaryRegistry>())
+                    .create_army(owner, member_ids, world.resource::<MilitaryRegistry>())
                     .unwrap()
             })
     }
 
     #[test]
-    fn handle_army_group_command_buttons_add_selection_adds_ungrouped_member() {
-        let (mut app, own_army_1, own_army_2, _enemy_army) = build_army_group_command_test_app();
-        let group_id = create_test_group(&mut app, CountryId(1), &[own_army_1]);
+    fn handle_army_command_buttons_add_selection_adds_ungrouped_member() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) = build_army_command_test_app();
+        let group_id = create_test_group(&mut app, CountryId(1), &[own_division_1]);
 
         // 既存グループ所属の師団1 + 未所属の師団2 を選択してAdd
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1, own_army_2].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::AddSelection);
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1, own_division_2].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::AddSelection);
 
         app.update();
 
-        let registry = app.world().resource::<ArmyGroupRegistry>();
+        let registry = app.world().resource::<ArmyRegistry>();
         assert_eq!(
-            registry.groups[&group_id].member_army_ids,
-            vec![own_army_1, own_army_2]
+            registry.armies[&group_id].member_division_ids,
+            vec![own_division_1, own_division_2]
         );
-        assert_eq!(registry.group_for_army(own_army_2), Some(group_id));
+        assert_eq!(registry.army_for_division(own_division_2), Some(group_id));
     }
 
     #[test]
-    fn handle_army_group_command_buttons_remove_selection() {
-        let (mut app, own_army_1, own_army_2, _enemy_army) = build_army_group_command_test_app();
-        let group_id = create_test_group(&mut app, CountryId(1), &[own_army_1, own_army_2]);
+    fn handle_army_command_buttons_remove_selection() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) = build_army_command_test_app();
+        let group_id = create_test_group(&mut app, CountryId(1), &[own_division_1, own_division_2]);
 
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::RemoveSelection);
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::RemoveSelection);
 
         app.update();
 
-        let registry = app.world().resource::<ArmyGroupRegistry>();
-        assert_eq!(registry.group_for_army(own_army_1), None);
-        assert_eq!(registry.groups[&group_id].member_army_ids, vec![own_army_2]);
+        let registry = app.world().resource::<ArmyRegistry>();
+        assert_eq!(registry.army_for_division(own_division_1), None);
+        assert_eq!(registry.armies[&group_id].member_division_ids, vec![own_division_2]);
     }
 
     #[test]
-    fn handle_army_group_command_buttons_select_group_expands_selection() {
-        let (mut app, own_army_1, own_army_2, _enemy_army) = build_army_group_command_test_app();
-        create_test_group(&mut app, CountryId(1), &[own_army_1, own_army_2]);
+    fn handle_army_command_buttons_select_group_expands_selection() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) = build_army_command_test_app();
+        create_test_group(&mut app, CountryId(1), &[own_division_1, own_division_2]);
 
         // 師団1だけを選択した状態から「軍を選択」を押す
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::SelectGroup);
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::SelectArmy);
 
         app.update();
 
-        let selected = app.world().resource::<SelectedArmy>();
+        let selected = app.world().resource::<SelectedDivision>();
         assert_eq!(selected.len(), 2);
-        assert!(selected.is_selected(own_army_1));
-        assert!(selected.is_selected(own_army_2));
+        assert!(selected.is_selected(own_division_1));
+        assert!(selected.is_selected(own_division_2));
     }
 
     #[test]
-    fn handle_army_group_command_buttons_disband_returns_members_to_unassigned() {
-        let (mut app, own_army_1, own_army_2, _enemy_army) = build_army_group_command_test_app();
-        let group_id = create_test_group(&mut app, CountryId(1), &[own_army_1, own_army_2]);
+    fn handle_army_command_buttons_disband_returns_members_to_unassigned() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) = build_army_command_test_app();
+        let group_id = create_test_group(&mut app, CountryId(1), &[own_division_1, own_division_2]);
 
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::Disband);
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::Disband);
 
         app.update();
 
-        let registry = app.world().resource::<ArmyGroupRegistry>();
-        assert!(!registry.groups.contains_key(&group_id));
-        assert_eq!(registry.group_for_army(own_army_1), None);
-        assert_eq!(registry.group_for_army(own_army_2), None);
+        let registry = app.world().resource::<ArmyRegistry>();
+        assert!(!registry.armies.contains_key(&group_id));
+        assert_eq!(registry.army_for_division(own_division_1), None);
+        assert_eq!(registry.army_for_division(own_division_2), None);
     }
 
     #[test]
-    fn handle_army_group_command_buttons_fires_once_per_press() {
-        let (mut app, own_army_1, own_army_2, _enemy_army) = build_army_group_command_test_app();
-        app.world_mut().resource_mut::<SelectedArmy>().army_ids =
-            [own_army_1, own_army_2].into_iter().collect();
-        app.add_systems(Update, handle_army_group_command_buttons);
-        press_army_group_command_button(&mut app, ArmyGroupCommand::Create);
+    fn handle_army_command_buttons_fires_once_per_press() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) = build_army_command_test_app();
+        app.world_mut().resource_mut::<SelectedDivision>().division_ids =
+            [own_division_1, own_division_2].into_iter().collect();
+        app.add_systems(Update, handle_army_command_buttons);
+        press_army_command_button(&mut app, ArmyCommand::Create);
 
         app.update();
-        assert_eq!(app.world().resource::<ArmyGroupRegistry>().groups.len(), 1);
+        assert_eq!(app.world().resource::<ArmyRegistry>().armies.len(), 1);
 
         // 作成後、Interactionを変化させないまま再度updateしても2件目は作られない
         app.update();
         assert_eq!(
-            app.world().resource::<ArmyGroupRegistry>().groups.len(),
+            app.world().resource::<ArmyRegistry>().armies.len(),
             1,
             "without a new Interaction change, the button must not fire again"
         );

@@ -9,16 +9,16 @@ pub fn process_supply(
     let mut state_supply_usage: HashMap<crate::common::StateId, f32> = HashMap::new();
 
     // Calculate total usage per state
-    for army in military_registry.armies.values() {
+    for division in military_registry.divisions.values() {
         let usage = military_registry
             .definitions
-            .get(&army.def_id)
+            .get(&division.def_id)
             .map(|d| d.supply_usage)
             .unwrap_or(1.0);
-        *state_supply_usage.entry(army.current_state).or_insert(0.0) += usage;
+        *state_supply_usage.entry(division.current_state).or_insert(0.0) += usage;
     }
 
-    // Update state logistics ratio and apply to armies
+    // Update state logistics ratio and apply to divisions
     for (state_id, usage) in state_supply_usage.into_iter() {
         if let Some(state) = state_registry.get_mut(state_id) {
             state.logistics_usage = usage;
@@ -31,10 +31,10 @@ pub fn process_supply(
         }
     }
 
-    // Apply ratio to armies
-    for army in military_registry.armies.values_mut() {
-        if let Some(state) = state_registry.get(army.current_state) {
-            army.supply_ratio = state.logistics_ratio;
+    // Apply ratio to divisions
+    for division in military_registry.divisions.values_mut() {
+        if let Some(state) = state_registry.get(division.current_state) {
+            division.supply_ratio = state.logistics_ratio;
         }
     }
 }

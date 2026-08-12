@@ -10,13 +10,13 @@ pub struct CountryId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StateId(pub usize);
 
-/// 軍隊を一意に識別するID型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ArmyId(pub usize);
-
-/// 師団・部隊定義を一意に識別するID型
+/// 個別師団インスタンスを一意に識別するID型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DivisionId(pub usize);
+
+/// 師団・部隊定義(テンプレート)を一意に識別するID型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DivisionDefinitionId(pub usize);
 
 /// 戦争を一意に識別するID型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -42,7 +42,9 @@ pub struct BattleId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FrontlineId(pub usize);
 
-/// 編成(複数師団の永続的な集合、いわゆる「軍」)を一意に識別するID型。
-/// 既存の`ArmyId`(1師団)と紛らわしいため、複数師団の集合は「ArmyGroup」と呼ぶ。
+/// 軍(複数師団の永続的な集合)を一意に識別するID型。
+/// 個別師団は`DivisionId`。複数の軍を束ねる上位階層(軍集団)を将来追加する場合は
+/// 「ArmyGroup」の名称をそちらのために予約し、この型とは別名にすること
+/// (P21-004R: この階層名は現時点で唯一のもの)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ArmyGroupId(pub usize);
+pub struct ArmyId(pub usize);

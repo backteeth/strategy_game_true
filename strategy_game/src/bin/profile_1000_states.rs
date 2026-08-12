@@ -248,7 +248,7 @@ fn run_one(scale: usize, scenario: Scenario) -> RunResult {
 fn write_results_csv(path: &Path, results: &[RunResult]) {
     let mut csv = String::new();
     csv.push_str(
-        "scale,scenario,state_count,country_count,army_initial,war_initial,army_final,war_active_final,frontline_final,battle_final,ecs_entity_count,init_ms,warmup_days,measured_days,mean_ms,median_ms,p95_ms,min_ms,max_ms,ticks_per_sec,treasury_before,treasury_after,treasury_changed,population_before,population_after,population_changed,memory_bytes,peak_memory_bytes\n",
+        "scale,scenario,state_count,country_count,division_initial,war_initial,division_final,war_active_final,frontline_final,battle_final,ecs_entity_count,init_ms,warmup_days,measured_days,mean_ms,median_ms,p95_ms,min_ms,max_ms,ticks_per_sec,treasury_before,treasury_after,treasury_changed,population_before,population_after,population_changed,memory_bytes,peak_memory_bytes\n",
     );
     for r in results {
         csv.push_str(&format!(
@@ -257,9 +257,9 @@ fn write_results_csv(path: &Path, results: &[RunResult]) {
             r.scenario.label(),
             r.workload.state_count,
             r.workload.country_count,
-            r.workload.initial_army_count,
+            r.workload.initial_division_count,
             r.workload.initial_war_count,
-            r.runtime_after.army_count,
+            r.runtime_after.division_count,
             r.runtime_after.active_war_count,
             r.runtime_after.frontline_count,
             r.runtime_after.battle_count,
@@ -327,16 +327,16 @@ fn write_results_json(path: &Path, results: &[RunResult]) {
             r.workload.country_count
         ));
         json.push_str(&format!(
-            "      \"army_initial\": {},\n",
-            r.workload.initial_army_count
+            "      \"division_initial\": {},\n",
+            r.workload.initial_division_count
         ));
         json.push_str(&format!(
             "      \"war_initial\": {},\n",
             r.workload.initial_war_count
         ));
         json.push_str(&format!(
-            "      \"army_final\": {},\n",
-            r.runtime_after.army_count
+            "      \"division_final\": {},\n",
+            r.runtime_after.division_count
         ));
         json.push_str(&format!(
             "      \"war_active_final\": {},\n",
@@ -419,11 +419,11 @@ fn write_summary_txt(path: &Path, results: &[RunResult]) {
             r.scenario.label()
         ));
         out.push_str(&format!(
-            "  states={} countries={} armies(init={} final={}) wars(init={} active_final={}) frontlines_final={} battles_final={} ecs_entity_count={}\n",
+            "  states={} countries={} divisions(init={} final={}) wars(init={} active_final={}) frontlines_final={} battles_final={} ecs_entity_count={}\n",
             r.workload.state_count,
             r.workload.country_count,
-            r.workload.initial_army_count,
-            r.runtime_after.army_count,
+            r.workload.initial_division_count,
+            r.runtime_after.division_count,
             r.workload.initial_war_count,
             r.runtime_after.active_war_count,
             r.runtime_after.frontline_count,

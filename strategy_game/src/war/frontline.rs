@@ -1,6 +1,6 @@
 use crate::app::time::DayChangedMessage;
-use crate::common::{ArmyId, CountryId, FrontlineId, StateId, WarId};
-use crate::military::data::{ArmyStatus, MilitaryRegistry};
+use crate::common::{DivisionId, CountryId, FrontlineId, StateId, WarId};
+use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::military::pathfinding::find_path;
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarRegistry, WarStatus};
@@ -50,7 +50,7 @@ pub struct FrontlinePlan {
     pub commanding_country_id: CountryId,
     pub stance: FrontlineStance,
     pub objective_region_id: Option<StateId>,
-    pub assigned_army_ids: Vec<ArmyId>,
+    pub assigned_division_ids: Vec<DivisionId>,
 }
 
 impl FrontlinePlan {
@@ -60,7 +60,7 @@ impl FrontlinePlan {
             commanding_country_id,
             stance: FrontlineStance::Stopped,
             objective_region_id: None,
-            assigned_army_ids: Vec::new(),
+            assigned_division_ids: Vec::new(),
         }
     }
 }
@@ -72,10 +72,10 @@ pub struct FrontlineRegistry {
     /// key: (FrontlineId, CountryId)
     pub plans: HashMap<(FrontlineId, CountryId), FrontlinePlan>,
     pub next_frontline_id: usize,
-    /// ArmyId -> FrontlineId のマッピング（1陸軍は1前線のみ所属）
-    pub army_frontline_map: HashMap<ArmyId, FrontlineId>,
+    /// DivisionId -> FrontlineId のマッピング（1陸軍は1前線のみ所属）
+    pub division_frontline_map: HashMap<DivisionId, FrontlineId>,
     /// 前線によって自動生成された移動命令を実行中の陸軍セット
-    pub frontline_generated_movements: HashSet<ArmyId>,
+    pub frontline_generated_movements: HashSet<DivisionId>,
 }
 
 impl FrontlineRegistry {
@@ -115,9 +115,9 @@ impl FrontlineRegistry {
     }
 
     /// 陸軍を前線へ割り当てる
-    pub fn assign_army(
+    pub fn assign_division(
         &mut self,
-        army_id: ArmyId,
+        division_id: DivisionId,
         frontline_id: FrontlineId,
         country_id: CountryId,
         military_registry: &MilitaryRegistry,
@@ -142,22 +142,22 @@ impl FrontlineRegistry {
             return Err("Country is not a participant in this frontline");
         }
 
-        let army = military_registry
-            .armies
-            .get(&army_id)
-            .ok_or("Army not found")?;
-        if army.owner != country_id {
-            return Err("Army belongs to a different country");
+        let division = military_registry
+            .divisions
+            .get(&division_id)
+            .ok_or("Division not found")?;
+        if division.owner != country_id {
+            return Err("Division belongs to a different country");
         }
-        if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
-            return Err("Army is destroyed or has 0 manpower");
+        if division.manpower == 0 || division.status == DivisionStatus::Destroyed {
+            return Err("Division is destroyed or has 0 manpower");
         }
 
         // 他の前線からの割当解除
-        if let Some(old_fl_id) = self.army_frontline_map.remove(&army_id)
+        if let Some(old_fl_id) = self.division_frontline_map.remove(&division_id)
             && let Some(old_plan) = self.plans.get_mut(&(old_fl_id, country_id))
         {
-            old_plan.assigned_army_ids.retain(|&id| id != army_id);
+            old_plan.assigned_division_ids.retain(|&id| id != division_id);
         }
 
         // 対象Planの取得または作成
@@ -166,55 +166,55 @@ impl FrontlineRegistry {
             .entry((frontline_id, country_id))
             .or_insert_with(|| FrontlinePlan::new(frontline_id, country_id));
 
-        if !plan.assigned_army_ids.contains(&army_id) {
-            plan.assigned_army_ids.push(army_id);
-            plan.assigned_army_ids.sort_by_key(|id| id.0);
+        if !plan.assigned_division_ids.contains(&division_id) {
+            plan.assigned_division_ids.push(division_id);
+            plan.assigned_division_ids.sort_by_key(|id| id.0);
         }
 
-        self.army_frontline_map.insert(army_id, frontline_id);
+        self.division_frontline_map.insert(division_id, frontline_id);
         Ok(())
     }
 
     /// 陸軍の前線割り当てを解除する
     ///
     /// `country_id`の陸軍であることを検証してから解除する。P21-002以前は所有者検証が
-    /// 存在せず、選択中の陸軍(所有者不問で選択可能、`map::army_selection`参照)が
+    /// 存在せず、選択中の陸軍(所有者不問で選択可能、`map::division_selection`参照)が
     /// 敵国や第三国の陸軍であっても無条件に前線割り当てを解除できてしまっていた。
-    pub fn unassign_army(
+    pub fn unassign_division(
         &mut self,
-        army_id: ArmyId,
+        division_id: DivisionId,
         country_id: CountryId,
         military_registry: &MilitaryRegistry,
     ) -> Result<(), &'static str> {
-        let army = military_registry
-            .armies
-            .get(&army_id)
-            .ok_or("Army not found")?;
-        if army.owner != country_id {
-            return Err("Army belongs to a different country");
+        let division = military_registry
+            .divisions
+            .get(&division_id)
+            .ok_or("Division not found")?;
+        if division.owner != country_id {
+            return Err("Division belongs to a different country");
         }
 
-        if let Some(fl_id) = self.army_frontline_map.remove(&army_id) {
+        if let Some(fl_id) = self.division_frontline_map.remove(&division_id) {
             for plan in self.plans.values_mut() {
                 if plan.frontline_id == fl_id {
-                    plan.assigned_army_ids.retain(|&id| id != army_id);
+                    plan.assigned_division_ids.retain(|&id| id != division_id);
                 }
             }
         }
-        self.frontline_generated_movements.remove(&army_id);
+        self.frontline_generated_movements.remove(&division_id);
         Ok(())
     }
 
     /// 前線の全陸軍割当を解除する
-    pub fn unassign_all_armies_for_plan(
+    pub fn unassign_all_divisions_for_plan(
         &mut self,
         frontline_id: FrontlineId,
         country_id: CountryId,
     ) {
         if let Some(plan) = self.plans.get_mut(&(frontline_id, country_id)) {
-            for army_id in plan.assigned_army_ids.drain(..) {
-                self.army_frontline_map.remove(&army_id);
-                self.frontline_generated_movements.remove(&army_id);
+            for division_id in plan.assigned_division_ids.drain(..) {
+                self.division_frontline_map.remove(&division_id);
+                self.frontline_generated_movements.remove(&division_id);
             }
         }
     }
@@ -245,24 +245,24 @@ impl FrontlineRegistry {
 
         // 各Plan内の無効陸軍（削除済み、戦力0）の整理
         for plan in self.plans.values_mut() {
-            plan.assigned_army_ids.retain(|&army_id| {
-                if let Some(army) = military_registry.armies.get(&army_id) {
-                    army.manpower > 0
-                        && army.status != ArmyStatus::Destroyed
-                        && army.owner == plan.commanding_country_id
+            plan.assigned_division_ids.retain(|&division_id| {
+                if let Some(division) = military_registry.divisions.get(&division_id) {
+                    division.manpower > 0
+                        && division.status != DivisionStatus::Destroyed
+                        && division.owner == plan.commanding_country_id
                 } else {
                     false
                 }
             });
         }
 
-        // army_frontline_map の整理
-        self.army_frontline_map.retain(|army_id, fl_id| {
+        // division_frontline_map の整理
+        self.division_frontline_map.retain(|division_id, fl_id| {
             if !self.frontlines.contains_key(fl_id) {
                 return false;
             }
-            if let Some(army) = military_registry.armies.get(army_id) {
-                army.manpower > 0 && army.status != ArmyStatus::Destroyed
+            if let Some(division) = military_registry.divisions.get(division_id) {
+                division.manpower > 0 && division.status != DivisionStatus::Destroyed
             } else {
                 false
             }
@@ -270,7 +270,7 @@ impl FrontlineRegistry {
 
         // frontline_generated_movements の整理
         self.frontline_generated_movements
-            .retain(|army_id| military_registry.armies.contains_key(army_id));
+            .retain(|division_id| military_registry.divisions.contains_key(division_id));
     }
 
     /// 前線と関連データを削除する
@@ -290,9 +290,9 @@ impl FrontlineRegistry {
 
         for key in plan_keys {
             if let Some(plan) = self.plans.remove(&key) {
-                for army_id in plan.assigned_army_ids {
-                    self.army_frontline_map.remove(&army_id);
-                    self.frontline_generated_movements.remove(&army_id);
+                for division_id in plan.assigned_division_ids {
+                    self.division_frontline_map.remove(&division_id);
+                    self.frontline_generated_movements.remove(&division_id);
                 }
             }
         }
@@ -309,10 +309,10 @@ impl FrontlineRegistry {
 pub enum FrontlineCommandFeasibility {
     Ready,
     NoActiveFrontline,
-    NoArmySelected,
-    ArmyNotFound,
-    NotOwnArmy,
-    ArmyDestroyed,
+    NoDivisionSelected,
+    DivisionNotFound,
+    NotOwnDivision,
+    DivisionDestroyed,
 }
 
 impl FrontlineCommandFeasibility {
@@ -323,33 +323,33 @@ impl FrontlineCommandFeasibility {
 
 /// 選択中の陸軍を前線へ割当/解除する操作が可能かを判定する。
 ///
-/// `selected_army_id`は所有者を問わず選択され得る(`map::army_selection::handle_army_selection`
-/// 参照)ため、ここで所有者を必ず再検証する。`assign_army`/`unassign_army`実行時にも
+/// `selected_division_id`は所有者を問わず選択され得る(`map::division_selection::handle_division_selection`
+/// 参照)ため、ここで所有者を必ず再検証する。`assign_division`/`unassign_division`実行時にも
 /// 同じ検証を行うため、この関数の結果は表示専用であり実行の可否を最終的に保証するのは
-/// 実行系側(`assign_army`/`unassign_army`自身)である。
-fn evaluate_single_army_command_feasibility(
-    army_id: ArmyId,
+/// 実行系側(`assign_division`/`unassign_division`自身)である。
+fn evaluate_single_division_command_feasibility(
+    division_id: DivisionId,
     player_cid: CountryId,
     military_registry: &MilitaryRegistry,
 ) -> FrontlineCommandFeasibility {
-    let Some(army) = military_registry.armies.get(&army_id) else {
-        return FrontlineCommandFeasibility::ArmyNotFound;
+    let Some(division) = military_registry.divisions.get(&division_id) else {
+        return FrontlineCommandFeasibility::DivisionNotFound;
     };
-    if army.owner != player_cid {
-        return FrontlineCommandFeasibility::NotOwnArmy;
+    if division.owner != player_cid {
+        return FrontlineCommandFeasibility::NotOwnDivision;
     }
-    if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
-        return FrontlineCommandFeasibility::ArmyDestroyed;
+    if division.manpower == 0 || division.status == DivisionStatus::Destroyed {
+        return FrontlineCommandFeasibility::DivisionDestroyed;
     }
     FrontlineCommandFeasibility::Ready
 }
 
-/// P21-003: 複数選択に対応。`selected_army_ids`のうち1件でも実行可能ならReadyを返す
+/// P21-003: 複数選択に対応。`selected_division_ids`のうち1件でも実行可能ならReadyを返す
 /// (複数選択時は一部の陸軍だけでも割当/解除が成立すれば十分なため)。全滅なら、
-/// `selected_army_ids`をArmyId昇順に評価した最初の失敗理由を返す(呼び出し側が
+/// `selected_division_ids`をDivisionId昇順に評価した最初の失敗理由を返す(呼び出し側が
 /// ソート済みの配列を渡すことで結果を決定的にする)。
-pub fn evaluate_frontline_army_command_feasibility(
-    selected_army_ids: &[ArmyId],
+pub fn evaluate_frontline_division_command_feasibility(
+    selected_division_ids: &[DivisionId],
     player_cid: CountryId,
     military_registry: &MilitaryRegistry,
     frontline: Option<&Frontline>,
@@ -357,18 +357,18 @@ pub fn evaluate_frontline_army_command_feasibility(
     if frontline.is_none() {
         return FrontlineCommandFeasibility::NoActiveFrontline;
     }
-    if selected_army_ids.is_empty() {
-        return FrontlineCommandFeasibility::NoArmySelected;
+    if selected_division_ids.is_empty() {
+        return FrontlineCommandFeasibility::NoDivisionSelected;
     }
 
-    let mut first_failure = FrontlineCommandFeasibility::NoArmySelected;
-    for &army_id in selected_army_ids {
+    let mut first_failure = FrontlineCommandFeasibility::NoDivisionSelected;
+    for &division_id in selected_division_ids {
         let result =
-            evaluate_single_army_command_feasibility(army_id, player_cid, military_registry);
+            evaluate_single_division_command_feasibility(division_id, player_cid, military_registry);
         if result == FrontlineCommandFeasibility::Ready {
             return FrontlineCommandFeasibility::Ready;
         }
-        if first_failure == FrontlineCommandFeasibility::NoArmySelected {
+        if first_failure == FrontlineCommandFeasibility::NoDivisionSelected {
             first_failure = result;
         }
     }
@@ -584,7 +584,7 @@ pub fn process_defensive_plan(
         &frontline.defender_front_regions
     };
 
-    if front_regions.is_empty() || plan.assigned_army_ids.is_empty() {
+    if front_regions.is_empty() || plan.assigned_division_ids.is_empty() {
         return;
     }
 
@@ -592,51 +592,51 @@ pub fn process_defensive_plan(
     let mut region_counts: HashMap<StateId, usize> =
         front_regions.iter().map(|&r| (r, 0)).collect();
 
-    for &army_id in &plan.assigned_army_ids {
-        if let Some(army) = military_registry.armies.get(&army_id) {
-            let target = army.destination.unwrap_or(army.current_state);
+    for &division_id in &plan.assigned_division_ids {
+        if let Some(division) = military_registry.divisions.get(&division_id) {
+            let target = division.destination.unwrap_or(division.current_state);
             if region_counts.contains_key(&target) {
                 *region_counts.get_mut(&target).unwrap() += 1;
             }
         }
     }
 
-    // 2. 陸軍をArmyId順で処理し、最適な配置先へ移動指示
-    let mut army_ids = plan.assigned_army_ids.clone();
-    army_ids.sort_by_key(|id| id.0);
+    // 2. 陸軍をDivisionId順で処理し、最適な配置先へ移動指示
+    let mut division_ids = plan.assigned_division_ids.clone();
+    division_ids.sort_by_key(|id| id.0);
 
-    for army_id in army_ids {
-        let army = match military_registry.armies.get(&army_id) {
+    for division_id in division_ids {
+        let division = match military_registry.divisions.get(&division_id) {
             Some(a) => a.clone(),
             None => continue,
         };
 
         // 命令受給可能か判定
-        if army.manpower == 0
-            || army.status == ArmyStatus::Fighting
-            || army.status == ArmyStatus::Retreating
-            || army.status == ArmyStatus::Destroyed
+        if division.manpower == 0
+            || division.status == DivisionStatus::Fighting
+            || division.status == DivisionStatus::Retreating
+            || division.status == DivisionStatus::Destroyed
         {
             continue;
         }
 
         // 手動移動中は上書きしない（frontline_generated_movementsに含まれず、かつMovingの場合はスキップ）
-        if army.status == ArmyStatus::Moving
+        if division.status == DivisionStatus::Moving
             && !frontline_registry
                 .frontline_generated_movements
-                .contains(&army_id)
+                .contains(&division_id)
         {
             continue;
         }
 
         // 既に前線地域におり、待機中の場合
-        if front_regions.contains(&army.current_state) && army.status == ArmyStatus::Idle {
+        if front_regions.contains(&division.current_state) && division.status == DivisionStatus::Idle {
             // 現在地がまだ配置バランス上問題なければ維持
             continue;
         }
 
         // 移動中の場合はカウントを一旦仮減算して再配置決定
-        let curr_target = army.destination.unwrap_or(army.current_state);
+        let curr_target = division.destination.unwrap_or(division.current_state);
         if let Some(count) = region_counts.get_mut(&curr_target) {
             *count = count.saturating_sub(1);
         }
@@ -648,7 +648,7 @@ pub fn process_defensive_plan(
         for &region_id in front_regions {
             let count = *region_counts.get(&region_id).unwrap_or(&0);
             if let Some(path) = find_path(
-                army.current_state,
+                division.current_state,
                 region_id,
                 state_registry,
                 &[country_id],
@@ -668,25 +668,25 @@ pub fn process_defensive_plan(
         if let Some((best_region, _, _)) = candidates.first().copied() {
             *region_counts.entry(best_region).or_default() += 1;
 
-            if army.current_state != best_region
+            if division.current_state != best_region
                 && let Some(path) = find_path(
-                    army.current_state,
+                    division.current_state,
                     best_region,
                     state_registry,
                     &[country_id],
                     &[enemy_id],
                 )
                 && !path.is_empty()
-                && let Some(a_mut) = military_registry.armies.get_mut(&army_id)
+                && let Some(a_mut) = military_registry.divisions.get_mut(&division_id)
             {
                 a_mut.destination = Some(best_region);
                 a_mut.current_path = path;
                 a_mut.target_state = None;
-                a_mut.status = ArmyStatus::Moving;
+                a_mut.status = DivisionStatus::Moving;
                 a_mut.movement_progress = 0.0;
                 frontline_registry
                     .frontline_generated_movements
-                    .insert(army_id);
+                    .insert(division_id);
             }
         }
     }
@@ -760,26 +760,26 @@ pub fn process_offensive_plan(
         &frontline.defender_front_regions
     };
 
-    let mut army_ids = plan.assigned_army_ids.clone();
-    army_ids.sort_by_key(|id| id.0);
+    let mut division_ids = plan.assigned_division_ids.clone();
+    division_ids.sort_by_key(|id| id.0);
 
     let mut daily_target_counts: HashMap<StateId, usize> = HashMap::new();
 
-    for army_id in army_ids {
-        let army = match military_registry.armies.get(&army_id) {
+    for division_id in division_ids {
+        let division = match military_registry.divisions.get(&division_id) {
             Some(a) => a.clone(),
             None => continue,
         };
 
-        if army.status != ArmyStatus::Idle || army.manpower == 0 {
+        if division.status != DivisionStatus::Idle || division.manpower == 0 {
             continue;
         }
 
-        if !front_regions.contains(&army.current_state) {
+        if !front_regions.contains(&division.current_state) {
             continue;
         }
 
-        let curr_state = match state_registry.get(army.current_state) {
+        let curr_state = match state_registry.get(division.current_state) {
             Some(s) => s,
             None => continue,
         };
@@ -833,15 +833,15 @@ pub fn process_offensive_plan(
         if let Some(&best_target) = candidates.first() {
             *daily_target_counts.entry(best_target).or_default() += 1;
 
-            if let Some(a_mut) = military_registry.armies.get_mut(&army_id) {
+            if let Some(a_mut) = military_registry.divisions.get_mut(&division_id) {
                 a_mut.destination = Some(best_target);
                 a_mut.current_path = vec![best_target];
                 a_mut.target_state = None;
-                a_mut.status = ArmyStatus::Moving;
+                a_mut.status = DivisionStatus::Moving;
                 a_mut.movement_progress = 0.0;
                 frontline_registry
                     .frontline_generated_movements
-                    .insert(army_id);
+                    .insert(division_id);
             }
         }
     }
@@ -853,22 +853,22 @@ pub fn process_stopped_plan(
     military_registry: &mut MilitaryRegistry,
     frontline_registry: &mut FrontlineRegistry,
 ) {
-    for &army_id in &plan.assigned_army_ids {
+    for &division_id in &plan.assigned_division_ids {
         if frontline_registry
             .frontline_generated_movements
-            .contains(&army_id)
-            && let Some(army) = military_registry.armies.get_mut(&army_id)
-            && army.status == ArmyStatus::Moving
+            .contains(&division_id)
+            && let Some(division) = military_registry.divisions.get_mut(&division_id)
+            && division.status == DivisionStatus::Moving
         {
-            army.status = ArmyStatus::Idle;
-            army.destination = None;
-            army.current_path.clear();
-            army.target_state = None;
-            army.movement_progress = 0.0;
+            division.status = DivisionStatus::Idle;
+            division.destination = None;
+            division.current_path.clear();
+            division.target_state = None;
+            division.movement_progress = 0.0;
         }
         frontline_registry
             .frontline_generated_movements
-            .remove(&army_id);
+            .remove(&division_id);
     }
 }
 
@@ -970,10 +970,10 @@ pub fn handle_daily_frontline_plans(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{ArmyId, CountryId, DivisionId, StateId, WarId};
+    use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId, WarId};
     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
     use crate::military::data::{
-        ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType,
+        DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType,
     };
     use crate::state::data::StateData;
 
@@ -1041,9 +1041,9 @@ mod tests {
 
         // 師団定義
         military_registry.definitions.insert(
-            DivisionId(1),
+            DivisionDefinitionId(1),
             DivisionDefinition {
-                id: DivisionId(1),
+                id: DivisionDefinitionId(1),
                 name: "Infantry".to_string(),
                 division_type: DivisionType::Infantry,
                 size: DivisionSize::Standard,
@@ -1154,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_army_assignment_and_validation() {
+    fn test_division_assignment_and_validation() {
         let (state_registry, war_registry, mut military_registry, mut frontline_registry) =
             setup_test_environment();
         update_all_frontlines(
@@ -1169,8 +1169,8 @@ mod tests {
             .frontline_id;
 
         // C1の有効な陸軍を追加
-        let a1 = ArmyUnit {
-            id: ArmyId(0),
+        let a1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1189,28 +1189,28 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let army_id = military_registry.add_army(a1);
+        let division_id = military_registry.add_division(a1);
 
         // C3 (無関係な国) の陸軍
-        let a2 = ArmyUnit {
-            id: ArmyId(1),
+        let a2 = Division {
+            id: DivisionId(1),
             owner: CountryId(3),
             manpower: 1000,
-            ..military_registry.armies.get(&army_id).unwrap().clone()
+            ..military_registry.divisions.get(&division_id).unwrap().clone()
         };
-        let other_army_id = military_registry.add_army(a2);
+        let other_division_id = military_registry.add_division(a2);
 
         // 割当成功の検証
         assert!(
             frontline_registry
-                .assign_army(
-                    army_id,
+                .assign_division(
+                    division_id,
                     fl_id,
                     CountryId(1),
                     &military_registry,
@@ -1219,15 +1219,15 @@ mod tests {
                 .is_ok()
         );
         assert_eq!(
-            frontline_registry.army_frontline_map.get(&army_id),
+            frontline_registry.division_frontline_map.get(&division_id),
             Some(&fl_id)
         );
 
         // 重複登録の防止
         assert!(
             frontline_registry
-                .assign_army(
-                    army_id,
+                .assign_division(
+                    division_id,
                     fl_id,
                     CountryId(1),
                     &military_registry,
@@ -1237,9 +1237,9 @@ mod tests {
         );
         let plan = frontline_registry.get_plan(fl_id, CountryId(1)).unwrap();
         assert_eq!(
-            plan.assigned_army_ids
+            plan.assigned_division_ids
                 .iter()
-                .filter(|&&id| id == army_id)
+                .filter(|&&id| id == division_id)
                 .count(),
             1
         );
@@ -1247,8 +1247,8 @@ mod tests {
         // 他国陸軍の割り当て拒否
         assert!(
             frontline_registry
-                .assign_army(
-                    other_army_id,
+                .assign_division(
+                    other_division_id,
                     fl_id,
                     CountryId(1),
                     &military_registry,
@@ -1260,17 +1260,17 @@ mod tests {
         // 解除
         assert!(
             frontline_registry
-                .unassign_army(army_id, CountryId(1), &military_registry)
+                .unassign_division(division_id, CountryId(1), &military_registry)
                 .is_ok()
         );
-        assert!(!frontline_registry.army_frontline_map.contains_key(&army_id));
+        assert!(!frontline_registry.division_frontline_map.contains_key(&division_id));
     }
 
-    /// P21-002回帰テスト: `unassign_army`は所有者と異なる`country_id`を渡すと拒否し、
+    /// P21-002回帰テスト: `unassign_division`は所有者と異なる`country_id`を渡すと拒否し、
     /// 割当状態を一切変更しない。UI経由(選択中陸軍は所有者不問で選択され得る)で
     /// 他国の前線割当を無断解除できてしまう不具合の修正確認。
     #[test]
-    fn test_unassign_army_rejects_non_owner() {
+    fn test_unassign_division_rejects_non_owner() {
         let (state_registry, war_registry, mut military_registry, mut frontline_registry) =
             setup_test_environment();
         update_all_frontlines(
@@ -1284,8 +1284,8 @@ mod tests {
             .unwrap()
             .frontline_id;
 
-        let a1 = ArmyUnit {
-            id: ArmyId(0),
+        let a1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1304,16 +1304,16 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let army_id = military_registry.add_army(a1);
+        let division_id = military_registry.add_division(a1);
         frontline_registry
-            .assign_army(
-                army_id,
+            .assign_division(
+                division_id,
                 fl_id,
                 CountryId(1),
                 &military_registry,
@@ -1322,24 +1322,24 @@ mod tests {
             .unwrap();
 
         // CountryId(1)の陸軍を、無関係な第三国CountryId(3)として解除しようとすると拒否される
-        let result = frontline_registry.unassign_army(army_id, CountryId(3), &military_registry);
+        let result = frontline_registry.unassign_division(division_id, CountryId(3), &military_registry);
         assert!(result.is_err());
         assert_eq!(
-            frontline_registry.army_frontline_map.get(&army_id),
+            frontline_registry.division_frontline_map.get(&division_id),
             Some(&fl_id),
             "unauthorized unassign must not change the assignment"
         );
         let plan = frontline_registry.get_plan(fl_id, CountryId(1)).unwrap();
-        assert!(plan.assigned_army_ids.contains(&army_id));
+        assert!(plan.assigned_division_ids.contains(&division_id));
 
         // 存在しない陸軍IDも拒否される
         let result_missing =
-            frontline_registry.unassign_army(ArmyId(999), CountryId(1), &military_registry);
+            frontline_registry.unassign_division(DivisionId(999), CountryId(1), &military_registry);
         assert!(result_missing.is_err());
     }
 
     #[test]
-    fn test_evaluate_frontline_army_command_feasibility() {
+    fn test_evaluate_frontline_division_command_feasibility() {
         let (state_registry, war_registry, mut military_registry, mut frontline_registry) =
             setup_test_environment();
         update_all_frontlines(
@@ -1355,7 +1355,7 @@ mod tests {
 
         // 前線が存在しない場合
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
+            evaluate_frontline_division_command_feasibility(
                 &[],
                 CountryId(1),
                 &military_registry,
@@ -1366,17 +1366,17 @@ mod tests {
 
         // 前線はあるが陸軍未選択
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
+            evaluate_frontline_division_command_feasibility(
                 &[],
                 CountryId(1),
                 &military_registry,
                 Some(&frontline),
             ),
-            FrontlineCommandFeasibility::NoArmySelected
+            FrontlineCommandFeasibility::NoDivisionSelected
         );
 
-        let a1 = ArmyUnit {
-            id: ArmyId(0),
+        let a1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1395,18 +1395,18 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let army_id = military_registry.add_army(a1);
+        let division_id = military_registry.add_division(a1);
 
         // 自国の有効な陸軍を選択中 → Ready
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
-                &[army_id],
+            evaluate_frontline_division_command_feasibility(
+                &[division_id],
                 CountryId(1),
                 &military_registry,
                 Some(&frontline),
@@ -1414,32 +1414,32 @@ mod tests {
             FrontlineCommandFeasibility::Ready
         );
 
-        // 他国の陸軍を選択中(所有者不問で選択され得るため) → NotOwnArmy
+        // 他国の陸軍を選択中(所有者不問で選択され得るため) → NotOwnDivision
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
-                &[army_id],
+            evaluate_frontline_division_command_feasibility(
+                &[division_id],
                 CountryId(2),
                 &military_registry,
                 Some(&frontline),
             ),
-            FrontlineCommandFeasibility::NotOwnArmy
+            FrontlineCommandFeasibility::NotOwnDivision
         );
 
-        // 存在しない陸軍IDを選択中 → ArmyNotFound
+        // 存在しない陸軍IDを選択中 → DivisionNotFound
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
-                &[ArmyId(999)],
+            evaluate_frontline_division_command_feasibility(
+                &[DivisionId(999)],
                 CountryId(1),
                 &military_registry,
                 Some(&frontline),
             ),
-            FrontlineCommandFeasibility::ArmyNotFound
+            FrontlineCommandFeasibility::DivisionNotFound
         );
 
         // P21-003: 複数選択のうち1件でも実行可能ならReady
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
-                &[ArmyId(999), army_id],
+            evaluate_frontline_division_command_feasibility(
+                &[DivisionId(999), division_id],
                 CountryId(1),
                 &military_registry,
                 Some(&frontline),
@@ -1447,15 +1447,15 @@ mod tests {
             FrontlineCommandFeasibility::Ready
         );
 
-        // P21-003: 全滅の場合は先頭(ArmyId昇順)の失敗理由を返す
+        // P21-003: 全滅の場合は先頭(DivisionId昇順)の失敗理由を返す
         assert_eq!(
-            evaluate_frontline_army_command_feasibility(
-                &[army_id, ArmyId(999)],
+            evaluate_frontline_division_command_feasibility(
+                &[division_id, DivisionId(999)],
                 CountryId(2),
                 &military_registry,
                 Some(&frontline),
             ),
-            FrontlineCommandFeasibility::NotOwnArmy
+            FrontlineCommandFeasibility::NotOwnDivision
         );
     }
 
@@ -1475,8 +1475,8 @@ mod tests {
             .frontline_id;
 
         // C1の陸軍を追加 (State 1に待機中)
-        let a1 = ArmyUnit {
-            id: ArmyId(0),
+        let a1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1495,15 +1495,15 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let army_id = military_registry.add_army(a1);
-        let _ = frontline_registry.assign_army(
-            army_id,
+        let division_id = military_registry.add_division(a1);
+        let _ = frontline_registry.assign_division(
+            division_id,
             fl_id,
             CountryId(1),
             &military_registry,
@@ -1524,10 +1524,10 @@ mod tests {
         );
 
         // 割当部隊が自国側前線 State 2 へ向かって移動を開始したことを確認
-        let army = military_registry.armies.get(&army_id).unwrap();
-        assert_eq!(army.status, ArmyStatus::Moving);
-        assert_eq!(army.destination, Some(StateId(2)));
-        assert_eq!(army.current_path, vec![StateId(2)]);
+        let division = military_registry.divisions.get(&division_id).unwrap();
+        assert_eq!(division.status, DivisionStatus::Moving);
+        assert_eq!(division.destination, Some(StateId(2)));
+        assert_eq!(division.current_path, vec![StateId(2)]);
     }
 
     #[test]
@@ -1546,8 +1546,8 @@ mod tests {
             .frontline_id;
 
         // C1の陸軍を追加 (既に自国側前線 State 2 に待機中)
-        let a1 = ArmyUnit {
-            id: ArmyId(0),
+        let a1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1566,15 +1566,15 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let army_id = military_registry.add_army(a1);
-        let _ = frontline_registry.assign_army(
-            army_id,
+        let division_id = military_registry.add_division(a1);
+        let _ = frontline_registry.assign_division(
+            division_id,
             fl_id,
             CountryId(1),
             &military_registry,
@@ -1595,9 +1595,9 @@ mod tests {
         );
 
         // 待機中の部隊が隣接する戦争目標 State 3 へ進軍を開始したことを検証
-        let army = military_registry.armies.get(&army_id).unwrap();
-        assert_eq!(army.status, ArmyStatus::Moving);
-        assert_eq!(army.destination, Some(StateId(3)));
+        let division = military_registry.divisions.get(&division_id).unwrap();
+        assert_eq!(division.status, DivisionStatus::Moving);
+        assert_eq!(division.destination, Some(StateId(3)));
     }
 
     #[test]
@@ -1615,8 +1615,8 @@ mod tests {
             .unwrap()
             .frontline_id;
 
-        let a1 = ArmyUnit {
-            id: ArmyId(0),
+        let a1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -1635,15 +1635,15 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let army_id = military_registry.add_army(a1);
-        let _ = frontline_registry.assign_army(
-            army_id,
+        let division_id = military_registry.add_division(a1);
+        let _ = frontline_registry.assign_division(
+            division_id,
             fl_id,
             CountryId(1),
             &military_registry,
@@ -1651,10 +1651,10 @@ mod tests {
         );
 
         // プレイヤーが手動で移動指示を出した想定
-        if let Some(army) = military_registry.armies.get_mut(&army_id) {
-            army.status = ArmyStatus::Moving;
-            army.destination = Some(StateId(2));
-            army.current_path = vec![StateId(2)];
+        if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+            division.status = DivisionStatus::Moving;
+            division.destination = Some(StateId(2));
+            division.current_path = vec![StateId(2)];
         }
         // frontline_generated_movements に含まれていない＝手動移動
 
@@ -1671,9 +1671,9 @@ mod tests {
             None,
         );
 
-        let army = military_registry.armies.get(&army_id).unwrap();
-        assert_eq!(army.status, ArmyStatus::Moving);
-        assert_eq!(army.destination, Some(StateId(2)));
+        let division = military_registry.divisions.get(&division_id).unwrap();
+        assert_eq!(division.status, DivisionStatus::Moving);
+        assert_eq!(division.destination, Some(StateId(2)));
 
         // 停止命令 (Stopped) を出しても、手動移動経路は解除されない
         if let Some(plan) = frontline_registry.get_plan_mut(fl_id, CountryId(1)) {
@@ -1688,8 +1688,8 @@ mod tests {
             None,
         );
 
-        let army_after_stop = military_registry.armies.get(&army_id).unwrap();
-        assert_eq!(army_after_stop.status, ArmyStatus::Moving);
-        assert_eq!(army_after_stop.destination, Some(StateId(2)));
+        let division_after_stop = military_registry.divisions.get(&division_id).unwrap();
+        assert_eq!(division_after_stop.status, DivisionStatus::Moving);
+        assert_eq!(division_after_stop.destination, Some(StateId(2)));
     }
 }

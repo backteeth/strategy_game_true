@@ -1,7 +1,7 @@
 use crate::app::time::DayChangedMessage;
-use crate::common::{ArmyId, CountryId, FrontlineId, StateId};
+use crate::common::{DivisionId, CountryId, FrontlineId, StateId};
 use crate::country::{CountryRegistry, PlayerCountry};
-use crate::military::data::{ArmyStatus, ArmyUnit, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, Division, MilitaryRegistry};
 use crate::military::pathfinding::find_path;
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarRegistry, WarStatus};
@@ -18,7 +18,7 @@ pub enum MilitaryAiDecisionReason {
     #[default]
     NoActiveWar,
     NoValidFrontline,
-    NoAvailableArmy,
+    NoAvailableDivision,
     NoReachableFrontline,
     NoValidTarget,
     Recovering,
@@ -34,7 +34,7 @@ impl MilitaryAiDecisionReason {
         match self {
             MilitaryAiDecisionReason::NoActiveWar => "military_ai_reason.no_active_war",
             MilitaryAiDecisionReason::NoValidFrontline => "military_ai_reason.no_valid_frontline",
-            MilitaryAiDecisionReason::NoAvailableArmy => "military_ai_reason.no_available_army",
+            MilitaryAiDecisionReason::NoAvailableDivision => "military_ai_reason.no_available_division",
             MilitaryAiDecisionReason::NoReachableFrontline => {
                 "military_ai_reason.no_reachable_frontline"
             }
@@ -109,35 +109,35 @@ impl MilitaryAiRegistry {
 }
 
 /// 単一陸軍の有効戦力計算 (manpower * org / max_org)
-pub fn evaluate_army_power(army: &ArmyUnit) -> u64 {
-    if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
+pub fn evaluate_division_power(division: &Division) -> u64 {
+    if division.manpower == 0 || division.status == DivisionStatus::Destroyed {
         return 0;
     }
-    if army.max_organization <= 0.0 {
-        return army.manpower;
+    if division.max_organization <= 0.0 {
+        return division.manpower;
     }
-    let org_ratio = (army.organization / army.max_organization).clamp(0.0, 1.0);
-    ((army.manpower as f64) * (org_ratio as f64)) as u64
+    let org_ratio = (division.organization / division.max_organization).clamp(0.0, 1.0);
+    ((division.manpower as f64) * (org_ratio as f64)) as u64
 }
 
 /// 部隊がAI割当対象として使用可能か検証する
-pub fn is_army_available_for_ai(
-    army: &ArmyUnit,
+pub fn is_division_available_for_ai(
+    division: &Division,
     commanding_country: CountryId,
     frontline_registry: &FrontlineRegistry,
 ) -> bool {
-    if army.owner != commanding_country {
+    if division.owner != commanding_country {
         return false;
     }
-    if army.manpower == 0 || army.status == ArmyStatus::Destroyed {
+    if division.manpower == 0 || division.status == DivisionStatus::Destroyed {
         return false;
     }
     // 戦闘中・撤退中の部隊は新規割当対象にしない（割当済み前線への所属維持は可）
-    if army.status == ArmyStatus::Fighting || army.status == ArmyStatus::Retreating {
+    if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating {
         return false;
     }
     // 既に別の前線に所属している場合は対象外
-    if frontline_registry.army_frontline_map.contains_key(&army.id) {
+    if frontline_registry.division_frontline_map.contains_key(&division.id) {
         return false;
     }
     true
@@ -252,27 +252,27 @@ pub fn evaluate_powers(
 
     // 自軍割り当て部隊の有効戦力合計
     let own_power: u64 = plan
-        .assigned_army_ids
+        .assigned_division_ids
         .iter()
-        .filter_map(|&id| military_registry.armies.get(&id))
-        .filter(|a| a.owner == commanding_country && a.status != ArmyStatus::Destroyed)
-        .map(evaluate_army_power)
+        .filter_map(|&id| military_registry.divisions.get(&id))
+        .filter(|a| a.owner == commanding_country && a.status != DivisionStatus::Destroyed)
+        .map(evaluate_division_power)
         .sum();
 
     // 敵国の全戦闘可能部隊の有効戦力合計
     let enemy_power: u64 = military_registry
-        .armies
+        .divisions
         .values()
         .filter(|a| {
             a.owner == enemy_id
                 && a.manpower > 0
-                && a.status != ArmyStatus::Destroyed
+                && a.status != DivisionStatus::Destroyed
                 && state_registry
                     .get(a.current_state)
                     .map(|s| !s.is_sea)
                     .unwrap_or(false)
         })
-        .map(evaluate_army_power)
+        .map(evaluate_division_power)
         .sum();
 
     (own_power, enemy_power)
@@ -294,23 +294,23 @@ pub fn evaluate_military_ai_decision(
         );
     }
 
-    if plan.assigned_army_ids.is_empty() {
+    if plan.assigned_division_ids.is_empty() {
         return (
             FrontlineStance::Stopped,
-            MilitaryAiDecisionReason::NoAvailableArmy,
+            MilitaryAiDecisionReason::NoAvailableDivision,
         );
     }
 
     // 即応可能な待機・移動中陸軍があるか確認
-    let has_ready_armies = plan.assigned_army_ids.iter().any(|&id| {
+    let has_ready_divisions = plan.assigned_division_ids.iter().any(|&id| {
         military_registry
-            .armies
+            .divisions
             .get(&id)
-            .map(|a| a.status == ArmyStatus::Idle || a.status == ArmyStatus::Moving)
+            .map(|a| a.status == DivisionStatus::Idle || a.status == DivisionStatus::Moving)
             .unwrap_or(false)
     });
 
-    if !has_ready_armies {
+    if !has_ready_divisions {
         return (
             FrontlineStance::Defend,
             MilitaryAiDecisionReason::Recovering,
@@ -371,7 +371,7 @@ pub fn evaluate_military_ai_decision(
 }
 
 /// 未割り当ての有効陸軍を評価し、適切な前線へ自動割り当てする
-pub fn assign_unassigned_armies_to_frontlines(
+pub fn assign_unassigned_divisions_to_frontlines(
     country_id: CountryId,
     war_registry: &WarRegistry,
     state_registry: &StateRegistry,
@@ -379,15 +379,15 @@ pub fn assign_unassigned_armies_to_frontlines(
     frontline_registry: &mut FrontlineRegistry,
     current_date: Option<&str>,
 ) {
-    // AI国家の未割当・使用可能陸軍を取得 (ArmyId昇順)
-    let mut available_army_ids: Vec<ArmyId> = military_registry
-        .armies
+    // AI国家の未割当・使用可能陸軍を取得 (DivisionId昇順)
+    let mut available_division_ids: Vec<DivisionId> = military_registry
+        .divisions
         .values()
         .filter(|a| {
             a.owner == country_id
                 && a.manpower > 0
-                && a.status != ArmyStatus::Destroyed
-                && !frontline_registry.army_frontline_map.contains_key(&a.id)
+                && a.status != DivisionStatus::Destroyed
+                && !frontline_registry.division_frontline_map.contains_key(&a.id)
                 && state_registry
                     .get(a.current_state)
                     .map(|s| !s.is_sea)
@@ -396,9 +396,9 @@ pub fn assign_unassigned_armies_to_frontlines(
         .map(|a| a.id)
         .collect();
 
-    available_army_ids.sort_by_key(|a| a.0);
+    available_division_ids.sort_by_key(|a| a.0);
 
-    if available_army_ids.is_empty() {
+    if available_division_ids.is_empty() {
         return;
     }
 
@@ -436,8 +436,8 @@ pub fn assign_unassigned_armies_to_frontlines(
         return;
     }
 
-    for army_id in available_army_ids {
-        let army = match military_registry.armies.get(&army_id) {
+    for division_id in available_division_ids {
+        let division = match military_registry.divisions.get(&division_id) {
             Some(a) => a,
             None => continue,
         };
@@ -464,7 +464,7 @@ pub fn assign_unassigned_armies_to_frontlines(
 
             let is_reachable = front_regions.iter().any(|&fr| {
                 find_path(
-                    army.current_state,
+                    division.current_state,
                     fr,
                     state_registry,
                     &[country_id],
@@ -475,7 +475,7 @@ pub fn assign_unassigned_armies_to_frontlines(
 
             if is_reachable {
                 let plan = frontline_registry.get_plan(fl.frontline_id, country_id);
-                let assigned_count = plan.map(|p| p.assigned_army_ids.len()).unwrap_or(0);
+                let assigned_count = plan.map(|p| p.assigned_division_ids.len()).unwrap_or(0);
                 let (own_p, enemy_p) = plan
                     .map(|p| evaluate_powers(fl, p, country_id, military_registry, state_registry))
                     .unwrap_or((0, 0));
@@ -503,8 +503,8 @@ pub fn assign_unassigned_armies_to_frontlines(
         }
 
         if let Some(target_fl_id) = best_fl_id {
-            let _ = frontline_registry.assign_army(
-                army_id,
+            let _ = frontline_registry.assign_division(
+                division_id,
                 target_fl_id,
                 country_id,
                 military_registry,
@@ -569,7 +569,7 @@ pub fn process_daily_military_ai(
         }
 
         // 1. 未割当陸軍の複数前線分配 (宣戦布告当日の前線は対象外)
-        assign_unassigned_armies_to_frontlines(
+        assign_unassigned_divisions_to_frontlines(
             country_id,
             war_registry,
             state_registry,
@@ -677,11 +677,11 @@ pub fn handle_daily_military_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::{ArmyId, CountryId, DivisionId, StateId, WarId};
+    use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId, WarId};
     use crate::country::CountryData;
     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
     use crate::military::data::{
-        ArmyStatus, ArmyUnit, DivisionDefinition, DivisionSize, DivisionType,
+        DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType,
     };
     use crate::state::data::StateData;
     use crate::war::frontline::update_all_frontlines;
@@ -771,9 +771,9 @@ mod tests {
 
         let mut military_registry = MilitaryRegistry::default();
         military_registry.definitions.insert(
-            DivisionId(1),
+            DivisionDefinitionId(1),
             DivisionDefinition {
-                id: DivisionId(1),
+                id: DivisionDefinitionId(1),
                 name: "Infantry".to_string(),
                 division_type: DivisionType::Infantry,
                 size: DivisionSize::Standard,
@@ -884,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ai_army_assignment_and_power_evaluation() {
+    fn test_ai_division_assignment_and_power_evaluation() {
         let (
             player_country,
             country_registry,
@@ -896,8 +896,8 @@ mod tests {
         ) = setup_test_env();
 
         // C2 (AI国家) の部隊を追加
-        let a_c2 = ArmyUnit {
-            id: ArmyId(0),
+        let a_c2 = Division {
+            id: DivisionId(0),
             owner: CountryId(2),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -916,13 +916,13 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let c2_army_id = military_registry.add_army(a_c2);
+        let c2_division_id = military_registry.add_division(a_c2);
 
         update_all_frontlines(
             &war_registry,
@@ -950,7 +950,7 @@ mod tests {
         let plan_c2 = frontline_registry.get_plan(fl_id, CountryId(2)).unwrap();
 
         // C2 の陸軍が前線へ自動割当されたことを確認
-        assert!(plan_c2.assigned_army_ids.contains(&c2_army_id));
+        assert!(plan_c2.assigned_division_ids.contains(&c2_division_id));
     }
 
     #[test]
@@ -966,8 +966,8 @@ mod tests {
         ) = setup_test_env();
 
         // C2 (AI国家) に強力な陸軍を追加 (2000人)
-        let a_c2 = ArmyUnit {
-            id: ArmyId(0),
+        let a_c2 = Division {
+            id: DivisionId(0),
             owner: CountryId(2),
             division_type: DivisionType::Infantry,
             size: DivisionSize::Standard,
@@ -986,26 +986,26 @@ mod tests {
             experience: 0.0,
             supply_ratio: 1.0,
             movement_progress: 0.0,
-            status: ArmyStatus::Idle,
-            def_id: DivisionId(1),
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
             attack_power: 10,
             defense_power: 10,
             combat_id: None,
         };
-        let c2_army_id = military_registry.add_army(a_c2);
+        let c2_division_id = military_registry.add_division(a_c2);
 
         // C1 (敵国) に弱い陸軍を追加 (500人)
-        let a_c1 = ArmyUnit {
-            id: ArmyId(0),
+        let a_c1 = Division {
+            id: DivisionId(0),
             owner: CountryId(1),
             manpower: 500,
             max_manpower: 500,
             organization: 100.0,
             max_organization: 100.0,
-            status: ArmyStatus::Idle,
-            ..military_registry.armies.get(&c2_army_id).unwrap().clone()
+            status: DivisionStatus::Idle,
+            ..military_registry.divisions.get(&c2_division_id).unwrap().clone()
         };
-        military_registry.add_army(a_c1);
+        military_registry.add_division(a_c1);
 
         update_all_frontlines(
             &war_registry,

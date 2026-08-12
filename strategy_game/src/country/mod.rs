@@ -242,7 +242,10 @@ impl CountryRegistry {
 
 pub mod country_ai;
 
-use country_ai::{CountryAiRegistry, handle_daily_country_ai};
+use country_ai::{
+    CountryAiRegistry, PendingAiWarDeclarations, emit_ai_war_declaration_notifications,
+    handle_daily_country_ai,
+};
 
 // ─── プレイヤー国家 ──────────────────────────────────────────────────────────
 
@@ -260,9 +263,13 @@ impl Plugin for CountryPlugin {
         app.insert_resource(CountryRegistry::default())
             .insert_resource(PlayerCountry::default())
             .insert_resource(CountryAiRegistry::default())
+            .insert_resource(PendingAiWarDeclarations::default())
             .add_systems(
                 Update,
-                handle_daily_country_ai
+                (
+                    handle_daily_country_ai,
+                    emit_ai_war_declaration_notifications.after(handle_daily_country_ai),
+                )
                     .in_set(DailySimulationSet::CountryAi)
                     .run_if(in_state(GameState::Playing)),
             );

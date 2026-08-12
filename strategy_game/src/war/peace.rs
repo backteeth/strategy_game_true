@@ -2,7 +2,7 @@ use crate::app::time::GameDate;
 use crate::common::{CountryId, StateId, WarId};
 use crate::diplomacy::data::DiplomacyRegistry;
 use crate::military::battle::{BattleRegistry, BattleStatus};
-use crate::military::data::{ArmyStatus, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use crate::war::data::{WarRegistry, WarStatus};
 use serde::{Deserialize, Serialize};
@@ -135,22 +135,22 @@ pub fn can_accept_peace_offer(
 }
 
 /// 戦争終結後の敵国領残存陸軍の自国領域への安全帰還処理
-pub fn relocate_hostile_territory_armies(
+pub fn relocate_hostile_territory_divisions(
     state_registry: &StateRegistry,
     military_registry: &mut MilitaryRegistry,
 ) {
-    for army in military_registry.armies.values_mut() {
-        if army.status == ArmyStatus::Destroyed || army.manpower == 0 {
+    for division in military_registry.divisions.values_mut() {
+        if division.status == DivisionStatus::Destroyed || division.manpower == 0 {
             continue;
         }
 
-        let curr_state = match state_registry.get(army.current_state) {
+        let curr_state = match state_registry.get(division.current_state) {
             Some(s) => s,
             None => continue,
         };
 
         // 自国所有または自国支配の地域に居る場合は移動不要
-        if curr_state.owner_country_id == army.owner || curr_state.controller() == army.owner {
+        if curr_state.owner_country_id == division.owner || curr_state.controller() == division.owner {
             continue;
         }
 
@@ -162,7 +162,7 @@ pub fn relocate_hostile_territory_armies(
             .filter(|&nid| {
                 if let Some(ns) = state_registry.get(nid) {
                     !ns.is_sea
-                        && (ns.controller() == army.owner || ns.owner_country_id == army.owner)
+                        && (ns.controller() == division.owner || ns.owner_country_id == division.owner)
                 } else {
                     false
                 }
@@ -172,11 +172,11 @@ pub fn relocate_hostile_territory_armies(
         valid_neighbors.sort_by_key(|s| s.0);
 
         if let Some(&target_neighbor) = valid_neighbors.first() {
-            army.current_state = target_neighbor;
-            army.status = ArmyStatus::Idle;
-            army.target_state = None;
-            army.current_path.clear();
-            army.movement_progress = 0.0;
+            division.current_state = target_neighbor;
+            division.status = DivisionStatus::Idle;
+            division.target_state = None;
+            division.current_path.clear();
+            division.movement_progress = 0.0;
             continue;
         }
 
@@ -185,7 +185,7 @@ pub fn relocate_hostile_territory_armies(
             .states
             .iter()
             .filter(|s| {
-                !s.is_sea && (s.controller() == army.owner || s.owner_country_id == army.owner)
+                !s.is_sea && (s.controller() == division.owner || s.owner_country_id == division.owner)
             })
             .map(|s| s.id)
             .collect();
@@ -193,20 +193,20 @@ pub fn relocate_hostile_territory_armies(
         owned_states.sort_by_key(|s| s.0);
 
         if let Some(&min_state_id) = owned_states.first() {
-            army.current_state = min_state_id;
-            army.status = ArmyStatus::Idle;
-            army.target_state = None;
-            army.current_path.clear();
-            army.movement_progress = 0.0;
+            division.current_state = min_state_id;
+            division.status = DivisionStatus::Idle;
+            division.target_state = None;
+            division.current_path.clear();
+            division.movement_progress = 0.0;
             continue;
         }
 
         // 帰還優先3: 自国領土が一切ない場合は安全に削除/非活動化
-        army.status = ArmyStatus::Destroyed;
-        army.manpower = 0;
-        army.organization = 0.0;
-        army.target_state = None;
-        army.current_path.clear();
+        division.status = DivisionStatus::Destroyed;
+        division.manpower = 0;
+        division.organization = 0.0;
+        division.target_state = None;
+        division.current_path.clear();
     }
 }
 
@@ -280,19 +280,18 @@ pub fn execute_peace_settlement(
         if battle.war_id == war_id && battle.status == BattleStatus::Ongoing {
             battle.status = BattleStatus::Cancelled;
 
-            if let Some(a) = military_registry
-                .armies
-                .get_mut(&battle.attacker_army_id)
-                .filter(|a| a.status == ArmyStatus::Fighting)
+            for division_id in battle
+                .attacker_division_ids
+                .iter()
+                .chain(battle.defender_division_ids.iter())
             {
-                a.status = ArmyStatus::Idle;
-            }
-            if let Some(d) = military_registry
-                .armies
-                .get_mut(&battle.defender_army_id)
-                .filter(|d| d.status == ArmyStatus::Fighting)
-            {
-                d.status = ArmyStatus::Idle;
+                if let Some(d) = military_registry
+                    .divisions
+                    .get_mut(division_id)
+                    .filter(|d| d.status == DivisionStatus::Fighting)
+                {
+                    d.status = DivisionStatus::Idle;
+                }
             }
         }
     }
@@ -303,7 +302,7 @@ pub fn execute_peace_settlement(
     }
 
     // 5. 敵国領残存陸軍の帰還
-    relocate_hostile_territory_armies(state_registry, military_registry);
+    relocate_hostile_territory_divisions(state_registry, military_registry);
 
     // 6. 5年間 (1825日) の休戦の作成
     let curr_date = GameDate::from_string(current_date_str).unwrap_or_default();

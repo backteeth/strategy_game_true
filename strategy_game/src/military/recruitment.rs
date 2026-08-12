@@ -1,13 +1,13 @@
-use crate::common::{CountryId, DivisionId, StateId};
+use crate::common::{CountryId, DivisionDefinitionId, StateId};
 use crate::country::CountryRegistry;
-use crate::military::data::{ArmyStatus, ArmyUnit, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, Division, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecruitmentQueueItem {
-    pub division_id: DivisionId,
+    pub division_id: DivisionDefinitionId,
     pub target_state: StateId,
     pub days_remaining: u32,
     pub total_days: u32,
@@ -17,7 +17,7 @@ pub fn process_recruitment(
     country_registry: &mut CountryRegistry,
     military_registry: &mut MilitaryRegistry,
 ) {
-    let mut new_armies = Vec::new();
+    let mut new_divisions = Vec::new();
 
     for country in country_registry.countries.iter_mut() {
         let mut completed_indices = Vec::new();
@@ -31,8 +31,8 @@ pub fn process_recruitment(
                 completed_indices.push(i);
 
                 if let Some(def) = military_registry.definitions.get(&item.division_id) {
-                    new_armies.push(ArmyUnit {
-                        id: crate::common::ArmyId(0), // Assigned in add_army
+                    new_divisions.push(Division {
+                        id: crate::common::DivisionId(0), // Assigned in add_division
                         owner: country.id,
                         division_type: def.division_type,
                         size: def.size,
@@ -51,7 +51,7 @@ pub fn process_recruitment(
                         experience: 0.0,
                         supply_ratio: 1.0,
                         movement_progress: 0.0,
-                        status: ArmyStatus::Idle,
+                        status: DivisionStatus::Idle,
                         def_id: item.division_id,
                         attack_power: def.attack as i32,
                         defense_power: def.defense as i32,
@@ -66,15 +66,15 @@ pub fn process_recruitment(
         }
     }
 
-    for army in new_armies {
-        military_registry.add_army(army);
+    for division in new_divisions {
+        military_registry.add_division(division);
     }
 }
 
 pub fn request_recruitment(
     country: &mut crate::country::CountryData,
     military_registry: &MilitaryRegistry,
-    division_id: DivisionId,
+    division_id: DivisionDefinitionId,
     target_state: StateId,
 ) -> Result<(), &'static str> {
     let def = military_registry
@@ -156,7 +156,7 @@ pub fn evaluate_recruit_feasibility(
     state_registry: &StateRegistry,
     country: &crate::country::CountryData,
     military_registry: &MilitaryRegistry,
-    division_id: DivisionId,
+    division_id: DivisionDefinitionId,
 ) -> RecruitFeasibility {
     let Some(state_id) = selected_state else {
         return RecruitFeasibility::NoStateSelected;

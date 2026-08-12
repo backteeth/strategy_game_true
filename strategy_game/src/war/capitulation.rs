@@ -1,5 +1,5 @@
 use crate::common::CountryId;
-use crate::military::data::{ArmyStatus, MilitaryRegistry};
+use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarStatus};
 
@@ -12,12 +12,12 @@ pub enum CapitulationResult {
 }
 
 /// 指定国家に戦闘可能な陸軍ユニットが残っているか判定
-pub fn has_combat_ready_armies(
+pub fn has_combat_ready_divisions(
     country_id: CountryId,
     military_registry: &MilitaryRegistry,
 ) -> bool {
-    military_registry.armies.values().any(|army| {
-        army.owner == country_id && army.status != ArmyStatus::Destroyed && army.manpower > 0
+    military_registry.divisions.values().any(|division| {
+        division.owner == country_id && division.status != DivisionStatus::Destroyed && division.manpower > 0
     })
 }
 
@@ -78,7 +78,7 @@ pub fn check_defender_capitulation(
     }
 
     // 条件2: 防御側に戦闘可能な陸軍が残っていない
-    if !has_combat_ready_armies(defender, military_registry) {
+    if !has_combat_ready_divisions(defender, military_registry) {
         return true;
     }
 
@@ -123,7 +123,7 @@ pub fn check_attacker_capitulation(
     }
 
     // 条件2: 攻撃側に戦闘可能な陸軍がなく、かつ防御側が攻撃側地域を1つ以上支配
-    if !has_combat_ready_armies(attacker, military_registry) && defender_occupied_count >= 1 {
+    if !has_combat_ready_divisions(attacker, military_registry) && defender_occupied_count >= 1 {
         return true;
     }
 
