@@ -55,11 +55,14 @@ use strategy_game::military::MilitaryPlugin;
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::population::PopulationPlugin;
 use strategy_game::research::ResearchPlugin;
+use strategy_game::save::{
+    LastLoadOutcome, LoadGamePlugin, LoadOperationError, LoadOutcome, LoadSaveError, SaveGamePlugin,
+};
 use strategy_game::state::StatePlugin;
 use strategy_game::state::data::StateRegistry;
 use strategy_game::ui::UiPlugin;
 use strategy_game::ui::country_selection::{
-    CountrySelectButton, CountrySelectionRoot, StartGameButton,
+    ContinueButton, ContinueStatusText, CountrySelectButton, CountrySelectionRoot, StartGameButton,
 };
 use strategy_game::ui::top_bar::{TopBarPlayerInfoText, TopBarRoot};
 use strategy_game::war::WarPlugin;
@@ -72,6 +75,40 @@ const MIN_NON_BACKGROUND_PIXELS: usize = 300;
 const MIN_DIFF_PIXELS: usize = 50;
 const WARMUP_FRAMES: usize = 30;
 const SETTLE_FRAMES: usize = 20;
+
+// ─────────────────────────────────────────────────────────────────────────
+// P21-FIX-002: GPUテスト直列化
+//
+// このファイル内の4テストはいずれも`build_headless_app`(`DefaultPlugins`経由で
+// 独立したwgpu Instance/Adapter/Deviceを持つ完全なHeadless App)を構築する。
+// libtestは`#[test]`関数をデフォルトで並列スレッド実行するため、複数テストが
+// 同時にGPUコンテキストを初期化・描画すると、稀に最初のフレームが空(single flat
+// color)のまま読み戻される競合が発生することを実測・再現した(単体実行・
+// `--test-threads=1`では常に成功、デフォルト並列実行でのみ低頻度で失敗)。
+// `cargo test`は統合テストバイナリを1つずつ順に実行する(プロセス間の同時実行は
+// ない)ため、この競合は本バイナリ内のスレッド間だけで起きる。そのため本ファイル
+// 内だけで完結する`std::sync::OnceLock<Mutex<()>>`で、GPU初期化から
+// readback・PNG保存・App破棄までを直列化する(追加の依存crateは使わない)。
+// ─────────────────────────────────────────────────────────────────────────
+
+static GPU_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+/// GPU(`build_headless_app`経由のHeadless App)を扱うテスト本体を排他的に実行する。
+/// ロック取得前に`f`は一切呼ばれないため、GPU App構築より前にロックを取得する
+/// (要求テスト項目)。`f`の戻り値を返すまでガードを保持したままにするため、
+/// `f`内で構築される`App`のDrop・PNG保存・readback完了は、必ずロック解放より前に
+/// 完了する。
+///
+/// Poison(直前のテストがロック保持中にpanicした)場合でも、後続テストが無関係に
+/// 巻き添えで失敗しないよう`into_inner()`で回復して実行を継続する。先行テスト自身の
+/// panicは、そのテスト自身のassertが既に報告済みであり、ここで握り潰されるのは
+/// 「ロックの排他性(poison flag)」だけであって、描画失敗そのものではない
+/// (`f`は毎回必ず実行され、そのテスト自身の判定は一切スキップ・省略されない)。
+fn with_gpu_test_lock<T>(f: impl FnOnce() -> T) -> T {
+    let lock = GPU_TEST_LOCK.get_or_init(|| std::sync::Mutex::new(()));
+    let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f()
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Headless offscreen readback インフラ (P20-007と同型)
@@ -300,7 +337,17 @@ fn build_headless_app() -> App {
         .add_plugins(WarPlugin)
         .add_plugins(MapPlugin)
         .add_plugins(UiPlugin)
-        .add_plugins(DebugPlugin);
+        .add_plugins(DebugPlugin)
+        // P21-FIX-001: 本番main.rsと同じくSaveGamePlugin/LoadGamePluginを他の全Pluginの後に
+        // 追加する。P21-SAVE-002E以降、UiPlugin配下(top_bar/load_confirm/country_selection)の
+        // Systemが`Res<LastLoadOutcome>`(LoadGamePluginが初期化)・`MessageReader/Writer<
+        // LoadRequestMessage>`(SaveGamePluginが登録)を毎フレーム無条件に要求するため、
+        // この2 Pluginを欠いたままだと`GameState::CountrySelection`へ入った直後の最初の
+        // updateから両方ともpanicする(実際に本ラウンドで発見・再現・修正)。
+        // `tests/p21_save_002e_headless_render_test.rs`の`build_headless_app`が既に
+        // 同じ位置へ同じ2 Pluginを追加しており、その既存パターンをそのまま踏襲する。
+        .add_plugins(SaveGamePlugin)
+        .add_plugins(LoadGamePlugin);
 
     app.add_plugins(ImageCopyPlugin);
     app.add_plugins(InputInjectionPlugin);
@@ -429,6 +476,7 @@ enum PendingClick {
     CountryButtonIndex(usize),
     StartGameButton,
     LanguageToggleButton,
+    ContinueButton,
 }
 
 struct InputInjectionPlugin;
@@ -454,6 +502,15 @@ fn apply_pending_click(
             With<LanguageToggleButton>,
             Without<CountrySelectButton>,
             Without<StartGameButton>,
+        ),
+    >,
+    mut continue_button: Query<
+        &mut Interaction,
+        (
+            With<ContinueButton>,
+            Without<CountrySelectButton>,
+            Without<StartGameButton>,
+            Without<LanguageToggleButton>,
         ),
     >,
 ) {
@@ -487,6 +544,12 @@ fn apply_pending_click(
                 .expect("[P20-009] Expected exactly 1 production LanguageToggleButton entity");
             *interaction = Interaction::Pressed;
         }
+        PendingClick::ContinueButton => {
+            let mut interaction = continue_button
+                .single_mut()
+                .expect("[P21-FIX-001] Expected exactly 1 production ContinueButton entity");
+            *interaction = Interaction::Pressed;
+        }
     }
 }
 
@@ -503,6 +566,11 @@ fn queue_start_game_click(app: &mut App) {
 fn queue_language_toggle_click(app: &mut App) {
     app.world_mut()
         .insert_resource(PendingClick::LanguageToggleButton);
+}
+
+fn queue_continue_button_click(app: &mut App) {
+    app.world_mut()
+        .insert_resource(PendingClick::ContinueButton);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -603,374 +671,499 @@ fn tap_key(app: &mut App, key: KeyCode) {
 
 #[test]
 fn localization_headless_render_ja_en_switch_and_back() {
-    let mut app = build_headless_app();
-    initialize_app(&mut app);
+    with_gpu_test_lock(|| {
+        let mut app = build_headless_app();
+        initialize_app(&mut app);
 
-    {
-        let world = app.world();
-        assert!(
-            world.get_resource::<RenderDevice>().is_some(),
-            "[P20-009][FAIL:adapter] no RenderDevice"
+        {
+            let world = app.world();
+            assert!(
+                world.get_resource::<RenderDevice>().is_some(),
+                "[P20-009][FAIL:adapter] no RenderDevice"
+            );
+            let fonts = world.resource::<Assets<Font>>();
+            assert!(
+                !fonts.is_empty(),
+                "[P20-009][FAIL:asset] Assets<Font> is empty"
+            );
+            assert!(
+                fonts.get(AssetId::<Font>::default()).is_some(),
+                "[P20-009][FAIL:asset] default font (Noto Sans JP) not present at AssetId::default()"
+            );
+        }
+
+        for _ in 0..WARMUP_FRAMES {
+            app.update();
+        }
+
+        assert_eq!(
+            current_locale(&app),
+            Locale::JaJp,
+            "[P20-009] default locale must be ja-JP"
         );
-        let fonts = world.resource::<Assets<Font>>();
-        assert!(
-            !fonts.is_empty(),
-            "[P20-009][FAIL:asset] Assets<Font> is empty"
-        );
-        assert!(
-            fonts.get(AssetId::<Font>::default()).is_some(),
-            "[P20-009][FAIL:asset] default font (Noto Sans JP) not present at AssetId::default()"
-        );
-    }
 
-    for _ in 0..WARMUP_FRAMES {
-        app.update();
-    }
+        {
+            let world = app.world_mut();
+            let mut root_q = world.query::<(&CountrySelectionRoot, &ComputedNode)>();
+            let (_, computed) = root_q
+                .single(world)
+                .expect("[P20-009][FAIL:ui-root] CountrySelectionRoot not found after warmup");
+            assert!(computed.size.x > 0.0 && computed.size.y > 0.0);
 
-    assert_eq!(
-        current_locale(&app),
-        Locale::JaJp,
-        "[P20-009] default locale must be ja-JP"
-    );
-
-    {
-        let world = app.world_mut();
-        let mut root_q = world.query::<(&CountrySelectionRoot, &ComputedNode)>();
-        let (_, computed) = root_q
-            .single(world)
-            .expect("[P20-009][FAIL:ui-root] CountrySelectionRoot not found after warmup");
-        assert!(computed.size.x > 0.0 && computed.size.y > 0.0);
-
-        let mut cam_q =
-            world.query_filtered::<(&RenderTarget, Has<IsDefaultUiCamera>), With<GameCamera>>();
-        let (render_target, is_default_ui_camera) = cam_q
-            .single(world)
-            .expect("[P20-009][FAIL:camera] GameCamera entity not found after warmup");
-        assert!(
-            is_default_ui_camera,
-            "[P20-009][FAIL:camera] GameCamera must carry IsDefaultUiCamera"
-        );
-        let capture_target = world.resource::<CaptureTarget>();
-        match render_target {
-            RenderTarget::Image(img) => {
-                assert_eq!(
-                    img.handle.id(),
-                    capture_target.image.id(),
-                    "[P20-009][FAIL:camera] GameCamera RenderTarget::Image does not match the offscreen CaptureTarget image"
-                );
+            let mut cam_q =
+                world.query_filtered::<(&RenderTarget, Has<IsDefaultUiCamera>), With<GameCamera>>();
+            let (render_target, is_default_ui_camera) = cam_q
+                .single(world)
+                .expect("[P20-009][FAIL:camera] GameCamera entity not found after warmup");
+            assert!(
+                is_default_ui_camera,
+                "[P20-009][FAIL:camera] GameCamera must carry IsDefaultUiCamera"
+            );
+            let capture_target = world.resource::<CaptureTarget>();
+            match render_target {
+                RenderTarget::Image(img) => {
+                    assert_eq!(
+                        img.handle.id(),
+                        capture_target.image.id(),
+                        "[P20-009][FAIL:camera] GameCamera RenderTarget::Image does not match the offscreen CaptureTarget image"
+                    );
+                }
+                other => panic!(
+                    "[P20-009][FAIL:camera] GameCamera RenderTarget is not Image, got: {other:?}"
+                ),
             }
-            other => panic!(
-                "[P20-009][FAIL:camera] GameCamera RenderTarget is not Image, got: {other:?}"
+        }
+
+        let evidence_dir = evidence_dir();
+        let mut png_hashes: Vec<(String, String)> = Vec::new();
+
+        // ── Checkpoint 1: 国選択画面, ja-JP (既定言語) ──
+        let (frame_ja1, w, h) = capture_and_verify_frame(&app, "country_selection_ja_jp");
+        assert_eq!(w, CAPTURE_WIDTH);
+        assert_eq!(h, CAPTURE_HEIGHT);
+        let a1 = analyze_frame(&frame_ja1, w, h);
+        println!(
+            "[P20-009] checkpoint=country_selection_ja_jp non_bg={} unique_colors={}",
+            a1.non_background_count, a1.unique_color_count
+        );
+        assert!(
+            a1.unique_color_count > 1,
+            "[P20-009][FAIL:pixels] country_selection_ja_jp: single flat color"
+        );
+        assert!(
+            a1.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
+            "[P20-009][FAIL:pixels] country_selection_ja_jp: non-bg pixels {} below {}",
+            a1.non_background_count,
+            MIN_NON_BACKGROUND_PIXELS
+        );
+        save_png(
+            &evidence_dir.join("01_country_selection_ja_jp.png"),
+            &frame_ja1,
+            w,
+            h,
+        );
+        assert!(
+            find_missing_markers(&mut app).is_empty(),
+            "[P20-009] missing keys at checkpoint 1 (ja-JP country selection): {:?}",
+            find_missing_markers(&mut app)
+        );
+
+        // ── Checkpoint 2: 言語切替ボタンをクリック -> en-US ──
+        queue_language_toggle_click(&mut app);
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        assert_eq!(
+            current_locale(&app),
+            Locale::EnUs,
+            "[P20-009] language toggle click must switch to en-US"
+        );
+
+        let (frame_en1, _, _) = capture_and_verify_frame(&app, "country_selection_en_us");
+        let a2 = analyze_frame(&frame_en1, w, h);
+        println!(
+            "[P20-009] checkpoint=country_selection_en_us non_bg={} unique_colors={}",
+            a2.non_background_count, a2.unique_color_count
+        );
+        assert!(
+            a2.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
+            "[P20-009][FAIL:pixels] UI vanished after switching to en-US"
+        );
+        let diff_ja1_en1 = diff_pixel_count(&frame_ja1, &frame_en1);
+        println!("[P20-009] diff(ja_jp, en_us) country_selection = {diff_ja1_en1} pixels");
+        assert!(
+            diff_ja1_en1 >= MIN_DIFF_PIXELS,
+            "[P20-009][FAIL:differential] switching ja-JP -> en-US changed only {diff_ja1_en1} pixels; rendering does not reflect language change"
+        );
+        save_png(
+            &evidence_dir.join("02_country_selection_en_us.png"),
+            &frame_en1,
+            w,
+            h,
+        );
+        assert!(
+            find_missing_markers(&mut app).is_empty(),
+            "[P20-009] missing keys at checkpoint 2 (en-US country selection): {:?}",
+            find_missing_markers(&mut app)
+        );
+
+        // ── Checkpoint 3: 言語切替ボタンを再度クリック -> ja-JPへ戻す ──
+        queue_language_toggle_click(&mut app);
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        assert_eq!(
+            current_locale(&app),
+            Locale::JaJp,
+            "[P20-009] second toggle click must switch back to ja-JP"
+        );
+
+        let (frame_ja2, _, _) = capture_and_verify_frame(&app, "country_selection_ja_jp_again");
+        let a3 = analyze_frame(&frame_ja2, w, h);
+        println!(
+            "[P20-009] checkpoint=country_selection_ja_jp_again non_bg={} unique_colors={}",
+            a3.non_background_count, a3.unique_color_count
+        );
+        assert!(
+            a3.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
+            "[P20-009][FAIL:pixels] UI vanished after switching back to ja-JP"
+        );
+        let diff_en1_ja2 = diff_pixel_count(&frame_en1, &frame_ja2);
+        println!("[P20-009] diff(en_us, ja_jp_again) country_selection = {diff_en1_ja2} pixels");
+        assert!(
+            diff_en1_ja2 >= MIN_DIFF_PIXELS,
+            "[P20-009][FAIL:differential] switching en-US -> ja-JP changed only {diff_en1_ja2} pixels"
+        );
+        // 同一状態への再描画は決定的なため、最初のja-JP描画とほぼ一致するはず(僅かなdiffは許容)。
+        let diff_ja1_ja2 = diff_pixel_count(&frame_ja1, &frame_ja2);
+        println!(
+            "[P20-009] diff(ja_jp, ja_jp_again) round-trip = {diff_ja1_ja2} pixels (expected small)"
+        );
+        save_png(
+            &evidence_dir.join("03_country_selection_ja_jp_again.png"),
+            &frame_ja2,
+            w,
+            h,
+        );
+        assert!(
+            find_missing_markers(&mut app).is_empty(),
+            "[P20-009] missing keys at checkpoint 3 (ja-JP again, country selection): {:?}",
+            find_missing_markers(&mut app)
+        );
+
+        // ── Playingへ遷移(P20-007と同一の本番ハンドラ経路) ──
+        queue_country_button_click(&mut app, 1);
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        queue_start_game_click(&mut app);
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        assert_eq!(
+            *app.world().resource::<State<GameState>>().get(),
+            GameState::Playing,
+            "[P20-009][FAIL:state] did not transition to Playing"
+        );
+        {
+            let world = app.world_mut();
+            let mut root_q = world.query::<(&TopBarRoot, &ComputedNode)>();
+            let (_, computed) = root_q.single(world).expect(
+                "[P20-009][FAIL:ui-root] TopBarRoot not found after transitioning to Playing",
+            );
+            assert!(computed.size.x > 0.0 && computed.size.y > 0.0);
+        }
+
+        // 折りたたみパネルを全て開き、それぞれのUI更新Systemを最低1回実行させておく
+        // (未開放のままLocalizedText::default()が残らないことを保証し、後続の言語
+        // 切り替えテストが全パネルのコンテンツを実際に検証できるようにする)。
+        tap_key(&mut app, KeyCode::KeyR); // Research
+        tap_key(&mut app, KeyCode::KeyP); // Politics
+        tap_key(&mut app, KeyCode::KeyN); // Peace (旧: Politicsと同じKeyPを共有していたが、
+        // 重複解消のためKeyNへ変更)
+        tap_key(&mut app, KeyCode::KeyG); // Diplomacy (旧: WASDカメラ移動のKeyDと衝突していたため
+        // KeyGへ変更)
+        tap_key(&mut app, KeyCode::KeyM); // Military
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        assert!(
+            find_missing_markers(&mut app).is_empty(),
+            "[P20-009] missing keys after opening all panels (ja-JP): {:?}",
+            find_missing_markers(&mut app)
+        );
+
+        let snapshot_before = snapshot_sim_state(&mut app);
+        let ja_playing_text = top_bar_text(&mut app);
+        assert!(!ja_playing_text.is_empty());
+
+        let (frame_playing_ja, _, _) = capture_and_verify_frame(&app, "playing_ja_jp");
+        let a4 = analyze_frame(&frame_playing_ja, w, h);
+        println!(
+            "[P20-009] checkpoint=playing_ja_jp non_bg={} unique_colors={}",
+            a4.non_background_count, a4.unique_color_count
+        );
+        assert!(a4.non_background_count >= MIN_NON_BACKGROUND_PIXELS);
+        save_png(
+            &evidence_dir.join("04_playing_ja_jp.png"),
+            &frame_playing_ja,
+            w,
+            h,
+        );
+        assert!(find_missing_markers(&mut app).is_empty());
+
+        // ── Playing中に言語切替(TopBar側のボタン) -> en-US ──
+        queue_language_toggle_click(&mut app);
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        assert_eq!(current_locale(&app), Locale::EnUs);
+
+        let snapshot_after_en = snapshot_sim_state(&mut app);
+        assert_snapshots_equal(&snapshot_before, &snapshot_after_en, "playing ja->en");
+
+        let en_playing_text = top_bar_text(&mut app);
+        assert_ne!(
+            ja_playing_text, en_playing_text,
+            "[P20-009] TopBar text must change after switching to en-US"
+        );
+        let treasury_digits = format!("{:.0}", snapshot_before.treasury);
+        assert!(
+            en_playing_text.contains(&treasury_digits)
+                && ja_playing_text.contains(&treasury_digits),
+            "[P20-009] treasury figure '{treasury_digits}' must survive the language switch: ja='{ja_playing_text}' en='{en_playing_text}'"
+        );
+
+        let (frame_playing_en, _, _) = capture_and_verify_frame(&app, "playing_en_us");
+        let a5 = analyze_frame(&frame_playing_en, w, h);
+        println!(
+            "[P20-009] checkpoint=playing_en_us non_bg={} unique_colors={}",
+            a5.non_background_count, a5.unique_color_count
+        );
+        assert!(
+            a5.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
+            "[P20-009][FAIL:pixels] UI vanished (Playing, en-US)"
+        );
+        let diff_playing_ja_en = diff_pixel_count(&frame_playing_ja, &frame_playing_en);
+        println!("[P20-009] diff(playing_ja_jp, playing_en_us) = {diff_playing_ja_en} pixels");
+        assert!(
+            diff_playing_ja_en >= MIN_DIFF_PIXELS,
+            "[P20-009][FAIL:differential] Playing screen language switch changed only {diff_playing_ja_en} pixels"
+        );
+        save_png(
+            &evidence_dir.join("05_playing_en_us.png"),
+            &frame_playing_en,
+            w,
+            h,
+        );
+        assert!(find_missing_markers(&mut app).is_empty());
+
+        // ── Playing中に再度ja-JPへ戻す ──
+        queue_language_toggle_click(&mut app);
+        for _ in 0..SETTLE_FRAMES {
+            app.update();
+        }
+        assert_eq!(current_locale(&app), Locale::JaJp);
+
+        let snapshot_after_ja_again = snapshot_sim_state(&mut app);
+        assert_snapshots_equal(&snapshot_before, &snapshot_after_ja_again, "playing en->ja");
+
+        let ja_playing_text_again = top_bar_text(&mut app);
+        assert_eq!(
+            ja_playing_text, ja_playing_text_again,
+            "[P20-009] switching back to ja-JP during Playing must reproduce the original text exactly"
+        );
+
+        let (frame_playing_ja2, _, _) = capture_and_verify_frame(&app, "playing_ja_jp_again");
+        let a6 = analyze_frame(&frame_playing_ja2, w, h);
+        println!(
+            "[P20-009] checkpoint=playing_ja_jp_again non_bg={} unique_colors={}",
+            a6.non_background_count, a6.unique_color_count
+        );
+        assert!(a6.non_background_count >= MIN_NON_BACKGROUND_PIXELS);
+        let diff_playing_en_ja2 = diff_pixel_count(&frame_playing_en, &frame_playing_ja2);
+        println!(
+            "[P20-009] diff(playing_en_us, playing_ja_jp_again) = {diff_playing_en_ja2} pixels"
+        );
+        assert!(diff_playing_en_ja2 >= MIN_DIFF_PIXELS);
+        save_png(
+            &evidence_dir.join("06_playing_ja_jp_again.png"),
+            &frame_playing_ja2,
+            w,
+            h,
+        );
+        assert!(
+            find_missing_markers(&mut app).is_empty(),
+            "[P20-009] missing keys found at final checkpoint: {:?}",
+            find_missing_markers(&mut app)
+        );
+
+        for (name, path) in [
+            (
+                "01_country_selection_ja_jp.png",
+                evidence_dir.join("01_country_selection_ja_jp.png"),
             ),
+            (
+                "02_country_selection_en_us.png",
+                evidence_dir.join("02_country_selection_en_us.png"),
+            ),
+            (
+                "03_country_selection_ja_jp_again.png",
+                evidence_dir.join("03_country_selection_ja_jp_again.png"),
+            ),
+            (
+                "04_playing_ja_jp.png",
+                evidence_dir.join("04_playing_ja_jp.png"),
+            ),
+            (
+                "05_playing_en_us.png",
+                evidence_dir.join("05_playing_en_us.png"),
+            ),
+            (
+                "06_playing_ja_jp_again.png",
+                evidence_dir.join("06_playing_ja_jp_again.png"),
+            ),
+        ] {
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("[P20-009] failed to re-read {path:?}: {e}"));
+            use std::fmt::Write as _;
+            let mut hash_hex = String::new();
+            for byte in simple_sha256(&bytes) {
+                let _ = write!(hash_hex, "{byte:02x}");
+            }
+            png_hashes.push((name.to_string(), hash_hex));
         }
-    }
-
-    let evidence_dir = evidence_dir();
-    let mut png_hashes: Vec<(String, String)> = Vec::new();
-
-    // ── Checkpoint 1: 国選択画面, ja-JP (既定言語) ──
-    let (frame_ja1, w, h) = capture_and_verify_frame(&app, "country_selection_ja_jp");
-    assert_eq!(w, CAPTURE_WIDTH);
-    assert_eq!(h, CAPTURE_HEIGHT);
-    let a1 = analyze_frame(&frame_ja1, w, h);
-    println!(
-        "[P20-009] checkpoint=country_selection_ja_jp non_bg={} unique_colors={}",
-        a1.non_background_count, a1.unique_color_count
-    );
-    assert!(
-        a1.unique_color_count > 1,
-        "[P20-009][FAIL:pixels] country_selection_ja_jp: single flat color"
-    );
-    assert!(
-        a1.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
-        "[P20-009][FAIL:pixels] country_selection_ja_jp: non-bg pixels {} below {}",
-        a1.non_background_count,
-        MIN_NON_BACKGROUND_PIXELS
-    );
-    save_png(
-        &evidence_dir.join("01_country_selection_ja_jp.png"),
-        &frame_ja1,
-        w,
-        h,
-    );
-    assert!(
-        find_missing_markers(&mut app).is_empty(),
-        "[P20-009] missing keys at checkpoint 1 (ja-JP country selection): {:?}",
-        find_missing_markers(&mut app)
-    );
-
-    // ── Checkpoint 2: 言語切替ボタンをクリック -> en-US ──
-    queue_language_toggle_click(&mut app);
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    assert_eq!(
-        current_locale(&app),
-        Locale::EnUs,
-        "[P20-009] language toggle click must switch to en-US"
-    );
-
-    let (frame_en1, _, _) = capture_and_verify_frame(&app, "country_selection_en_us");
-    let a2 = analyze_frame(&frame_en1, w, h);
-    println!(
-        "[P20-009] checkpoint=country_selection_en_us non_bg={} unique_colors={}",
-        a2.non_background_count, a2.unique_color_count
-    );
-    assert!(
-        a2.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
-        "[P20-009][FAIL:pixels] UI vanished after switching to en-US"
-    );
-    let diff_ja1_en1 = diff_pixel_count(&frame_ja1, &frame_en1);
-    println!("[P20-009] diff(ja_jp, en_us) country_selection = {diff_ja1_en1} pixels");
-    assert!(
-        diff_ja1_en1 >= MIN_DIFF_PIXELS,
-        "[P20-009][FAIL:differential] switching ja-JP -> en-US changed only {diff_ja1_en1} pixels; rendering does not reflect language change"
-    );
-    save_png(
-        &evidence_dir.join("02_country_selection_en_us.png"),
-        &frame_en1,
-        w,
-        h,
-    );
-    assert!(
-        find_missing_markers(&mut app).is_empty(),
-        "[P20-009] missing keys at checkpoint 2 (en-US country selection): {:?}",
-        find_missing_markers(&mut app)
-    );
-
-    // ── Checkpoint 3: 言語切替ボタンを再度クリック -> ja-JPへ戻す ──
-    queue_language_toggle_click(&mut app);
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    assert_eq!(
-        current_locale(&app),
-        Locale::JaJp,
-        "[P20-009] second toggle click must switch back to ja-JP"
-    );
-
-    let (frame_ja2, _, _) = capture_and_verify_frame(&app, "country_selection_ja_jp_again");
-    let a3 = analyze_frame(&frame_ja2, w, h);
-    println!(
-        "[P20-009] checkpoint=country_selection_ja_jp_again non_bg={} unique_colors={}",
-        a3.non_background_count, a3.unique_color_count
-    );
-    assert!(
-        a3.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
-        "[P20-009][FAIL:pixels] UI vanished after switching back to ja-JP"
-    );
-    let diff_en1_ja2 = diff_pixel_count(&frame_en1, &frame_ja2);
-    println!("[P20-009] diff(en_us, ja_jp_again) country_selection = {diff_en1_ja2} pixels");
-    assert!(
-        diff_en1_ja2 >= MIN_DIFF_PIXELS,
-        "[P20-009][FAIL:differential] switching en-US -> ja-JP changed only {diff_en1_ja2} pixels"
-    );
-    // 同一状態への再描画は決定的なため、最初のja-JP描画とほぼ一致するはず(僅かなdiffは許容)。
-    let diff_ja1_ja2 = diff_pixel_count(&frame_ja1, &frame_ja2);
-    println!(
-        "[P20-009] diff(ja_jp, ja_jp_again) round-trip = {diff_ja1_ja2} pixels (expected small)"
-    );
-    save_png(
-        &evidence_dir.join("03_country_selection_ja_jp_again.png"),
-        &frame_ja2,
-        w,
-        h,
-    );
-    assert!(
-        find_missing_markers(&mut app).is_empty(),
-        "[P20-009] missing keys at checkpoint 3 (ja-JP again, country selection): {:?}",
-        find_missing_markers(&mut app)
-    );
-
-    // ── Playingへ遷移(P20-007と同一の本番ハンドラ経路) ──
-    queue_country_button_click(&mut app, 1);
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    queue_start_game_click(&mut app);
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    assert_eq!(
-        *app.world().resource::<State<GameState>>().get(),
-        GameState::Playing,
-        "[P20-009][FAIL:state] did not transition to Playing"
-    );
-    {
-        let world = app.world_mut();
-        let mut root_q = world.query::<(&TopBarRoot, &ComputedNode)>();
-        let (_, computed) = root_q
-            .single(world)
-            .expect("[P20-009][FAIL:ui-root] TopBarRoot not found after transitioning to Playing");
-        assert!(computed.size.x > 0.0 && computed.size.y > 0.0);
-    }
-
-    // 折りたたみパネルを全て開き、それぞれのUI更新Systemを最低1回実行させておく
-    // (未開放のままLocalizedText::default()が残らないことを保証し、後続の言語
-    // 切り替えテストが全パネルのコンテンツを実際に検証できるようにする)。
-    tap_key(&mut app, KeyCode::KeyR); // Research
-    tap_key(&mut app, KeyCode::KeyP); // Politics
-    tap_key(&mut app, KeyCode::KeyN); // Peace (旧: Politicsと同じKeyPを共有していたが、
-    // 重複解消のためKeyNへ変更)
-    tap_key(&mut app, KeyCode::KeyG); // Diplomacy (旧: WASDカメラ移動のKeyDと衝突していたため
-    // KeyGへ変更)
-    tap_key(&mut app, KeyCode::KeyM); // Military
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    assert!(
-        find_missing_markers(&mut app).is_empty(),
-        "[P20-009] missing keys after opening all panels (ja-JP): {:?}",
-        find_missing_markers(&mut app)
-    );
-
-    let snapshot_before = snapshot_sim_state(&mut app);
-    let ja_playing_text = top_bar_text(&mut app);
-    assert!(!ja_playing_text.is_empty());
-
-    let (frame_playing_ja, _, _) = capture_and_verify_frame(&app, "playing_ja_jp");
-    let a4 = analyze_frame(&frame_playing_ja, w, h);
-    println!(
-        "[P20-009] checkpoint=playing_ja_jp non_bg={} unique_colors={}",
-        a4.non_background_count, a4.unique_color_count
-    );
-    assert!(a4.non_background_count >= MIN_NON_BACKGROUND_PIXELS);
-    save_png(
-        &evidence_dir.join("04_playing_ja_jp.png"),
-        &frame_playing_ja,
-        w,
-        h,
-    );
-    assert!(find_missing_markers(&mut app).is_empty());
-
-    // ── Playing中に言語切替(TopBar側のボタン) -> en-US ──
-    queue_language_toggle_click(&mut app);
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    assert_eq!(current_locale(&app), Locale::EnUs);
-
-    let snapshot_after_en = snapshot_sim_state(&mut app);
-    assert_snapshots_equal(&snapshot_before, &snapshot_after_en, "playing ja->en");
-
-    let en_playing_text = top_bar_text(&mut app);
-    assert_ne!(
-        ja_playing_text, en_playing_text,
-        "[P20-009] TopBar text must change after switching to en-US"
-    );
-    let treasury_digits = format!("{:.0}", snapshot_before.treasury);
-    assert!(
-        en_playing_text.contains(&treasury_digits) && ja_playing_text.contains(&treasury_digits),
-        "[P20-009] treasury figure '{treasury_digits}' must survive the language switch: ja='{ja_playing_text}' en='{en_playing_text}'"
-    );
-
-    let (frame_playing_en, _, _) = capture_and_verify_frame(&app, "playing_en_us");
-    let a5 = analyze_frame(&frame_playing_en, w, h);
-    println!(
-        "[P20-009] checkpoint=playing_en_us non_bg={} unique_colors={}",
-        a5.non_background_count, a5.unique_color_count
-    );
-    assert!(
-        a5.non_background_count >= MIN_NON_BACKGROUND_PIXELS,
-        "[P20-009][FAIL:pixels] UI vanished (Playing, en-US)"
-    );
-    let diff_playing_ja_en = diff_pixel_count(&frame_playing_ja, &frame_playing_en);
-    println!("[P20-009] diff(playing_ja_jp, playing_en_us) = {diff_playing_ja_en} pixels");
-    assert!(
-        diff_playing_ja_en >= MIN_DIFF_PIXELS,
-        "[P20-009][FAIL:differential] Playing screen language switch changed only {diff_playing_ja_en} pixels"
-    );
-    save_png(
-        &evidence_dir.join("05_playing_en_us.png"),
-        &frame_playing_en,
-        w,
-        h,
-    );
-    assert!(find_missing_markers(&mut app).is_empty());
-
-    // ── Playing中に再度ja-JPへ戻す ──
-    queue_language_toggle_click(&mut app);
-    for _ in 0..SETTLE_FRAMES {
-        app.update();
-    }
-    assert_eq!(current_locale(&app), Locale::JaJp);
-
-    let snapshot_after_ja_again = snapshot_sim_state(&mut app);
-    assert_snapshots_equal(&snapshot_before, &snapshot_after_ja_again, "playing en->ja");
-
-    let ja_playing_text_again = top_bar_text(&mut app);
-    assert_eq!(
-        ja_playing_text, ja_playing_text_again,
-        "[P20-009] switching back to ja-JP during Playing must reproduce the original text exactly"
-    );
-
-    let (frame_playing_ja2, _, _) = capture_and_verify_frame(&app, "playing_ja_jp_again");
-    let a6 = analyze_frame(&frame_playing_ja2, w, h);
-    println!(
-        "[P20-009] checkpoint=playing_ja_jp_again non_bg={} unique_colors={}",
-        a6.non_background_count, a6.unique_color_count
-    );
-    assert!(a6.non_background_count >= MIN_NON_BACKGROUND_PIXELS);
-    let diff_playing_en_ja2 = diff_pixel_count(&frame_playing_en, &frame_playing_ja2);
-    println!("[P20-009] diff(playing_en_us, playing_ja_jp_again) = {diff_playing_en_ja2} pixels");
-    assert!(diff_playing_en_ja2 >= MIN_DIFF_PIXELS);
-    save_png(
-        &evidence_dir.join("06_playing_ja_jp_again.png"),
-        &frame_playing_ja2,
-        w,
-        h,
-    );
-    assert!(
-        find_missing_markers(&mut app).is_empty(),
-        "[P20-009] missing keys found at final checkpoint: {:?}",
-        find_missing_markers(&mut app)
-    );
-
-    for (name, path) in [
-        (
-            "01_country_selection_ja_jp.png",
-            evidence_dir.join("01_country_selection_ja_jp.png"),
-        ),
-        (
-            "02_country_selection_en_us.png",
-            evidence_dir.join("02_country_selection_en_us.png"),
-        ),
-        (
-            "03_country_selection_ja_jp_again.png",
-            evidence_dir.join("03_country_selection_ja_jp_again.png"),
-        ),
-        (
-            "04_playing_ja_jp.png",
-            evidence_dir.join("04_playing_ja_jp.png"),
-        ),
-        (
-            "05_playing_en_us.png",
-            evidence_dir.join("05_playing_en_us.png"),
-        ),
-        (
-            "06_playing_ja_jp_again.png",
-            evidence_dir.join("06_playing_ja_jp_again.png"),
-        ),
-    ] {
-        let bytes = std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("[P20-009] failed to re-read {path:?}: {e}"));
-        use std::fmt::Write as _;
-        let mut hash_hex = String::new();
-        for byte in simple_sha256(&bytes) {
-            let _ = write!(hash_hex, "{byte:02x}");
+        for (name, hash) in &png_hashes {
+            println!("[P20-009] PNG SHA-256 {name} = {hash}");
         }
-        png_hashes.push((name.to_string(), hash_hex));
-    }
-    for (name, hash) in &png_hashes {
-        println!("[P20-009] PNG SHA-256 {name} = {hash}");
-    }
 
-    println!("[P20-009] All localization headless render assertions passed.");
-    println!(
-        "[P20-009] SUMMARY treasury={} diff(ja1,en1)={diff_ja1_en1} diff(en1,ja2)={diff_en1_ja2} \
+        println!("[P20-009] All localization headless render assertions passed.");
+        println!(
+            "[P20-009] SUMMARY treasury={} diff(ja1,en1)={diff_ja1_en1} diff(en1,ja2)={diff_en1_ja2} \
          diff(playing_ja,playing_en)={diff_playing_ja_en} diff(playing_en,playing_ja2)={diff_playing_en_ja2}",
-        snapshot_before.treasury
-    );
+            snapshot_before.treasury
+        );
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// P21-FIX-001: LastLoadOutcome/LoadRequestMessage 初期化の回帰テスト。
+//
+// `build_headless_app`/`initialize_app`は本番`main.rs`と同一のPlugin構成
+// (`SaveGamePlugin`/`LoadGamePlugin`を含む)を使う唯一の経路であり、この2 Pluginが
+// 欠けると`GameState::CountrySelection`へ入った最初のupdateから
+// `ui::country_selection`のSystem群がpanicする(本ラウンドで実際に発見・修正した不具合)。
+// 個別型の存在チェックだけでなく、実際にCountrySelection画面を複数フレームupdateし、
+// 表示内容・Message送受信まで検証することで、同種の初期化漏れを再発時に確実に検出する。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// 要求テスト項目5/6: CountrySelection画面の初回表示がpanicせず、
+/// `LastLoadOutcome`未設定時(既定のNone)は`ContinueStatusText`が空のままであること。
+#[test]
+fn country_selection_initial_frame_does_not_panic_and_shows_default_state() {
+    with_gpu_test_lock(|| {
+        let mut app = build_headless_app();
+        initialize_app(&mut app);
+
+        for _ in 0..WARMUP_FRAMES {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().resource::<LastLoadOutcome>().0,
+            None,
+            "[P21-FIX-001] LastLoadOutcome must default to None until a load is attempted"
+        );
+
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<&Text, With<ContinueStatusText>>();
+        let text = query
+            .single(world)
+            .expect("[P21-FIX-001] ContinueStatusText must exist in the production UI tree")
+            .0
+            .clone();
+        assert!(
+            text.is_empty(),
+            "[P21-FIX-001] default (no load attempted) ContinueStatusText must be empty, got '{text}'"
+        );
+    });
+}
+
+/// 要求テスト項目7: ロード失敗結果を`LastLoadOutcome`へ与えた場合、
+/// `ContinueStatusText`へ空でない失敗表示が反映され、欠落キーマーカーも出さないこと。
+/// `ui::country_selection`自身の独立ユニットテスト(`continue_status_text_shows_failure_and_clears_on_new_attempt`)
+/// と同じ主張を、本番`SaveGamePlugin`/`LoadGamePlugin`込みの完全なAppで確認する。
+#[test]
+fn load_failure_outcome_is_displayed_in_full_app() {
+    with_gpu_test_lock(|| {
+        let mut app = build_headless_app();
+        initialize_app(&mut app);
+
+        for _ in 0..WARMUP_FRAMES {
+            app.update();
+        }
+
+        app.world_mut().resource_mut::<LastLoadOutcome>().0 = Some(LoadOutcome::Failure {
+            path: std::path::PathBuf::from("saves/savegame_v1.ron"),
+            error: LoadOperationError::ReadOrValidate(LoadSaveError::FileNotFound(
+                "saves/savegame_v1.ron".to_string(),
+            )),
+        });
+        app.update();
+
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<&Text, With<ContinueStatusText>>();
+        let text = query
+            .single(world)
+            .expect("[P21-FIX-001] ContinueStatusText must exist")
+            .0
+            .clone();
+        assert!(
+            !text.is_empty(),
+            "[P21-FIX-001] a load failure outcome must produce a non-empty inline status message"
+        );
+        assert!(
+            !text.contains(MISSING_KEY_MARKER_PREFIX),
+            "[P21-FIX-001] failure display must not show a missing-key marker: {text}"
+        );
+    });
+}
+
+/// 要求テスト項目8: `SaveGamePlugin`が登録する`LoadRequestMessage`が実際に機能する
+/// (`ContinueButton`押下 -> `handle_continue_button`がMessageWriterで送信 ->
+/// `save::runtime::handle_load_requests`がMessageReaderで受信・処理する、という
+/// 本番のend-to-end経路。Message型が未登録なら受信側システムがこのテスト以前にpanicするため、
+/// `LastLoadOutcome`へ結果が記録されたこと自体が送受信の実動作の証拠になる)。
+#[test]
+fn continue_button_press_is_actually_read_by_the_load_handler_in_full_app() {
+    with_gpu_test_lock(|| {
+        let mut app = build_headless_app();
+        initialize_app(&mut app);
+
+        for _ in 0..WARMUP_FRAMES {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<LastLoadOutcome>().0, None);
+
+        // `PreUpdate.after(UiSystems::Focus)`経由で注入する(他のボタンクリックヘルパーと同じ
+        // 方式)。本番の`bevy_ui`フォーカス系Systemが同一フレームの`PreUpdate`内でカーソル未検出の
+        // `Interaction`をリセットしうるため、`Focus`より後に注入しないと`Update`の
+        // `handle_continue_button`まで`Pressed`が残らない(直接`entity_mut().insert(..)`する方式で
+        // 実際にこれが原因で最初の実装が失敗することを確認した)。
+        queue_continue_button_click(&mut app);
+        // 同一フレーム内で PreUpdate(注入) -> Update(handle_continue_button送信) ->
+        // PostUpdate(handle_load_requests受信・記録) の順に実行されるため、1回のupdateで足りるが、
+        // 余裕を持って複数フレーム進める。
+        for _ in 0..3 {
+            app.update();
+        }
+
+        assert!(
+            app.world().resource::<LastLoadOutcome>().0.is_some(),
+            "[P21-FIX-001] pressing Continue must cause handle_load_requests to record an outcome, \
+         proving LoadRequestMessage was actually registered/sent/received end-to-end"
+        );
+    });
 }
 
 /// 依存クレートを追加せずSHA-256を計算する最小実装(証拠ログ用途のみ)。

@@ -13,6 +13,7 @@ pub mod politics;
 pub mod population;
 pub mod profiling;
 pub mod research;
+pub mod save;
 pub mod state;
 pub mod ui;
 pub mod war;

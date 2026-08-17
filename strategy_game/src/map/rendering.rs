@@ -259,4 +259,52 @@ mod tests {
             brighten_color(Color::srgb(0.0, 1.0, 0.0), 1.5)
         );
     }
+
+    /// P21-004 spec #20: 講和による領土割譲後、州の色が新所有国の色になることを検証する。
+    /// `war::peace::execute_peace_settlement`のCedeWarGoalRegion経路が実際に呼ぶ
+    /// `StateRegistry::transfer_region_ownership`(owner_country_idとcontroller_countryを
+    /// 両方新所有国へ更新する)をそのまま使い、占領(controllerのみ変化)ではなく
+    /// 割譲(ownerも変化)のケースを別途直接検証する。
+    #[test]
+    fn state_sprite_color_updates_to_new_owner_after_peace_cession() {
+        let original_owner = crate::common::CountryId(1);
+        let new_owner = crate::common::CountryId(2);
+        let state_id = StateId(1);
+
+        let state = StateData {
+            id: state_id,
+            owner_country_id: original_owner,
+            ..Default::default()
+        };
+        let countries = vec![country(1, [1.0, 0.0, 0.0]), country(2, [0.0, 1.0, 0.0])];
+        let mut app = build_app(state, countries);
+        app.update();
+
+        {
+            let mut state_registry = app.world_mut().resource_mut::<StateRegistry>();
+            state_registry
+                .transfer_region_ownership(state_id, new_owner)
+                .unwrap();
+        }
+        app.update();
+
+        let sprite = app
+            .world_mut()
+            .query::<&Sprite>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            sprite.color,
+            Color::srgb(0.0, 1.0, 0.0),
+            "割譲後は新所有国の色になるはず"
+        );
+
+        let state_registry = app.world().resource::<StateRegistry>();
+        let state = state_registry.get(state_id).unwrap();
+        assert_eq!(
+            state.owner_country_id, new_owner,
+            "所有権も新所有国へ移るはず"
+        );
+        assert_eq!(state.controller(), new_owner);
+    }
 }

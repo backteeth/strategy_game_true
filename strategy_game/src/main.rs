@@ -12,6 +12,7 @@ use strategy_game::military::MilitaryPlugin;
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::population::PopulationPlugin;
 use strategy_game::research::ResearchPlugin;
+use strategy_game::save::{LoadGamePlugin, SaveGamePlugin};
 use strategy_game::state::StatePlugin;
 use strategy_game::ui::UiPlugin;
 use strategy_game::war::WarPlugin;
@@ -54,5 +55,12 @@ fn main() {
         .add_plugins(MapPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(DebugPlugin)
+        // P21-SAVE-002E: 単一スロットのセーブ／ロード導線。ここまでの全プラグインが
+        // 登録した後に追加する(SaveGameResourceParams/apply::prepare_loadが読む
+        // 全Resourceが出揃っている必要があるため)。起動だけでは一切ファイルI/Oを
+        // 行わない(トップバーのボタン操作でSaveRequestMessage/LoadRequestMessageが
+        // 発行された場合だけPostUpdateで動作する)。
+        .add_plugins(SaveGamePlugin)
+        .add_plugins(LoadGamePlugin)
         .run();
 }

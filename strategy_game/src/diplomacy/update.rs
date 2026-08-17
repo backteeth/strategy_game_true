@@ -1,5 +1,6 @@
 use crate::app::time::{DayChangedMessage, GameDate};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::diplomacy::crisis::{CrisisPhase, CrisisRegistry};
 use crate::diplomacy::data::DiplomacyRegistry;
 use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::ui::notification::GameNotification;
@@ -18,12 +19,26 @@ pub fn handle_daily_diplomacy(
     date: Res<GameDate>,
     mut justification_registry: ResMut<crate::war::justification::WarJustificationRegistry>,
     state_registry: Res<crate::state::data::StateRegistry>,
+    mut crisis_registry: ResMut<CrisisRegistry>,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
 ) {
     for _event in day_events.read() {
         // 0. 正当化の日次進行 (CountryAiより前に完了判定を行うため)
         justification_registry.process_daily_justifications(&state_registry);
+
+        // 3. 外交危機の日次進行 (P21-010: 既存の状態遷移規則が存在しないため、
+        // 接続範囲は`days_in_phase`のインクリメントのみに限定する。フェーズ自動遷移・
+        // 自動終結・自動宣戦は実装しない[対象外: 新しい外交ルール]。terminal state
+        // [ResolvedPeacefully/WarStarted/Cancelled]は既存実装どおり日数を進めない)。
+        for crisis in crisis_registry.crises.values_mut() {
+            if !matches!(
+                crisis.current_phase,
+                CrisisPhase::ResolvedPeacefully | CrisisPhase::WarStarted | CrisisPhase::Cancelled
+            ) {
+                crisis.days_in_phase += 1;
+            }
+        }
 
         for (&key, relation) in diplomacy_registry.relations.iter_mut() {
             // 1. クールダウン減算

@@ -18,11 +18,20 @@
     ("top_bar.reform_none", "改革: なし"),
     ("top_bar.date_paused", "{date} [一時停止]"),
     ("top_bar.date_speed", "{date} [速度: {speed}]"),
+    ("top_bar.save_button", "セーブ"),
+    ("top_bar.load_button", "ロード"),
+
+    // ── load_confirm (P21-SAVE-002E) ─────────────────────────
+    ("load_confirm.body", "保存済みゲームをロードしますか？"),
+    ("load_confirm.confirm_button", "ロード"),
+    ("load_confirm.cancel_button", "キャンセル"),
 
     // ── country_selection ───────────────────────────────────
     ("country_selection.title", "国家を選択"),
     ("country_selection.select_prompt", "国家を選択してください..."),
     ("country_selection.start_button", "ゲーム開始"),
+    ("country_selection.continue_button", "続きから"),
+    ("country_selection.continue_hint", "最後に保存したゲームをロードします"),
     ("country_selection.preview", "国名: {name}\n政体: {government}\n経済体制: {economy}\n総人口: {population}\n国庫: {treasury} G\n首都: {capital}"),
 
     // ── state_panel ─────────────────────────────────────────
@@ -38,6 +47,8 @@
     ("state_panel.build_failed_max_level", "建設失敗: {building} は既に最大レベルです (Lv.{max_level})"),
     ("state_panel.build_failed_in_queue", "建設失敗: {state} の {building} は既にキュー内です"),
     ("state_panel.build_failed_funds", "建設失敗: 資金不足 (必要: {cost} G, 保有: {treasury} G)"),
+    ("state_panel.build_failed_no_deposit", "建設失敗: {building} には {state} に魔晶石鉱床が必要です"),
+    ("state_panel.build_failed_crystal_only_state", "建設失敗: {state} には通常の採掘対象鉱床がないため {building} は建設できません(クリスタル鉱山を使用してください)"),
     ("state_panel.build_started", "建設開始: {building} ({state}, Lv.{level})"),
     ("state_panel.build_cancelled", "建設キャンセル: {building} (返金: {refund} G)"),
 
@@ -149,17 +160,43 @@
     ("military_panel.frontline_cmd_status_not_own_division", "自国の陸軍のみ選択できます"),
     ("military_panel.frontline_cmd_status_division_destroyed", "選択中の部隊は撃破済みです"),
     ("military_panel.frontline_cmd_status_no_frontline", "進行中の戦争がないため前線命令は実行できません"),
+    ("military_panel.stop_movement_button", "移動停止"),
+    ("military_panel.stop_movement_no_selection", "移動停止: 自国師団を選択してください"),
+    ("military_panel.stop_movement_target_line", "移動停止: 選択中の自国師団{count}体が対象"),
     ("military_panel.army_header", "── 編成(軍) ──"),
     ("military_panel.army_create_button", "編成作成"),
-    ("military_panel.army_add_button", "追加"),
-    ("military_panel.army_remove_button", "除外"),
-    ("military_panel.army_select_button", "軍を選択"),
-    ("military_panel.army_disband_button", "解散"),
-    ("military_panel.army_target_line", "対象編成: {name} ({count}師団)"),
-    ("military_panel.army_no_target", "対象編成なし(所属師団を含む選択がありません)"),
-    ("military_panel.army_list_header", "編成一覧 ({count})"),
-    ("military_panel.army_list_line", "  {name}: {count}師団 [{ids}]"),
+    ("military_panel.army_add_button", "選択師団を追加"),
+    ("military_panel.army_remove_button", "選択師団を除外"),
+    ("military_panel.army_disband_button", "軍を解散"),
+    ("military_panel.army_target_line", "選択中編成: {name} ({count}師団)"),
+    ("military_panel.army_no_target", "選択中編成なし(一覧から編成をクリックしてください)"),
+    ("military_panel.army_list_row", "{name} ({count}師団)"),
     ("military_panel.army_list_empty", "(編成はまだありません)"),
+    ("military_panel.army_frontline_assign_button", "前線を設定"),
+    ("military_panel.army_frontline_unassign_button", "前線を解除"),
+    ("military_panel.army_frontline_status_none_selected", "現在の割当前線: 編成を選択してください"),
+    ("military_panel.army_frontline_status_selecting", "前線選択中...(強調表示された前線をクリック。Escまたは右クリックでキャンセル)"),
+    ("military_panel.army_frontline_status_assigned", "現在の割当前線: 対{enemy}"),
+    ("military_panel.army_frontline_status_no_assignable", "現在の割当前線: 有効な前線がない"),
+    ("military_panel.army_frontline_status_unassigned", "現在の割当前線: なし"),
+    ("military_panel.army_frontline_assign_success", "編成を前線へ割り当てました"),
+    ("military_panel.army_frontline_unassign_success", "編成の前線割当を解除しました"),
+    ("military_panel.army_frontline_invalid_click", "無効な前線です"),
+    ("military_panel.offensive_line_start_button", "攻勢線を設定"),
+    ("military_panel.offensive_line_clear_button", "攻勢線を解除"),
+    ("military_panel.offensive_line_confirm_button", "確定"),
+    ("military_panel.offensive_line_cancel_button", "キャンセル"),
+    ("military_panel.offensive_line_status_none_selected", "攻勢線: 編成を選択してください"),
+    ("military_panel.offensive_line_status_not_assigned", "攻勢線: 選択中の編成は前線に未割当です"),
+    ("military_panel.offensive_line_status_unset", "攻勢線: 未設定"),
+    ("military_panel.offensive_line_status_editing", "攻勢線: 編集中({count}地点選択中。地図をクリックして追加/除去、確定またはキャンセル)"),
+    ("military_panel.offensive_line_status_preparing", "攻勢線: 準備中(攻勢姿勢にすると実行されます)"),
+    ("military_panel.offensive_line_status_in_progress", "攻勢線: 実行中(残り{count}州)"),
+    ("military_panel.offensive_line_status_reached", "攻勢線: 到達済み"),
+    ("military_panel.offensive_line_status_no_reachable_targets", "攻勢線: 到達可能な目標なし"),
+    ("military_panel.offensive_line_set_success", "攻勢線を設定しました"),
+    ("military_panel.offensive_line_clear_success", "攻勢線を解除しました"),
+    ("military_panel.offensive_line_confirm_invalid", "無効な攻勢線です"),
 
     // ── diplomacy_panel ─────────────────────────────────────
     ("diplomacy_panel.toggle_button", "[D] 外交パネル"),
@@ -211,6 +248,38 @@
     ("diplomacy_panel.notif_war_declared", "{country} に宣戦布告した! (戦争ID: {war_id})"),
     ("diplomacy_panel.notif_declare_failed", "宣戦布告不可: {reason}"),
 
+    // ── diplomacy_panel: P21-010 Claim/Crisis ────────────────
+    ("diplomacy_panel.claim_section_title", "-- 領土請求 --"),
+    ("diplomacy_panel.claim_no_states", "対象国は請求可能な陸上州を所有していません。"),
+    ("diplomacy_panel.claim_state_selected", "> {state} [選択中]"),
+    ("diplomacy_panel.claim_state_line", "  {state}"),
+    ("diplomacy_panel.claim_select_button", "選択"),
+    ("diplomacy_panel.claim_create_button", "領土要求を作成"),
+    ("diplomacy_panel.claim_create_disabled", "請求作成不可: {reason}"),
+    ("diplomacy_panel.my_claims_header", "-- この国に対する自国Claim --"),
+    ("diplomacy_panel.my_claims_none", "この国に対するClaimはありません。"),
+    ("diplomacy_panel.claim_line", "請求: {state} ({source}, {date}提出)"),
+    ("diplomacy_panel.start_crisis_button", "外交危機を開始"),
+    ("diplomacy_panel.crisis_start_disabled", "危機開始不可: {reason}"),
+    ("diplomacy_panel.crisis_confirm_prompt", "この請求で外交危機を開始しますか? 戦争につながる可能性があります。"),
+    ("diplomacy_panel.crisis_confirm_button", "危機を開始"),
+    ("diplomacy_panel.crisis_cancel_button", "キャンセル"),
+    ("diplomacy_panel.active_crises_header", "-- 進行中の外交危機 --"),
+    ("diplomacy_panel.no_active_crises", "進行中の外交危機はありません。"),
+    ("diplomacy_panel.crisis_phase_preparing", "準備中"),
+    ("diplomacy_panel.crisis_phase_demand_sent", "要求送付済み"),
+    ("diplomacy_panel.crisis_phase_negotiating", "交渉中"),
+    ("diplomacy_panel.crisis_phase_escalating", "激化中"),
+    ("diplomacy_panel.crisis_phase_resolved", "平和的解決"),
+    ("diplomacy_panel.crisis_phase_war_started", "開戦"),
+    ("diplomacy_panel.crisis_phase_cancelled", "中止"),
+    ("diplomacy_panel.crisis_line", "対 {country} ({states}): {phase} ({days}日目)"),
+    ("diplomacy_panel.notif_claim_created", "{state} へ領土請求を提出しました!"),
+    ("diplomacy_panel.notif_claim_failed", "請求作成不可: {reason}"),
+    ("diplomacy_panel.notif_crisis_claim_gone", "その請求は既に存在しません。"),
+    ("diplomacy_panel.notif_crisis_started", "外交危機を開始しました!"),
+    ("diplomacy_panel.notif_crisis_failed", "危機開始不可: {reason}"),
+
     // ── peace_panel ─────────────────────────────────────────
     ("peace_panel.toggle_button", "[P] 戦争と講和パネル"),
     ("peace_panel.title", "=== 戦況と講和会議 ==="),
@@ -256,6 +325,17 @@
     ("notif.debug_reform_completed", "[デバッグ] 政治改革を即座に完了させました！"),
     ("notif.ai_war_declared", "{attacker} が {defender} に宣戦布告した! (対象州: {state}, 戦争ID: {war_id})"),
 
+    // ── notification (save/load, P21-SAVE-002E) ─────────────
+    ("notif.save_success", "セーブが完了しました。"),
+    ("notif.save_failed", "セーブに失敗しました。"),
+    ("notif.load_success", "ロードが完了しました。ゲームは一時停止中です。"),
+    ("notif.load_failed_file_not_found", "セーブファイルが見つかりません。"),
+    ("notif.load_failed_read", "セーブファイルの読み込みに失敗しました。"),
+    ("notif.load_failed_deserialize", "セーブファイルが破損しています。"),
+    ("notif.load_failed_unsupported_version", "対応していないセーブ形式です。"),
+    ("notif.load_failed_validation", "セーブデータの整合性検証に失敗しました({count}件)。"),
+    ("notif.load_failed_apply", "セーブデータの適用に失敗しました。"),
+
     // ── building.* (BuildingType) ───────────────────────────
     ("building.farm", "農場"),
     ("building.logging_camp", "伐採キャンプ"),
@@ -265,6 +345,8 @@
     ("building.railway", "鉄道"),
     ("building.university", "大学"),
     ("building.magic_academy", "魔法学院"),
+    ("building.crystal_mine", "魔晶石鉱山"),
+    ("building.crystal_refinery", "魔晶石精製所"),
 
     // ── government.* (GovernmentType) ───────────────────────
     ("government.monarchy", "君主制"),
@@ -289,6 +371,7 @@
     ("resource.magic_crystal", "魔晶石"),
     ("resource.industrial_goods", "工業製品"),
     ("resource.military_equipment", "軍需物資"),
+    ("resource.raw_magic_crystal", "魔晶石原石"),
 
     // ── economic_state.* (EconomicState) ────────────────────
     ("economic_state.depression", "大恐慌"),
@@ -428,6 +511,22 @@
     ("war_error.justify.nap", "不可侵条約締結国に対して正当化はできません"),
     ("war_error.justify.truce", "休戦中は正当化できません"),
     ("war_error.justify.duplicate", "この州に対する正当化は既に存在します"),
+
+    // ── diplomacy_error.claim.* (ClaimRegistry::can_create_claim, P21-010) ─
+    ("diplomacy_error.claim.self", "自国に対する請求は作成できません"),
+    ("diplomacy_error.claim.claimant_missing", "請求国が存在しません"),
+    ("diplomacy_error.claim.target_missing", "対象国が存在しません"),
+    ("diplomacy_error.claim.state_missing", "対象州が存在しません"),
+    ("diplomacy_error.claim.state_is_sea", "海域は請求できません"),
+    ("diplomacy_error.claim.own_state", "自国の州は請求できません"),
+    ("diplomacy_error.claim.state_not_owned_by_target", "対象州は対象国が所有していません"),
+    ("diplomacy_error.claim.duplicate", "この州への請求は既に存在します"),
+
+    // ── diplomacy_error.crisis.* (CrisisRegistry::can_start_crisis, P21-010) ─
+    ("diplomacy_error.crisis.not_your_claim", "この請求はあなたのものではありません"),
+    ("diplomacy_error.crisis.state_missing", "請求対象の州が既に存在しません"),
+    ("diplomacy_error.crisis.claim_target_mismatch", "請求対象の州は既にこの国の所有ではありません"),
+    ("diplomacy_error.crisis.duplicate", "この請求に対する危機は既に進行中です"),
 
     // ── war_error.peace.* (can_accept_peace_offer / execute_peace_settlement) ─
     ("war_error.peace.war_not_found", "戦争が見つかりません"),

@@ -6,7 +6,7 @@ pub mod settings;
 pub mod time;
 
 use bevy::prelude::*;
-use game_state::GameState;
+use game_state::{GameState, PlayingEntryMode};
 use loader::DataLoaderPlugin;
 use settings::CameraSettings;
 use time::GameTimePlugin;
@@ -17,6 +17,7 @@ pub struct AppPlugin;
 impl Plugin for AppPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
+            .init_resource::<PlayingEntryMode>()
             .insert_resource(CameraSettings::default())
             .add_plugins(DataLoaderPlugin)
             .add_plugins(GameTimePlugin);

@@ -62,6 +62,12 @@ impl WarRegistry {
         self.next_id
     }
 
+    /// 保存されていた要素・次回ID発行値から`WarRegistry`を復元する（P21-SAVE-002D）。
+    /// `crate::save`のDTO型ではなく、通常のコレクションとカウンタだけを引数にとる。
+    pub(crate) fn from_saved_parts(wars: HashMap<WarId, War>, next_id: usize) -> Self {
+        Self { wars, next_id }
+    }
+
     pub fn add_war(&mut self, mut war: War) -> WarId {
         war.id = WarId(self.next_id);
         self.next_id += 1;

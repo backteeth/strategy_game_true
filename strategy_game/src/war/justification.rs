@@ -33,6 +33,19 @@ impl WarJustificationRegistry {
         self.next_id
     }
 
+    /// 保存されていた要素・次回ID発行値から`WarJustificationRegistry`を復元する
+    /// （P21-SAVE-002D）。`crate::save`のDTO型ではなく、通常のコレクションと
+    /// カウンタだけを引数にとる。
+    pub(crate) fn from_saved_parts(
+        justifications: HashMap<usize, WarJustification>,
+        next_id: usize,
+    ) -> Self {
+        Self {
+            justifications,
+            next_id,
+        }
+    }
+
     /// 正当化が開始可能かを検証し、エラーメッセージを返す
     pub fn can_start_justification(
         &self,

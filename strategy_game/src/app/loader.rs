@@ -1,4 +1,4 @@
-use crate::app::game_state::GameState;
+use crate::app::game_state::{GameState, PlayingEntryMode, reset_playing_entry_mode};
 use crate::building::data::{BuildingDefinition, BuildingRegistry, BuildingType};
 use crate::common::StateId;
 use crate::country::{CountryData, CountryRegistry};
@@ -24,7 +24,14 @@ impl Plugin for DataLoaderPlugin {
             load_game_data.before(crate::app::loader::transition_to_country_selection),
         )
         .add_systems(Startup, transition_to_country_selection)
-        .add_systems(OnEnter(GameState::Playing), spawn_debug_divisions);
+        .add_systems(
+            OnEnter(GameState::Playing),
+            // P21-SAVE-003: spawn_debug_divisionsはNew Game専用の正規データ生成であり、
+            // 「続きから」によるLoaded Game進入では実行してはならない(PlayingEntryModeで
+            // 判定)。reset_playing_entry_modeは判定完了後に必ず`.chain()`で後続実行し、
+            // このResourceを次のPlaying進入まで決定的な既定値へ戻す。
+            (spawn_debug_divisions, reset_playing_entry_mode).chain(),
+        );
     }
 }
 
@@ -185,7 +192,7 @@ pub fn load_game_data(
     let countries_ron = std::fs::read_to_string("assets/data/countries.ron")
         .unwrap_or_else(|e| panic!("[DataLoader] Failed to read assets/data/countries.ron: {e}"));
 
-    let countries: Vec<CountryData> = ron::from_str(&countries_ron)
+    let mut countries: Vec<CountryData> = ron::from_str(&countries_ron)
         .unwrap_or_else(|e| panic!("[DataLoader] Failed to parse assets/data/countries.ron: {e}"));
 
     // ── 州データ読み込み ─────────────────────────────────────────────────
@@ -199,6 +206,25 @@ pub fn load_game_data(
         if let Some(deposits) = resource_deposits_map.get(&state.id) {
             state.resource_deposits = deposits.clone();
         }
+    }
+
+    // P21-009-FIX-001: クリスタル専用州に残る初期Mine配置をCrystalMineへ正規化する
+    // (通常Mineは既にMagicCrystal種別鉱床を対象から除外しているため、そのまま
+    // 残すと無出力の建物になってしまう)。
+    let mine_migration_report = crate::building::mine_migration::migrate_mines_to_crystal_mines(
+        &mut states,
+        &mut countries,
+        &building_registry.definitions,
+    );
+    if !mine_migration_report.is_empty() {
+        info!(
+            "[DataLoader] Mine->CrystalMine migration: {} state(s) migrated ({:?}), {} construction item(s) converted, {} mixed-deposit state(s) skipped ({:?})",
+            mine_migration_report.migrated_states.len(),
+            mine_migration_report.migrated_states,
+            mine_migration_report.migrated_construction_items,
+            mine_migration_report.skipped_mixed_deposit_states.len(),
+            mine_migration_report.skipped_mixed_deposit_states,
+        );
     }
 
     validate_data(
@@ -295,11 +321,21 @@ pub fn transition_to_country_selection(mut next_state: ResMut<NextState<GameStat
     next_state.set(GameState::CountrySelection);
 }
 
-/// ゲーム開始時にデバッグ用の部隊を各国首都に1部隊ずつ配置する
+/// ゲーム開始時にデバッグ用の部隊を各国首都に1部隊ずつ配置する。
+///
+/// P21-SAVE-003: New Game経由(`PlayingEntryMode::NewGame`)でのみ実行する。「続きから」の
+/// ロード成功による`Playing`進入(`PlayingEntryMode::LoadedGame`)では、セーブ済みの
+/// Division集合をそのまま使う必要があるため、ここで即座にreturnして何も変更しない
+/// (0件のセーブへもデバッグDivisionを追加しない)。
 pub fn spawn_debug_divisions(
     mut military_registry: ResMut<MilitaryRegistry>,
     country_registry: Res<crate::country::CountryRegistry>,
+    entry_mode: Res<PlayingEntryMode>,
 ) {
+    if *entry_mode != PlayingEntryMode::NewGame {
+        return;
+    }
+
     // Infantry (DivisionDefinitionId=0) を各国首都に配置
     let infantry_def_id = crate::common::DivisionDefinitionId(0);
 

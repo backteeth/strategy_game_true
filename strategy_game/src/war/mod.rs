@@ -15,7 +15,9 @@ pub mod tests;
 use crate::app::game_state::GameState;
 use crate::app::time::DailySimulationSet;
 use crate::war::data::WarRegistry;
-use crate::war::frontline::{FrontlineRegistry, handle_daily_frontline_plans};
+use crate::war::frontline::{
+    FrontlineRegistry, handle_daily_frontline_plans, sync_army_frontline_references,
+};
 use crate::war::justification::WarJustificationRegistry;
 use crate::war::military_ai::{MilitaryAiRegistry, handle_daily_military_ai};
 use crate::war::update::{handle_daily_war_prep, handle_daily_war_resolution};
@@ -38,6 +40,10 @@ impl Plugin for WarPlugin {
                     handle_daily_frontline_plans.in_set(DailySimulationSet::FrontlineOrders),
                 )
                     .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                sync_army_frontline_references.run_if(in_state(GameState::Playing)),
             );
     }
 }

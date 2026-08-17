@@ -25,6 +25,14 @@ pub struct Army {
     pub member_division_ids: Vec<DivisionId>,
 }
 
+/// UI上で現在「選択中」の編成(軍)。マップの`SelectedState`/`SelectedDivision`と同様、
+/// 純粋なUI選択状態でありシミュレーション本体には影響しない。
+/// P21-004: 編成一覧のクリックで設定され、追加/除外/解散ボタンの対象を決める。
+/// 参照先の編成が消滅(解散・自動解散)した場合はNoneへ戻す必要がある
+/// (`ui::military_panel::update_army_ui`が毎更新時に再検証する)。
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectedArmy(pub Option<ArmyId>);
+
 /// 全編成を集中管理するリソース
 #[derive(Resource, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ArmyRegistry {
@@ -36,7 +44,11 @@ pub struct ArmyRegistry {
     next_army_number: HashMap<CountryId, u32>,
 }
 
-fn division_is_usable(military_registry: &MilitaryRegistry, division_id: DivisionId, owner: CountryId) -> bool {
+fn division_is_usable(
+    military_registry: &MilitaryRegistry,
+    division_id: DivisionId,
+    owner: CountryId,
+) -> bool {
     military_registry
         .divisions
         .get(&division_id)
@@ -49,12 +61,43 @@ impl ArmyRegistry {
         self.next_id
     }
 
+    /// 保存されていた全4フィールドから`ArmyRegistry`を復元する（P21-SAVE-002D）。
+    /// `crate::save`のDTO型ではなく、通常のコレクションとカウンタだけを引数にとる。
+    pub(crate) fn from_saved_parts(
+        armies: HashMap<ArmyId, Army>,
+        division_army_map: HashMap<DivisionId, ArmyId>,
+        next_id: usize,
+        next_army_number: HashMap<CountryId, u32>,
+    ) -> Self {
+        Self {
+            armies,
+            division_army_map,
+            next_id,
+            next_army_number,
+        }
+    }
+
+    /// 国家ごとの自動採番カウンタへの読み取り専用アクセサ（P21-SAVE-002B: セーブ用。
+    /// `next_army_number`はロード後の命名衝突防止に必要な正規状態だが、既存の`next_id()`
+    /// と異なりHashMapなのでコピーではなく借用を返す。呼び出し側[`crate::save::export`]で
+    /// `.clone()`してSaved DTOへ複製する）
+    pub(crate) fn next_army_number_map(&self) -> &HashMap<CountryId, u32> {
+        &self.next_army_number
+    }
+
     /// 陸軍を現在所属している編成(あれば)から取り除く(内部ヘルパー)。
+    /// 除去の結果、編成の所属師団が0になった場合は編成自体を自動解散する
+    /// (最小仕様: 空編成を放置しない)。
     fn detach_division(&mut self, division_id: DivisionId) {
         if let Some(old_group_id) = self.division_army_map.remove(&division_id)
             && let Some(old_group) = self.armies.get_mut(&old_group_id)
         {
-            old_group.member_division_ids.retain(|&id| id != division_id);
+            old_group
+                .member_division_ids
+                .retain(|&id| id != division_id);
+            if old_group.member_division_ids.is_empty() {
+                self.armies.remove(&old_group_id);
+            }
         }
     }
 
@@ -113,12 +156,23 @@ impl ArmyRegistry {
         owner: CountryId,
         military_registry: &MilitaryRegistry,
     ) -> Result<(), &'static str> {
-        let group = self.armies.get(&group_id).ok_or("Division group not found")?;
+        let group = self
+            .armies
+            .get(&group_id)
+            .ok_or("Division group not found")?;
         if group.owner != owner {
             return Err("Division group belongs to a different country");
         }
         if !division_is_usable(military_registry, division_id, owner) {
             return Err("Division not found, foreign-owned, or destroyed");
+        }
+
+        // 既にこの編成へ所属済みなら何もしない。ここで無条件にdetach_divisionを
+        // 呼ぶと、対象師団がこの編成の唯一の所属だった場合、detach直後の
+        // 自動解散(空編成を残さない仕様)でgroup_id自体が消えてしまい、
+        // 直後のget_mutが失敗する自己参照トラップになる。
+        if self.division_army_map.get(&division_id) == Some(&group_id) {
+            return Ok(());
         }
 
         self.detach_division(division_id);
@@ -155,7 +209,10 @@ impl ArmyRegistry {
 
     /// 編成を解散する。所属していた陸軍は全員未所属へ戻る。
     pub fn disband(&mut self, group_id: ArmyId, owner: CountryId) -> Result<(), &'static str> {
-        let group = self.armies.get(&group_id).ok_or("Division group not found")?;
+        let group = self
+            .armies
+            .get(&group_id)
+            .ok_or("Division group not found")?;
         if group.owner != owner {
             return Err("Division group belongs to a different country");
         }
@@ -176,7 +233,10 @@ impl ArmyRegistry {
     /// DivisionId昇順で最初に見つかったものが属する編成を「操作対象の編成」として返す。
     /// UI(追加/除外/軍を選択/解散ボタン)と実行ハンドラの両方がこれを使い、
     /// 「対象編成をどう決めるか」の判断を1箇所に集約する。
-    pub fn target_army_for_selection(&self, selected_division_ids: &[DivisionId]) -> Option<ArmyId> {
+    pub fn target_army_for_selection(
+        &self,
+        selected_division_ids: &[DivisionId],
+    ) -> Option<ArmyId> {
         let mut ids: Vec<DivisionId> = selected_division_ids.to_vec();
         ids.sort_by_key(|id| id.0);
         ids.iter().find_map(|id| self.army_for_division(*id))
@@ -184,6 +244,7 @@ impl ArmyRegistry {
 
     /// 消滅・撃破済み陸軍の参照を全編成から整理する
     /// (`war::frontline::FrontlineRegistry::sanitize_references`と対になる日次処理)。
+    /// 整理の結果、所属師団が0になった編成は自動解散する(最小仕様: 空編成を放置しない)。
     pub fn sanitize_references(&mut self, military_registry: &MilitaryRegistry) {
         for group in self.armies.values_mut() {
             let owner = group.owner;
@@ -191,6 +252,9 @@ impl ArmyRegistry {
                 .member_division_ids
                 .retain(|&division_id| division_is_usable(military_registry, division_id, owner));
         }
+
+        self.armies
+            .retain(|_, group| !group.member_division_ids.is_empty());
 
         let armies = &self.armies;
         self.division_army_map.retain(|division_id, group_id| {
@@ -288,11 +352,16 @@ mod tests {
     #[test]
     fn add_division_moves_it_from_previous_group() {
         let owner = CountryId(1);
-        let military_registry =
-            registry_with_divisions(vec![make_division(1, owner), make_division(2, owner)]);
+        // group_aは師団1・3の2体編成にしておく(師団1が抜けても空にならず、
+        // 「移動元編成からの除外」だけを空編成の自動解散から切り分けて検証できる)
+        let military_registry = registry_with_divisions(vec![
+            make_division(1, owner),
+            make_division(2, owner),
+            make_division(3, owner),
+        ]);
         let mut groups = ArmyRegistry::default();
         let group_a = groups
-            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .create_army(owner, &[DivisionId(1), DivisionId(3)], &military_registry)
             .unwrap();
         let group_b = groups
             .create_army(owner, &[DivisionId(2)], &military_registry)
@@ -302,7 +371,16 @@ mod tests {
             .add_division(group_b, DivisionId(1), owner, &military_registry)
             .unwrap();
 
-        assert!(!groups.armies[&group_a].member_division_ids.contains(&DivisionId(1)));
+        assert!(
+            !groups.armies[&group_a]
+                .member_division_ids
+                .contains(&DivisionId(1))
+        );
+        assert_eq!(
+            groups.armies[&group_a].member_division_ids,
+            vec![DivisionId(3)],
+            "移動元編成は残りの師団を保持したまま存続する"
+        );
         assert_eq!(
             groups.armies[&group_b].member_division_ids,
             vec![DivisionId(1), DivisionId(2)]
@@ -310,11 +388,36 @@ mod tests {
         assert_eq!(groups.army_for_division(DivisionId(1)), Some(group_b));
     }
 
+    /// 自己参照トラップの回帰テスト: 既に唯一の所属師団である師団を、同じ編成へ
+    /// 「追加」しても(=UIで選択中編成に既存メンバーごと選択して追加を押す等)、
+    /// 空編成の自動解散と衝突してpanicしたり編成が消えたりしない。
+    #[test]
+    fn add_division_already_sole_member_of_target_is_a_safe_no_op() {
+        let owner = CountryId(1);
+        let military_registry = registry_with_divisions(vec![make_division(1, owner)]);
+        let mut groups = ArmyRegistry::default();
+        let group_id = groups
+            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .unwrap();
+
+        let result = groups.add_division(group_id, DivisionId(1), owner, &military_registry);
+
+        assert!(result.is_ok());
+        assert!(groups.armies.contains_key(&group_id));
+        assert_eq!(
+            groups.armies[&group_id].member_division_ids,
+            vec![DivisionId(1)]
+        );
+        assert_eq!(groups.army_for_division(DivisionId(1)), Some(group_id));
+    }
+
     #[test]
     fn add_division_rejects_foreign_division() {
         let owner = CountryId(1);
-        let military_registry =
-            registry_with_divisions(vec![make_division(1, owner), make_division(2, CountryId(2))]);
+        let military_registry = registry_with_divisions(vec![
+            make_division(1, owner),
+            make_division(2, CountryId(2)),
+        ]);
         let mut groups = ArmyRegistry::default();
         let group_id = groups
             .create_army(owner, &[DivisionId(1)], &military_registry)
@@ -340,7 +443,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(groups.army_for_division(DivisionId(1)), None);
-        assert_eq!(groups.armies[&group_id].member_division_ids, vec![DivisionId(2)]);
+        assert_eq!(
+            groups.armies[&group_id].member_division_ids,
+            vec![DivisionId(2)]
+        );
     }
 
     #[test]
@@ -403,7 +509,10 @@ mod tests {
 
         groups.sanitize_references(&military_registry);
 
-        assert_eq!(groups.armies[&group_id].member_division_ids, vec![DivisionId(2)]);
+        assert_eq!(
+            groups.armies[&group_id].member_division_ids,
+            vec![DivisionId(2)]
+        );
         assert_eq!(groups.army_for_division(DivisionId(1)), None);
         assert_eq!(groups.army_for_division(DivisionId(2)), Some(group_id));
     }
@@ -430,6 +539,118 @@ mod tests {
         assert_eq!(
             groups.target_army_for_selection(&[DivisionId(1), DivisionId(3)]),
             None
+        );
+    }
+
+    #[test]
+    fn army_ids_are_unique_across_creations() {
+        let owner = CountryId(1);
+        let military_registry =
+            registry_with_divisions(vec![make_division(1, owner), make_division(2, owner)]);
+        let mut groups = ArmyRegistry::default();
+        let g1 = groups
+            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .unwrap();
+        let g2 = groups
+            .create_army(owner, &[DivisionId(2)], &military_registry)
+            .unwrap();
+
+        assert_ne!(g1, g2);
+        assert_eq!(groups.armies.len(), 2);
+    }
+
+    /// P21-004 spec #11/#14: 最後の所属師団を除外(手動)すると、その編成は自動解散される。
+    #[test]
+    fn removing_last_division_auto_disbands_the_army() {
+        let owner = CountryId(1);
+        let military_registry = registry_with_divisions(vec![make_division(1, owner)]);
+        let mut groups = ArmyRegistry::default();
+        let group_id = groups
+            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .unwrap();
+
+        groups
+            .remove_division(DivisionId(1), owner, &military_registry)
+            .unwrap();
+
+        assert!(
+            !groups.armies.contains_key(&group_id),
+            "空になった編成は自動解散されるはず"
+        );
+        assert_eq!(groups.army_for_division(DivisionId(1)), None);
+    }
+
+    /// P21-004 spec #14: 最後の所属師団が戦闘等で消滅した場合も、日次整理
+    /// (`sanitize_references`)で編成が自動解散される。
+    #[test]
+    fn sanitize_references_auto_disbands_army_that_becomes_empty() {
+        let owner = CountryId(1);
+        let mut military_registry = registry_with_divisions(vec![make_division(1, owner)]);
+        let mut groups = ArmyRegistry::default();
+        let group_id = groups
+            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .unwrap();
+
+        // 唯一の所属師団が消滅
+        military_registry.remove_division(DivisionId(1));
+        groups.sanitize_references(&military_registry);
+
+        assert!(
+            !groups.armies.contains_key(&group_id),
+            "最後の所属師団が消滅した編成は自動解散されるはず"
+        );
+        assert_eq!(groups.army_for_division(DivisionId(1)), None);
+    }
+
+    /// 移動によって旧編成が空になった場合も、旧編成は自動解散される
+    /// (作成直後の除外だけでなく、他編成への移動でも同じ不変条件が保たれることを確認)。
+    #[test]
+    fn moving_last_division_to_another_army_auto_disbands_the_source_army() {
+        let owner = CountryId(1);
+        let military_registry =
+            registry_with_divisions(vec![make_division(1, owner), make_division(2, owner)]);
+        let mut groups = ArmyRegistry::default();
+        let group_a = groups
+            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .unwrap();
+        let group_b = groups
+            .create_army(owner, &[DivisionId(2)], &military_registry)
+            .unwrap();
+
+        groups
+            .add_division(group_b, DivisionId(1), owner, &military_registry)
+            .unwrap();
+
+        assert!(
+            !groups.armies.contains_key(&group_a),
+            "唯一の所属師団を失った旧編成は自動解散されるはず"
+        );
+        assert_eq!(
+            groups.armies[&group_b].member_division_ids,
+            vec![DivisionId(1), DivisionId(2)]
+        );
+    }
+
+    /// P21-004 spec #15: 存在しないDivisionIdを対象にした操作は安全に無視/拒否される。
+    #[test]
+    fn add_and_remove_reject_nonexistent_division_id_safely() {
+        let owner = CountryId(1);
+        let military_registry = registry_with_divisions(vec![make_division(1, owner)]);
+        let mut groups = ArmyRegistry::default();
+        let group_id = groups
+            .create_army(owner, &[DivisionId(1)], &military_registry)
+            .unwrap();
+
+        let add_result = groups.add_division(group_id, DivisionId(999), owner, &military_registry);
+        assert!(add_result.is_err());
+        assert_eq!(groups.army_for_division(DivisionId(999)), None);
+
+        let remove_result = groups.remove_division(DivisionId(999), owner, &military_registry);
+        assert!(remove_result.is_err());
+        // 既存編成には影響しない
+        assert_eq!(
+            groups.armies[&group_id].member_division_ids,
+            vec![DivisionId(1)]
         );
     }
 

@@ -19,11 +19,20 @@
     ("top_bar.reform_none", "Reform: None"),
     ("top_bar.date_paused", "{date} [PAUSED]"),
     ("top_bar.date_speed", "{date} [Spd: {speed}]"),
+    ("top_bar.save_button", "Save"),
+    ("top_bar.load_button", "Load"),
+
+    // ── load_confirm (P21-SAVE-002E) ─────────────────────────
+    ("load_confirm.body", "Load the saved game?"),
+    ("load_confirm.confirm_button", "Load"),
+    ("load_confirm.cancel_button", "Cancel"),
 
     // ── country_selection ───────────────────────────────────
     ("country_selection.title", "Select Your Nation"),
     ("country_selection.select_prompt", "Select a nation..."),
     ("country_selection.start_button", "Start Game"),
+    ("country_selection.continue_button", "Continue"),
+    ("country_selection.continue_hint", "Load the most recently saved game"),
     ("country_selection.preview", "Name: {name}\nGovernment: {government}\nEconomy: {economy}\nTotal Pop: {population}\nTreasury: {treasury} G\nCapital: {capital}"),
 
     // ── state_panel ─────────────────────────────────────────
@@ -39,6 +48,8 @@
     ("state_panel.build_failed_max_level", "Build Failed: {building} is already at max level (Lv.{max_level})"),
     ("state_panel.build_failed_in_queue", "Build Failed: {building} in {state} is already in queue"),
     ("state_panel.build_failed_funds", "Build Failed: Insufficient funds (Req: {cost} G, Has: {treasury} G)"),
+    ("state_panel.build_failed_no_deposit", "Build Failed: {building} requires a magic crystal deposit in {state}"),
+    ("state_panel.build_failed_crystal_only_state", "Build Failed: {state} has no ordinary mining deposit; {building} cannot be built here (use Crystal Mine instead)"),
     ("state_panel.build_started", "Build Started: {building} ({state}, Lv.{level})"),
     ("state_panel.build_cancelled", "Build Cancelled: {building} (Refund: {refund} G)"),
 
@@ -150,17 +161,43 @@
     ("military_panel.frontline_cmd_status_not_own_division", "You can only select your own division"),
     ("military_panel.frontline_cmd_status_division_destroyed", "Selected unit has been destroyed"),
     ("military_panel.frontline_cmd_status_no_frontline", "No active war, frontline orders unavailable"),
+    ("military_panel.stop_movement_button", "Stop Movement"),
+    ("military_panel.stop_movement_no_selection", "Stop Movement: select your own division(s)"),
+    ("military_panel.stop_movement_target_line", "Stop Movement: {count} own division(s) selected"),
     ("military_panel.army_header", "── Armies ──"),
     ("military_panel.army_create_button", "Create Army"),
-    ("military_panel.army_add_button", "Add"),
-    ("military_panel.army_remove_button", "Remove"),
-    ("military_panel.army_select_button", "Select Army"),
-    ("military_panel.army_disband_button", "Disband"),
-    ("military_panel.army_target_line", "Target army: {name} ({count} divisions)"),
-    ("military_panel.army_no_target", "No target army (select a division that belongs to one)"),
-    ("military_panel.army_list_header", "Armies ({count})"),
-    ("military_panel.army_list_line", "  {name}: {count} divisions [{ids}]"),
+    ("military_panel.army_add_button", "Add Selected"),
+    ("military_panel.army_remove_button", "Remove Selected"),
+    ("military_panel.army_disband_button", "Disband Army"),
+    ("military_panel.army_target_line", "Selected army: {name} ({count} divisions)"),
+    ("military_panel.army_no_target", "No army selected (click one in the list below)"),
+    ("military_panel.army_list_row", "{name} ({count} divisions)"),
     ("military_panel.army_list_empty", "(no armies yet)"),
+    ("military_panel.army_frontline_assign_button", "Assign Frontline"),
+    ("military_panel.army_frontline_unassign_button", "Unassign Frontline"),
+    ("military_panel.army_frontline_status_none_selected", "Assigned Frontline: select an army first"),
+    ("military_panel.army_frontline_status_selecting", "Selecting frontline... (click a highlighted frontline; Esc or right-click to cancel)"),
+    ("military_panel.army_frontline_status_assigned", "Assigned Frontline: vs {enemy}"),
+    ("military_panel.army_frontline_status_no_assignable", "Assigned Frontline: no assignable frontline"),
+    ("military_panel.army_frontline_status_unassigned", "Assigned Frontline: none"),
+    ("military_panel.army_frontline_assign_success", "Army assigned to frontline"),
+    ("military_panel.army_frontline_unassign_success", "Army unassigned from frontline"),
+    ("military_panel.army_frontline_invalid_click", "Invalid frontline"),
+    ("military_panel.offensive_line_start_button", "Set offensive line"),
+    ("military_panel.offensive_line_clear_button", "Clear offensive line"),
+    ("military_panel.offensive_line_confirm_button", "Confirm"),
+    ("military_panel.offensive_line_cancel_button", "Cancel"),
+    ("military_panel.offensive_line_status_none_selected", "Offensive line: select an army"),
+    ("military_panel.offensive_line_status_not_assigned", "Offensive line: selected army is not assigned to a frontline"),
+    ("military_panel.offensive_line_status_unset", "Offensive line: unset"),
+    ("military_panel.offensive_line_status_editing", "Offensive line: editing ({count} points selected. Click the map to add/remove, then confirm or cancel)"),
+    ("military_panel.offensive_line_status_preparing", "Offensive line: preparing (will execute once the stance is set to Offensive)"),
+    ("military_panel.offensive_line_status_in_progress", "Offensive line: in progress ({count} states remaining)"),
+    ("military_panel.offensive_line_status_reached", "Offensive line: reached"),
+    ("military_panel.offensive_line_status_no_reachable_targets", "Offensive line: no reachable targets"),
+    ("military_panel.offensive_line_set_success", "Offensive line set"),
+    ("military_panel.offensive_line_clear_success", "Offensive line cleared"),
+    ("military_panel.offensive_line_confirm_invalid", "Invalid offensive line"),
 
     // ── diplomacy_panel ─────────────────────────────────────
     ("diplomacy_panel.toggle_button", "[D] Diplomacy Panel"),
@@ -212,6 +249,38 @@
     ("diplomacy_panel.notif_war_declared", "DECLARED WAR on {country}! (War ID: {war_id})"),
     ("diplomacy_panel.notif_declare_failed", "Cannot Declare War: {reason}"),
 
+    // ── diplomacy_panel: P21-010 Claim/Crisis ────────────────
+    ("diplomacy_panel.claim_section_title", "-- Territorial Claims --"),
+    ("diplomacy_panel.claim_no_states", "Target country owns no claimable land states."),
+    ("diplomacy_panel.claim_state_selected", "> {state} [SELECTED]"),
+    ("diplomacy_panel.claim_state_line", "  {state}"),
+    ("diplomacy_panel.claim_select_button", "Select"),
+    ("diplomacy_panel.claim_create_button", "Create Territorial Claim"),
+    ("diplomacy_panel.claim_create_disabled", "Cannot Create Claim: {reason}"),
+    ("diplomacy_panel.my_claims_header", "-- Your Claims on This Country --"),
+    ("diplomacy_panel.my_claims_none", "You have no claims on this country."),
+    ("diplomacy_panel.claim_line", "Claim: {state} ({source}, filed {date})"),
+    ("diplomacy_panel.start_crisis_button", "Start Diplomatic Crisis"),
+    ("diplomacy_panel.crisis_start_disabled", "Cannot Start Crisis: {reason}"),
+    ("diplomacy_panel.crisis_confirm_prompt", "Start a diplomatic crisis over this claim? This may lead to war."),
+    ("diplomacy_panel.crisis_confirm_button", "Start Crisis"),
+    ("diplomacy_panel.crisis_cancel_button", "Cancel"),
+    ("diplomacy_panel.active_crises_header", "-- Active Diplomatic Crises --"),
+    ("diplomacy_panel.no_active_crises", "No active diplomatic crises."),
+    ("diplomacy_panel.crisis_phase_preparing", "Preparing"),
+    ("diplomacy_panel.crisis_phase_demand_sent", "Demand Sent"),
+    ("diplomacy_panel.crisis_phase_negotiating", "Negotiating"),
+    ("diplomacy_panel.crisis_phase_escalating", "Escalating"),
+    ("diplomacy_panel.crisis_phase_resolved", "Resolved Peacefully"),
+    ("diplomacy_panel.crisis_phase_war_started", "War Started"),
+    ("diplomacy_panel.crisis_phase_cancelled", "Cancelled"),
+    ("diplomacy_panel.crisis_line", "vs {country} over {states}: {phase} (day {days})"),
+    ("diplomacy_panel.notif_claim_created", "Territorial Claim filed on {state}!"),
+    ("diplomacy_panel.notif_claim_failed", "Cannot Create Claim: {reason}"),
+    ("diplomacy_panel.notif_crisis_claim_gone", "That claim no longer exists."),
+    ("diplomacy_panel.notif_crisis_started", "Diplomatic Crisis started!"),
+    ("diplomacy_panel.notif_crisis_failed", "Cannot Start Crisis: {reason}"),
+
     // ── peace_panel ─────────────────────────────────────────
     ("peace_panel.toggle_button", "[P] War & Peace Panel"),
     ("peace_panel.title", "=== War Progress & Peace Conference ==="),
@@ -257,6 +326,17 @@
     ("notif.debug_reform_completed", "[DEBUG] Instantly completed political reform!"),
     ("notif.ai_war_declared", "{attacker} DECLARED WAR on {defender}! (Target: {state}, War ID: {war_id})"),
 
+    // ── notification (save/load, P21-SAVE-002E) ─────────────
+    ("notif.save_success", "Save complete."),
+    ("notif.save_failed", "Save failed."),
+    ("notif.load_success", "Load complete. The game is paused."),
+    ("notif.load_failed_file_not_found", "No save file found."),
+    ("notif.load_failed_read", "Failed to read the save file."),
+    ("notif.load_failed_deserialize", "The save file is corrupted."),
+    ("notif.load_failed_unsupported_version", "Unsupported save format version."),
+    ("notif.load_failed_validation", "Save data failed integrity validation ({count} issue(s))."),
+    ("notif.load_failed_apply", "Failed to apply the save data."),
+
     // ── building.* (BuildingType) ───────────────────────────
     ("building.farm", "Farm"),
     ("building.logging_camp", "Logging Camp"),
@@ -266,6 +346,8 @@
     ("building.railway", "Railway"),
     ("building.university", "University"),
     ("building.magic_academy", "Magic Academy"),
+    ("building.crystal_mine", "Crystal Mine"),
+    ("building.crystal_refinery", "Crystal Refinery"),
 
     // ── government.* (GovernmentType) ───────────────────────
     ("government.monarchy", "Monarchy"),
@@ -290,6 +372,7 @@
     ("resource.magic_crystal", "Magic Crystal"),
     ("resource.industrial_goods", "Industrial Goods"),
     ("resource.military_equipment", "Military Equipment"),
+    ("resource.raw_magic_crystal", "Raw Magic Crystal"),
 
     // ── economic_state.* (EconomicState) ────────────────────
     ("economic_state.depression", "Depression"),
@@ -429,6 +512,22 @@
     ("war_error.justify.nap", "Cannot justify war against non-aggression pact partner"),
     ("war_error.justify.truce", "Cannot justify war during truce"),
     ("war_error.justify.duplicate", "Justification for this state already exists"),
+
+    // ── diplomacy_error.claim.* (ClaimRegistry::can_create_claim, P21-010) ─
+    ("diplomacy_error.claim.self", "Cannot file a claim against your own country"),
+    ("diplomacy_error.claim.claimant_missing", "Claimant country does not exist"),
+    ("diplomacy_error.claim.target_missing", "Target country does not exist"),
+    ("diplomacy_error.claim.state_missing", "Target state does not exist"),
+    ("diplomacy_error.claim.state_is_sea", "Cannot claim a sea region"),
+    ("diplomacy_error.claim.own_state", "Cannot claim your own state"),
+    ("diplomacy_error.claim.state_not_owned_by_target", "Target state is not owned by the target country"),
+    ("diplomacy_error.claim.duplicate", "You already have a claim on this state"),
+
+    // ── diplomacy_error.crisis.* (CrisisRegistry::can_start_crisis, P21-010) ─
+    ("diplomacy_error.crisis.not_your_claim", "This claim does not belong to you"),
+    ("diplomacy_error.crisis.state_missing", "The claimed state no longer exists"),
+    ("diplomacy_error.crisis.claim_target_mismatch", "The claimed state is no longer owned by this country"),
+    ("diplomacy_error.crisis.duplicate", "A crisis over this claim is already in progress"),
 
     // ── war_error.peace.* (can_accept_peace_offer / execute_peace_settlement) ─
     ("war_error.peace.war_not_found", "War not found"),

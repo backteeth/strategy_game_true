@@ -1,7 +1,9 @@
 use crate::app::game_state::GameState;
 use crate::app::time::GameDate;
-use crate::common::CountryId;
+use crate::common::{ClaimId, CountryId, StateId};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::diplomacy::claims::{ClaimRegistry, ClaimSource};
+use crate::diplomacy::crisis::{CrisisPhase, CrisisRegistry};
 use crate::diplomacy::data::{
     ActiveDiplomaticActivity, ActiveTreaty, DiplomacyRegistry, DiplomaticActivityType, TreatyType,
 };
@@ -25,6 +27,21 @@ pub struct DiplomacyPanelRoot;
 pub struct DiplomacyPanelState {
     pub open: bool,
     pub target_country: Option<CountryId>,
+    /// P21-010: 請求対象として選択中の州(対象国が所有する陸上州のみ有効)。
+    /// 対象国変更・パネルを閉じる・ロード・`GameState::Playing`離脱で破棄する。
+    pub claim_target_state: Option<StateId>,
+    /// P21-010: 危機開始の確認待ちClaim(インライン2段階確認の1段階目)。
+    /// `claim_target_state`と同じタイミングで破棄する。
+    pub pending_crisis_claim: Option<ClaimId>,
+}
+
+impl DiplomacyPanelState {
+    /// P21-010: 一時的な請求州選択・危機開始確認状態だけを破棄する
+    /// (`open`/`target_country`は対象外)。
+    fn clear_transient_selection(&mut self) {
+        self.claim_target_state = None;
+        self.pending_crisis_claim = None;
+    }
 }
 
 #[derive(Component)]
@@ -48,6 +65,31 @@ pub struct JustifyWarButton(pub CountryId, pub crate::common::StateId);
 #[derive(Component)]
 pub struct DeclareWarButton(pub CountryId, pub crate::common::StateId);
 
+/// P21-010: Claimパネル操作が発行する命令の種類。`Create`は選択中の
+/// `target_country`/`claim_target_state`を実行時に読み直すだけで(payloadを持たない)、
+/// 同一フレーム内で対象国が切り替わった場合でも古い対象へ作成しない
+/// (`can_create_claim`が実行時点の対象国と州所有者を必ず再検証する)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimCommand {
+    SelectState(StateId),
+    Create,
+}
+
+#[derive(Component)]
+pub struct ClaimCommandButton(pub ClaimCommand);
+
+/// P21-010: Crisisパネル操作が発行する命令の種類。`Confirm`/`Cancel`はpayloadを持たず、
+/// 実行時点の`pending_crisis_claim`を読み直す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrisisCommand {
+    RequestStart(ClaimId),
+    Confirm,
+    Cancel,
+}
+
+#[derive(Component)]
+pub struct CrisisCommandButton(pub CrisisCommand);
+
 #[derive(Component)]
 pub struct DiplomacyHeaderText;
 
@@ -66,11 +108,23 @@ impl Plugin for DiplomacyPluginUI {
                     toggle_diplomacy_panel_key,
                     sync_target_country_from_selected_state,
                     handle_diplomacy_action_buttons,
+                    handle_claim_command_buttons,
+                    handle_crisis_command_buttons,
                     update_diplomacy_panel_ui,
                 )
+                    .chain()
                     .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                OnExit(GameState::Playing),
+                reset_diplomacy_panel_transient_state,
             );
     }
+}
+
+/// P21-010: `GameState::Playing`離脱時に一時的な請求州選択・危機開始確認状態を破棄する。
+fn reset_diplomacy_panel_transient_state(mut state: ResMut<DiplomacyPanelState>) {
+    state.clear_transient_selection();
 }
 
 fn setup_diplomacy_panel(
@@ -186,6 +240,10 @@ fn toggle_diplomacy_panel_key(
         // 食い違いが発生していた。
         active_panel.toggle(crate::ui::PanelKind::Diplomacy);
         state.open = active_panel.current == crate::ui::PanelKind::Diplomacy;
+        if !state.open {
+            // P21-010: パネルを閉じたら一時的な請求州選択・危機開始確認状態を破棄する。
+            state.clear_transient_selection();
+        }
         if let Ok(mut node) = panel_q.single_mut() {
             node.display = if state.open {
                 Display::Flex
@@ -207,8 +265,12 @@ fn sync_target_country_from_selected_state(
     }
     if let Some(state) = selected_state.0.and_then(|sid| state_registry.get(sid))
         && player_country.0 != Some(state.owner_country_id)
+        && diplo_state.target_country != Some(state.owner_country_id)
     {
         diplo_state.target_country = Some(state.owner_country_id);
+        // P21-010: 対象国が変わったら一時的な請求州選択・危機開始確認状態を破棄する
+        // (古い対象国向けの選択を新しい対象国へ持ち越さない)。
+        diplo_state.clear_transient_selection();
     }
 }
 
@@ -436,6 +498,215 @@ fn handle_diplomacy_action_buttons(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// P21-010: 領土請求(Claim)コマンド処理
+// ─────────────────────────────────────────────────────────────────────────
+
+fn execute_claim_select_state(diplo_state: &mut DiplomacyPanelState, state_id: StateId) {
+    diplo_state.claim_target_state = Some(state_id);
+    // 州選択をやり直したら、古い選択に紐づく危機開始確認は破棄する。
+    diplo_state.pending_crisis_claim = None;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_claim_create(
+    diplo_state: &mut DiplomacyPanelState,
+    claim_registry: &mut ClaimRegistry,
+    player: CountryId,
+    target: CountryId,
+    country_registry: &CountryRegistry,
+    state_registry: &StateRegistry,
+    date: &GameDate,
+    notif_writer: &mut MessageWriter<GameNotification>,
+    locale: &CurrentLocale,
+    catalog: &TranslationCatalog,
+) {
+    let Some(target_state) = diplo_state.claim_target_state else {
+        return;
+    };
+
+    match claim_registry.create_claim(
+        player,
+        target,
+        target_state,
+        date.display(),
+        ClaimSource::Strategic,
+        country_registry,
+        state_registry,
+    ) {
+        Ok(_) => {
+            let st_name = state_registry
+                .get(target_state)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| t(catalog, locale.0, "common.unknown"));
+            notif_writer.write(GameNotification {
+                message: tf(
+                    catalog,
+                    locale.0,
+                    "diplomacy_panel.notif_claim_created",
+                    vec![("state", st_name)],
+                ),
+            });
+        }
+        Err(err) => {
+            notif_writer.write(GameNotification {
+                message: tf(
+                    catalog,
+                    locale.0,
+                    "diplomacy_panel.notif_claim_failed",
+                    vec![("reason", t(catalog, locale.0, err))],
+                ),
+            });
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_claim_command_buttons(
+    btn_q: Query<(&Interaction, &ClaimCommandButton), Changed<Interaction>>,
+    mut diplo_state: ResMut<DiplomacyPanelState>,
+    player_country: Res<PlayerCountry>,
+    mut claim_registry: ResMut<ClaimRegistry>,
+    country_registry: Res<CountryRegistry>,
+    state_registry: Res<StateRegistry>,
+    date: Res<GameDate>,
+    mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
+    let Some(player) = player_country.0 else {
+        return;
+    };
+    let Some(target) = diplo_state.target_country else {
+        return;
+    };
+
+    for (interaction, btn) in btn_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match btn.0 {
+            ClaimCommand::SelectState(state_id) => {
+                execute_claim_select_state(&mut diplo_state, state_id)
+            }
+            ClaimCommand::Create => execute_claim_create(
+                &mut diplo_state,
+                &mut claim_registry,
+                player,
+                target,
+                &country_registry,
+                &state_registry,
+                &date,
+                &mut notif_writer,
+                &locale,
+                &catalog,
+            ),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// P21-010: 外交危機(Crisis)コマンド処理
+// ─────────────────────────────────────────────────────────────────────────
+
+fn execute_crisis_request_start(diplo_state: &mut DiplomacyPanelState, claim_id: ClaimId) {
+    diplo_state.pending_crisis_claim = Some(claim_id);
+}
+
+fn execute_crisis_cancel(diplo_state: &mut DiplomacyPanelState) {
+    diplo_state.pending_crisis_claim = None;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_crisis_confirm(
+    diplo_state: &mut DiplomacyPanelState,
+    crisis_registry: &mut CrisisRegistry,
+    claim_registry: &ClaimRegistry,
+    player: CountryId,
+    target: CountryId,
+    state_registry: &StateRegistry,
+    date: &GameDate,
+    notif_writer: &mut MessageWriter<GameNotification>,
+    locale: &CurrentLocale,
+    catalog: &TranslationCatalog,
+) {
+    let Some(claim_id) = diplo_state.pending_crisis_claim else {
+        return;
+    };
+    // 確認は必ずここで閉じる(成功/失敗いずれの場合も、確認待ち状態を持ち越さない)。
+    diplo_state.pending_crisis_claim = None;
+
+    let Some(claim) = claim_registry.claims.get(&claim_id) else {
+        notif_writer.write(GameNotification {
+            message: t(catalog, locale.0, "diplomacy_panel.notif_crisis_claim_gone"),
+        });
+        return;
+    };
+
+    match crisis_registry.start_crisis(claim, player, target, date.display(), state_registry) {
+        Ok(_) => {
+            notif_writer.write(GameNotification {
+                message: t(catalog, locale.0, "diplomacy_panel.notif_crisis_started"),
+            });
+        }
+        Err(err) => {
+            notif_writer.write(GameNotification {
+                message: tf(
+                    catalog,
+                    locale.0,
+                    "diplomacy_panel.notif_crisis_failed",
+                    vec![("reason", t(catalog, locale.0, err))],
+                ),
+            });
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_crisis_command_buttons(
+    btn_q: Query<(&Interaction, &CrisisCommandButton), Changed<Interaction>>,
+    mut diplo_state: ResMut<DiplomacyPanelState>,
+    player_country: Res<PlayerCountry>,
+    mut crisis_registry: ResMut<CrisisRegistry>,
+    claim_registry: Res<ClaimRegistry>,
+    state_registry: Res<StateRegistry>,
+    date: Res<GameDate>,
+    mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
+    let Some(player) = player_country.0 else {
+        return;
+    };
+    let Some(target) = diplo_state.target_country else {
+        return;
+    };
+
+    for (interaction, btn) in btn_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match btn.0 {
+            CrisisCommand::RequestStart(claim_id) => {
+                execute_crisis_request_start(&mut diplo_state, claim_id)
+            }
+            CrisisCommand::Cancel => execute_crisis_cancel(&mut diplo_state),
+            CrisisCommand::Confirm => execute_crisis_confirm(
+                &mut diplo_state,
+                &mut crisis_registry,
+                &claim_registry,
+                player,
+                target,
+                &state_registry,
+                &date,
+                &mut notif_writer,
+                &locale,
+                &catalog,
+            ),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_diplomacy_panel_ui(
     mut commands: Commands,
@@ -446,6 +717,8 @@ fn update_diplomacy_panel_ui(
     state_registry: Res<StateRegistry>,
     justification_registry: Res<WarJustificationRegistry>,
     war_registry: Res<WarRegistry>,
+    claim_registry: Res<ClaimRegistry>,
+    crisis_registry: Res<CrisisRegistry>,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
     mut header_q: Query<(&mut Text, &mut LocalizedText), With<DiplomacyHeaderText>>,
@@ -1163,6 +1436,529 @@ fn update_diplomacy_panel_ui(
                 }
             });
 
+        // ── P21-010: 領土請求(Claim)セクション ────────────────────
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(12.0)),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.05, 0.1, 0.12, 0.9)),
+            ))
+            .with_children(|sec| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.claim_section_title",
+                    vec![],
+                );
+                sec.spawn((
+                    text,
+                    marker,
+                    TextColor(Color::srgb(0.5, 0.8, 0.9)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                let claimable_states: Vec<_> = state_registry
+                    .states
+                    .iter()
+                    .filter(|s| s.owner_country_id == target_cid && !s.is_sea)
+                    .collect();
+
+                if claimable_states.is_empty() {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.claim_no_states",
+                        vec![],
+                    );
+                    sec.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    for st in &claimable_states {
+                        let is_selected = state.claim_target_state == Some(st.id);
+                        sec.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            let key = if is_selected {
+                                "diplomacy_panel.claim_state_selected"
+                            } else {
+                                "diplomacy_panel.claim_state_line"
+                            };
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                key,
+                                vec![("state", st.name.clone())],
+                            );
+                            row.spawn((
+                                text,
+                                marker,
+                                TextColor(if is_selected {
+                                    Color::srgb(0.6, 0.9, 0.9)
+                                } else {
+                                    Color::srgb(0.8, 0.8, 0.8)
+                                }),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                            ));
+
+                            if !is_selected {
+                                row.spawn((
+                                    ClaimCommandButton(ClaimCommand::SelectState(st.id)),
+                                    Button,
+                                    Node {
+                                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.2, 0.4, 0.45, 1.0)),
+                                ))
+                                .with_children(|b| {
+                                    let (text, marker) = localized_text(
+                                        &catalog,
+                                        locale.0,
+                                        "diplomacy_panel.claim_select_button",
+                                        vec![],
+                                    );
+                                    b.spawn((
+                                        text,
+                                        marker,
+                                        TextColor(Color::WHITE),
+                                        TextFont {
+                                            font_size: FontSize::Px(10.0),
+                                            ..default()
+                                        },
+                                    ));
+                                });
+                            }
+                        });
+                    }
+
+                    if let Some(sel_id) = state.claim_target_state {
+                        match claim_registry.can_create_claim(
+                            p_cid,
+                            target_cid,
+                            sel_id,
+                            &country_registry,
+                            &state_registry,
+                        ) {
+                            Ok(()) => {
+                                sec.spawn((
+                                    ClaimCommandButton(ClaimCommand::Create),
+                                    Button,
+                                    Node {
+                                        padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                        margin: UiRect::top(Val::Px(4.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.2, 0.5, 0.55, 1.0)),
+                                ))
+                                .with_children(|b| {
+                                    let (text, marker) = localized_text(
+                                        &catalog,
+                                        locale.0,
+                                        "diplomacy_panel.claim_create_button",
+                                        vec![],
+                                    );
+                                    b.spawn((
+                                        text,
+                                        marker,
+                                        TextColor(Color::WHITE),
+                                        TextFont {
+                                            font_size: FontSize::Px(11.0),
+                                            ..default()
+                                        },
+                                    ));
+                                });
+                            }
+                            Err(reason) => {
+                                let (text, marker) = localized_text(
+                                    &catalog,
+                                    locale.0,
+                                    "diplomacy_panel.claim_create_disabled",
+                                    vec![("reason", t(&catalog, locale.0, reason))],
+                                );
+                                sec.spawn((
+                                    text,
+                                    marker,
+                                    TextColor(Color::srgb(0.9, 0.6, 0.4)),
+                                    TextFont {
+                                        font_size: FontSize::Px(10.0),
+                                        ..default()
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                }
+            });
+
+        // ── P21-010: 自国Claim一覧 + 危機開始セクション ────────────
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(12.0)),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.1, 0.08, 0.05, 0.9)),
+            ))
+            .with_children(|sec| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.my_claims_header",
+                    vec![],
+                );
+                sec.spawn((
+                    text,
+                    marker,
+                    TextColor(Color::srgb(0.9, 0.7, 0.5)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                let my_claims: Vec<_> = claim_registry
+                    .get_claims_by_country(p_cid)
+                    .into_iter()
+                    .filter(|c| {
+                        state_registry
+                            .get(c.target_state)
+                            .is_some_and(|s| s.owner_country_id == target_cid)
+                    })
+                    .collect();
+
+                if my_claims.is_empty() {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.my_claims_none",
+                        vec![],
+                    );
+                    sec.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    for claim in my_claims {
+                        let st_name = state_registry
+                            .get(claim.target_state)
+                            .map(|s| s.name.clone())
+                            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+
+                        sec.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(2.0),
+                            margin: UiRect::bottom(Val::Px(4.0)),
+                            ..default()
+                        })
+                        .with_children(|claim_col| {
+                            let (text, marker) = localized_text(
+                                &catalog,
+                                locale.0,
+                                "diplomacy_panel.claim_line",
+                                vec![
+                                    ("state", st_name),
+                                    ("source", format!("{:?}", claim.source)),
+                                    ("date", claim.created_date.clone()),
+                                ],
+                            );
+                            claim_col.spawn((
+                                text,
+                                marker,
+                                TextColor(Color::srgb(0.9, 0.85, 0.7)),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                            ));
+
+                            if state.pending_crisis_claim == Some(claim.id) {
+                                let (text, marker) = localized_text(
+                                    &catalog,
+                                    locale.0,
+                                    "diplomacy_panel.crisis_confirm_prompt",
+                                    vec![],
+                                );
+                                claim_col.spawn((
+                                    text,
+                                    marker,
+                                    TextColor(Color::srgb(1.0, 0.8, 0.3)),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                ));
+                                claim_col
+                                    .spawn(Node {
+                                        flex_direction: FlexDirection::Row,
+                                        column_gap: Val::Px(8.0),
+                                        ..default()
+                                    })
+                                    .with_children(|row| {
+                                        row.spawn((
+                                            CrisisCommandButton(CrisisCommand::Confirm),
+                                            Button,
+                                            Node {
+                                                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgba(0.7, 0.15, 0.1, 1.0)),
+                                        ))
+                                        .with_children(
+                                            |b| {
+                                                let (text, marker) = localized_text(
+                                                    &catalog,
+                                                    locale.0,
+                                                    "diplomacy_panel.crisis_confirm_button",
+                                                    vec![],
+                                                );
+                                                b.spawn((
+                                                    text,
+                                                    marker,
+                                                    TextColor(Color::WHITE),
+                                                    TextFont {
+                                                        font_size: FontSize::Px(10.0),
+                                                        ..default()
+                                                    },
+                                                ));
+                                            },
+                                        );
+
+                                        row.spawn((
+                                            CrisisCommandButton(CrisisCommand::Cancel),
+                                            Button,
+                                            Node {
+                                                padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                                ..default()
+                                            },
+                                            BackgroundColor(Color::srgba(0.4, 0.4, 0.4, 1.0)),
+                                        ))
+                                        .with_children(
+                                            |b| {
+                                                let (text, marker) = localized_text(
+                                                    &catalog,
+                                                    locale.0,
+                                                    "diplomacy_panel.crisis_cancel_button",
+                                                    vec![],
+                                                );
+                                                b.spawn((
+                                                    text,
+                                                    marker,
+                                                    TextColor(Color::WHITE),
+                                                    TextFont {
+                                                        font_size: FontSize::Px(10.0),
+                                                        ..default()
+                                                    },
+                                                ));
+                                            },
+                                        );
+                                    });
+                            } else {
+                                match crisis_registry.can_start_crisis(
+                                    claim,
+                                    p_cid,
+                                    target_cid,
+                                    &state_registry,
+                                ) {
+                                    Ok(()) => {
+                                        claim_col
+                                            .spawn((
+                                                CrisisCommandButton(CrisisCommand::RequestStart(
+                                                    claim.id,
+                                                )),
+                                                Button,
+                                                Node {
+                                                    padding: UiRect::axes(
+                                                        Val::Px(8.0),
+                                                        Val::Px(3.0),
+                                                    ),
+                                                    ..default()
+                                                },
+                                                BackgroundColor(Color::srgba(0.6, 0.2, 0.1, 1.0)),
+                                            ))
+                                            .with_children(|b| {
+                                                let (text, marker) = localized_text(
+                                                    &catalog,
+                                                    locale.0,
+                                                    "diplomacy_panel.start_crisis_button",
+                                                    vec![],
+                                                );
+                                                b.spawn((
+                                                    text,
+                                                    marker,
+                                                    TextColor(Color::WHITE),
+                                                    TextFont {
+                                                        font_size: FontSize::Px(10.0),
+                                                        ..default()
+                                                    },
+                                                ));
+                                            });
+                                    }
+                                    Err(reason) => {
+                                        let (text, marker) = localized_text(
+                                            &catalog,
+                                            locale.0,
+                                            "diplomacy_panel.crisis_start_disabled",
+                                            vec![("reason", t(&catalog, locale.0, reason))],
+                                        );
+                                        claim_col.spawn((
+                                            text,
+                                            marker,
+                                            TextColor(Color::srgb(0.8, 0.6, 0.5)),
+                                            TextFont {
+                                                font_size: FontSize::Px(10.0),
+                                                ..default()
+                                            },
+                                        ));
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+
+        // ── P21-010: 進行中外交危機一覧セクション ──────────────────
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(12.0)),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.1, 0.05, 0.1, 0.9)),
+            ))
+            .with_children(|sec| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.active_crises_header",
+                    vec![],
+                );
+                sec.spawn((
+                    text,
+                    marker,
+                    TextColor(Color::srgb(0.9, 0.5, 0.8)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                let mut my_crises: Vec<_> = crisis_registry
+                    .crises
+                    .values()
+                    .filter(|c| c.initiator == p_cid || c.target == p_cid)
+                    .collect();
+                my_crises.sort_by_key(|c| c.id.0);
+
+                if my_crises.is_empty() {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.no_active_crises",
+                        vec![],
+                    );
+                    sec.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    for crisis in my_crises {
+                        let other_id = if crisis.initiator == p_cid {
+                            crisis.target
+                        } else {
+                            crisis.initiator
+                        };
+                        let other_name = country_registry
+                            .get(other_id)
+                            .map(|c| c.name.clone())
+                            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+                        let target_states = crisis
+                            .war_goals
+                            .first()
+                            .map(|g| {
+                                g.target_states
+                                    .iter()
+                                    .filter_map(|sid| {
+                                        state_registry.get(*sid).map(|s| s.name.clone())
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .unwrap_or_default();
+                        let phase_key = match crisis.current_phase {
+                            CrisisPhase::Preparing => "diplomacy_panel.crisis_phase_preparing",
+                            CrisisPhase::DemandSent => "diplomacy_panel.crisis_phase_demand_sent",
+                            CrisisPhase::Negotiating => "diplomacy_panel.crisis_phase_negotiating",
+                            CrisisPhase::Escalating => "diplomacy_panel.crisis_phase_escalating",
+                            CrisisPhase::ResolvedPeacefully => {
+                                "diplomacy_panel.crisis_phase_resolved"
+                            }
+                            CrisisPhase::WarStarted => "diplomacy_panel.crisis_phase_war_started",
+                            CrisisPhase::Cancelled => "diplomacy_panel.crisis_phase_cancelled",
+                        };
+
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.crisis_line",
+                            vec![
+                                ("country", other_name),
+                                ("states", target_states),
+                                ("phase", t(&catalog, locale.0, phase_key)),
+                                ("days", crisis.days_in_phase.to_string()),
+                            ],
+                        );
+                        sec.spawn((
+                            text,
+                            marker,
+                            TextColor(Color::srgb(0.9, 0.7, 0.9)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                        ));
+                    }
+                }
+            });
+
         // ── 6. 進行中戦争一覧セクション ────────────────────────────
         parent
             .spawn((
@@ -1252,4 +2048,216 @@ fn update_diplomacy_panel_ui(
                 }
             });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::time::GameDate;
+    use crate::common::ClaimId;
+    use crate::country::CountryData;
+    use crate::diplomacy::claims::TerritorialClaim;
+    use crate::state::data::StateData;
+
+    fn build_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<GameNotification>();
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.insert_resource(GameDate::new(1800, 1, 1));
+        app.add_systems(
+            Update,
+            (
+                sync_target_country_from_selected_state,
+                handle_claim_command_buttons,
+                handle_crisis_command_buttons,
+            )
+                .chain(),
+        );
+
+        app.insert_resource(PlayerCountry(Some(CountryId(0))));
+        app.insert_resource(SelectedState::default());
+        app.insert_resource(DiplomacyPanelState {
+            open: true,
+            target_country: Some(CountryId(1)),
+            claim_target_state: None,
+            pending_crisis_claim: None,
+        });
+        app.insert_resource(CountryRegistry {
+            countries: vec![
+                CountryData {
+                    id: CountryId(0),
+                    ..CountryData::default()
+                },
+                CountryData {
+                    id: CountryId(1),
+                    ..CountryData::default()
+                },
+                CountryData {
+                    id: CountryId(2),
+                    ..CountryData::default()
+                },
+            ],
+        });
+        app.insert_resource(StateRegistry::build(vec![
+            StateData {
+                id: StateId(1),
+                owner_country_id: CountryId(1),
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(2),
+                owner_country_id: CountryId(2),
+                ..Default::default()
+            },
+        ]));
+        app.insert_resource(ClaimRegistry::default());
+        app.insert_resource(CrisisRegistry::default());
+        app
+    }
+
+    fn press(app: &mut App, bundle: impl Bundle) {
+        app.world_mut().spawn((bundle, Interaction::Pressed));
+        app.update();
+    }
+
+    /// 要求テスト項目7: 外交UI(Command経路)からClaim作成。
+    #[test]
+    fn claim_command_flow_selects_state_and_creates_claim() {
+        let mut app = build_test_app();
+
+        press(
+            &mut app,
+            ClaimCommandButton(ClaimCommand::SelectState(StateId(1))),
+        );
+        assert_eq!(
+            app.world()
+                .resource::<DiplomacyPanelState>()
+                .claim_target_state,
+            Some(StateId(1))
+        );
+
+        press(&mut app, ClaimCommandButton(ClaimCommand::Create));
+
+        let claims = &app.world().resource::<ClaimRegistry>().claims;
+        assert_eq!(claims.len(), 1);
+        let claim = claims.values().next().unwrap();
+        assert_eq!(claim.claimant_country, CountryId(0));
+        assert_eq!(claim.target_state, StateId(1));
+    }
+
+    /// 要求テスト項目8: 対象国変更時に州選択がresetされる。
+    #[test]
+    fn claim_target_state_resets_when_target_country_changes() {
+        let mut app = build_test_app();
+        press(
+            &mut app,
+            ClaimCommandButton(ClaimCommand::SelectState(StateId(1))),
+        );
+        assert_eq!(
+            app.world()
+                .resource::<DiplomacyPanelState>()
+                .claim_target_state,
+            Some(StateId(1))
+        );
+
+        // StateId(2)はCountryId(2)所有。選択すると対象国がCountryId(2)へ切り替わる。
+        app.world_mut().resource_mut::<SelectedState>().0 = Some(StateId(2));
+        app.update();
+
+        let diplo = app.world().resource::<DiplomacyPanelState>();
+        assert_eq!(diplo.target_country, Some(CountryId(2)));
+        assert_eq!(
+            diplo.claim_target_state, None,
+            "changing target country must clear the stale claim state selection"
+        );
+    }
+
+    /// 要求テスト項目14: 確認キャンセルでCrisisを作成しない。
+    #[test]
+    fn crisis_cancel_does_not_create_crisis() {
+        let mut app = build_test_app();
+        let claim_id =
+            app.world_mut()
+                .resource_mut::<ClaimRegistry>()
+                .add_claim(TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(1),
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: ClaimSource::Strategic,
+                });
+
+        press(
+            &mut app,
+            CrisisCommandButton(CrisisCommand::RequestStart(claim_id)),
+        );
+        assert_eq!(
+            app.world()
+                .resource::<DiplomacyPanelState>()
+                .pending_crisis_claim,
+            Some(claim_id)
+        );
+
+        press(&mut app, CrisisCommandButton(CrisisCommand::Cancel));
+
+        assert!(app.world().resource::<CrisisRegistry>().crises.is_empty());
+        assert_eq!(
+            app.world()
+                .resource::<DiplomacyPanelState>()
+                .pending_crisis_claim,
+            None
+        );
+    }
+
+    /// Crisis確認の2段階目(Confirm)で実際にCrisisが作成される(Cancelとの対比)。
+    #[test]
+    fn crisis_confirm_after_request_creates_crisis() {
+        let mut app = build_test_app();
+        let claim_id =
+            app.world_mut()
+                .resource_mut::<ClaimRegistry>()
+                .add_claim(TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(1),
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: ClaimSource::Strategic,
+                });
+
+        press(
+            &mut app,
+            CrisisCommandButton(CrisisCommand::RequestStart(claim_id)),
+        );
+        press(&mut app, CrisisCommandButton(CrisisCommand::Confirm));
+
+        let crises = &app.world().resource::<CrisisRegistry>().crises;
+        assert_eq!(crises.len(), 1);
+        assert_eq!(
+            app.world()
+                .resource::<DiplomacyPanelState>()
+                .pending_crisis_claim,
+            None,
+            "confirming must clear the pending confirmation state"
+        );
+    }
+
+    /// パネルを閉じると一時的な選択・確認状態が破棄される。
+    #[test]
+    fn closing_panel_clears_transient_selection() {
+        let mut app = build_test_app();
+        let mut state = app.world_mut().resource_mut::<DiplomacyPanelState>();
+        state.claim_target_state = Some(StateId(1));
+        state.pending_crisis_claim = Some(ClaimId(0));
+        state.clear_transient_selection();
+
+        let state = app.world().resource::<DiplomacyPanelState>();
+        assert_eq!(state.claim_target_state, None);
+        assert_eq!(state.pending_crisis_claim, None);
+    }
 }

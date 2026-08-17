@@ -1,6 +1,6 @@
 use crate::app::game_state::GameState;
-use crate::map::division_selection::DragSelectState;
 use crate::map::camera::GameCamera;
+use crate::map::division_selection::DragSelectState;
 use crate::map::rendering::StateVisual;
 use crate::state::{SelectedState, StateSelectionChanged};
 use bevy::prelude::*;
@@ -19,7 +19,7 @@ impl Plugin for SelectionPlugin {
 /// マウス左クリックで州を選択・解除する
 /// UI上の要素をホバー/クリックしている場合は無効化し、競合を避ける
 #[allow(clippy::too_many_arguments)]
-fn handle_state_click(
+pub(crate) fn handle_state_click(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     camera_q: Query<&Transform, With<GameCamera>>,
@@ -30,7 +30,14 @@ fn handle_state_click(
     drag_state: Res<DragSelectState>,
     mut selected: ResMut<SelectedState>,
     mut selection_changed: MessageWriter<StateSelectionChanged>,
+    frontline_select_mode: Res<crate::map::frontline_selection::FrontlineSelectMode>,
 ) {
+    // P21-005: 前線選択モード中は州クリックを一切発生させない
+    // (`map::frontline_selection::handle_frontline_select_click`が同じクリックを処理する)。
+    if frontline_select_mode.is_active() {
+        return;
+    }
+
     // 左クリックが離された瞬間のみ処理(押下瞬間ではない)。
     // P21-004: division_selectionの矩形選択は「押下→ドラッグ→解放」で確定するため、
     // 押下瞬間に反応すると、ドラッグ選択の開始点がたまたま州の上だった場合に
@@ -142,4 +149,122 @@ pub(crate) fn brighten_color(color: Color, factor: f32) -> Color {
         (linear.green * factor).min(1.0),
         (linear.blue * factor).min(1.0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::military::data::MilitaryRegistry;
+    use crate::state::data::StateRegistry;
+
+    fn press_left(app: &mut App) {
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Left);
+        app.insert_resource(mouse);
+        app.update();
+    }
+
+    fn release_left(app: &mut App) {
+        {
+            let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse.clear();
+            mouse.release(MouseButton::Left);
+        }
+        app.update();
+    }
+
+    /// P21-004 spec項目17: UIボタン(編成一覧の行など)をクリックしている間、
+    /// 同時に走る州クリック処理(`handle_state_click`)が誤って発火しないことを検証する。
+    /// `ArmyListRowButton`固有のロジックではなく、`Interaction::Pressed`を持つ
+    /// あらゆるUIノードを対象にした既存の汎用ガードが、新しく追加した動的な
+    /// 編成一覧の行にもそのまま適用されることの回帰テスト。
+    #[test]
+    fn ui_button_press_blocks_map_state_click_from_firing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<StateSelectionChanged>();
+        app.add_systems(Update, handle_state_click);
+
+        app.insert_resource(MilitaryRegistry::default());
+        app.insert_resource(StateRegistry::build(vec![]));
+        app.insert_resource(DragSelectState::default());
+        app.insert_resource(SelectedState(None));
+        app.insert_resource(crate::map::frontline_selection::FrontlineSelectMode::default());
+
+        // 何らかのUIボタン(編成一覧の行など)がクリックされている状態を再現する。
+        // マーカーコンポーネントの種類は問わない(`handle_state_click`は
+        // `Interaction`を持つノードを型を問わず走査するため)。
+        app.world_mut().spawn(Interaction::Pressed);
+
+        press_left(&mut app);
+        release_left(&mut app);
+
+        assert_eq!(
+            app.world().resource::<SelectedState>().0,
+            None,
+            "UIボタン押下中はマップの州クリックが発火してはならない"
+        );
+    }
+
+    /// P21-005要求テスト項目34: 前線選択モード中は州クリックが一切発火しない
+    /// (`FrontlineSelectMode`がアクティブなら`handle_state_click`は即座にreturnする)。
+    /// 実際にクリック座標がStateVisualの矩形へ命中する状況を再現した上で、モードが
+    /// 非アクティブなら選択される・アクティブなら選択されない、の両方を確認する。
+    #[test]
+    fn frontline_select_mode_blocks_map_state_click_from_firing() {
+        fn build_app() -> App {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            app.add_message::<StateSelectionChanged>();
+            app.add_systems(Update, handle_state_click);
+
+            app.insert_resource(MilitaryRegistry::default());
+            app.insert_resource(StateRegistry::build(vec![]));
+            app.insert_resource(DragSelectState::default());
+            app.insert_resource(SelectedState(None));
+
+            let mut window = Window {
+                resolution: bevy::window::WindowResolution::new(800, 600),
+                ..Default::default()
+            };
+            window.set_cursor_position(Some(Vec2::new(400.0, 300.0)));
+            app.world_mut().spawn(window);
+            app.world_mut()
+                .spawn((GameCamera, Transform::from_xyz(0.0, 0.0, 0.0)));
+            app.world_mut().spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                StateVisual {
+                    state_id: crate::common::StateId(1),
+                    size: Vec2::new(100.0, 100.0),
+                    base_color: Color::WHITE,
+                },
+            ));
+            app
+        }
+
+        // モード非アクティブなら通常通り選択される(前提の妥当性確認)。
+        let mut app_without_mode = build_app();
+        app_without_mode
+            .insert_resource(crate::map::frontline_selection::FrontlineSelectMode::default());
+        press_left(&mut app_without_mode);
+        release_left(&mut app_without_mode);
+        assert_eq!(
+            app_without_mode.world().resource::<SelectedState>().0,
+            Some(crate::common::StateId(1)),
+            "前提確認: 前線選択モード非アクティブなら通常通り州クリックが発火するはず"
+        );
+
+        // モードアクティブなら同じクリックでも選択されない。
+        let mut app_with_mode = build_app();
+        let mut mode = crate::map::frontline_selection::FrontlineSelectMode::default();
+        mode.activate(crate::common::ArmyId(0));
+        app_with_mode.insert_resource(mode);
+        press_left(&mut app_with_mode);
+        release_left(&mut app_with_mode);
+        assert_eq!(
+            app_with_mode.world().resource::<SelectedState>().0,
+            None,
+            "前線選択モード中は同じクリックでも通常の州クリックが発火してはならない"
+        );
+    }
 }

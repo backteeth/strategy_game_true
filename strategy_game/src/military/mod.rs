@@ -16,7 +16,7 @@ mod tests;
 
 use crate::app::game_state::GameState;
 use crate::app::time::{DailySimulationSet, DayChangedMessage};
-use crate::military::army::ArmyRegistry;
+use crate::military::army::{ArmyRegistry, SelectedArmy};
 use crate::military::battle::BattleRegistry;
 use crate::military::data::MilitaryRegistry;
 use crate::military::update::handle_daily_military;
@@ -29,6 +29,7 @@ impl Plugin for MilitaryPlugin {
         app.insert_resource(MilitaryRegistry::default())
             .insert_resource(BattleRegistry::default())
             .insert_resource(ArmyRegistry::default())
+            .insert_resource(SelectedArmy::default())
             .add_systems(
                 Update,
                 (

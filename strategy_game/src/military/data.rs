@@ -118,6 +118,22 @@ impl MilitaryRegistry {
         self.next_division_id
     }
 
+    /// 保存されていたDivision・次回ID発行値から`MilitaryRegistry`を復元する
+    /// （P21-SAVE-002D）。`definitions`(静的師団定義)は引数で明示的に受け取る
+    /// (セーブには含まれないため、呼び出し側が適用先Worldの現在値を渡す想定)。
+    /// `crate::save`のDTO型ではなく、通常のコレクションとカウンタだけを引数にとる。
+    pub(crate) fn from_saved_parts(
+        definitions: HashMap<DivisionDefinitionId, DivisionDefinition>,
+        divisions: HashMap<DivisionId, Division>,
+        next_division_id: usize,
+    ) -> Self {
+        Self {
+            definitions,
+            divisions,
+            next_division_id,
+        }
+    }
+
     pub fn add_division(&mut self, mut division: Division) -> DivisionId {
         division.id = DivisionId(self.next_division_id);
         self.next_division_id += 1;

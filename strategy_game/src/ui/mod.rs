@@ -1,6 +1,7 @@
 pub mod country_selection;
 pub mod diplomacy_panel;
 pub mod economy_panel;
+pub mod load_confirm;
 pub mod military_panel;
 pub mod notification;
 pub mod peace_panel;
@@ -14,6 +15,7 @@ use bevy::prelude::*;
 use country_selection::CountrySelectionPlugin;
 use diplomacy_panel::DiplomacyPluginUI;
 use economy_panel::EconomyPanelPlugin;
+use load_confirm::LoadConfirmPlugin;
 use military_panel::MilitaryPanelPlugin;
 use politics_panel::PoliticsPluginUI;
 use research_panel::ResearchPluginUI;
@@ -144,6 +146,7 @@ impl Plugin for UiPlugin {
             .add_plugins(DiplomacyPluginUI)
             .add_plugins(MilitaryPanelPlugin)
             .add_plugins(peace_panel::PeacePanelPlugin)
+            .add_plugins(LoadConfirmPlugin)
             .add_plugins(TopBarPlugin)
             .add_systems(
                 Update,

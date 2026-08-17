@@ -333,6 +333,13 @@ pub fn process_construction_ai(
             return false;
         }
         if let Some(state_data) = state_registry.get(sid) {
+            // P21-009-FIX-001: クリスタル専用州には通常Mineの対象鉱床が存在しないため、
+            // AIも新規建設候補から除外する(CrystalMineはAIの建設判断対象外のまま)。
+            if target_building == BuildingType::Mine
+                && crate::economy::resources::is_crystal_only_state(&state_data.resource_deposits)
+            {
+                return false;
+            }
             let current_level = state_data.building_level(target_building);
             current_level < def.max_level
         } else {
@@ -1029,6 +1036,104 @@ mod tests {
         // 建設キューに1件追加され、資金が減っていることを確認
         assert_eq!(c2.construction_queue.len(), 1);
         assert!(c2.treasury < initial_treasury);
+    }
+
+    /// P21-009-FIX-001要求テスト項目7: AIもクリスタル専用州へ通常Mineを新規建設しない
+    /// (2州所有し、片方はクリスタル専用・もう片方は非クリスタルの場合、後者が選ばれる)。
+    #[test]
+    fn ai_construction_skips_crystal_only_state_for_mine() {
+        use crate::economy::resources::{ResourceType as Res, StateResourceDeposit};
+
+        let mut c2 = CountryData {
+            id: CountryId(2),
+            name: "AI C2".to_string(),
+            capital_state_id: StateId(3),
+            treasury: 5000.0,
+            ..default()
+        };
+        // FoodはFarm優先を避けるため十分、Wood/Iron/Coalは低くMine優先を発火させる。
+        c2.stockpile.set(Res::Food, 100.0);
+        c2.stockpile.set(Res::Wood, 0.0);
+        c2.stockpile.set(Res::Iron, 0.0);
+        c2.stockpile.set(Res::Coal, 0.0);
+        let mut country_registry = CountryRegistry {
+            countries: vec![c2],
+        };
+
+        // StateId(2)はクリスタル専用(MagicCrystal鉱床のみ)、StateId(3)は非クリスタル。
+        let s2 = StateData {
+            id: StateId(2),
+            name: "Crystal Only".to_string(),
+            owner_country_id: CountryId(2),
+            resource_deposits: vec![StateResourceDeposit {
+                resource_type: Res::MagicCrystal,
+                base_output: 30.0,
+                discovered: true,
+                development_level: 1,
+            }],
+            world_position: [0.0, 0.0],
+            size: [100.0, 100.0],
+            ..default()
+        };
+        let s3 = StateData {
+            id: StateId(3),
+            name: "Iron State".to_string(),
+            owner_country_id: CountryId(2),
+            resource_deposits: vec![StateResourceDeposit {
+                resource_type: Res::Iron,
+                base_output: 10.0,
+                discovered: true,
+                development_level: 1,
+            }],
+            world_position: [100.0, 0.0],
+            size: [100.0, 100.0],
+            ..default()
+        };
+        let state_registry = StateRegistry::build(vec![s2, s3]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry.definitions.insert(
+            BuildingType::Mine,
+            crate::building::data::BuildingDefinition {
+                building_type: BuildingType::Mine,
+                name: "Mine".to_string(),
+                construction_cost: 500.0,
+                required_progress: 60.0,
+                required_workforce: 10_000.0,
+                logistics_cost: 10.0,
+                input_resources: HashMap::new(),
+                output_resources: HashMap::new(),
+                maintenance_cost: 15.0,
+                max_level: 10,
+                science_output: 0.0,
+                magic_output: 0.0,
+                railway_capacity_bonus: 0.0,
+            },
+        );
+
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(2));
+
+        process_construction_ai(
+            CountryId(2),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c2 = country_registry.get(CountryId(2)).unwrap();
+        assert_eq!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::RawMaterialMinePriority
+        );
+        assert_eq!(c2.construction_queue.len(), 1);
+        assert_eq!(c2.construction_queue[0].building_type, BuildingType::Mine);
+        assert_eq!(
+            c2.construction_queue[0].state_id,
+            StateId(3),
+            "AI must pick the non-crystal state, skipping the crystal-only StateId(2)"
+        );
     }
 
     // ── P20-008 回帰テスト ───────────────────────────────────────────────────

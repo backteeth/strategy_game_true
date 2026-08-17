@@ -82,6 +82,36 @@ impl GameDate {
         self.accumulator += amount;
     }
 
+    /// 経過日数アキュムレーターを読み取る（P21-SAVE-002B: セーブ用の読み取り専用アクセサ。
+    /// `accumulator`自体はモジュール外へ公開せず、値のコピーだけを返す）
+    pub(crate) fn accumulator(&self) -> f64 {
+        self.accumulator
+    }
+
+    /// 保存されていたaccumulatorを含む全フィールドから`GameDate`を復元する
+    /// （P21-SAVE-002D: セーブ適用用の書き込み経路。`accumulator`自体はモジュール外へ
+    /// `pub`化せず、この専用コンストラクタ経由でのみ設定できる）。
+    pub(crate) fn from_saved_parts(year: i32, month: u8, day: u8, accumulator: f64) -> Self {
+        Self {
+            year,
+            month,
+            day,
+            accumulator,
+        }
+    }
+
+    /// 指定した月の日数を返す（1〜12以外は`None`）。P21-SAVE-002C: セーブ検証用の
+    /// 読み取り専用ヘルパー。`DAYS_IN_MONTH`自体はモジュール外へ公開せず、
+    /// 検証に必要な問い合わせ結果だけを返す（うるう年は考慮しない簡易暦、
+    /// `advance_game_date`が使う暦と同一のルール）。
+    pub(crate) fn days_in_month(month: u8) -> Option<u8> {
+        if (1..=12).contains(&month) {
+            Some(DAYS_IN_MONTH[(month - 1) as usize])
+        } else {
+            None
+        }
+    }
+
     /// 日付を文字列として取得する ("YYYY/MM/DD")
     pub fn display(&self) -> String {
         format!("{:04}/{:02}/{:02}", self.year, self.month, self.day)

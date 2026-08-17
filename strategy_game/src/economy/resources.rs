@@ -8,13 +8,16 @@ pub enum ResourceType {
     Wood,
     Iron,
     Coal,
+    /// 精製済みマジッククリスタル(魔法系施設が消費する既存資源、P21-009でRawMagicCrystalと分離)
     MagicCrystal,
     IndustrialGoods,
     MilitaryEquipment,
+    /// 未精製のマジッククリスタル原石(P21-009: クリスタル採掘施設が産出し、精製施設が消費する)
+    RawMagicCrystal,
 }
 
 impl ResourceType {
-    pub const ALL: [ResourceType; 7] = [
+    pub const ALL: [ResourceType; 8] = [
         ResourceType::Food,
         ResourceType::Wood,
         ResourceType::Iron,
@@ -22,6 +25,7 @@ impl ResourceType {
         ResourceType::MagicCrystal,
         ResourceType::IndustrialGoods,
         ResourceType::MilitaryEquipment,
+        ResourceType::RawMagicCrystal,
     ];
 
     /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
@@ -34,6 +38,7 @@ impl ResourceType {
             ResourceType::MagicCrystal => "resource.magic_crystal",
             ResourceType::IndustrialGoods => "resource.industrial_goods",
             ResourceType::MilitaryEquipment => "resource.military_equipment",
+            ResourceType::RawMagicCrystal => "resource.raw_magic_crystal",
         }
     }
 }
@@ -94,5 +99,127 @@ impl Default for StateResourceDeposit {
             discovered: true,
             development_level: 1,
         }
+    }
+}
+
+/// 指定した資源種別のdiscovered済み鉱床が1件以上含まれるかを判定する(P21-009)。
+/// クリスタル採掘施設のような鉱床ゲート付き建物の建設可否判定に使う。
+pub fn has_discovered_deposit(deposits: &[StateResourceDeposit], resource: ResourceType) -> bool {
+    deposits
+        .iter()
+        .any(|d| d.discovered && d.resource_type == resource)
+}
+
+/// 州がクリスタル専用(discoveredなMagicCrystal鉱床を持ち、それ以外のdiscovered鉱床を
+/// 持たない)かどうかを判定する(P21-009-FIX-001)。このような州では通常Mineは対象鉱床
+/// (MagicCrystal以外)を持たないため、新規建設を許可しない(既存のMineから
+/// MagicCrystal種別鉱床を除外する仕様[production.rs]と対になる判定)。
+pub fn is_crystal_only_state(deposits: &[StateResourceDeposit]) -> bool {
+    has_discovered_deposit(deposits, ResourceType::MagicCrystal)
+        && !deposits
+            .iter()
+            .any(|d| d.discovered && d.resource_type != ResourceType::MagicCrystal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_discovered_deposit_true_only_for_matching_discovered_type() {
+        let deposits = vec![
+            StateResourceDeposit {
+                resource_type: ResourceType::Iron,
+                base_output: 10.0,
+                discovered: true,
+                development_level: 1,
+            },
+            StateResourceDeposit {
+                resource_type: ResourceType::MagicCrystal,
+                base_output: 30.0,
+                discovered: false,
+                development_level: 1,
+            },
+        ];
+        assert!(!has_discovered_deposit(
+            &deposits,
+            ResourceType::MagicCrystal
+        ));
+        assert!(has_discovered_deposit(&deposits, ResourceType::Iron));
+        assert!(!has_discovered_deposit(&deposits, ResourceType::Coal));
+    }
+
+    #[test]
+    fn has_discovered_deposit_true_when_discovered_and_matching() {
+        let deposits = vec![StateResourceDeposit {
+            resource_type: ResourceType::MagicCrystal,
+            base_output: 30.0,
+            discovered: true,
+            development_level: 1,
+        }];
+        assert!(has_discovered_deposit(
+            &deposits,
+            ResourceType::MagicCrystal
+        ));
+    }
+
+    #[test]
+    fn is_crystal_only_state_true_when_only_magic_crystal_deposit_present() {
+        let deposits = vec![StateResourceDeposit {
+            resource_type: ResourceType::MagicCrystal,
+            base_output: 30.0,
+            discovered: true,
+            development_level: 1,
+        }];
+        assert!(is_crystal_only_state(&deposits));
+    }
+
+    #[test]
+    fn is_crystal_only_state_false_when_no_magic_crystal_deposit() {
+        let deposits = vec![StateResourceDeposit {
+            resource_type: ResourceType::Iron,
+            base_output: 10.0,
+            discovered: true,
+            development_level: 1,
+        }];
+        assert!(!is_crystal_only_state(&deposits));
+    }
+
+    #[test]
+    fn is_crystal_only_state_false_when_mixed_with_other_discovered_deposit() {
+        let deposits = vec![
+            StateResourceDeposit {
+                resource_type: ResourceType::MagicCrystal,
+                base_output: 30.0,
+                discovered: true,
+                development_level: 1,
+            },
+            StateResourceDeposit {
+                resource_type: ResourceType::Iron,
+                base_output: 10.0,
+                discovered: true,
+                development_level: 1,
+            },
+        ];
+        assert!(!is_crystal_only_state(&deposits));
+    }
+
+    #[test]
+    fn is_crystal_only_state_true_when_other_deposit_is_not_discovered() {
+        let deposits = vec![
+            StateResourceDeposit {
+                resource_type: ResourceType::MagicCrystal,
+                base_output: 30.0,
+                discovered: true,
+                development_level: 1,
+            },
+            StateResourceDeposit {
+                resource_type: ResourceType::Iron,
+                base_output: 10.0,
+                discovered: false,
+                development_level: 1,
+            },
+        ];
+        assert!(is_crystal_only_state(&deposits));
     }
 }

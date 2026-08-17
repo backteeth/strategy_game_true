@@ -74,6 +74,14 @@ const EXEMPTIONS: &[Exemption] = &[
         literal: "\"+1%\"",
         reason: "税率プラス調整ボタンの記号ラベル(言語に依存しない数値+%記号)。",
     },
+    Exemption {
+        file: "src/ui/country_selection.rs",
+        literal: "\"\"",
+        reason: "ContinueStatusTextの初期値。空文字列であり翻訳対象の文言を含まず、\
+                  併せて付与されるLocalizedText::default()(空key)により\
+                  update_continue_status_textが実際のロード失敗を検出するまで未初期化を保つ。\
+                  失敗時はLocalizedText経由へ即座に差し替わる。",
+    },
 ];
 
 /// 走査対象ファイル(P20-009でユーザー表示文字列を扱う全モジュール)。
@@ -87,6 +95,7 @@ const TARGET_FILES: &[&str] = &[
     "src/ui/military_panel.rs",
     "src/ui/diplomacy_panel.rs",
     "src/ui/peace_panel.rs",
+    "src/ui/load_confirm.rs",
     "src/ui/top_bar.rs",
     "src/ui/notification.rs",
     "src/economy/mod.rs",

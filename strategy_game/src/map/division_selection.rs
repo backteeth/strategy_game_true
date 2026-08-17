@@ -1,8 +1,8 @@
 use crate::app::game_state::GameState;
 use crate::common::DivisionId;
 use crate::country::PlayerCountry;
-use crate::map::division_render::division_visual_clusters;
 use crate::map::camera::GameCamera;
+use crate::map::division_render::division_visual_clusters;
 use crate::military::army::ArmyRegistry;
 use crate::military::battle::BattleRegistry;
 use crate::military::data::{DivisionStatus, MilitaryRegistry};
@@ -27,6 +27,12 @@ impl SelectedDivision {
     pub fn select_only(&mut self, id: DivisionId) {
         self.division_ids.clear();
         self.division_ids.insert(id);
+    }
+
+    /// 選択を`ids`の集合へ置き換える(P21-004: 軍クリックによる一括選択の入口)。
+    pub fn select_only_many(&mut self, ids: impl IntoIterator<Item = DivisionId>) {
+        self.division_ids.clear();
+        self.division_ids.extend(ids);
     }
 
     /// `id`が選択中なら解除し、未選択なら追加する(Ctrl+クリック)。
@@ -122,7 +128,7 @@ fn prune_selected_division(
 ///   (Ctrl押下時は既存選択に追加、非押下時は矩形内の師団だけに置き換える。
 ///   矩形内が空でCtrl非押下なら選択解除になる)。
 #[allow(clippy::too_many_arguments)]
-fn handle_division_selection(
+pub(crate) fn handle_division_selection(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
@@ -135,7 +141,15 @@ fn handle_division_selection(
     mut selected_division: ResMut<SelectedDivision>,
     mut selected_state: ResMut<SelectedState>,
     mut drag_state: ResMut<DragSelectState>,
+    frontline_select_mode: Res<crate::map::frontline_selection::FrontlineSelectMode>,
 ) {
+    // P21-005: 前線選択モード中はマップクリックを前線割当専用にし、通常の師団選択/
+    // ドラッグ選択を一切発生させない(`map::frontline_selection::handle_frontline_select_click`
+    // が同じクリックを処理する)。
+    if frontline_select_mode.is_active() {
+        return;
+    }
+
     let ui_blocked = ui_interactions_q
         .iter()
         .any(|i| *i == Interaction::Hovered || *i == Interaction::Pressed);
@@ -290,7 +304,7 @@ fn handle_division_selection(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_movement_order(
+pub(crate) fn handle_movement_order(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     camera_q: Query<&Transform, With<GameCamera>>,
@@ -301,7 +315,14 @@ fn handle_movement_order(
     mut military_registry: ResMut<MilitaryRegistry>,
     battle_registry: Res<BattleRegistry>,
     ui_interactions_q: Query<&Interaction>,
+    frontline_select_mode: Res<crate::map::frontline_selection::FrontlineSelectMode>,
 ) {
+    // P21-005: 前線選択モード中の右クリックは「選択モードのキャンセル」専用であり、
+    // 移動命令を発行してはならない(前線設定操作を移動命令より優先する)。
+    if frontline_select_mode.is_active() {
+        return;
+    }
+
     if !mouse_buttons.just_pressed(MouseButton::Right) {
         return;
     }
@@ -511,12 +532,50 @@ fn try_issue_move_order(
     }
 }
 
+/// P21-004A: 選択中師団1体分の移動命令を解除する(「移動停止」)。
+/// 前線スタンスの「停止」(`war::frontline::FrontlineStance::Stopped`、国家の前線プラン
+/// 全体に効く設定)とは全く別の操作で、個別師団の移動命令のみを対象とする。
+///
+/// - `current_state`は変更しない(その場に留まる)
+/// - `destination`/`target_state`を解除し、`current_path`を空にする
+/// - `movement_progress`を0へ戻す
+/// - `status`が`Moving`の場合のみ`Idle`へ戻す。`Fighting`(戦闘中)や`Occupying`等の
+///   進行中の状態は変更しない(強制的に戦闘や占領処理を終了させない)
+/// - Army所属(`military::army::ArmyRegistry`)には一切触れない
+/// - 他国師団・存在しない師団は無視する(何もしない)
+pub(crate) fn stop_division_movement(
+    division_id: DivisionId,
+    player_cid: crate::common::CountryId,
+    military_registry: &mut MilitaryRegistry,
+) {
+    let Some(division) = military_registry.divisions.get_mut(&division_id) else {
+        return;
+    };
+    if division.owner != player_cid {
+        return;
+    }
+
+    division.destination = None;
+    division.current_path.clear();
+    division.target_state = None;
+    division.movement_progress = 0.0;
+
+    if division.status == DivisionStatus::Moving {
+        division.status = DivisionStatus::Idle;
+    }
+
+    info!(
+        "[DivisionMovement] Division {} movement order cleared (stop)",
+        division_id.0
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
     use crate::map::division_render::division_display_positions;
-    use crate::military::data::{DivisionStatus, Division, DivisionSize, DivisionType};
+    use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
     use crate::state::data::StateData;
     use bevy::window::WindowResolution;
 
@@ -654,6 +713,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins(MinimalPlugins);
             app.add_systems(Update, handle_division_selection);
+            app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
 
             app.insert_resource(military_registry);
             app.insert_resource(StateRegistry::build(state_registry.states.clone()));
@@ -729,6 +789,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_division_selection);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
@@ -800,6 +861,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_division_selection);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
@@ -868,6 +930,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_division_selection);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
@@ -907,6 +970,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_division_selection);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
@@ -953,7 +1017,11 @@ mod tests {
 
         let mut army_registry = ArmyRegistry::default();
         army_registry
-            .create_army(CountryId(1), &[DivisionId(1), DivisionId(2)], &military_registry)
+            .create_army(
+                CountryId(1),
+                &[DivisionId(1), DivisionId(2)],
+                &military_registry,
+            )
             .unwrap();
 
         let state_registry = StateRegistry::build(vec![state_at(1, Vec2::ZERO)]);
@@ -962,6 +1030,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_division_selection);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(army_registry);
@@ -1013,7 +1082,11 @@ mod tests {
 
         let mut army_registry = ArmyRegistry::default();
         army_registry
-            .create_army(CountryId(1), &[DivisionId(1), DivisionId(2)], &military_registry)
+            .create_army(
+                CountryId(1),
+                &[DivisionId(1), DivisionId(2)],
+                &military_registry,
+            )
             .unwrap();
 
         let state_registry = StateRegistry::build(vec![
@@ -1025,6 +1098,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_division_selection);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(army_registry);
@@ -1113,6 +1187,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_systems(Update, handle_movement_order);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
 
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
@@ -1121,7 +1196,9 @@ mod tests {
         app.insert_resource(BattleRegistry::default());
         app.init_resource::<crate::state::SelectedState>();
         app.insert_resource(SelectedDivision {
-            division_ids: [DivisionId(1), DivisionId(2), DivisionId(3)].into_iter().collect(),
+            division_ids: [DivisionId(1), DivisionId(2), DivisionId(3)]
+                .into_iter()
+                .collect(),
         });
 
         let mut mouse = ButtonInput::<MouseButton>::default();
@@ -1160,5 +1237,185 @@ mod tests {
         let division2 = military_registry.divisions.get(&DivisionId(2)).unwrap();
         assert_eq!(division2.destination, None);
         assert_eq!(division2.status, DivisionStatus::Idle);
+    }
+
+    /// P21-005要求テスト項目34: 前線選択モード中の右クリックは移動命令へ漏れない
+    /// (前線設定操作の右クリック=キャンセル操作が、既存の移動命令発行と衝突しない)。
+    #[test]
+    fn frontline_select_mode_blocks_movement_order_from_firing() {
+        let mut military_registry = MilitaryRegistry::default();
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        military_registry.divisions.insert(a1.id, a1);
+
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(2)],
+            world_position: [0.0, 0.0],
+            size: [100.0, 100.0],
+            ..Default::default()
+        };
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(1)],
+            world_position: [300.0, 0.0],
+            size: [100.0, 100.0],
+            ..Default::default()
+        };
+        let state_registry = StateRegistry::build(vec![s1, s2]);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_systems(Update, handle_movement_order);
+        let mut mode = crate::map::frontline_selection::FrontlineSelectMode::default();
+        mode.activate(crate::common::ArmyId(0));
+        app.insert_resource(mode);
+
+        app.insert_resource(military_registry);
+        app.insert_resource(state_registry);
+        app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
+        app.insert_resource(WarRegistry::default());
+        app.insert_resource(BattleRegistry::default());
+        app.init_resource::<crate::state::SelectedState>();
+        app.insert_resource(SelectedDivision {
+            division_ids: [DivisionId(1)].into_iter().collect(),
+        });
+
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Right);
+        app.insert_resource(mouse);
+
+        app.world_mut()
+            .spawn((Camera2d, GameCamera, Transform::default()));
+
+        let mut window = Window {
+            resolution: WindowResolution::new(800, 600),
+            ..default()
+        };
+        let window_size = Vec2::new(800.0, 600.0);
+        let target_world = Vec2::new(300.0, 0.0);
+        let half_size = window_size * 0.5;
+        let ndc = target_world / half_size;
+        let raw_ndc = Vec2::new(ndc.x, -ndc.y);
+        let screen = (raw_ndc + Vec2::ONE) * 0.5 * window_size;
+        window.set_cursor_position(Some(screen));
+        app.world_mut().spawn(window);
+
+        app.update();
+
+        let military_registry = app.world().resource::<MilitaryRegistry>();
+        let division1 = military_registry.divisions.get(&DivisionId(1)).unwrap();
+        assert_eq!(
+            division1.destination, None,
+            "前線選択モード中の右クリックは移動命令を発行してはならない"
+        );
+        assert_eq!(division1.status, DivisionStatus::Idle);
+    }
+
+    /// P21-004A spec #1/#8: 移動中の師団を単体で停止できる。current_stateは変化しない。
+    #[test]
+    fn stop_division_movement_clears_order_and_resets_moving_to_idle() {
+        let mut military_registry = MilitaryRegistry::default();
+        let mut division = make_test_division(1, CountryId(1), StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(5));
+        division.current_path = vec![StateId(2), StateId(5)];
+        division.target_state = Some(StateId(2));
+        division.movement_progress = 0.4;
+        military_registry.divisions.insert(division.id, division);
+
+        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+
+        let d = &military_registry.divisions[&DivisionId(1)];
+        assert_eq!(d.destination, None);
+        assert!(d.current_path.is_empty());
+        assert_eq!(d.target_state, None);
+        assert_eq!(d.movement_progress, 0.0);
+        assert_eq!(d.status, DivisionStatus::Idle);
+        // current_stateは変化しない(spec #8)
+        assert_eq!(d.current_state, StateId(1));
+    }
+
+    /// P21-004A spec #6: 他国師団は停止処理の対象にならない(何も変化しない)。
+    #[test]
+    fn stop_division_movement_ignores_foreign_division() {
+        let mut military_registry = MilitaryRegistry::default();
+        let mut division = make_test_division(1, CountryId(2), StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(5));
+        division.current_path = vec![StateId(5)];
+        division.target_state = Some(StateId(5));
+        division.movement_progress = 0.7;
+        military_registry
+            .divisions
+            .insert(division.id, division.clone());
+
+        // CountryId(1)としてCountryId(2)所有の師団を止めようとしても無視される
+        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+
+        let d = &military_registry.divisions[&DivisionId(1)];
+        assert_eq!(d.destination, division.destination);
+        assert_eq!(d.current_path, division.current_path);
+        assert_eq!(d.target_state, division.target_state);
+        assert_eq!(d.movement_progress, division.movement_progress);
+        assert_eq!(d.status, division.status);
+    }
+
+    /// P21-004A spec #7: 停止してもArmy所属(division_army_map)は変化しない。
+    #[test]
+    fn stop_division_movement_does_not_change_army_membership() {
+        use crate::military::army::ArmyRegistry;
+
+        let mut military_registry = MilitaryRegistry::default();
+        let mut division = make_test_division(1, CountryId(1), StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(5));
+        military_registry.divisions.insert(division.id, division);
+
+        let mut army_registry = ArmyRegistry::default();
+        let group_id = army_registry
+            .create_army(CountryId(1), &[DivisionId(1)], &military_registry)
+            .unwrap();
+
+        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+
+        assert_eq!(
+            army_registry.army_for_division(DivisionId(1)),
+            Some(group_id)
+        );
+        assert_eq!(
+            army_registry.armies[&group_id].member_division_ids,
+            vec![DivisionId(1)]
+        );
+    }
+
+    /// P21-004A spec #9: 戦闘中の師団に停止処理を行っても、戦闘状態(status/combat_id)は
+    /// 強制的に解除されない(進行中の戦闘決着処理に任せる)。移動関連フィールドは
+    /// (既に空である前提で)引き続き空のままであることを確認する。
+    #[test]
+    fn stop_division_movement_does_not_interrupt_fighting_division() {
+        let mut military_registry = MilitaryRegistry::default();
+        let mut division = make_test_division(1, CountryId(1), StateId(1));
+        division.status = DivisionStatus::Fighting;
+        division.combat_id = Some(crate::common::BattleId(0));
+        // 戦闘中は既に移動関連フィールドが空になっている想定(start_battle_betweenの挙動)
+        military_registry.divisions.insert(division.id, division);
+
+        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+
+        let d = &military_registry.divisions[&DivisionId(1)];
+        assert_eq!(
+            d.status,
+            DivisionStatus::Fighting,
+            "戦闘中ステータスを強制的にIdleへ戻してはならない"
+        );
+        assert_eq!(
+            d.combat_id,
+            Some(crate::common::BattleId(0)),
+            "戦闘IDが解除されてはならない(戦闘を強制終了させない)"
+        );
+        assert_eq!(d.destination, None);
+        assert!(d.current_path.is_empty());
     }
 }

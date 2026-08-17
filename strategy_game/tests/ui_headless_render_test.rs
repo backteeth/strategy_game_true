@@ -45,6 +45,7 @@ use strategy_game::military::MilitaryPlugin;
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::population::PopulationPlugin;
 use strategy_game::research::ResearchPlugin;
+use strategy_game::save::{LoadGamePlugin, SaveGamePlugin};
 use strategy_game::state::StatePlugin;
 use strategy_game::ui::UiPlugin;
 use strategy_game::ui::country_selection::{
@@ -303,7 +304,14 @@ fn build_headless_app() -> App {
         .add_plugins(WarPlugin)
         .add_plugins(MapPlugin)
         .add_plugins(UiPlugin)
-        .add_plugins(DebugPlugin);
+        .add_plugins(DebugPlugin)
+        // P21-FIX-001: 本番main.rsと同じくSaveGamePlugin/LoadGamePluginを他の全Pluginの後に
+        // 追加する。UiPlugin配下(top_bar/load_confirm/country_selection)のSystemが
+        // `Res<LastLoadOutcome>`/`MessageReader/Writer<LoadRequestMessage>`を毎フレーム
+        // 無条件に要求するため、この2 Pluginを欠くと`GameState::CountrySelection`の
+        // 最初のupdateからpanicする(実際に本ラウンドで発見・修正)。
+        .add_plugins(SaveGamePlugin)
+        .add_plugins(LoadGamePlugin);
 
     app.add_plugins(ImageCopyPlugin);
     app.add_plugins(InputInjectionPlugin);

@@ -2,6 +2,7 @@ use crate::app::game_state::GameState;
 use crate::building::construction::{ConstructionQueueItem, ConstructionStatus, REFUND_RATIO};
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::economy::resources::{ResourceType, has_discovered_deposit, is_crystal_only_state};
 use crate::localization::{
     CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
 };
@@ -296,6 +297,40 @@ fn handle_build_buttons(
                     None => continue,
                 };
 
+                if btn.0.requires_magic_crystal_deposit()
+                    && !has_discovered_deposit(&state.resource_deposits, ResourceType::MagicCrystal)
+                {
+                    notif_writer.write(GameNotification {
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "state_panel.build_failed_no_deposit",
+                            vec![
+                                ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                ("state", state.name.clone()),
+                            ],
+                        ),
+                    });
+                    continue;
+                }
+
+                // P21-009-FIX-001: クリスタル専用州(MagicCrystal鉱床のみ)には通常Mineの
+                // 対象鉱床が存在しないため、新規建設を許可しない(CrystalMineを使う)。
+                if btn.0 == BuildingType::Mine && is_crystal_only_state(&state.resource_deposits) {
+                    notif_writer.write(GameNotification {
+                        message: tf(
+                            &catalog,
+                            locale.0,
+                            "state_panel.build_failed_crystal_only_state",
+                            vec![
+                                ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                ("state", state.name.clone()),
+                            ],
+                        ),
+                    });
+                    continue;
+                }
+
                 let current_level = state.building_level(btn.0);
                 let country = match country_registry.get_mut(player_cid) {
                     Some(c) => c,
@@ -430,5 +465,232 @@ pub fn format_population(pop: u64) -> String {
         format!("{:.1}K", pop as f64 / 1_000.0)
     } else {
         format!("{}", pop)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{CountryId, StateId};
+    use crate::country::CountryData;
+    use crate::economy::resources::StateResourceDeposit;
+    use crate::state::data::{StateData, StateRegistry};
+    use bevy::ecs::system::SystemState;
+    use std::collections::HashMap;
+
+    fn building_def(building_type: BuildingType) -> crate::building::data::BuildingDefinition {
+        crate::building::data::BuildingDefinition {
+            building_type,
+            name: format!("{building_type:?}"),
+            construction_cost: 100.0,
+            required_progress: 10.0,
+            required_workforce: 10.0,
+            logistics_cost: 0.0,
+            input_resources: HashMap::new(),
+            output_resources: HashMap::new(),
+            maintenance_cost: 1.0,
+            max_level: 10,
+            science_output: 0.0,
+            magic_output: 0.0,
+            railway_capacity_bonus: 0.0,
+        }
+    }
+
+    fn build_test_app(state: StateData) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<GameNotification>();
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Update, handle_build_buttons);
+
+        let mut definitions = HashMap::new();
+        definitions.insert(BuildingType::Mine, building_def(BuildingType::Mine));
+        definitions.insert(
+            BuildingType::CrystalMine,
+            building_def(BuildingType::CrystalMine),
+        );
+        definitions.insert(
+            BuildingType::CrystalRefinery,
+            building_def(BuildingType::CrystalRefinery),
+        );
+        app.insert_resource(BuildingRegistry { definitions });
+
+        app.insert_resource(SelectedState(Some(state.id)));
+        app.insert_resource(PlayerCountry(Some(state.owner_country_id)));
+        app.insert_resource(CountryRegistry {
+            countries: vec![CountryData {
+                id: state.owner_country_id,
+                treasury: 10_000.0,
+                ..CountryData::default()
+            }],
+        });
+        app.insert_resource(StateRegistry::build(vec![state]));
+        app
+    }
+
+    fn press_build_button(app: &mut App, building_type: BuildingType) {
+        app.world_mut().spawn((
+            BuildButton(building_type),
+            Interaction::Pressed,
+            BackgroundColor(Color::WHITE),
+        ));
+        app.update();
+    }
+
+    fn read_notifications(app: &mut App) -> Vec<String> {
+        let mut state: SystemState<MessageReader<GameNotification>> =
+            SystemState::new(app.world_mut());
+        state
+            .get_mut(app.world_mut())
+            .expect("reader")
+            .read()
+            .map(|n| n.message.clone())
+            .collect()
+    }
+
+    fn state_with_deposit(id: StateId, owner: CountryId, has_deposit: bool) -> StateData {
+        StateData {
+            id,
+            owner_country_id: owner,
+            population: 100_000,
+            resource_deposits: if has_deposit {
+                vec![StateResourceDeposit {
+                    resource_type: ResourceType::MagicCrystal,
+                    base_output: 30.0,
+                    discovered: true,
+                    development_level: 1,
+                }]
+            } else {
+                Vec::new()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// 要求テスト項目15/16: 建設UIからクリスタル採掘施設・精製施設の建設をリクエストできる。
+    #[test]
+    fn crystal_mine_build_request_succeeds_when_state_has_deposit() {
+        let state = state_with_deposit(StateId(0), CountryId(0), true);
+        let mut app = build_test_app(state);
+
+        press_build_button(&mut app, BuildingType::CrystalMine);
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert_eq!(country_registry.countries[0].construction_queue.len(), 1);
+        assert_eq!(
+            country_registry.countries[0].construction_queue[0].building_type,
+            BuildingType::CrystalMine
+        );
+    }
+
+    #[test]
+    fn crystal_refinery_build_request_succeeds_without_deposit() {
+        let state = state_with_deposit(StateId(0), CountryId(0), false);
+        let mut app = build_test_app(state);
+
+        press_build_button(&mut app, BuildingType::CrystalRefinery);
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert_eq!(
+            country_registry.countries[0].construction_queue.len(),
+            1,
+            "CrystalRefinery must be buildable without a magic crystal deposit, like Factory"
+        );
+    }
+
+    /// 要求テスト項目17: 鉱床がない州では採掘不可理由が通知として表示される。
+    #[test]
+    fn crystal_mine_build_blocked_without_deposit_shows_reason() {
+        let state = state_with_deposit(StateId(0), CountryId(0), false);
+        let mut app = build_test_app(state);
+
+        press_build_button(&mut app, BuildingType::CrystalMine);
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert!(
+            country_registry.countries[0].construction_queue.is_empty(),
+            "no deposit must block the build request"
+        );
+
+        let notifications = read_notifications(&mut app);
+        assert_eq!(notifications.len(), 1);
+        let catalog = app.world().resource::<TranslationCatalog>();
+        let locale = app.world().resource::<CurrentLocale>();
+        let expected = tf(
+            catalog,
+            locale.0,
+            "state_panel.build_failed_no_deposit",
+            vec![
+                (
+                    "building",
+                    t(catalog, locale.0, BuildingType::CrystalMine.display_name()),
+                ),
+                ("state", "Default State".to_string()),
+            ],
+        );
+        assert_eq!(
+            notifications[0], expected,
+            "reason notification must be shown, got: {notifications:?}"
+        );
+    }
+
+    /// P21-009-FIX-001要求テスト項目7: クリスタル専用州へ通常Mineを新規建設できない。
+    #[test]
+    fn mine_build_blocked_in_crystal_only_state_shows_reason() {
+        let state = state_with_deposit(StateId(0), CountryId(0), true); // MagicCrystal専用
+        let mut app = build_test_app(state);
+
+        press_build_button(&mut app, BuildingType::Mine);
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert!(
+            country_registry.countries[0].construction_queue.is_empty(),
+            "crystal-only state must block new ordinary Mine construction"
+        );
+
+        let notifications = read_notifications(&mut app);
+        assert_eq!(notifications.len(), 1);
+        let catalog = app.world().resource::<TranslationCatalog>();
+        let locale = app.world().resource::<CurrentLocale>();
+        let expected = tf(
+            catalog,
+            locale.0,
+            "state_panel.build_failed_crystal_only_state",
+            vec![
+                (
+                    "building",
+                    t(catalog, locale.0, BuildingType::Mine.display_name()),
+                ),
+                ("state", "Default State".to_string()),
+            ],
+        );
+        assert_eq!(notifications[0], expected);
+    }
+
+    /// Iron等の非クリスタル州では、従来どおり通常Mineを建設できる(回帰防止)。
+    #[test]
+    fn mine_build_still_succeeds_in_non_crystal_state() {
+        let mut state = state_with_deposit(StateId(0), CountryId(0), false);
+        state.resource_deposits = vec![StateResourceDeposit {
+            resource_type: ResourceType::Iron,
+            base_output: 10.0,
+            discovered: true,
+            development_level: 1,
+        }];
+        let mut app = build_test_app(state);
+
+        press_build_button(&mut app, BuildingType::Mine);
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert_eq!(
+            country_registry.countries[0].construction_queue.len(),
+            1,
+            "Iron-deposit state must still allow ordinary Mine construction"
+        );
+        assert_eq!(
+            country_registry.countries[0].construction_queue[0].building_type,
+            BuildingType::Mine
+        );
     }
 }

@@ -114,9 +114,11 @@ pub fn process_country_production(
             }
 
             // 生産実行 (Mineの場合は州の鉱床情報を利用)
+            // P21-009: MagicCrystal鉱床は専用のCrystalMine(固定産出量・鉱床ゲート付き)の
+            // 管轄とし、汎用Mineでは採掘しない(精製ステップを迂回する経路を作らないため)。
             if b_type == BuildingType::Mine {
                 for deposit in &state.resource_deposits {
-                    if deposit.discovered {
+                    if deposit.discovered && deposit.resource_type != ResourceType::MagicCrystal {
                         let out_amount =
                             calculate_actual_output(deposit.base_output, level, final_op);
                         stockpile.add(deposit.resource_type, out_amount);

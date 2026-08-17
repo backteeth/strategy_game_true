@@ -14,10 +14,14 @@ pub enum BuildingType {
     Railway,
     University,
     MagicAcademy,
+    /// マジッククリスタル採掘施設(P21-009)。クリスタル鉱床を持つ州でのみ建設可能。
+    CrystalMine,
+    /// マジッククリスタル精製施設(P21-009)。RawMagicCrystalを消費しMagicCrystalを生産する。
+    CrystalRefinery,
 }
 
 impl BuildingType {
-    pub const ALL: [BuildingType; 8] = [
+    pub const ALL: [BuildingType; 10] = [
         BuildingType::Farm,
         BuildingType::LoggingCamp,
         BuildingType::Mine,
@@ -26,6 +30,8 @@ impl BuildingType {
         BuildingType::Railway,
         BuildingType::University,
         BuildingType::MagicAcademy,
+        BuildingType::CrystalMine,
+        BuildingType::CrystalRefinery,
     ];
 
     /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
@@ -39,7 +45,14 @@ impl BuildingType {
             BuildingType::Railway => "building.railway",
             BuildingType::University => "building.university",
             BuildingType::MagicAcademy => "building.magic_academy",
+            BuildingType::CrystalMine => "building.crystal_mine",
+            BuildingType::CrystalRefinery => "building.crystal_refinery",
         }
+    }
+
+    /// クリスタル鉱床(discoveredなMagicCrystal鉱床)が州に存在する場合のみ建設可能な施設か。
+    pub fn requires_magic_crystal_deposit(self) -> bool {
+        matches!(self, BuildingType::CrystalMine)
     }
 }
 
