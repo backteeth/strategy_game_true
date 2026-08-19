@@ -3,6 +3,8 @@ use crate::building::construction::{ConstructionQueueItem, ConstructionStatus};
 use crate::building::data::BuildingType;
 use crate::common::{CountryId, StateId, WarId};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::diplomacy::crisis::CrisisRegistry;
+use crate::diplomacy::crisis_response;
 use crate::diplomacy::data::DiplomacyRegistry;
 use crate::economy::resources::ResourceType;
 use crate::localization::{Loc, tf};
@@ -94,7 +96,9 @@ impl CountryAiDecisionReason {
             CountryAiDecisionReason::NoBuildableState => "country_ai_reason.no_buildable_state",
             CountryAiDecisionReason::NoResearchableTech => "country_ai_reason.no_researchable_tech",
             CountryAiDecisionReason::PostWarCooldown => "country_ai_reason.post_war_cooldown",
-            CountryAiDecisionReason::NoAvailableDivisions => "country_ai_reason.no_available_divisions",
+            CountryAiDecisionReason::NoAvailableDivisions => {
+                "country_ai_reason.no_available_divisions"
+            }
             CountryAiDecisionReason::NoReachableTargetCountry => {
                 "country_ai_reason.no_reachable_target_country"
             }
@@ -204,13 +208,15 @@ pub fn calculate_country_total_power(
 /// 走査コストを上回り性能回帰を引き起こしていたため(詳細は報告書のP20-008追補セクション参照)、
 /// ハッシュ計算を伴わないVecインデックスへ置き換えることで小規模でもオーバーヘッドを抑える。
 /// 値・優先順位・決定論への影響は無い(単純な合計・グルーピングの実装変更のみ)。
-fn compute_total_power_by_country(
+pub(super) fn compute_total_power_by_country(
     military_registry: &MilitaryRegistry,
     state_registry: &StateRegistry,
 ) -> Vec<u64> {
     let mut power_by_country: Vec<u64> = Vec::new();
     for division in military_registry.divisions.values() {
-        if division.manpower == 0 || division.status == crate::military::data::DivisionStatus::Destroyed {
+        if division.manpower == 0
+            || division.status == crate::military::data::DivisionStatus::Destroyed
+        {
             continue;
         }
         let is_land = state_registry
@@ -571,6 +577,7 @@ pub fn process_war_declaration_ai(
     ai_registry: &mut MilitaryAiRegistry,
     ai_state: &mut CountryAiState,
     pending_ai_wars: &mut Vec<(CountryId, CountryId, StateId, WarId)>,
+    crisis_registry: &mut CrisisRegistry,
 ) {
     let completed_justifications: Vec<(usize, CountryId, StateId)> = justification_registry
         .justifications
@@ -606,6 +613,17 @@ pub fn process_war_declaration_ai(
             );
 
             if let Ok(war_id) = res {
+                // P21-011: 正当化を削除する前に、Escalating中のCrisisとの照合・同期を行う
+                // (declare_war自体が既にconsume_justificationで消費済みだが、
+                // ここではidだけを使うため削除順序に依存しない)。
+                crisis_response::sync_crisis_on_war_declared(
+                    crisis_registry,
+                    country_id,
+                    target_cid,
+                    j_id,
+                    war_id,
+                );
+
                 // 正当化の削除
                 justification_registry.justifications.remove(&j_id);
 
@@ -646,6 +664,7 @@ pub fn process_daily_country_ai(
     military_ai_registry: &mut MilitaryAiRegistry,
     country_ai_registry: &mut CountryAiRegistry,
     pending_ai_wars: &mut Vec<(CountryId, CountryId, StateId, WarId)>,
+    crisis_registry: &mut CrisisRegistry,
 ) {
     let player_cid = player_country.0;
 
@@ -700,6 +719,7 @@ pub fn process_daily_country_ai(
             military_ai_registry,
             ai_state,
             pending_ai_wars,
+            crisis_registry,
         );
 
         // 2. 週次評価 (game_day % 7 == country_id.0 % 7 または dirty)
@@ -774,6 +794,7 @@ pub fn handle_daily_country_ai(
     mut military_ai_registry: ResMut<MilitaryAiRegistry>,
     mut country_ai_registry: ResMut<CountryAiRegistry>,
     mut pending_ai_wars: ResMut<PendingAiWarDeclarations>,
+    mut crisis_registry: ResMut<CrisisRegistry>,
 ) {
     for event in day_events.read() {
         let current_date = format!("{:04}/{:02}/{:02}", event.year, event.month, event.day);
@@ -797,6 +818,7 @@ pub fn handle_daily_country_ai(
             &mut military_ai_registry,
             &mut country_ai_registry,
             &mut pending_ai_wars.0,
+            &mut crisis_registry,
         );
     }
 }
@@ -977,6 +999,7 @@ mod tests {
         ) = setup_test_env();
 
         let mut pending_ai_wars = Vec::new();
+        let mut crisis_registry = CrisisRegistry::default();
         process_daily_country_ai(
             1,
             "1800/01/01",
@@ -994,6 +1017,7 @@ mod tests {
             &mut military_ai_registry,
             &mut country_ai_registry,
             &mut pending_ai_wars,
+            &mut crisis_registry,
         );
 
         // プレイヤー国家 (CountryId(1)) は国家AI状態が作成されない
@@ -1146,7 +1170,7 @@ mod tests {
         current_state: StateId,
         manpower: u64,
     ) -> crate::military::data::Division {
-        use crate::military::data::{DivisionStatus, DivisionSize, DivisionType};
+        use crate::military::data::{DivisionSize, DivisionStatus, DivisionType};
         crate::military::data::Division {
             id: crate::common::DivisionId(0),
             owner,
@@ -1287,6 +1311,7 @@ mod tests {
 
         // day=7: 週次評価 (day % 7 == country_id % 7) を Strong(0) に対して成立させる
         let mut pending_ai_wars = Vec::new();
+        let mut crisis_registry = CrisisRegistry::default();
         process_daily_country_ai(
             7,
             "1800/01/08",
@@ -1304,6 +1329,7 @@ mod tests {
             &mut military_ai_registry,
             &mut country_ai_registry,
             &mut pending_ai_wars,
+            &mut crisis_registry,
         );
 
         assert!(

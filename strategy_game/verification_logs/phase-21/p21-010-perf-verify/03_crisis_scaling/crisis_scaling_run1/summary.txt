@@ -1,0 +1,30 @@
+P21-010-PERF-VERIFY Crisis Scaling Summary
+===========================================
+
+state_count=2000 warmup_days=10 measured_days=60 seed=0xC0FFEE12345678
+
+--- crisis_count=0 mix=AllActive ---
+  overall day_tick: mean=0.23341ms median=0.18810ms min=0.16890ms max=1.08740ms
+  Diplomacy set:    mean=0.03118ms median=0.03010ms
+  days_in_phase total=0 expected=0 (HashMap反復順に非依存で決定論的)
+
+--- crisis_count=1 mix=AllActive ---
+  overall day_tick: mean=0.22822ms median=0.18530ms min=0.16560ms max=0.94220ms
+  Diplomacy set:    mean=0.03146ms median=0.02950ms
+  days_in_phase total=70 expected=70 (HashMap反復順に非依存で決定論的)
+
+--- crisis_count=100 mix=AllActive ---
+  overall day_tick: mean=0.23009ms median=0.18320ms min=0.16800ms max=0.96630ms
+  Diplomacy set:    mean=0.03058ms median=0.02930ms
+  days_in_phase total=7000 expected=7000 (HashMap反復順に非依存で決定論的)
+
+--- crisis_count=1000 mix=AllActive ---
+  overall day_tick: mean=0.23717ms median=0.18290ms min=0.17080ms max=0.98480ms
+  Diplomacy set:    mean=0.03426ms median=0.03320ms
+  days_in_phase total=70000 expected=70000 (HashMap反復順に非依存で決定論的)
+
+--- crisis_count=1000 mix=AllTerminal ---
+  overall day_tick: mean=0.22014ms median=0.18150ms min=0.16490ms max=0.92360ms
+  Diplomacy set:    mean=0.03222ms median=0.03170ms
+  days_in_phase total=0 expected=0 (HashMap反復順に非依存で決定論的)
+

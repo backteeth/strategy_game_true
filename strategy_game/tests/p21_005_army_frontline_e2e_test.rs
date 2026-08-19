@@ -191,6 +191,8 @@ fn army_frontline_assignment_survives_save_load_round_trip_with_real_map_data() 
         name: "P21-005 Test War".to_string(),
         attackers: [CountryId(0)].into_iter().collect(),
         defenders: [CountryId(1)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![],
         start_date: "1801/01/01".to_string(),
         end_date: None,

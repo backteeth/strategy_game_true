@@ -64,7 +64,7 @@
     ("economy_panel.info", "State: {state}\nTax Rate: {tax_rate}%\nMonthly Inc: +{income} G\nMonthly Exp: -{expenses} G\nMonthly Bal: {balance} G\nSci Capacity: {sci_cap}\nMag Capacity: {mag_cap}\n\n[Stockpile]\n{stockpile}\n[Construction Queue (Cancel: Press C)]\n{queue}\n[Notification]\n  {last_notification}"),
 
     // ── research_panel ──────────────────────────────────────
-    ("research_panel.toggle_button", "[R] Research Panel"),
+    ("research_panel.toggle_button", "[Ctrl+1] Research"),
     ("research_panel.title", "-- Technology & Research --"),
     ("research_panel.alloc_label", "Alloc (+5%):"),
     ("research_panel.alloc_field_button", "+{field}"),
@@ -80,7 +80,7 @@
     ("research_panel.status_available", "[Available]"),
 
     // ── politics_panel ──────────────────────────────────────
-    ("politics_panel.toggle_button", "[P] Politics Panel"),
+    ("politics_panel.toggle_button", "[Ctrl+2] Politics"),
     ("politics_panel.title", "-- Government & Politics --"),
     ("politics_panel.header", "Gov: {government} (Locked) | Econ: {economy} (Locked)\nValues: Sci/Mag {sci_mag} | Ind/State {ind_state} | Sec/Rel {sec_rel}"),
     ("politics_panel.reform_line", "Reform: {axis} -> {target} ({progress}/{required} - {monthly}/mo, Res: {resistance})"),
@@ -97,7 +97,7 @@
     ("politics_panel.interest_group_line", "{group} | Influence: {influence}% | Approval: {approval} | Stance: {stance}"),
 
     // ── military_panel ──────────────────────────────────────
-    ("military_panel.toggle_button", "[M] Military Panel"),
+    ("military_panel.toggle_button", "[Ctrl+5] Military"),
     ("military_panel.title", "-- Military --"),
     ("military_panel.loading", "Loading..."),
     ("military_panel.manpower", "Manpower: {available} / Mobilized: {mobilized}"),
@@ -200,7 +200,7 @@
     ("military_panel.offensive_line_confirm_invalid", "Invalid offensive line"),
 
     // ── diplomacy_panel ─────────────────────────────────────
-    ("diplomacy_panel.toggle_button", "[D] Diplomacy Panel"),
+    ("diplomacy_panel.toggle_button", "[Ctrl+3] Diplomacy"),
     ("diplomacy_panel.title", "-- Foreign Affairs & Diplomacy --"),
     ("diplomacy_panel.select_prompt", "Select a foreign state/country on the map."),
     ("diplomacy_panel.self_selected", "Selected self: Cannot perform foreign diplomacy on your own country."),
@@ -239,6 +239,7 @@
     ("diplomacy_panel.active_wars_header", "-- Active Wars --"),
     ("diplomacy_panel.no_active_wars", "No active wars in the world."),
     ("diplomacy_panel.war_line", "[War #{id}] {name} ({attackers} vs {defenders}) - Started: {date}"),
+    ("diplomacy_panel.war_leader_suffix", " (Leader)"),
     ("diplomacy_panel.notif_diplomacy_started_improve", "Diplomacy Started: Improve Relations with Country #{id}"),
     ("diplomacy_panel.notif_diplomacy_started_harm", "Diplomacy Started: Harm Relations with Country #{id}"),
     ("diplomacy_panel.notif_proposal_accepted", "Proposal Accepted: {treaty} signed with {country}!"),
@@ -281,8 +282,56 @@
     ("diplomacy_panel.notif_crisis_started", "Diplomatic Crisis started!"),
     ("diplomacy_panel.notif_crisis_failed", "Cannot Start Crisis: {reason}"),
 
+    // ── diplomacy_panel: P21-011 Ultimatum response ────────────────
+    ("diplomacy_panel.crisis_deadline_line", "  Deadline: {date}"),
+    ("diplomacy_panel.crisis_accept_button", "Accept"),
+    ("diplomacy_panel.crisis_reject_button", "Reject"),
+    ("diplomacy_panel.crisis_withdraw_button", "Withdraw"),
+    ("diplomacy_panel.crisis_accept_confirm_prompt", "Accept this demand? The target state will be ceded peacefully."),
+    ("diplomacy_panel.crisis_accept_confirm_button", "Accept Demand"),
+    ("diplomacy_panel.crisis_reject_confirm_prompt", "Reject this demand? The other country will gain a justification for war."),
+    ("diplomacy_panel.crisis_reject_confirm_button", "Reject Demand"),
+    ("diplomacy_panel.crisis_justification_ready_line", "  War justification acquired. You may declare war from the war declaration UI."),
+    ("diplomacy_panel.notif_crisis_accepted", "Accepted the other country's demand and ceded the state."),
+    ("diplomacy_panel.notif_crisis_accept_failed", "Cannot Accept Demand: {reason}"),
+    ("diplomacy_panel.notif_crisis_rejected", "Rejected the other country's demand."),
+    ("diplomacy_panel.notif_crisis_reject_failed", "Cannot Reject Demand: {reason}"),
+    ("diplomacy_panel.notif_crisis_withdrawn", "Withdrew the diplomatic crisis."),
+    ("diplomacy_panel.notif_crisis_withdraw_failed", "Cannot Withdraw Crisis: {reason}"),
+
+    // ── diplomacy_panel: P21-013 Third-country crisis support ────────────────
+    ("diplomacy_panel.crisis_support_initiator_line", "  Supporting the initiator: {countries}"),
+    ("diplomacy_panel.crisis_support_target_line", "  Supporting the target: {countries}"),
+    ("diplomacy_panel.crisis_support_none", "none"),
+    ("diplomacy_panel.crisis_your_support_initiator_line", "  You are supporting the initiator"),
+    ("diplomacy_panel.crisis_your_support_target_line", "  You are supporting the target"),
+    ("diplomacy_panel.crisis_support_initiator_button", "Support Initiator"),
+    ("diplomacy_panel.crisis_support_target_button", "Support Target"),
+    ("diplomacy_panel.crisis_support_initiator_confirm_prompt", "Support the initiator's side?"),
+    ("diplomacy_panel.crisis_support_target_confirm_prompt", "Support the target's side?"),
+    ("diplomacy_panel.crisis_support_confirm_button", "Confirm Support"),
+    ("diplomacy_panel.crisis_withdraw_support_button", "Withdraw Support"),
+    ("diplomacy_panel.notif_support_pledged", "Support pledged."),
+    ("diplomacy_panel.notif_support_pledge_failed", "Cannot Pledge Support: {reason}"),
+    ("diplomacy_panel.notif_support_withdrawn", "Support withdrawn."),
+    ("diplomacy_panel.notif_support_withdraw_failed", "Cannot Withdraw Support: {reason}"),
+
+    // P21-014: National power / power tier
+    ("diplomacy_panel.power_self_heading", "Your Country: {country}"),
+    ("diplomacy_panel.power_selected_heading", "Selected: {country}"),
+    ("diplomacy_panel.power_pending", "Evaluating..."),
+    ("diplomacy_panel.power_tier_line", "Power tier: {tier}"),
+    ("diplomacy_panel.power_rank_line", "World rank: {rank} / {total}"),
+    ("diplomacy_panel.power_total_line", "National power: {score}"),
+    ("diplomacy_panel.power_military_line", "Military: {value}"),
+    ("diplomacy_panel.power_economic_line", "Economy: {value}"),
+    ("diplomacy_panel.power_population_line", "Population: {value}"),
+    ("power_tier.great_power", "Great Power"),
+    ("power_tier.regional_power", "Regional Power"),
+    ("power_tier.minor_power", "Minor Power"),
+
     // ── peace_panel ─────────────────────────────────────────
-    ("peace_panel.toggle_button", "[P] War & Peace Panel"),
+    ("peace_panel.toggle_button", "[Ctrl+4] War & Peace"),
     ("peace_panel.title", "=== War Progress & Peace Conference ==="),
     ("peace_panel.no_country", "No player country selected."),
     ("peace_panel.no_active_war", "No active war engaging your country."),
@@ -325,6 +374,10 @@
     ("notif.debug_revealed_deposits", "[DEBUG] Revealed all resource deposits in owned states."),
     ("notif.debug_reform_completed", "[DEBUG] Instantly completed political reform!"),
     ("notif.ai_war_declared", "{attacker} DECLARED WAR on {defender}! (Target: {state}, War ID: {war_id})"),
+    ("notif.crisis_demand_expired_initiator", "{country} failed to respond before the deadline. You have gained a justification for war."),
+    ("notif.crisis_demand_expired_target", "The deadline to respond to {country}'s demand has expired and was treated as a rejection."),
+    ("notif.crisis_ai_accepted", "{country} accepted your demand."),
+    ("notif.crisis_ai_rejected", "{country} rejected your demand. You have gained a justification for war."),
 
     // ── notification (save/load, P21-SAVE-002E) ─────────────
     ("notif.save_success", "Save complete."),
@@ -528,6 +581,15 @@
     ("diplomacy_error.crisis.state_missing", "The claimed state no longer exists"),
     ("diplomacy_error.crisis.claim_target_mismatch", "The claimed state is no longer owned by this country"),
     ("diplomacy_error.crisis.duplicate", "A crisis over this claim is already in progress"),
+    ("diplomacy_error.crisis.claim_consumed", "This claim has already been consumed"),
+    ("diplomacy_error.crisis.not_found", "The specified diplomatic crisis was not found"),
+    ("diplomacy_error.crisis.not_your_crisis", "This diplomatic crisis is not yours"),
+    ("diplomacy_error.crisis.not_awaiting_response", "This diplomatic crisis is not currently awaiting a response"),
+    ("diplomacy_error.crisis.already_resolved", "This diplomatic crisis has already concluded"),
+    ("diplomacy_error.crisis.support_self", "A belligerent cannot support itself"),
+    ("diplomacy_error.crisis.support_country_missing", "The specified country does not exist"),
+    ("diplomacy_error.crisis.support_side_conflict", "You already support the opposite side. Withdraw your support first"),
+    ("diplomacy_error.crisis.support_not_found", "No support pledge for this crisis was found"),
 
     // ── war_error.peace.* (can_accept_peace_offer / execute_peace_settlement) ─
     ("war_error.peace.war_not_found", "War not found"),

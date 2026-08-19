@@ -8,6 +8,7 @@ use crate::military::battle::BattleRegistry;
 use crate::military::data::MilitaryRegistry;
 use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
+use crate::ui::tab_bar::{TabBarRoot, ctrl_held};
 use crate::war::capitulation::{
     check_attacker_capitulation, check_defender_capitulation, has_combat_ready_divisions,
 };
@@ -42,12 +43,14 @@ pub struct PeacePanelPlugin;
 impl Plugin for PeacePanelPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PeacePanelState::default())
-            .add_systems(OnEnter(GameState::Playing), setup_peace_panel)
+            .add_systems(
+                OnEnter(GameState::Playing),
+                setup_peace_panel.after(crate::ui::tab_bar::spawn_tab_bar),
+            )
             .add_systems(
                 Update,
                 (
-                    toggle_peace_panel_key,
-                    handle_toggle_button,
+                    toggle_peace_panel,
                     handle_peace_action_buttons,
                     update_peace_panel_ui,
                 )
@@ -60,94 +63,117 @@ fn setup_peace_panel(
     mut commands: Commands,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
+    tab_bar_q: Query<Entity, With<TabBarRoot>>,
 ) {
-    // [P] Peace Panel Button
-    commands
+    // タブバー共通コンテナの子としてトグルボタンを配置(`ui::tab_bar`参照)
+    if let Ok(tab_bar) = tab_bar_q.single() {
+        commands.entity(tab_bar).with_children(|parent| {
+            parent
+                .spawn((
+                    TogglePeacePanelButton,
+                    Button,
+                    Node {
+                        padding: UiRect::all(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.3, 0.2, 0.4, 0.9)),
+                ))
+                .with_children(|btn| {
+                    let (text, marker) =
+                        localized_text(&catalog, locale.0, "peace_panel.toggle_button", vec![]);
+                    btn.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::WHITE),
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                    ));
+                });
+        });
+    }
+
+    // Peace Panel Window
+    // バグ報告(2026-08-17): 講和パネルだけ他4パネル(left:310,top:75,幅580〜600)と
+    // 異なる原点・幅(left:250,width:700)で開かれ、視覚的に「他より大きい」ように
+    // 見えていた。他4パネルと同じ原点・同程度の幅へ統一する。
+    // タイトルはスクロール対象の外(常に表示)、それ以外はスクロール可能な本体
+    // (`ui::scroll::spawn_scrollable_body`)へ入れる(詳細は`ui::scroll`のドキュメント参照)。
+    let peace_panel_entity = commands
         .spawn((
-            TogglePeacePanelButton,
+            PeacePanelRoot,
+            // P21-013: 背景自体もButton化し、子Button以外の余白をクリック/ホバーしても
+            // `Interaction`を確実に発行させる(`ui::load_confirm`の既存パターンを踏襲)。
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(710.0),
-                top: Val::Px(45.0),
-                padding: UiRect::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.3, 0.2, 0.4, 0.9)),
-        ))
-        .with_children(|parent| {
-            let (text, marker) =
-                localized_text(&catalog, locale.0, "peace_panel.toggle_button", vec![]);
-            parent.spawn((
-                text,
-                marker,
-                TextColor(Color::WHITE),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-            ));
-        });
-
-    // Peace Panel Window
-    commands
-        .spawn((
-            PeacePanelRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(250.0),
-                top: Val::Px(80.0),
-                width: Val::Px(700.0),
-                height: Val::Px(620.0),
+                left: Val::Px(310.0),
+                top: Val::Px(75.0),
+                width: Val::Px(600.0),
+                height: Val::Px(600.0),
                 padding: UiRect::all(Val::Px(16.0)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(10.0),
                 display: Display::None,
-                overflow: Overflow::clip_y(),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.95)),
         ))
-        .with_children(|parent| {
-            let (text, marker) = localized_text(&catalog, locale.0, "peace_panel.title", vec![]);
-            parent.spawn((
-                text,
-                marker,
-                TextColor(Color::srgb(0.9, 0.8, 0.4)),
-                TextFont {
-                    font_size: FontSize::Px(18.0),
-                    ..default()
-                },
-            ));
+        .id();
+    commands.entity(peace_panel_entity).with_children(|parent| {
+        let (text, marker) = localized_text(&catalog, locale.0, "peace_panel.title", vec![]);
+        parent.spawn((
+            text,
+            marker,
+            TextColor(Color::srgb(0.9, 0.8, 0.4)),
+            TextFont {
+                font_size: FontSize::Px(18.0),
+                ..default()
+            },
+        ));
 
+        crate::ui::scroll::spawn_scrollable_body(parent, Val::Px(8.0), |parent| {
             parent.spawn((
                 PeacePanelContentContainer,
                 Node {
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(8.0),
-                    overflow: Overflow::clip_y(),
                     flex_grow: 1.0,
                     ..default()
                 },
             ));
         });
+    });
 }
 
-fn toggle_peace_panel_key(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<PeacePanelState>) {
-    // KeyNを使用(KeyPはPoliticsパネルと重複していたため変更)。
-    if keys.just_pressed(KeyCode::KeyN) {
-        state.open = !state.open;
-    }
-}
-
-fn handle_toggle_button(
+/// 他4パネル(`research_panel::toggle_research_panel_key`等)と同じ構造:
+/// `ActivePanel`を経由することで、他タブへ切り替えたときに講和パネルも自動的に閉じる
+/// (`ui::mod::sync_panels_to_active`が`ActivePanel`の変化を見て`PeacePanelState.open`を
+/// 同期する)。講和パネル自身のopen/closeは、ここで即座に`state.open`へも反映する
+/// (他4パネルが`panel_q.single_mut().display`を直接書き換えるのと同じく、
+/// 自パネル分の反映をシステム間の実行順に依存させないため)。
+fn toggle_peace_panel(
     mut state: ResMut<PeacePanelState>,
-    q_btn: Query<&Interaction, (Changed<Interaction>, With<TogglePeacePanelButton>)>,
+    mut active_panel: ResMut<crate::ui::ActivePanel>,
+    keys: Res<ButtonInput<KeyCode>>,
+    btn_q: Query<&Interaction, (With<TogglePeacePanelButton>, Changed<Interaction>)>,
 ) {
-    for interaction in q_btn.iter() {
+    let mut toggle = false;
+    // Ctrl+4: タブ切替は全パネル共通でCtrl+数字に統一
+    // (軍事パネル内の素のDigit1/2/3/7/8/9フロントライン操作キーとの衝突を避けるため)。
+    if keys.just_pressed(KeyCode::Digit4) && ctrl_held(&keys) {
+        toggle = true;
+    }
+    for interaction in btn_q.iter() {
         if *interaction == Interaction::Pressed {
-            state.open = !state.open;
+            toggle = true;
         }
+    }
+
+    if toggle {
+        active_panel.toggle(crate::ui::PanelKind::Peace);
+        state.open = active_panel.current == crate::ui::PanelKind::Peace;
     }
 }
 
@@ -182,10 +208,12 @@ fn handle_peace_action_buttons(
             None => continue,
         };
 
+        // P21-016: 講和申し入れの相手は常に敵陣営の代表国(primary)とする
+        // (支持国宛てに送る講和申し入れは既存仕様の対象外)。
         let recipient_id = if war.attackers.contains(&player_id) {
-            *war.defenders.iter().next().unwrap_or(&player_id)
+            war.primary_defender_id()
         } else {
-            *war.attackers.iter().next().unwrap_or(&player_id)
+            war.primary_attacker_id()
         };
 
         let offer = PeaceOffer {
@@ -311,8 +339,8 @@ fn update_peace_panel_ui(
 
     commands.entity(container_entity).with_children(|parent| {
         if let Some(war) = active_war {
-            let atk_id = *war.attackers.iter().next().unwrap_or(&player_id);
-            let def_id = *war.defenders.iter().next().unwrap_or(&player_id);
+            let atk_id = war.primary_attacker_id();
+            let def_id = war.primary_defender_id();
 
             let atk_name = country_registry
                 .get(atk_id)
@@ -432,12 +460,18 @@ fn update_peace_panel_ui(
                 "peace_panel.capitulation_status",
                 vec![
                     ("defender", def_name.clone()),
-                    ("def_division", t(&catalog, locale.0, ready_key(def_has_division))),
+                    (
+                        "def_division",
+                        t(&catalog, locale.0, ready_key(def_has_division)),
+                    ),
                     ("atk_occ", atk_occ_def.to_string()),
                     ("def_total", def_owned.len().to_string()),
                     ("def_cap", t(&catalog, locale.0, cap_key(def_cap))),
                     ("attacker", atk_name.clone()),
-                    ("atk_division", t(&catalog, locale.0, ready_key(atk_has_division))),
+                    (
+                        "atk_division",
+                        t(&catalog, locale.0, ready_key(atk_has_division)),
+                    ),
                     ("def_occ", def_occ_atk.to_string()),
                     ("atk_total", atk_owned.len().to_string()),
                     ("atk_cap", t(&catalog, locale.0, cap_key(atk_cap))),
@@ -756,4 +790,140 @@ fn update_peace_panel_ui(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::tab_bar::spawn_tab_bar;
+
+    fn build_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(PeacePanelState::default());
+        app.insert_resource(crate::ui::ActivePanel::default());
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, toggle_peace_panel);
+        app
+    }
+
+    fn press_ctrl_plus(app: &mut App, digit: KeyCode) {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::ControlLeft);
+        keys.press(digit);
+        app.insert_resource(keys);
+        app.update();
+    }
+
+    fn press_bare(app: &mut App, digit: KeyCode) {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(digit);
+        app.insert_resource(keys);
+        app.update();
+    }
+
+    #[test]
+    fn ctrl_plus_digit4_toggles_peace_panel() {
+        let mut app = build_test_app();
+        press_ctrl_plus(&mut app, KeyCode::Digit4);
+
+        assert!(app.world().resource::<PeacePanelState>().open);
+        assert_eq!(
+            app.world().resource::<crate::ui::ActivePanel>().current,
+            crate::ui::PanelKind::Peace
+        );
+    }
+
+    #[test]
+    fn bare_digit4_alone_does_not_toggle_peace_panel() {
+        let mut app = build_test_app();
+        press_bare(&mut app, KeyCode::Digit4);
+
+        assert!(
+            !app.world().resource::<PeacePanelState>().open,
+            "Digit4 without Ctrl must not open the Peace panel"
+        );
+    }
+
+    /// バグ報告(2026-08-17): 講和タブだけ、他タブへ切り替えても開いたままだった。
+    /// 講和パネルは`ActivePanel`を経由するようになったため、`ui::mod::sync_panels_to_active`
+    /// が他パネルへの切替時に`PeacePanelState.open`をfalseへ同期することを確認する。
+    /// `toggle_peace_panel`は意図的に登録しない(このSystemは`sync_panels_to_active`単体の
+    /// 動作だけを検証する)。
+    #[test]
+    fn switching_to_another_panel_closes_the_peace_panel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(PeacePanelState {
+            open: true,
+            ..Default::default()
+        });
+        app.insert_resource(crate::ui::ActivePanel {
+            current: crate::ui::PanelKind::Peace,
+        });
+        app.add_systems(Update, crate::ui::sync_panels_to_active);
+        assert!(app.world().resource::<PeacePanelState>().open);
+
+        app.world_mut()
+            .resource_mut::<crate::ui::ActivePanel>()
+            .toggle(crate::ui::PanelKind::Research);
+        app.update();
+
+        assert!(
+            !app.world().resource::<PeacePanelState>().open,
+            "opening a different panel via ActivePanel must close the Peace panel too"
+        );
+    }
+
+    #[test]
+    fn toggle_button_is_spawned_as_a_child_of_the_shared_tab_bar() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Startup, (spawn_tab_bar, setup_peace_panel).chain());
+        app.update();
+
+        let tab_bar = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::ui::tab_bar::TabBarRoot>>()
+            .single(app.world())
+            .expect("TabBarRoot must be spawned");
+        let button = app
+            .world_mut()
+            .query_filtered::<Entity, With<TogglePeacePanelButton>>()
+            .single(app.world())
+            .expect("TogglePeacePanelButton must be spawned");
+
+        assert_eq!(
+            app.world().entity(button).get::<ChildOf>().map(|c| c.0),
+            Some(tab_bar),
+            "the peace toggle button must be a child of the shared TabBarRoot"
+        );
+    }
+
+    /// P21-013: `PeacePanelRoot`自身が`Button`であることを確認する回帰テスト。これにより
+    /// 子Button以外の余白をクリック/ホバーしても`Interaction`が確実に発行され、
+    /// `map::selection::handle_state_click`等の既存「UIのHovered/Pressed中はマップ操作を
+    /// スキップする」ガードがこの領域にも効くようになる(`ui::load_confirm`の既存パターンと
+    /// 同じ)。
+    #[test]
+    fn peace_panel_root_background_is_itself_a_button() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Startup, setup_peace_panel);
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<PeacePanelRoot>>()
+            .single(app.world())
+            .expect("PeacePanelRoot must be spawned");
+        assert!(
+            app.world().entity(root).contains::<Button>(),
+            "PeacePanelRoot's own background must be a Button so hovering it registers Interaction"
+        );
+    }
 }

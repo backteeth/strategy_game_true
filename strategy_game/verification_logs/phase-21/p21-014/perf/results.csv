@@ -1,0 +1,5 @@
+scale,country_count,state_count,division_count,building_count,assessment_count,overall_non_month_mean_ms,overall_non_month_max_ms,overall_month_day_ms,uiupdate_non_month_mean_ms,uiupdate_non_month_max_ms,uiupdate_month_day_ms,nan_count,duplicate_rank_count
+100,8,100,8,200,8,0.11801,0.55720,0.23660,0.00334,0.00930,0.02080,0,0
+500,25,500,25,1000,25,0.12566,0.61270,0.31160,0.00361,0.00800,0.03600,0,0
+1000,50,1000,50,2000,50,0.17093,0.58200,0.77420,0.00350,0.00600,0.07030,0,0
+2000,100,2000,100,4000,100,0.25944,0.98150,1.20440,0.00348,0.00480,0.24330,0,0

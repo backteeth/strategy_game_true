@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod claims;
 pub mod crisis;
+pub mod crisis_response;
 pub mod data;
 pub mod proposal;
 pub mod update;

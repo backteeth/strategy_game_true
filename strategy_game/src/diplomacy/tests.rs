@@ -89,6 +89,7 @@ fn test_claim_registry() {
         created_date: "1936/01/01".to_string(),
         is_permanent: false,
         source: ClaimSource::Strategic,
+        status: crate::diplomacy::claims::ClaimStatus::Active,
     };
 
     claims.add_claim(claim.clone());
@@ -126,6 +127,9 @@ fn test_crisis_registry() {
         deadline_date: None,
         international_concern: 0.0,
         third_party_reactions: HashMap::new(),
+        related_claim_id: None,
+        related_justification_id: None,
+        related_war_id: None,
     };
 
     let result_id = registry.add_crisis(crisis.clone());
@@ -175,6 +179,9 @@ fn test_demand_acceptance() {
         deadline_date: None,
         international_concern: 0.0,
         third_party_reactions: HashMap::new(),
+        related_claim_id: None,
+        related_justification_id: None,
+        related_war_id: None,
     };
 
     let relation = DiplomaticRelation::default();

@@ -531,7 +531,9 @@ mod tests {
             .iter(app.world())
             .next()
             .expect("button entity must exist");
-        app.world_mut().entity_mut(entity).insert(Interaction::Pressed);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(Interaction::Pressed);
     }
 
     // ─── Startup/非自動実行 ──────────────────────────────────────────────────
@@ -609,7 +611,10 @@ mod tests {
             .countries
             .push(one_country());
         app.update(); // setup_ui: preview.0 = Some(CountryId(0)) (first registered country)
-        assert_eq!(app.world().resource::<PreviewCountry>().0, Some(CountryId(0)));
+        assert_eq!(
+            app.world().resource::<PreviewCountry>().0,
+            Some(CountryId(0))
+        );
 
         press_button::<ContinueButton>(&mut app);
         app.update();
@@ -668,9 +673,7 @@ mod tests {
         app.world_mut().resource_mut::<LastLoadOutcome>().0 = Some(LoadOutcome::Failure {
             path: std::path::PathBuf::from("saves/savegame_v1.ron"),
             error: crate::save::runtime::LoadOperationError::ReadOrValidate(
-                crate::save::read::LoadSaveError::FileNotFound(
-                    "saves/savegame_v1.ron".to_string(),
-                ),
+                crate::save::read::LoadSaveError::FileNotFound("saves/savegame_v1.ron".to_string()),
             ),
         });
         app.update();

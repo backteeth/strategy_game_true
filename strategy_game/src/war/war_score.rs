@@ -14,14 +14,10 @@ pub struct WarScoreBreakdown {
 /// 攻撃側視点の戦勝点を計算する
 #[allow(clippy::manual_checked_ops)]
 pub fn calculate_war_score(war: &War, state_registry: &StateRegistry) -> WarScoreBreakdown {
-    let attacker = match war.attackers.iter().next() {
-        Some(&c) => c,
-        None => return WarScoreBreakdown::default(),
-    };
-    let defender = match war.defenders.iter().next() {
-        Some(&c) => c,
-        None => return WarScoreBreakdown::default(),
-    };
+    // P21-016: 多国間参加者がいても、戦勝点は明示的な代表国
+    // (primary_attacker/primary_defender)視点で据え置く(意味は不変)。
+    let attacker = war.primary_attacker_id();
+    let defender = war.primary_defender_id();
 
     // 1. 戦争目標点 (+40 / 0)
     let target_state_id = war

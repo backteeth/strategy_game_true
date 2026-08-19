@@ -383,6 +383,8 @@ mod tests {
             duration_days: 0,
             attackers: [c1].iter().cloned().collect(),
             defenders: [c2].iter().cloned().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![],
             war_score: 0.0,
             attacker_war_exhaustion: 0.0,

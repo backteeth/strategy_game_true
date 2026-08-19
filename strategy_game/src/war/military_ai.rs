@@ -1,7 +1,7 @@
 use crate::app::time::DayChangedMessage;
-use crate::common::{DivisionId, CountryId, FrontlineId, StateId};
+use crate::common::{CountryId, DivisionId, FrontlineId, StateId};
 use crate::country::{CountryRegistry, PlayerCountry};
-use crate::military::data::{DivisionStatus, Division, MilitaryRegistry};
+use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
 use crate::military::pathfinding::find_path;
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarRegistry, WarStatus};
@@ -34,7 +34,9 @@ impl MilitaryAiDecisionReason {
         match self {
             MilitaryAiDecisionReason::NoActiveWar => "military_ai_reason.no_active_war",
             MilitaryAiDecisionReason::NoValidFrontline => "military_ai_reason.no_valid_frontline",
-            MilitaryAiDecisionReason::NoAvailableDivision => "military_ai_reason.no_available_division",
+            MilitaryAiDecisionReason::NoAvailableDivision => {
+                "military_ai_reason.no_available_division"
+            }
             MilitaryAiDecisionReason::NoReachableFrontline => {
                 "military_ai_reason.no_reachable_frontline"
             }
@@ -133,11 +135,15 @@ pub fn is_division_available_for_ai(
         return false;
     }
     // 戦闘中・撤退中の部隊は新規割当対象にしない（割当済み前線への所属維持は可）
-    if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating {
+    if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating
+    {
         return false;
     }
     // 既に別の前線に所属している場合は対象外
-    if frontline_registry.division_frontline_map.contains_key(&division.id) {
+    if frontline_registry
+        .division_frontline_map
+        .contains_key(&division.id)
+    {
         return false;
     }
     true
@@ -387,7 +393,9 @@ pub fn assign_unassigned_divisions_to_frontlines(
             a.owner == country_id
                 && a.manpower > 0
                 && a.status != DivisionStatus::Destroyed
-                && !frontline_registry.division_frontline_map.contains_key(&a.id)
+                && !frontline_registry
+                    .division_frontline_map
+                    .contains_key(&a.id)
                 && state_registry
                     .get(a.current_state)
                     .map(|s| !s.is_sea)
@@ -681,7 +689,7 @@ mod tests {
     use crate::country::CountryData;
     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
     use crate::military::data::{
-        DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType,
+        Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType,
     };
     use crate::state::data::StateData;
     use crate::war::frontline::update_all_frontlines;
@@ -797,6 +805,8 @@ mod tests {
             name: "C1 vs C2".to_string(),
             attackers: [CountryId(1)].into_iter().collect(),
             defenders: [CountryId(2)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![WarGoal {
                 attacker: CountryId(1),
                 defender: CountryId(2),
@@ -1003,7 +1013,11 @@ mod tests {
             organization: 100.0,
             max_organization: 100.0,
             status: DivisionStatus::Idle,
-            ..military_registry.divisions.get(&c2_division_id).unwrap().clone()
+            ..military_registry
+                .divisions
+                .get(&c2_division_id)
+                .unwrap()
+                .clone()
         };
         military_registry.add_division(a_c1);
 

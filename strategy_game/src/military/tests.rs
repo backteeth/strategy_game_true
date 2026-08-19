@@ -1,10 +1,10 @@
 #![cfg(test)]
 #![allow(clippy::field_reassign_with_default)]
 
-use crate::common::{DivisionId, DivisionDefinitionId, CountryId, StateId};
+use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use crate::country::{CountryData, CountryRegistry};
 use crate::military::data::{
-    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+    Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
 };
 use crate::military::recruitment::{
     RecruitFeasibility, cancel_recruitment, evaluate_recruit_feasibility, process_recruitment,
@@ -112,7 +112,13 @@ fn test_recruitment_progress_and_completion() {
     country.available_manpower = 20_000;
     country.treasury = 500.0;
 
-    request_recruitment(&mut country, &military_registry, DivisionDefinitionId(1), StateId(1)).unwrap();
+    request_recruitment(
+        &mut country,
+        &military_registry,
+        DivisionDefinitionId(1),
+        StateId(1),
+    )
+    .unwrap();
     country_registry.countries.push(country);
 
     // Progress 1 day
@@ -716,6 +722,8 @@ fn setup_war(c1: CountryId, c2: CountryId) -> WarRegistry {
         duration_days: 0,
         attackers: [c1].iter().cloned().collect(),
         defenders: [c2].iter().cloned().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![],
         war_score: 0.0,
         attacker_war_exhaustion: 0.0,
@@ -847,8 +855,14 @@ fn test_phase15_battle_starts_when_entering_defended_state() {
         "Exactly one battle should be created"
     );
     // 両ユニットが戦闘中
-    assert_eq!(mil.divisions[&DivisionId(0)].status, DivisionStatus::Fighting);
-    assert_eq!(mil.divisions[&DivisionId(1)].status, DivisionStatus::Fighting);
+    assert_eq!(
+        mil.divisions[&DivisionId(0)].status,
+        DivisionStatus::Fighting
+    );
+    assert_eq!(
+        mil.divisions[&DivisionId(1)].status,
+        DivisionStatus::Fighting
+    );
 }
 
 #[test]

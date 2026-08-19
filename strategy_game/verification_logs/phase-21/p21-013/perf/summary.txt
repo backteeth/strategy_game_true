@@ -1,0 +1,33 @@
+P21-013 Crisis Support Scaling Summary
+========================================
+
+state_count=2000 warmup_days=10 measured_days=60 supporters_per_crisis=2 seed=0xC0FFEE12345678
+
+--- crisis_count=0 with_support=false ---
+  overall day_tick: mean=0.32828ms median=0.27240ms min=0.20040ms max=1.14420ms
+  Diplomacy set:    mean=0.04818ms median=0.04490ms
+
+--- crisis_count=1 with_support=false ---
+  overall day_tick: mean=0.42784ms median=0.38260ms min=0.30010ms max=1.20230ms
+  Diplomacy set:    mean=0.05176ms median=0.04710ms
+
+--- crisis_count=1 with_support=true ---
+  overall day_tick: mean=0.43080ms median=0.36920ms min=0.29950ms max=1.23830ms
+  Diplomacy set:    mean=0.05366ms median=0.04680ms
+
+--- crisis_count=100 with_support=false ---
+  overall day_tick: mean=6.32075ms median=6.26710ms min=5.80810ms max=8.11540ms
+  Diplomacy set:    mean=0.18822ms median=0.17510ms
+
+--- crisis_count=100 with_support=true ---
+  overall day_tick: mean=6.22499ms median=6.18050ms min=5.80990ms max=7.02540ms
+  Diplomacy set:    mean=0.19080ms median=0.17930ms
+
+--- crisis_count=1000 with_support=false ---
+  overall day_tick: mean=6.60189ms median=6.54360ms min=5.96520ms max=8.17600ms
+  Diplomacy set:    mean=0.55422ms median=0.53710ms
+
+--- crisis_count=1000 with_support=true ---
+  overall day_tick: mean=6.90612ms median=6.85210ms min=6.38520ms max=8.00850ms
+  Diplomacy set:    mean=0.72414ms median=0.69810ms
+

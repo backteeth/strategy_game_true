@@ -332,6 +332,7 @@ mod tests {
             strength: 42.0,
             created_date: "1800/03/01".to_string(),
             is_permanent: false,
+            status: crate::diplomacy::claims::ClaimStatus::Active,
             source: ClaimSource::BorderDispute,
         };
         let mut claims = HashMap::new();
@@ -351,6 +352,9 @@ mod tests {
             deadline_date: Some("1800/03/01".to_string()),
             international_concern: 5.0,
             third_party_reactions: HashMap::new(),
+            related_claim_id: None,
+            related_justification_id: None,
+            related_war_id: None,
         };
         let mut crises = HashMap::new();
         crises.insert(crisis.id, crisis);

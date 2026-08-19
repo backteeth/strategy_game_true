@@ -31,7 +31,11 @@ impl Plugin for CameraPlugin {
                 Update,
                 (
                     camera_keyboard_move,
-                    camera_zoom,
+                    // UIパネル/タブバー上でホイールした場合はマップズームへ渡さない
+                    // (`ui::scroll::CursorOverScrollableUi`参照)。UI側の
+                    // `RelativeCursorPosition`更新(PreUpdate)を受けてこのフレーム内で
+                    // 判定するため、`ui::scroll::update_cursor_over_scrollable_ui`の後に実行する。
+                    camera_zoom.after(crate::ui::scroll::update_cursor_over_scrollable_ui),
                     camera_drag,
                     reset_camera_on_request,
                 ),
@@ -131,8 +135,16 @@ fn camera_keyboard_move(
 fn camera_zoom(
     mut scroll_events: MessageReader<MouseWheel>,
     settings: Res<CameraSettings>,
+    cursor_over_ui: Res<crate::ui::scroll::CursorOverScrollableUi>,
     mut camera_q: Query<&mut Transform, With<GameCamera>>,
 ) {
+    // カーソルがスクロール可能なUIパネル/タブバーの上にある間は、ホイールを
+    // マップズームへ渡さない(既知の未解決事象だったパネルスクロールとの同時発生を防ぐ)。
+    if cursor_over_ui.0 {
+        scroll_events.clear();
+        return;
+    }
+
     let Ok(mut transform) = camera_q.single_mut() else {
         return;
     };

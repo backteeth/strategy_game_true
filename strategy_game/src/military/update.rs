@@ -453,6 +453,8 @@ mod tests {
             name: "Test War".to_string(),
             attackers: [attacker].into_iter().collect(),
             defenders: [defender].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![],
             start_date: "1800/01/01".to_string(),
             end_date: None,

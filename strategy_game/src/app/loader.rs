@@ -7,7 +7,7 @@ use crate::diplomacy::data::{
     InitialDiplomaticRelation,
 };
 use crate::economy::resources::StateResourceDeposit;
-use crate::military::data::{DivisionStatus, Division, DivisionDefinition, MilitaryRegistry};
+use crate::military::data::{Division, DivisionDefinition, DivisionStatus, MilitaryRegistry};
 use crate::research::data::{TechnologyDefinition, TechnologyRegistry};
 use crate::research::world_stage::{WorldCivilizationState, WorldStageDefinition};
 use crate::state::data::{StateData, StateRegistry};
@@ -30,7 +30,16 @@ impl Plugin for DataLoaderPlugin {
             // 「続きから」によるLoaded Game進入では実行してはならない(PlayingEntryModeで
             // 判定)。reset_playing_entry_modeは判定完了後に必ず`.chain()`で後続実行し、
             // このResourceを次のPlaying進入まで決定的な既定値へ戻す。
-            (spawn_debug_divisions, reset_playing_entry_mode).chain(),
+            // P21-014: rebuild_country_power_on_enter_playingはspawn_debug_divisionsの
+            // 後に置き、New Game用デバッグ初期師団配置後の軍事力を初回評価へ含める。
+            // Load-from-CountrySelection経由の進入でも冪等に再評価するだけで実害はない
+            // (詳細は`country::power`のドキュメント参照)。
+            (
+                spawn_debug_divisions,
+                crate::country::power::rebuild_country_power_on_enter_playing,
+                reset_playing_entry_mode,
+            )
+                .chain(),
         );
     }
 }

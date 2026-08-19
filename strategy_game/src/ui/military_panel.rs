@@ -14,6 +14,7 @@ use crate::military::recruitment::{
 use crate::state::SelectedState;
 use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
+use crate::ui::tab_bar::{TabBarRoot, ctrl_held};
 use crate::war::data::WarRegistry;
 use crate::war::frontline::{
     ArmyFrontlineAssignFeasibility, FrontlineCommandFeasibility, FrontlineRegistry,
@@ -21,7 +22,6 @@ use crate::war::frontline::{
     evaluate_army_frontline_assign_feasibility, evaluate_frontline_division_command_feasibility,
     uncaptured_offensive_line_regions,
 };
-use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
 /// P21-001: 募兵UIが常に対象とする基本部隊定義。
@@ -180,12 +180,14 @@ pub struct MilitaryPanelPlugin;
 impl Plugin for MilitaryPanelPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MilitaryPanelState::default())
-            .add_systems(OnEnter(GameState::Playing), setup_military_panel)
+            .add_systems(
+                OnEnter(GameState::Playing),
+                setup_military_panel.after(crate::ui::tab_bar::spawn_tab_bar),
+            )
             .add_systems(
                 Update,
                 (
                     toggle_military_panel_key,
-                    handle_military_panel_scroll,
                     update_military_panel_ui,
                     update_recruit_button_ui,
                     handle_recruit_buttons,
@@ -226,39 +228,48 @@ fn setup_military_panel(
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
     military_registry: Res<MilitaryRegistry>,
+    tab_bar_q: Query<Entity, With<TabBarRoot>>,
 ) {
-    // トグルボタン
-    commands
-        .spawn((
-            ToggleMilitaryPanelButton,
-            Button,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(840.0),
-                top: Val::Px(45.0),
-                padding: UiRect::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.3, 0.2, 0.5, 0.9)),
-        ))
-        .with_children(|parent| {
-            let (text, marker) =
-                localized_text(&catalog, locale.0, "military_panel.toggle_button", vec![]);
-            parent.spawn((
-                text,
-                marker,
-                TextColor(Color::WHITE),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-            ));
+    // タブバー共通コンテナの子としてトグルボタンを配置(`ui::tab_bar`参照)
+    if let Ok(tab_bar) = tab_bar_q.single() {
+        commands.entity(tab_bar).with_children(|parent| {
+            parent
+                .spawn((
+                    ToggleMilitaryPanelButton,
+                    Button,
+                    Node {
+                        padding: UiRect::all(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.3, 0.2, 0.5, 0.9)),
+                ))
+                .with_children(|btn| {
+                    let (text, marker) =
+                        localized_text(&catalog, locale.0, "military_panel.toggle_button", vec![]);
+                    btn.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::WHITE),
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                    ));
+                });
         });
+    }
 
     // メインパネル（初期は非表示）
-    commands
+    // タイトルはスクロール対象の外(常に表示)、それ以外はスクロール可能な本体
+    // (`ui::scroll::spawn_scrollable_body`)へ入れる(詳細は`ui::scroll`のドキュメント参照。
+    // P21-004: 編成セクション追加でパネル内容が固定高さ(650px)を超え、下部が見切れる
+    // 不具合が発生したため、クリップのみ(clip_y)からスクロール可能に変更した経緯がある)。
+    let military_panel_entity = commands
         .spawn((
             MilitaryPanelRoot,
+            // P21-013: 背景自体もButton化し、子Button以外の余白をクリック/ホバーしても
+            // `Interaction`を確実に発行させる(`ui::load_confirm`の既存パターンを踏襲)。
+            Button,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(310.0),
@@ -269,15 +280,13 @@ fn setup_military_panel(
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(8.0),
                 display: Display::None,
-                // P21-004: 編成セクション追加でパネル内容が固定高さ(650px)を超え、
-                // 下部が見切れる不具合が発生したため、クリップのみ(clip_y)から
-                // マウスホイールでスクロール可能(scroll_y)に変更する。
-                overflow: Overflow::scroll_y(),
                 ..default()
             },
-            ScrollPosition::default(),
             BackgroundColor(Color::srgba(0.08, 0.06, 0.14, 0.95)),
         ))
+        .id();
+    commands
+        .entity(military_panel_entity)
         .with_children(|parent| {
             let (text, marker) = localized_text(&catalog, locale.0, "military_panel.title", vec![]);
             parent.spawn((
@@ -290,513 +299,515 @@ fn setup_military_panel(
                 },
             ));
 
-            // P21-001: 募兵セクション
-            let (header_text, header_marker) =
-                localized_text(&catalog, locale.0, "military_panel.recruit_header", vec![]);
-            parent.spawn((
-                header_text,
-                header_marker,
-                TextColor(Color::srgb(0.7, 0.9, 0.7)),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-            ));
-
-            let recruit_unit_name = military_registry
-                .definitions
-                .get(&RECRUIT_DIVISION_ID)
-                .map(|def| def.name.clone())
-                .unwrap_or_else(|| "?".to_string());
-
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                })
-                .with_children(|row| {
-                    let (btn_text, btn_marker) = localized_text(
-                        &catalog,
-                        locale.0,
-                        "military_panel.recruit_button",
-                        vec![("unit", recruit_unit_name)],
-                    );
-                    row.spawn((
-                        RecruitButton(RECRUIT_DIVISION_ID),
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(RECRUIT_DISABLED_COLOR),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            btn_text,
-                            btn_marker,
-                            TextColor(Color::WHITE),
-                            TextFont {
-                                font_size: FontSize::Px(11.0),
-                                ..default()
-                            },
-                        ));
-                    });
-
-                    row.spawn((
-                        RecruitInfoText,
-                        Text::new(t(
-                            &catalog,
-                            locale.0,
-                            "military_panel.recruit_status_no_selection",
-                        )),
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextLayout {
-                            linebreak: LineBreak::AnyCharacter,
-                            ..default()
-                        },
-                    ));
-                });
-
-            // P21-002: 前線命令セクション(旧Digit1/2/3/7/8/9のボタン化)
-            let (fl_header_text, fl_header_marker) = localized_text(
-                &catalog,
-                locale.0,
-                "military_panel.frontline_cmd_header",
-                vec![],
-            );
-            parent.spawn((
-                fl_header_text,
-                fl_header_marker,
-                TextColor(Color::srgb(0.6, 0.8, 0.95)),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-            ));
-
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (cmd, key) in [
-                        (
-                            FrontlineCommand::Assign,
-                            "military_panel.frontline_assign_button",
-                        ),
-                        (
-                            FrontlineCommand::Unassign,
-                            "military_panel.frontline_unassign_button",
-                        ),
-                        (
-                            FrontlineCommand::UnassignAll,
-                            "military_panel.frontline_unassign_all_button",
-                        ),
-                    ] {
-                        let (btn_text, btn_marker) =
-                            localized_text(&catalog, locale.0, key, vec![]);
-                        row.spawn((
-                            FrontlineCommandButton(cmd),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                btn_text,
-                                btn_marker,
-                                TextColor(Color::WHITE),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-                    }
-                });
-
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (cmd, key) in [
-                        (
-                            FrontlineCommand::SetStance(FrontlineStance::Stopped),
-                            "military_panel.frontline_stop_button",
-                        ),
-                        (
-                            FrontlineCommand::SetStance(FrontlineStance::Defend),
-                            "military_panel.frontline_defend_button",
-                        ),
-                        (
-                            FrontlineCommand::SetStance(FrontlineStance::Offensive),
-                            "military_panel.frontline_offensive_button",
-                        ),
-                    ] {
-                        let (btn_text, btn_marker) =
-                            localized_text(&catalog, locale.0, key, vec![]);
-                        row.spawn((
-                            FrontlineCommandButton(cmd),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                btn_text,
-                                btn_marker,
-                                TextColor(Color::WHITE),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-                    }
-
-                    row.spawn((
-                        FrontlineCommandInfoText,
-                        Text::new(t(
-                            &catalog,
-                            locale.0,
-                            "military_panel.frontline_cmd_status_no_frontline",
-                        )),
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextLayout {
-                            linebreak: LineBreak::AnyCharacter,
-                            ..default()
-                        },
-                    ));
-                });
-
-            // P21-004A: 選択中師団向けの「移動停止」(前線スタンスの「停止」とは別物)。
-            // Army選択で埋まったDivision選択に対しても、それ以外の選択に対しても同じく機能する。
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                })
-                .with_children(|row| {
-                    let (btn_text, btn_marker) = localized_text(
-                        &catalog,
-                        locale.0,
-                        "military_panel.stop_movement_button",
-                        vec![],
-                    );
-                    row.spawn((
-                        StopMovementButton,
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            btn_text,
-                            btn_marker,
-                            TextColor(Color::WHITE),
-                            TextFont {
-                                font_size: FontSize::Px(11.0),
-                                ..default()
-                            },
-                        ));
-                    });
-
-                    row.spawn((
-                        StopMovementInfoText,
-                        Text::new(t(
-                            &catalog,
-                            locale.0,
-                            "military_panel.stop_movement_no_selection",
-                        )),
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextLayout {
-                            linebreak: LineBreak::AnyCharacter,
-                            ..default()
-                        },
-                    ));
-                });
-
-            // P21-004: 編成(Army)セクション。下の編成一覧(ArmyListContainer)の各行を
-            // クリックすることで「選択中編成」(`SelectedArmy`)を明示的に選べる。
-            let (ag_header_text, ag_header_marker) =
-                localized_text(&catalog, locale.0, "military_panel.army_header", vec![]);
-            parent.spawn((
-                ag_header_text,
-                ag_header_marker,
-                TextColor(Color::srgb(0.85, 0.7, 0.9)),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-            ));
-
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (cmd, key) in [
-                        (ArmyCommand::Create, "military_panel.army_create_button"),
-                        (ArmyCommand::AddSelection, "military_panel.army_add_button"),
-                        (
-                            ArmyCommand::RemoveSelection,
-                            "military_panel.army_remove_button",
-                        ),
-                        (ArmyCommand::Disband, "military_panel.army_disband_button"),
-                    ] {
-                        let (btn_text, btn_marker) =
-                            localized_text(&catalog, locale.0, key, vec![]);
-                        row.spawn((
-                            ArmyCommandButton(cmd),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(ARMY_GROUP_CMD_DISABLED_COLOR),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                btn_text,
-                                btn_marker,
-                                TextColor(Color::WHITE),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-                    }
-                });
-
-            parent.spawn((
-                ArmyStatusText,
-                Text::new(t(&catalog, locale.0, "military_panel.army_no_target")),
-                TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                TextFont {
-                    font_size: FontSize::Px(11.0),
-                    ..default()
-                },
-                TextLayout {
-                    linebreak: LineBreak::AnyCharacter,
-                    ..default()
-                },
-            ));
-
-            // P21-005: 選択中編成の前線割当(設定/解除ボタン+現在の割当状況表示)
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (cmd, key) in [
-                        (
-                            ArmyFrontlineCommand::Assign,
-                            "military_panel.army_frontline_assign_button",
-                        ),
-                        (
-                            ArmyFrontlineCommand::Unassign,
-                            "military_panel.army_frontline_unassign_button",
-                        ),
-                    ] {
-                        let (btn_text, btn_marker) =
-                            localized_text(&catalog, locale.0, key, vec![]);
-                        row.spawn((
-                            ArmyFrontlineCommandButton(cmd),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(ARMY_GROUP_CMD_DISABLED_COLOR),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                btn_text,
-                                btn_marker,
-                                TextColor(Color::WHITE),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-                    }
-
-                    row.spawn((
-                        ArmyFrontlineStatusText,
-                        Text::new(t(
-                            &catalog,
-                            locale.0,
-                            "military_panel.army_frontline_status_none_selected",
-                        )),
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextLayout {
-                            linebreak: LineBreak::AnyCharacter,
-                            ..default()
-                        },
-                    ));
-                });
-
-            // P21-007: 攻勢線(計画データのみ)の設定/解除/確定/キャンセルボタン+状態表示。
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (cmd, key) in [
-                        (
-                            OffensiveLineCommand::StartEdit,
-                            "military_panel.offensive_line_start_button",
-                        ),
-                        (
-                            OffensiveLineCommand::Clear,
-                            "military_panel.offensive_line_clear_button",
-                        ),
-                        (
-                            OffensiveLineCommand::Confirm,
-                            "military_panel.offensive_line_confirm_button",
-                        ),
-                        (
-                            OffensiveLineCommand::Cancel,
-                            "military_panel.offensive_line_cancel_button",
-                        ),
-                    ] {
-                        let (btn_text, btn_marker) =
-                            localized_text(&catalog, locale.0, key, vec![]);
-                        row.spawn((
-                            OffensiveLineCommandButton(cmd),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(ARMY_GROUP_CMD_DISABLED_COLOR),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                btn_text,
-                                btn_marker,
-                                TextColor(Color::WHITE),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-                    }
-
-                    row.spawn((
-                        OffensiveLineStatusText,
-                        Text::new(t(
-                            &catalog,
-                            locale.0,
-                            "military_panel.offensive_line_status_none_selected",
-                        )),
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextLayout {
-                            linebreak: LineBreak::AnyCharacter,
-                            ..default()
-                        },
-                    ));
-                });
-
-            // P21-004: 編成一覧本体はクリック可能な行として動的に構築される
-            // (`update_army_ui`が更新のたびに子を全破棄・再構築する)。
-            // 初期状態(0件)のプレースホルダ行はここで1つだけ用意しておく。
-            parent
-                .spawn((
-                    ArmyListContainer,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(2.0),
+            crate::ui::scroll::spawn_scrollable_body(parent, Val::Px(8.0), |parent| {
+                // P21-001: 募兵セクション
+                let (header_text, header_marker) =
+                    localized_text(&catalog, locale.0, "military_panel.recruit_header", vec![]);
+                parent.spawn((
+                    header_text,
+                    header_marker,
+                    TextColor(Color::srgb(0.7, 0.9, 0.7)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
                         ..default()
                     },
-                ))
-                .with_children(|list| {
-                    list.spawn((
-                        Text::new(t(&catalog, locale.0, "military_panel.army_list_empty")),
-                        TextColor(Color::srgb(0.85, 0.85, 0.85)),
-                        TextFont {
-                            font_size: FontSize::Px(12.0),
+                ));
+
+                let recruit_unit_name = military_registry
+                    .definitions
+                    .get(&RECRUIT_DIVISION_ID)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "?".to_string());
+
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        let (btn_text, btn_marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "military_panel.recruit_button",
+                            vec![("unit", recruit_unit_name)],
+                        );
+                        row.spawn((
+                            RecruitButton(RECRUIT_DIVISION_ID),
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(RECRUIT_DISABLED_COLOR),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                btn_text,
+                                btn_marker,
+                                TextColor(Color::WHITE),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                            ));
+                        });
+
+                        row.spawn((
+                            RecruitInfoText,
+                            Text::new(t(
+                                &catalog,
+                                locale.0,
+                                "military_panel.recruit_status_no_selection",
+                            )),
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
+                        ));
+                    });
+
+                // P21-002: 前線命令セクション(旧Digit1/2/3/7/8/9のボタン化)
+                let (fl_header_text, fl_header_marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "military_panel.frontline_cmd_header",
+                    vec![],
+                );
+                parent.spawn((
+                    fl_header_text,
+                    fl_header_marker,
+                    TextColor(Color::srgb(0.6, 0.8, 0.95)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (cmd, key) in [
+                            (
+                                FrontlineCommand::Assign,
+                                "military_panel.frontline_assign_button",
+                            ),
+                            (
+                                FrontlineCommand::Unassign,
+                                "military_panel.frontline_unassign_button",
+                            ),
+                            (
+                                FrontlineCommand::UnassignAll,
+                                "military_panel.frontline_unassign_all_button",
+                            ),
+                        ] {
+                            let (btn_text, btn_marker) =
+                                localized_text(&catalog, locale.0, key, vec![]);
+                            row.spawn((
+                                FrontlineCommandButton(cmd),
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    btn_text,
+                                    btn_marker,
+                                    TextColor(Color::WHITE),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                ));
+                            });
+                        }
+                    });
+
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (cmd, key) in [
+                            (
+                                FrontlineCommand::SetStance(FrontlineStance::Stopped),
+                                "military_panel.frontline_stop_button",
+                            ),
+                            (
+                                FrontlineCommand::SetStance(FrontlineStance::Defend),
+                                "military_panel.frontline_defend_button",
+                            ),
+                            (
+                                FrontlineCommand::SetStance(FrontlineStance::Offensive),
+                                "military_panel.frontline_offensive_button",
+                            ),
+                        ] {
+                            let (btn_text, btn_marker) =
+                                localized_text(&catalog, locale.0, key, vec![]);
+                            row.spawn((
+                                FrontlineCommandButton(cmd),
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    btn_text,
+                                    btn_marker,
+                                    TextColor(Color::WHITE),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                ));
+                            });
+                        }
+
+                        row.spawn((
+                            FrontlineCommandInfoText,
+                            Text::new(t(
+                                &catalog,
+                                locale.0,
+                                "military_panel.frontline_cmd_status_no_frontline",
+                            )),
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
+                        ));
+                    });
+
+                // P21-004A: 選択中師団向けの「移動停止」(前線スタンスの「停止」とは別物)。
+                // Army選択で埋まったDivision選択に対しても、それ以外の選択に対しても同じく機能する。
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        let (btn_text, btn_marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "military_panel.stop_movement_button",
+                            vec![],
+                        );
+                        row.spawn((
+                            StopMovementButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                btn_text,
+                                btn_marker,
+                                TextColor(Color::WHITE),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                            ));
+                        });
+
+                        row.spawn((
+                            StopMovementInfoText,
+                            Text::new(t(
+                                &catalog,
+                                locale.0,
+                                "military_panel.stop_movement_no_selection",
+                            )),
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
+                        ));
+                    });
+
+                // P21-004: 編成(Army)セクション。下の編成一覧(ArmyListContainer)の各行を
+                // クリックすることで「選択中編成」(`SelectedArmy`)を明示的に選べる。
+                let (ag_header_text, ag_header_marker) =
+                    localized_text(&catalog, locale.0, "military_panel.army_header", vec![]);
+                parent.spawn((
+                    ag_header_text,
+                    ag_header_marker,
+                    TextColor(Color::srgb(0.85, 0.7, 0.9)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (cmd, key) in [
+                            (ArmyCommand::Create, "military_panel.army_create_button"),
+                            (ArmyCommand::AddSelection, "military_panel.army_add_button"),
+                            (
+                                ArmyCommand::RemoveSelection,
+                                "military_panel.army_remove_button",
+                            ),
+                            (ArmyCommand::Disband, "military_panel.army_disband_button"),
+                        ] {
+                            let (btn_text, btn_marker) =
+                                localized_text(&catalog, locale.0, key, vec![]);
+                            row.spawn((
+                                ArmyCommandButton(cmd),
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(ARMY_GROUP_CMD_DISABLED_COLOR),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    btn_text,
+                                    btn_marker,
+                                    TextColor(Color::WHITE),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                ));
+                            });
+                        }
+                    });
+
+                parent.spawn((
+                    ArmyStatusText,
+                    Text::new(t(&catalog, locale.0, "military_panel.army_no_target")),
+                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                    TextFont {
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                    TextLayout {
+                        linebreak: LineBreak::AnyCharacter,
+                        ..default()
+                    },
+                ));
+
+                // P21-005: 選択中編成の前線割当(設定/解除ボタン+現在の割当状況表示)
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (cmd, key) in [
+                            (
+                                ArmyFrontlineCommand::Assign,
+                                "military_panel.army_frontline_assign_button",
+                            ),
+                            (
+                                ArmyFrontlineCommand::Unassign,
+                                "military_panel.army_frontline_unassign_button",
+                            ),
+                        ] {
+                            let (btn_text, btn_marker) =
+                                localized_text(&catalog, locale.0, key, vec![]);
+                            row.spawn((
+                                ArmyFrontlineCommandButton(cmd),
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(ARMY_GROUP_CMD_DISABLED_COLOR),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    btn_text,
+                                    btn_marker,
+                                    TextColor(Color::WHITE),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                ));
+                            });
+                        }
+
+                        row.spawn((
+                            ArmyFrontlineStatusText,
+                            Text::new(t(
+                                &catalog,
+                                locale.0,
+                                "military_panel.army_frontline_status_none_selected",
+                            )),
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
+                        ));
+                    });
+
+                // P21-007: 攻勢線(計画データのみ)の設定/解除/確定/キャンセルボタン+状態表示。
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for (cmd, key) in [
+                            (
+                                OffensiveLineCommand::StartEdit,
+                                "military_panel.offensive_line_start_button",
+                            ),
+                            (
+                                OffensiveLineCommand::Clear,
+                                "military_panel.offensive_line_clear_button",
+                            ),
+                            (
+                                OffensiveLineCommand::Confirm,
+                                "military_panel.offensive_line_confirm_button",
+                            ),
+                            (
+                                OffensiveLineCommand::Cancel,
+                                "military_panel.offensive_line_cancel_button",
+                            ),
+                        ] {
+                            let (btn_text, btn_marker) =
+                                localized_text(&catalog, locale.0, key, vec![]);
+                            row.spawn((
+                                OffensiveLineCommandButton(cmd),
+                                Button,
+                                Node {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(ARMY_GROUP_CMD_DISABLED_COLOR),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    btn_text,
+                                    btn_marker,
+                                    TextColor(Color::WHITE),
+                                    TextFont {
+                                        font_size: FontSize::Px(11.0),
+                                        ..default()
+                                    },
+                                ));
+                            });
+                        }
+
+                        row.spawn((
+                            OffensiveLineStatusText,
+                            Text::new(t(
+                                &catalog,
+                                locale.0,
+                                "military_panel.offensive_line_status_none_selected",
+                            )),
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
+                        ));
+                    });
+
+                // P21-004: 編成一覧本体はクリック可能な行として動的に構築される
+                // (`update_army_ui`が更新のたびに子を全破棄・再構築する)。
+                // 初期状態(0件)のプレースホルダ行はここで1つだけ用意しておく。
+                parent
+                    .spawn((
+                        ArmyListContainer,
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(2.0),
                             ..default()
                         },
-                    ));
-                });
+                    ))
+                    .with_children(|list| {
+                        list.spawn((
+                            Text::new(t(&catalog, locale.0, "military_panel.army_list_empty")),
+                            TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
+                                ..default()
+                            },
+                        ));
+                    });
 
-            // パネル内テキスト
-            // NOTE: このパネルは複数の翻訳キーを1行ずつ結合した合成テキストであり、
-            // 単一の翻訳キーで表現できないため、意図的に`LocalizedText`マーカーを付与しない
-            // (汎用の`retranslate_on_locale_change`による上書きを避ける)。
-            // 言語切り替え時の再翻訳は`update_military_panel_ui`自身が
-            // `!state.open && !locale.is_changed()`ガードにより担う。
-            parent.spawn((
-                MilitaryPanelText,
-                Text::new(t(&catalog, locale.0, "military_panel.loading")),
-                TextColor(Color::srgb(0.85, 0.85, 0.85)),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-                TextLayout {
-                    linebreak: LineBreak::AnyCharacter,
-                    ..default()
-                },
-            ));
+                // パネル内テキスト
+                // NOTE: このパネルは複数の翻訳キーを1行ずつ結合した合成テキストであり、
+                // 単一の翻訳キーで表現できないため、意図的に`LocalizedText`マーカーを付与しない
+                // (汎用の`retranslate_on_locale_change`による上書きを避ける)。
+                // 言語切り替え時の再翻訳は`update_military_panel_ui`自身が
+                // `!state.open && !locale.is_changed()`ガードにより担う。
+                parent.spawn((
+                    MilitaryPanelText,
+                    Text::new(t(&catalog, locale.0, "military_panel.loading")),
+                    TextColor(Color::srgb(0.85, 0.85, 0.85)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextLayout {
+                        linebreak: LineBreak::AnyCharacter,
+                        ..default()
+                    },
+                ));
+            });
         });
 }
 
@@ -808,7 +819,10 @@ fn toggle_military_panel_key(
     mut panel_q: Query<&mut Node, With<MilitaryPanelRoot>>,
 ) {
     let mut toggle = false;
-    if keys.just_pressed(KeyCode::KeyM) {
+    // Ctrl+5: タブ切替は全パネル共通でCtrl+数字に統一
+    // (このパネル自身が開いている間に使うフロントライン操作キー、素のDigit1/2/3/7/8/9
+    // [`update_military_panel_ui`参照]とは衝突しない)。
+    if keys.just_pressed(KeyCode::Digit5) && ctrl_held(&keys) {
         toggle = true;
     }
     for interaction in btn_q.iter() {
@@ -827,36 +841,6 @@ fn toggle_military_panel_key(
                 Display::None
             };
         }
-    }
-}
-
-/// P21-004: 軍事パネルの内容が固定高さを超える場合にマウスホイールでスクロールする。
-/// パネル自身の`Node`に`overflow: Overflow::scroll_y()`+`ScrollPosition`が設定済み。
-/// 上端でのクランプのみ行い、下端は厳密な最大値計算を避けて緩めの上限に留める
-/// (陸軍・編成・戦闘の行数は可変で、正確な最大値はレイアウト計算後でないと分からないため)。
-fn handle_military_panel_scroll(
-    state: Res<MilitaryPanelState>,
-    mut scroll_events: MessageReader<MouseWheel>,
-    mut panel_q: Query<&mut ScrollPosition, With<MilitaryPanelRoot>>,
-) {
-    if !state.open {
-        scroll_events.clear();
-        return;
-    }
-
-    let mut delta_y = 0.0_f32;
-    for event in scroll_events.read() {
-        delta_y += match event.unit {
-            MouseScrollUnit::Line => event.y * 24.0,
-            MouseScrollUnit::Pixel => event.y,
-        };
-    }
-    if delta_y == 0.0 {
-        return;
-    }
-
-    if let Ok(mut scroll) = panel_q.single_mut() {
-        scroll.y = (scroll.y - delta_y).clamp(0.0, 4000.0);
     }
 }
 
@@ -2857,6 +2841,28 @@ mod tests {
         );
     }
 
+    /// P21-013: `MilitaryPanelRoot`自身が`Button`であることを確認する回帰テスト。これにより
+    /// 子Button以外の余白をクリック/ホバーしても`Interaction`が確実に発行され、
+    /// `map::selection::handle_state_click`等の既存「UIのHovered/Pressed中はマップ操作を
+    /// スキップする」ガードがこの領域にも効くようになる(`ui::load_confirm`の既存パターンと
+    /// 同じ)。
+    #[test]
+    fn military_panel_root_background_is_itself_a_button() {
+        let mut app = build_test_app();
+        app.add_systems(Startup, setup_military_panel);
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<MilitaryPanelRoot>>()
+            .single(app.world())
+            .expect("MilitaryPanelRoot must be spawned");
+        assert!(
+            app.world().entity(root).contains::<Button>(),
+            "MilitaryPanelRoot's own background must be a Button so hovering it registers Interaction"
+        );
+    }
+
     // ── P21-002: 前線命令ボタンのテスト ──────────────────────────
 
     fn make_frontline_test_division(
@@ -2919,6 +2925,8 @@ mod tests {
                 name: "Test War".to_string(),
                 attackers: [player_cid].into_iter().collect(),
                 defenders: [enemy_cid].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
                 war_goals: Vec::new(),
                 start_date: "1800/01/01".to_string(),
                 end_date: None,
@@ -3801,6 +3809,8 @@ mod tests {
             name: "Test War".to_string(),
             attackers: [CountryId(1)].into_iter().collect(),
             defenders: [CountryId(2)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![],
             start_date: "1800/01/01".to_string(),
             end_date: None,
@@ -4627,6 +4637,88 @@ mod tests {
         assert_ne!(
             ja_text, en_text,
             "攻勢線実行中の状態表示もJA/EN切替で即座に更新されるはず"
+        );
+    }
+
+    fn build_tab_toggle_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::ui::ActivePanel::default());
+        app.insert_resource(MilitaryPanelState::default());
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, toggle_military_panel_key);
+        app
+    }
+
+    fn press_ctrl_plus(app: &mut App, digit: KeyCode) {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::ControlLeft);
+        keys.press(digit);
+        app.insert_resource(keys);
+        app.update();
+    }
+
+    fn press_bare(app: &mut App, digit: KeyCode) {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(digit);
+        app.insert_resource(keys);
+        app.update();
+    }
+
+    #[test]
+    fn ctrl_plus_digit5_toggles_military_panel() {
+        let mut app = build_tab_toggle_test_app();
+        press_ctrl_plus(&mut app, KeyCode::Digit5);
+
+        assert!(app.world().resource::<MilitaryPanelState>().open);
+        assert_eq!(
+            app.world().resource::<crate::ui::ActivePanel>().current,
+            crate::ui::PanelKind::Military
+        );
+    }
+
+    /// Digit5単体(Ctrlなし)ではパネルは開かない。素のDigit1/2/3/7/8/9は
+    /// このパネル自身が開いている間、フロントライン操作コマンドとして別途消費される
+    /// (`update_military_panel_ui`参照)ため、タブ切替は全てCtrl併用に統一している。
+    #[test]
+    fn bare_digit5_alone_does_not_toggle_military_panel() {
+        let mut app = build_tab_toggle_test_app();
+        press_bare(&mut app, KeyCode::Digit5);
+
+        assert!(
+            !app.world().resource::<MilitaryPanelState>().open,
+            "Digit5 without Ctrl must not open the Military panel"
+        );
+    }
+
+    #[test]
+    fn toggle_button_is_spawned_as_a_child_of_the_shared_tab_bar() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.insert_resource(MilitaryRegistry::default());
+        app.add_systems(
+            Startup,
+            (crate::ui::tab_bar::spawn_tab_bar, setup_military_panel).chain(),
+        );
+        app.update();
+
+        let tab_bar = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::ui::tab_bar::TabBarRoot>>()
+            .single(app.world())
+            .expect("TabBarRoot must be spawned");
+        let button = app
+            .world_mut()
+            .query_filtered::<Entity, With<ToggleMilitaryPanelButton>>()
+            .single(app.world())
+            .expect("ToggleMilitaryPanelButton must be spawned");
+
+        assert_eq!(
+            app.world().entity(button).get::<ChildOf>().map(|c| c.0),
+            Some(tab_bar),
+            "the military toggle button must be a child of the shared TabBarRoot"
         );
     }
 }

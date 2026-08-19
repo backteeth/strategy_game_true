@@ -1,0 +1,22 @@
+P21-012-PERF AI Crisis Response Scaling Summary
+================================================
+
+state_count=2000 warmup_days=0 measured_days=10 seed=0xC0FFEE12345678
+note: AI evaluation is deterministic, so all eligible crises resolve on day 1; `first_day_ms` is the actually meaningful number, `mean/max` over 10 days is diluted by the near-zero remaining days.
+
+--- crisis_count=0 ---
+  overall day_tick: mean=0.33104ms first_day=1.00910ms max=1.00910ms min=0.19530ms
+  Diplomacy set:    mean=0.05124ms first_day=0.09720ms
+
+--- crisis_count=1 ---
+  overall day_tick: mean=0.37760ms first_day=0.93090ms max=0.93090ms min=0.20810ms
+  Diplomacy set:    mean=0.05093ms first_day=0.08620ms
+
+--- crisis_count=100 ---
+  overall day_tick: mean=0.35939ms first_day=1.06700ms max=1.06700ms min=0.20930ms
+  Diplomacy set:    mean=0.05707ms first_day=0.14650ms
+
+--- crisis_count=1000 ---
+  overall day_tick: mean=1.15647ms first_day=2.98340ms max=2.98340ms min=0.86370ms
+  Diplomacy set:    mean=0.17888ms first_day=1.20640ms
+

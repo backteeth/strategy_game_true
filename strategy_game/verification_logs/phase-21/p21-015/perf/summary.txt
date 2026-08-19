@@ -1,0 +1,16 @@
+P21-015 AI Crisis Support Performance Summary
+=================================================
+
+repeats_per_case=20
+
+--- Axis 1: Crisis count scaling (country_count=1000) ---
+  crisis_count=1     great_powers=8 mean=0.14723ms max=0.15350ms
+  crisis_count=10    great_powers=8 mean=0.15785ms max=0.23140ms
+  crisis_count=100   great_powers=8 mean=0.23643ms max=0.38100ms
+  crisis_count=1000  great_powers=8 mean=0.93899ms max=1.03030ms
+
+--- Axis 2: Country count scaling (crisis_count=100) ---
+  country_count=8     great_powers=2 mean=0.03692ms max=0.05810ms
+  country_count=100   great_powers=8 mean=0.09248ms max=0.24300ms
+  country_count=500   great_powers=8 mean=0.12244ms max=0.15250ms
+  country_count=1000  great_powers=8 mean=0.23210ms max=0.30640ms

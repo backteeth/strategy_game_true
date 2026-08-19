@@ -1,4 +1,4 @@
-use crate::common::{CountryId, StateId};
+use crate::common::{CountryId, DiplomaticCrisisId, StateId};
 use crate::country::CountryRegistry;
 use crate::diplomacy::data::{DiplomacyRegistry, TreatyType};
 use crate::state::data::StateRegistry;
@@ -20,6 +20,19 @@ pub struct WarJustification {
     pub required_days: u32,
     pub days_passed: u32,
     pub is_ready: bool,
+    /// P21-016: この正当化を生んだCrisis(拒否・AI拒否・期限切れのいずれか)。
+    /// Crisis経由でない(既存の通常正当化)場合は`None`。旧Saveには存在しない
+    /// フィールドのため`#[serde(default)]`(=`None`)で後方互換を保つ。
+    #[serde(default)]
+    pub source_crisis_id: Option<DiplomaticCrisisId>,
+    /// P21-016: 正当化がReadyになった時点で確定した攻撃側支持国(要求国自身は含まない、
+    /// CountryId昇順・重複なし)。`source_crisis_id`が`None`なら常に空。
+    #[serde(default)]
+    pub committed_attackers: Vec<CountryId>,
+    /// P21-016: 正当化がReadyになった時点で確定した防御側支持国(対象国自身は含まない、
+    /// CountryId昇順・重複なし)。`source_crisis_id`が`None`なら常に空。
+    #[serde(default)]
+    pub committed_defenders: Vec<CountryId>,
 }
 
 #[derive(Resource, Default, Debug, Serialize, Deserialize)]
@@ -166,6 +179,9 @@ impl WarJustificationRegistry {
             required_days: DEFAULT_JUSTIFICATION_DAYS,
             days_passed: 0,
             is_ready: false,
+            source_crisis_id: None,
+            committed_attackers: Vec::new(),
+            committed_defenders: Vec::new(),
         };
 
         self.justifications.insert(id, justification);
@@ -215,6 +231,67 @@ impl WarJustificationRegistry {
                 && j.target_state == target_state
                 && j.is_ready
         })
+    }
+
+    /// P21-011: Crisisの拒否/期限切れ時に、initiatorへ即座に完成済み(is_ready=true)の
+    /// WarJustificationを付与する。同じ(initiator,target,target_state)の既存正当化が
+    /// あれば、それを即座に完了扱いへ引き上げる(重複作成しない)。同じCrisisに対して
+    /// 誤って複数回呼ばれても安全(冪等)。戻り値は付与されたjustificationのid。
+    ///
+    /// P21-016: `source_crisis_id`/`committed_attackers`/`committed_defenders`は
+    /// Crisis経由の支持コミットメントのスナップショット(§4)。Crisis経由でない
+    /// 呼び出しは`None`/空Vecを渡す。既存の`(initiator,target,target_state)`一致で
+    /// 既存正当化を「引き上げる」分岐でも、これら3フィールドを最新の呼び出し内容で
+    /// 上書きする(同じ国家ペアに複数Crisisが存在した場合、最後に完了したCrisisの
+    /// スナップショットを正とする — 既存の`is_ready`/`days_passed`上書きと同じ規約)。
+    #[allow(clippy::too_many_arguments)]
+    pub fn grant_completed_justification(
+        &mut self,
+        initiator: CountryId,
+        target: CountryId,
+        target_state: StateId,
+        start_date: String,
+        source_crisis_id: Option<DiplomaticCrisisId>,
+        committed_attackers: Vec<CountryId>,
+        committed_defenders: Vec<CountryId>,
+    ) -> usize {
+        if let Some(existing) = self.justifications.values_mut().find(|j| {
+            j.initiator == initiator && j.target == target && j.target_state == target_state
+        }) {
+            existing.is_ready = true;
+            existing.days_passed = existing.required_days;
+            existing.source_crisis_id = source_crisis_id;
+            existing.committed_attackers = committed_attackers;
+            existing.committed_defenders = committed_defenders;
+            return existing.id;
+        }
+
+        let id = self.next_id;
+        self.next_id += 1;
+        self.justifications.insert(
+            id,
+            WarJustification {
+                id,
+                initiator,
+                target,
+                target_state,
+                start_date,
+                required_days: DEFAULT_JUSTIFICATION_DAYS,
+                days_passed: DEFAULT_JUSTIFICATION_DAYS,
+                is_ready: true,
+                source_crisis_id,
+                committed_attackers,
+                committed_defenders,
+            },
+        );
+        id
+    }
+
+    /// P21-011: Crisisの撤回(withdraw)により、`grant_completed_justification`で
+    /// 付与済みのWarJustificationを取り消す。既に消費/削除済みの場合は`false`を返す
+    /// (冪等)。
+    pub fn cancel_justification(&mut self, id: usize) -> bool {
+        self.justifications.remove(&id).is_some()
     }
 
     /// 正当化を消費（削除）

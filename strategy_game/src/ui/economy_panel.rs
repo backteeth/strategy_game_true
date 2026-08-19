@@ -40,6 +40,9 @@ fn setup_economy_panel(
     commands
         .spawn((
             EconomyPanelRoot,
+            // P21-013: 背景自体もButton化し、子Button以外の余白をクリック/ホバーしても
+            // `Interaction`を確実に発行させる(`ui::load_confirm`の既存パターンを踏襲)。
+            Button,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -293,5 +296,36 @@ fn handle_tax_buttons(
         if *interaction == Interaction::Pressed {
             country.tax_rate = (country.tax_rate - 0.01).clamp(0.0, 1.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P21-013: `EconomyPanelRoot`自身が`Button`であることを確認する回帰テスト。これにより
+    /// 子Button(税率+/-等)以外の余白をクリック/ホバーしても`Interaction`が確実に発行され、
+    /// `map::selection::handle_state_click`等の既存「UIのHovered/Pressed中はマップ操作を
+    /// スキップする」ガードがこの領域にも効くようになる(`ui::load_confirm`の既存パターンと
+    /// 同じ)。`EconomyPanelRoot`は常時表示の左サイドバーであり、マップ左端に常に重なるため、
+    /// この抜け穴の実質的な主要因だったと考えられる。
+    #[test]
+    fn economy_panel_root_background_is_itself_a_button() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Startup, setup_economy_panel);
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<EconomyPanelRoot>>()
+            .single(app.world())
+            .expect("EconomyPanelRoot must be spawned");
+        assert!(
+            app.world().entity(root).contains::<Button>(),
+            "EconomyPanelRoot's own background must be a Button so hovering it registers Interaction"
+        );
     }
 }

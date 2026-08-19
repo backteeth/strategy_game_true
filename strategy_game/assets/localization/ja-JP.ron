@@ -63,7 +63,7 @@
     ("economy_panel.info", "国家: {state}\n税率: {tax_rate}%\n月次収入: +{income} G\n月次支出: -{expenses} G\n月次収支: {balance} G\n科学キャパシティ: {sci_cap}\n魔法キャパシティ: {mag_cap}\n\n[備蓄]\n{stockpile}\n[建設キュー (キャンセル: Cキー)]\n{queue}\n[通知]\n  {last_notification}"),
 
     // ── research_panel ──────────────────────────────────────
-    ("research_panel.toggle_button", "[R] 研究パネル"),
+    ("research_panel.toggle_button", "[Ctrl+1] 研究"),
     ("research_panel.title", "-- 技術と研究 --"),
     ("research_panel.alloc_label", "配分 (+5%):"),
     ("research_panel.alloc_field_button", "+{field}"),
@@ -79,7 +79,7 @@
     ("research_panel.status_available", "[選択可能]"),
 
     // ── politics_panel ──────────────────────────────────────
-    ("politics_panel.toggle_button", "[P] 政治パネル"),
+    ("politics_panel.toggle_button", "[Ctrl+2] 政治"),
     ("politics_panel.title", "-- 統治と政治 --"),
     ("politics_panel.header", "政体: {government} (固定) | 経済: {economy} (固定)\n価値観: 科学/魔法 {sci_mag} | 個人/国家 {ind_state} | 世俗/宗教 {sec_rel}"),
     ("politics_panel.reform_line", "改革: {axis} -> {target} ({progress}/{required} - 月{monthly}, 抵抗:{resistance})"),
@@ -96,7 +96,7 @@
     ("politics_panel.interest_group_line", "{group} | 影響力: {influence}% | 支持: {approval} | 改革姿勢: {stance}"),
 
     // ── military_panel ──────────────────────────────────────
-    ("military_panel.toggle_button", "[M] 軍事パネル"),
+    ("military_panel.toggle_button", "[Ctrl+5] 軍事"),
     ("military_panel.title", "-- 軍事 --"),
     ("military_panel.loading", "読込中..."),
     ("military_panel.manpower", "人的資源: {available} / 動員済み: {mobilized}"),
@@ -199,7 +199,7 @@
     ("military_panel.offensive_line_confirm_invalid", "無効な攻勢線です"),
 
     // ── diplomacy_panel ─────────────────────────────────────
-    ("diplomacy_panel.toggle_button", "[D] 外交パネル"),
+    ("diplomacy_panel.toggle_button", "[Ctrl+3] 外交"),
     ("diplomacy_panel.title", "-- 対外関係と外交 --"),
     ("diplomacy_panel.select_prompt", "地図で他国の州や国家を選択してください。"),
     ("diplomacy_panel.self_selected", "自国を選択しています: 自国に対して外交は行えません。"),
@@ -238,6 +238,7 @@
     ("diplomacy_panel.active_wars_header", "-- 進行中の戦争 --"),
     ("diplomacy_panel.no_active_wars", "世界に進行中の戦争はありません。"),
     ("diplomacy_panel.war_line", "[War #{id}] {name} ({attackers} vs {defenders}) - 開始: {date}"),
+    ("diplomacy_panel.war_leader_suffix", "（主導国）"),
     ("diplomacy_panel.notif_diplomacy_started_improve", "外交活動開始: 国家#{id} との関係改善"),
     ("diplomacy_panel.notif_diplomacy_started_harm", "外交活動開始: 国家#{id} との関係悪化"),
     ("diplomacy_panel.notif_proposal_accepted", "提案承認: {treaty} が {country} と締結されました!"),
@@ -280,8 +281,56 @@
     ("diplomacy_panel.notif_crisis_started", "外交危機を開始しました!"),
     ("diplomacy_panel.notif_crisis_failed", "危機開始不可: {reason}"),
 
+    // ── diplomacy_panel: P21-011 最後通牒応答 ────────────────
+    ("diplomacy_panel.crisis_deadline_line", "  要求期限: {date}"),
+    ("diplomacy_panel.crisis_accept_button", "受諾"),
+    ("diplomacy_panel.crisis_reject_button", "拒否"),
+    ("diplomacy_panel.crisis_withdraw_button", "撤回"),
+    ("diplomacy_panel.crisis_accept_confirm_prompt", "この要求を受諾しますか? 対象州は平和的に割譲されます。"),
+    ("diplomacy_panel.crisis_accept_confirm_button", "受諾する"),
+    ("diplomacy_panel.crisis_reject_confirm_prompt", "この要求を拒否しますか? 相手国は開戦の正当性を得ます。"),
+    ("diplomacy_panel.crisis_reject_confirm_button", "拒否する"),
+    ("diplomacy_panel.crisis_justification_ready_line", "  戦争の正当性を獲得済みです。宣戦布告UIから宣戦できます。"),
+    ("diplomacy_panel.notif_crisis_accepted", "相手国の要求を受諾し、州を割譲しました。"),
+    ("diplomacy_panel.notif_crisis_accept_failed", "要求受諾不可: {reason}"),
+    ("diplomacy_panel.notif_crisis_rejected", "相手国の要求を拒否しました。"),
+    ("diplomacy_panel.notif_crisis_reject_failed", "要求拒否不可: {reason}"),
+    ("diplomacy_panel.notif_crisis_withdrawn", "外交危機を撤回しました。"),
+    ("diplomacy_panel.notif_crisis_withdraw_failed", "危機撤回不可: {reason}"),
+
+    // ── diplomacy_panel: P21-013 第三国Crisis支持 ────────────────
+    ("diplomacy_panel.crisis_support_initiator_line", "  要求国支持: {countries}"),
+    ("diplomacy_panel.crisis_support_target_line", "  対象国支持: {countries}"),
+    ("diplomacy_panel.crisis_support_none", "なし"),
+    ("diplomacy_panel.crisis_your_support_initiator_line", "  あなたは要求国を支持しています"),
+    ("diplomacy_panel.crisis_your_support_target_line", "  あなたは対象国を支持しています"),
+    ("diplomacy_panel.crisis_support_initiator_button", "要求国を支持"),
+    ("diplomacy_panel.crisis_support_target_button", "対象国を支持"),
+    ("diplomacy_panel.crisis_support_initiator_confirm_prompt", "要求国側を支持しますか?"),
+    ("diplomacy_panel.crisis_support_target_confirm_prompt", "対象国側を支持しますか?"),
+    ("diplomacy_panel.crisis_support_confirm_button", "支持する"),
+    ("diplomacy_panel.crisis_withdraw_support_button", "支持を撤回"),
+    ("diplomacy_panel.notif_support_pledged", "支持を表明しました。"),
+    ("diplomacy_panel.notif_support_pledge_failed", "支持表明不可: {reason}"),
+    ("diplomacy_panel.notif_support_withdrawn", "支持を撤回しました。"),
+    ("diplomacy_panel.notif_support_withdraw_failed", "支持撤回不可: {reason}"),
+
+    // P21-014: 国家総合力・国家ランク
+    ("diplomacy_panel.power_self_heading", "自国: {country}"),
+    ("diplomacy_panel.power_selected_heading", "選択国: {country}"),
+    ("diplomacy_panel.power_pending", "評価中..."),
+    ("diplomacy_panel.power_tier_line", "国家ランク: {tier}"),
+    ("diplomacy_panel.power_rank_line", "世界順位: {rank} / {total}"),
+    ("diplomacy_panel.power_total_line", "国家総合力: {score}"),
+    ("diplomacy_panel.power_military_line", "軍事力: {value}"),
+    ("diplomacy_panel.power_economic_line", "経済力: {value}"),
+    ("diplomacy_panel.power_population_line", "人口: {value}"),
+    ("power_tier.great_power", "大国"),
+    ("power_tier.regional_power", "地域大国"),
+    ("power_tier.minor_power", "小国"),
+
     // ── peace_panel ─────────────────────────────────────────
-    ("peace_panel.toggle_button", "[P] 戦争と講和パネル"),
+    ("peace_panel.toggle_button", "[Ctrl+4] 講和"),
     ("peace_panel.title", "=== 戦況と講和会議 ==="),
     ("peace_panel.no_country", "プレイヤー国家が未選択です。"),
     ("peace_panel.no_active_war", "自国が関与する進行中の戦争はありません。"),
@@ -324,6 +373,10 @@
     ("notif.debug_revealed_deposits", "[デバッグ] 自国州の資源鉱床をすべて発見済みにしました。"),
     ("notif.debug_reform_completed", "[デバッグ] 政治改革を即座に完了させました！"),
     ("notif.ai_war_declared", "{attacker} が {defender} に宣戦布告した! (対象州: {state}, 戦争ID: {war_id})"),
+    ("notif.crisis_demand_expired_initiator", "{country} が要求期限内に応答しませんでした。戦争の正当性を獲得しました。"),
+    ("notif.crisis_demand_expired_target", "{country} への要求期限が切れ、拒否したものとみなされました。"),
+    ("notif.crisis_ai_accepted", "{country} が要求を受諾しました。"),
+    ("notif.crisis_ai_rejected", "{country} が要求を拒否しました。戦争の正当性を獲得しました。"),
 
     // ── notification (save/load, P21-SAVE-002E) ─────────────
     ("notif.save_success", "セーブが完了しました。"),
@@ -527,6 +580,15 @@
     ("diplomacy_error.crisis.state_missing", "請求対象の州が既に存在しません"),
     ("diplomacy_error.crisis.claim_target_mismatch", "請求対象の州は既にこの国の所有ではありません"),
     ("diplomacy_error.crisis.duplicate", "この請求に対する危機は既に進行中です"),
+    ("diplomacy_error.crisis.claim_consumed", "この請求は既に消費済みです"),
+    ("diplomacy_error.crisis.not_found", "指定された外交危機が見つかりません"),
+    ("diplomacy_error.crisis.not_your_crisis", "この外交危機はあなたのものではありません"),
+    ("diplomacy_error.crisis.not_awaiting_response", "この外交危機は現在応答待ちではありません"),
+    ("diplomacy_error.crisis.already_resolved", "この外交危機は既に終結しています"),
+    ("diplomacy_error.crisis.support_self", "当事国自身は支持国になれません"),
+    ("diplomacy_error.crisis.support_country_missing", "指定された国家が存在しません"),
+    ("diplomacy_error.crisis.support_side_conflict", "反対側を既に支持しています。先に支持を撤回してください"),
+    ("diplomacy_error.crisis.support_not_found", "この危機への支持表明が見つかりません"),
 
     // ── war_error.peace.* (can_accept_peace_offer / execute_peace_settlement) ─
     ("war_error.peace.war_not_found", "戦争が見つかりません"),

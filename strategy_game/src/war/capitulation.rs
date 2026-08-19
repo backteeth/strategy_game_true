@@ -17,7 +17,9 @@ pub fn has_combat_ready_divisions(
     military_registry: &MilitaryRegistry,
 ) -> bool {
     military_registry.divisions.values().any(|division| {
-        division.owner == country_id && division.status != DivisionStatus::Destroyed && division.manpower > 0
+        division.owner == country_id
+            && division.status != DivisionStatus::Destroyed
+            && division.manpower > 0
     })
 }
 
@@ -27,14 +29,10 @@ pub fn check_defender_capitulation(
     state_registry: &StateRegistry,
     military_registry: &MilitaryRegistry,
 ) -> bool {
-    let attacker = match war.attackers.iter().next() {
-        Some(&c) => c,
-        None => return false,
-    };
-    let defender = match war.defenders.iter().next() {
-        Some(&c) => c,
-        None => return false,
-    };
+    // P21-016: 多国間参加者がいても、既存の二国間中心の降伏判定は明示的な
+    // 代表国(primary_attacker/primary_defender)を基準に据え置く(意味は不変)。
+    let attacker = war.primary_attacker_id();
+    let defender = war.primary_defender_id();
 
     // 戦争目標地域を攻撃側が支配していることが前提
     let target_state_id = match war
@@ -91,14 +89,10 @@ pub fn check_attacker_capitulation(
     state_registry: &StateRegistry,
     military_registry: &MilitaryRegistry,
 ) -> bool {
-    let attacker = match war.attackers.iter().next() {
-        Some(&c) => c,
-        None => return false,
-    };
-    let defender = match war.defenders.iter().next() {
-        Some(&c) => c,
-        None => return false,
-    };
+    // P21-016: 多国間参加者がいても、既存の二国間中心の降伏判定は明示的な
+    // 代表国(primary_attacker/primary_defender)を基準に据え置く(意味は不変)。
+    let attacker = war.primary_attacker_id();
+    let defender = war.primary_defender_id();
 
     let attacker_land: Vec<_> = state_registry
         .get_owned_states(attacker)

@@ -1,0 +1,30 @@
+P21-011-PERF Crisis Scaling Summary (DemandSent deadline-filter path)
+=======================================================================
+
+state_count=2000 warmup_days=10 measured_days=60 seed=0xC0FFEE12345678
+
+--- crisis_count=0 mix=AllDemandSentFarDeadline ---
+  overall day_tick: mean=0.27430ms median=0.22550ms min=0.18640ms max=1.06710ms
+  Diplomacy set:    mean=0.03818ms median=0.03450ms
+  still_demand_sent=0
+
+--- crisis_count=1 mix=AllDemandSentFarDeadline ---
+  overall day_tick: mean=0.26216ms median=0.20430ms min=0.18100ms max=1.43130ms
+  Diplomacy set:    mean=0.03627ms median=0.03260ms
+  still_demand_sent=1
+
+--- crisis_count=100 mix=AllDemandSentFarDeadline ---
+  overall day_tick: mean=0.26747ms median=0.21950ms min=0.17930ms max=1.06940ms
+  Diplomacy set:    mean=0.04196ms median=0.04020ms
+  still_demand_sent=100
+
+--- crisis_count=1000 mix=AllDemandSentFarDeadline ---
+  overall day_tick: mean=0.34213ms median=0.28700ms min=0.23800ms max=1.36570ms
+  Diplomacy set:    mean=0.10922ms median=0.10310ms
+  still_demand_sent=1000
+
+--- crisis_count=1000 mix=AllTerminal ---
+  overall day_tick: mean=0.26441ms median=0.20860ms min=0.18180ms max=1.47200ms
+  Diplomacy set:    mean=0.04188ms median=0.03880ms
+  still_demand_sent=0
+

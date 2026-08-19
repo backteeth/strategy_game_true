@@ -38,6 +38,8 @@ fn build_lightweight_diplomacy_app() -> App {
     app.insert_resource(CountryRegistry::default());
     app.insert_resource(StateRegistry::build(vec![]));
     app.insert_resource(WarJustificationRegistry::default());
+    app.insert_resource(strategy_game::diplomacy::claims::ClaimRegistry::default());
+    app.insert_resource(strategy_game::country::power::CountryPowerRegistry::default());
     app.insert_resource(CurrentLocale::default());
     app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
     app.add_message::<GameNotification>();
@@ -70,6 +72,9 @@ fn insert_crisis(app: &mut App, phase: CrisisPhase) -> strategy_game::common::Di
             deadline_date: None,
             international_concern: 0.0,
             third_party_reactions: Default::default(),
+            related_claim_id: None,
+            related_justification_id: None,
+            related_war_id: None,
         },
     )
 }

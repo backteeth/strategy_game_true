@@ -1,7 +1,12 @@
-use crate::common::{CountryId, DiplomaticCrisisId, StateId};
+use crate::app::time::GameDate;
+use crate::common::{ClaimId, CountryId, DiplomaticCrisisId, StateId, WarId};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// P21-011: Claim受諾/拒否の要求期間(日数)。この期間内にtargetが応答しなければ、
+/// 期限切れとして自動的に拒否扱い(`Escalating`)になる。
+pub const CRISIS_DEMAND_PERIOD_DAYS: u32 = 30;
 
 /// 戦争目的の種別
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +70,21 @@ pub struct DiplomaticCrisis {
     pub deadline_date: Option<String>,
     pub international_concern: f32,
     pub third_party_reactions: HashMap<CountryId, ThirdCountryReaction>,
+    /// P21-011: 追加。このCrisisの根拠となったTerritorialClaimのid。受諾時にこのClaimを
+    /// `ClaimRegistry::mark_consumed`で消費済みにする。既存(P21-010以前)セーブは
+    /// `#[serde(default)]`により`None`として読む(根拠不明のCrisisは受諾処理で
+    /// `related_claim_id.is_none()`により拒否される=対象外操作として扱う)。
+    #[serde(default)]
+    pub related_claim_id: Option<ClaimId>,
+    /// P21-011: 追加。拒否/期限切れによりinitiatorへ付与されたWarJustificationのid
+    /// (`WarJustificationRegistry.justifications`のキー)。`Escalating`フェーズでのみ
+    /// `Some`。既存(P21-010以前)セーブは`#[serde(default)]`により`None`として読む。
+    #[serde(default)]
+    pub related_justification_id: Option<usize>,
+    /// P21-011: 追加。宣戦により`WarStarted`へ遷移した際の`WarId`。
+    /// 既存(P21-010以前)セーブは`#[serde(default)]`により`None`として読む。
+    #[serde(default)]
+    pub related_war_id: Option<WarId>,
 }
 
 /// 全外交危機を管理するリソース
@@ -124,6 +144,9 @@ impl CrisisRegistry {
         if claim.claimant_country != claimant {
             return Err("diplomacy_error.crisis.not_your_claim");
         }
+        if claim.status != crate::diplomacy::claims::ClaimStatus::Active {
+            return Err("diplomacy_error.crisis.claim_consumed");
+        }
 
         let state = state_registry
             .get(claim.target_state)
@@ -166,6 +189,13 @@ impl CrisisRegistry {
     ) -> Result<DiplomaticCrisisId, &'static str> {
         self.can_start_crisis(claim, claimant, target, state_registry)?;
 
+        // P21-011: 最後通牒として即座にDemandSentへ入り、開始日からCRISIS_DEMAND_PERIOD_DAYS
+        // 日後を要求期限とする。開始日文字列が不正で解析できない場合(実運用では起こり
+        // 得ないが、想定外の呼び出し元による壊れた日付文字列に対する保険として)は
+        // 期限なし(`None`)とし、日次進行側の期限判定を素通りさせる。
+        let deadline_date = GameDate::from_string(&start_date)
+            .map(|d| d.add_days(CRISIS_DEMAND_PERIOD_DAYS).display());
+
         let crisis = DiplomaticCrisis {
             id: DiplomaticCrisisId(0), // add_crisisが正規のnext_id発行値へ上書きする
             initiator: claimant,
@@ -181,14 +211,17 @@ impl CrisisRegistry {
                 is_primary: true,
             }],
             start_date,
-            current_phase: CrisisPhase::Preparing,
+            current_phase: CrisisPhase::DemandSent,
             escalation: 0.0,
             initiator_support: 0.0,
             target_resistance: 0.0,
             days_in_phase: 0,
-            deadline_date: None,
+            deadline_date,
             international_concern: 0.0,
             third_party_reactions: HashMap::new(),
+            related_claim_id: Some(claim.id),
+            related_justification_id: None,
+            related_war_id: None,
         };
 
         Ok(self.add_crisis(crisis))
@@ -198,7 +231,7 @@ impl CrisisRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diplomacy::claims::{ClaimSource, TerritorialClaim};
+    use crate::diplomacy::claims::{ClaimSource, ClaimStatus, TerritorialClaim};
     use crate::state::data::{StateData, StateRegistry};
 
     fn claim(claimant: usize, target_state: usize) -> TerritorialClaim {
@@ -210,6 +243,7 @@ mod tests {
             created_date: "1800/01/01".to_string(),
             is_permanent: false,
             source: ClaimSource::Strategic,
+            status: ClaimStatus::Active,
         }
     }
 
@@ -241,9 +275,41 @@ mod tests {
         let crisis = registry.crises.get(&id).unwrap();
         assert_eq!(crisis.initiator, CountryId(0));
         assert_eq!(crisis.target, CountryId(1));
-        assert_eq!(crisis.current_phase, CrisisPhase::Preparing);
+        assert_eq!(
+            crisis.current_phase,
+            CrisisPhase::DemandSent,
+            "P21-011: start_crisis must immediately issue an ultimatum (DemandSent), not sit in Preparing"
+        );
+        assert_eq!(
+            crisis.deadline_date,
+            Some("1800/01/31".to_string()),
+            "deadline must be start_date + CRISIS_DEMAND_PERIOD_DAYS(30)"
+        );
+        assert_eq!(crisis.related_claim_id, Some(c.id));
+        assert_eq!(crisis.related_justification_id, None);
+        assert_eq!(crisis.related_war_id, None);
         assert_eq!(crisis.war_goals.len(), 1);
         assert_eq!(crisis.war_goals[0].target_states, vec![StateId(1)]);
+    }
+
+    /// P21-011要求テスト項目: 消費済み(Consumed)Claimからの新規Crisis開始は拒否される。
+    #[test]
+    fn start_crisis_rejects_consumed_claim() {
+        let states = state_registry_with(1, 1);
+        let mut c = claim(0, 1);
+        c.status = ClaimStatus::Consumed;
+        let mut registry = CrisisRegistry::default();
+
+        let result = registry.start_crisis(
+            &c,
+            CountryId(0),
+            CountryId(1),
+            "1800/01/01".to_string(),
+            &states,
+        );
+
+        assert_eq!(result, Err("diplomacy_error.crisis.claim_consumed"));
+        assert!(registry.crises.is_empty());
     }
 
     /// 要求テスト項目10: ClaimなしでCrisis開始拒否(状態不整合: 州が存在しない)。
@@ -377,5 +443,128 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(registry.crises.len(), 2);
+    }
+
+    /// P21-011要求テスト: 旧形式(`related_claim_id`/`related_justification_id`/
+    /// `related_war_id`フィールド自体が存在しないRON、P21-010以前のセーブ相当)を
+    /// 読み込んだ場合、全て`None`として復元される(`#[serde(default)]`)。
+    #[test]
+    fn old_format_ron_without_p21_011_fields_loads_as_none() {
+        let crisis = DiplomaticCrisis {
+            id: DiplomaticCrisisId(0),
+            initiator: CountryId(0),
+            target: CountryId(1),
+            war_goals: vec![],
+            start_date: "1800/01/01".to_string(),
+            current_phase: CrisisPhase::Negotiating,
+            escalation: 0.0,
+            initiator_support: 0.0,
+            target_resistance: 0.0,
+            days_in_phase: 0,
+            deadline_date: None,
+            international_concern: 0.0,
+            third_party_reactions: HashMap::new(),
+            related_claim_id: Some(crate::common::ClaimId(5)),
+            related_justification_id: Some(7),
+            related_war_id: Some(WarId(9)),
+        };
+        let crisis_ron = ron::to_string(&crisis).unwrap();
+        assert!(crisis_ron.contains("related_claim_id"));
+        let without_new_fields = crisis_ron
+            .replacen(",related_claim_id:Some((5))", "", 1)
+            .replacen(",related_justification_id:Some(7)", "", 1)
+            .replacen(",related_war_id:Some((9))", "", 1);
+        assert_ne!(
+            without_new_fields, crisis_ron,
+            "test setup must actually remove the P21-011 fields"
+        );
+        let restored: DiplomaticCrisis = ron::from_str(&without_new_fields).expect(
+            "DiplomaticCrisis RON missing P21-011 fields must still deserialize (serde default)",
+        );
+        assert_eq!(restored.related_claim_id, None);
+        assert_eq!(restored.related_justification_id, None);
+        assert_eq!(restored.related_war_id, None);
+        assert_eq!(restored.current_phase, CrisisPhase::Negotiating);
+    }
+
+    /// P21-013要求テスト項目40-42: `third_party_reactions`(P21-013の支持データが
+    /// 再利用するフィールド)に複数の支持国(要求国側・対象国側それぞれ)を入れた状態が
+    /// RON往復で完全に保持される。このフィールドは P21-010 時点から`#[serde(default)]`
+    /// 無しの必須フィールドとして存在するため、新しいフィールド追加は不要
+    /// (旧セーブは既に空の`{}`を含んでいるため後方互換の懸念自体がない)。
+    #[test]
+    fn third_party_support_data_round_trips_through_ron() {
+        use crate::common::ClaimId;
+
+        let mut third_party_reactions = HashMap::new();
+        third_party_reactions.insert(CountryId(2), ThirdCountryReaction::SupportsInitiator);
+        third_party_reactions.insert(CountryId(3), ThirdCountryReaction::SupportsTarget);
+        let crisis = DiplomaticCrisis {
+            id: DiplomaticCrisisId(0),
+            initiator: CountryId(0),
+            target: CountryId(1),
+            war_goals: vec![],
+            start_date: "1800/01/01".to_string(),
+            current_phase: CrisisPhase::DemandSent,
+            escalation: 0.0,
+            initiator_support: 0.0,
+            target_resistance: 0.0,
+            days_in_phase: 0,
+            deadline_date: Some("1800/01/31".to_string()),
+            international_concern: 0.0,
+            third_party_reactions,
+            related_claim_id: Some(ClaimId(1)),
+            related_justification_id: None,
+            related_war_id: None,
+        };
+
+        let ron_text = ron::to_string(&crisis).unwrap();
+        let restored: DiplomaticCrisis = ron::from_str(&ron_text).unwrap();
+
+        assert_eq!(restored.third_party_reactions.len(), 2);
+        assert_eq!(
+            restored.third_party_reactions.get(&CountryId(2)),
+            Some(&ThirdCountryReaction::SupportsInitiator)
+        );
+        assert_eq!(
+            restored.third_party_reactions.get(&CountryId(3)),
+            Some(&ThirdCountryReaction::SupportsTarget)
+        );
+    }
+
+    /// P21-013要求テスト項目43: terminal Crisis(ResolvedPeacefully)でも支持履歴が
+    /// RON往復で保持される。
+    #[test]
+    fn support_history_round_trips_after_terminal_resolution() {
+        let mut third_party_reactions = HashMap::new();
+        third_party_reactions.insert(CountryId(2), ThirdCountryReaction::SupportsTarget);
+        let crisis = DiplomaticCrisis {
+            id: DiplomaticCrisisId(0),
+            initiator: CountryId(0),
+            target: CountryId(1),
+            war_goals: vec![],
+            start_date: "1800/01/01".to_string(),
+            current_phase: CrisisPhase::ResolvedPeacefully,
+            escalation: 0.0,
+            initiator_support: 0.0,
+            target_resistance: 0.0,
+            days_in_phase: 5,
+            deadline_date: Some("1800/01/31".to_string()),
+            international_concern: 0.0,
+            third_party_reactions,
+            related_claim_id: None,
+            related_justification_id: None,
+            related_war_id: None,
+        };
+
+        let ron_text = ron::to_string(&crisis).unwrap();
+        let restored: DiplomaticCrisis = ron::from_str(&ron_text).unwrap();
+
+        assert_eq!(restored.current_phase, CrisisPhase::ResolvedPeacefully);
+        assert_eq!(
+            restored.third_party_reactions.get(&CountryId(2)),
+            Some(&ThirdCountryReaction::SupportsTarget),
+            "support history must survive a save round trip even after the crisis resolved"
+        );
     }
 }

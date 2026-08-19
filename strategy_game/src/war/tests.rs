@@ -2,7 +2,7 @@
 
 use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use crate::military::data::{
-    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+    Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
 };
 use crate::state::data::{StateData, StateRegistry};
 use crate::war::data::{War, WarRegistry};
@@ -39,6 +39,8 @@ fn setup() -> (MilitaryRegistry, WarRegistry, StateRegistry) {
         war_score: 0.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![],
         attacker_war_exhaustion: 0.0,
         defender_war_exhaustion: 0.0,
@@ -387,6 +389,89 @@ fn test_justification_completion_after_required_days() {
     assert!(ready.is_some());
 }
 
+/// P21-011要求テスト: `grant_completed_justification`は既存正当化がない場合、
+/// 即座にis_ready=trueの新規正当化を作成する。
+#[test]
+fn grant_completed_justification_creates_new_ready_justification() {
+    let (_c_reg, _s_reg, _d_reg, mut j_reg, _w_reg) = setup_phase14_env();
+
+    let id = j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let justification = j_reg.justifications.get(&id).unwrap();
+    assert!(justification.is_ready);
+    assert_eq!(justification.initiator, CountryId(1));
+    assert_eq!(justification.target, CountryId(2));
+    assert_eq!(justification.target_state, StateId(2));
+    assert_eq!(j_reg.justifications.len(), 1);
+}
+
+/// P21-011要求テスト: 既に進行中(未完成)の正当化がある場合、`grant_completed_justification`は
+/// 重複作成せず、既存の正当化を即座に完了扱いへ引き上げる。
+#[test]
+fn grant_completed_justification_upgrades_existing_justification_idempotently() {
+    let (c_reg, s_reg, d_reg, mut j_reg, _w_reg) = setup_phase14_env();
+    let existing_id = j_reg
+        .start_justification(
+            CountryId(1),
+            CountryId(2),
+            StateId(2),
+            "1936/01/01".to_string(),
+            &c_reg,
+            &s_reg,
+            &d_reg,
+        )
+        .unwrap();
+    assert!(!j_reg.justifications.get(&existing_id).unwrap().is_ready);
+
+    let granted_id = j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/02/01".to_string(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        granted_id, existing_id,
+        "must upgrade the existing justification, not create a second one"
+    );
+    assert_eq!(j_reg.justifications.len(), 1);
+    assert!(j_reg.justifications.get(&existing_id).unwrap().is_ready);
+}
+
+/// P21-011要求テスト: `cancel_justification`は既存の正当化を削除し、
+/// 既に存在しないidに対しては`false`を返す(冪等)。
+#[test]
+fn cancel_justification_removes_existing_and_is_idempotent_when_missing() {
+    let (_c_reg, _s_reg, _d_reg, mut j_reg, _w_reg) = setup_phase14_env();
+    let id = j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        None,
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert!(j_reg.cancel_justification(id));
+    assert!(!j_reg.justifications.contains_key(&id));
+    assert!(
+        !j_reg.cancel_justification(id),
+        "cancelling an already-removed justification must return false, not panic"
+    );
+}
+
 #[test]
 fn test_cannot_declare_war_before_justification_complete() {
     let (c_reg, s_reg, mut d_reg, mut j_reg, mut w_reg) = setup_phase14_env();
@@ -541,6 +626,318 @@ fn test_war_data_created_on_declaration() {
     assert_eq!(war.start_date, "1936/01/31");
     assert_eq!(war.war_goals.len(), 1);
     assert_eq!(war.war_goals[0].target_states, vec![StateId(2)]);
+}
+
+/// P21-016要求テスト: P21-016より前のSave由来(`primary_attacker`/`primary_defender`
+/// フィールドを一切含まない)RONが引き続き正しくデシリアライズされ、
+/// `primary_attacker_id()`/`primary_defender_id()`が集合内の最小要素へ
+/// 正しくフォールバックする。
+#[test]
+fn war_deserializes_from_pre_p21_016_ron_without_primary_fields() {
+    let ron = r#"(
+        id: (0),
+        name: "Legacy War",
+        attackers: [(1)],
+        defenders: [(2)],
+        war_goals: [],
+        start_date: "1936/01/01",
+        war_score: 0.0,
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: [],
+        status: Active,
+    )"#;
+    let war: War = ron::from_str(ron).expect("pre-P21-016 War RON must still deserialize");
+    assert_eq!(war.primary_attacker, None);
+    assert_eq!(war.primary_defender, None);
+    assert_eq!(war.primary_attacker_id(), CountryId(1));
+    assert_eq!(war.primary_defender_id(), CountryId(2));
+}
+
+/// P21-016要求テスト: P21-016より前のSave由来(`source_crisis_id`/`committed_attackers`/
+/// `committed_defenders`フィールドを一切含まない)`WarJustification`のRONが
+/// 引き続き正しくデシリアライズされ、新フィールドは空/`None`になる。
+#[test]
+fn war_justification_deserializes_from_pre_p21_016_ron_without_snapshot_fields() {
+    let ron = r#"(
+        id: 0,
+        initiator: (0),
+        target: (1),
+        target_state: (1),
+        start_date: "1800/01/01",
+        required_days: 30,
+        days_passed: 30,
+        is_ready: true,
+    )"#;
+    let justification: crate::war::justification::WarJustification =
+        ron::from_str(ron).expect("pre-P21-016 WarJustification RON must still deserialize");
+    assert_eq!(justification.source_crisis_id, None);
+    assert!(justification.committed_attackers.is_empty());
+    assert!(justification.committed_defenders.is_empty());
+}
+
+/// P21-016要求テスト: 正当化のスナップショットに記録された支持国が、
+/// 正しい陣営(攻撃側/防御側)のWar参加国として追加される。
+#[test]
+fn declare_war_adds_committed_supporters_to_correct_sides() {
+    let (c_reg, s_reg, mut d_reg, mut j_reg, mut w_reg) = setup_phase14_env();
+    j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        Some(crate::common::DiplomaticCrisisId(0)),
+        vec![CountryId(3)],
+        vec![],
+    );
+
+    let war_id = w_reg
+        .declare_war(
+            CountryId(1),
+            CountryId(2),
+            StateId(2),
+            "1936/01/31".to_string(),
+            &c_reg,
+            &s_reg,
+            &mut d_reg,
+            &mut j_reg,
+        )
+        .unwrap();
+
+    let war = w_reg.wars.get(&war_id).unwrap();
+    assert_eq!(
+        war.attackers,
+        [CountryId(1), CountryId(3)].into_iter().collect()
+    );
+    assert_eq!(war.defenders, [CountryId(2)].into_iter().collect());
+    assert_eq!(war.primary_attacker, Some(CountryId(1)));
+    assert_eq!(war.primary_defender, Some(CountryId(2)));
+}
+
+/// P21-016要求テスト: 宣戦布告時点で既に存在しない支持国は、War全体を失敗させず
+/// 個別に静かに除外される。
+#[test]
+fn declare_war_excludes_nonexistent_supporter_silently() {
+    let (c_reg, s_reg, mut d_reg, mut j_reg, mut w_reg) = setup_phase14_env();
+    j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        None,
+        vec![CountryId(999)], // setup_phase14_envには存在しない
+        vec![],
+    );
+
+    let war_id = w_reg
+        .declare_war(
+            CountryId(1),
+            CountryId(2),
+            StateId(2),
+            "1936/01/31".to_string(),
+            &c_reg,
+            &s_reg,
+            &mut d_reg,
+            &mut j_reg,
+        )
+        .unwrap();
+
+    let war = w_reg.wars.get(&war_id).unwrap();
+    assert_eq!(war.attackers, [CountryId(1)].into_iter().collect());
+}
+
+/// P21-016要求テスト: 同じ国が攻撃側・防御側の両方の支持コミットメントに現れる
+/// (データ破損)場合、War全体をアトミックに拒否し、正当化も消費されない。
+#[test]
+fn declare_war_rejects_atomically_when_supporter_appears_on_both_sides() {
+    let (c_reg, s_reg, mut d_reg, mut j_reg, mut w_reg) = setup_phase14_env();
+    j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        None,
+        vec![CountryId(3)],
+        vec![CountryId(3)],
+    );
+
+    let result = w_reg.declare_war(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/31".to_string(),
+        &c_reg,
+        &s_reg,
+        &mut d_reg,
+        &mut j_reg,
+    );
+
+    assert_eq!(result, Err("war_error.declare.corrupt_support_snapshot"));
+    assert!(w_reg.wars.is_empty());
+    assert!(
+        j_reg
+            .get_ready_justification(CountryId(1), CountryId(2), StateId(2))
+            .is_some(),
+        "justification must not be consumed when declaration is atomically rejected"
+    );
+    assert!(
+        d_reg.get(CountryId(1), CountryId(2)).is_none(),
+        "diplomacy relation must not be mutated when declaration is atomically rejected"
+    );
+}
+
+/// P21-016要求テスト: 支持コミットメントが要求国/対象国自身と矛盾する
+/// (要求国が防御側支持者として記録されている等)場合もアトミックに拒否する。
+#[test]
+fn declare_war_rejects_atomically_when_supporter_equals_the_opposing_belligerent() {
+    let (c_reg, s_reg, mut d_reg, mut j_reg, mut w_reg) = setup_phase14_env();
+    j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        None,
+        vec![],
+        vec![CountryId(1)], // 攻撃側の要求国自身が防御側支持者として記録されている(矛盾)
+    );
+
+    let result = w_reg.declare_war(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/31".to_string(),
+        &c_reg,
+        &s_reg,
+        &mut d_reg,
+        &mut j_reg,
+    );
+
+    assert_eq!(result, Err("war_error.declare.corrupt_support_snapshot"));
+    assert!(w_reg.wars.is_empty());
+}
+
+/// P21-016要求テスト: `War`の敵味方判定共有API(`side_of`/`is_participant`/
+/// `are_opponents`/`opponents_of`)が多国間参加者を正しく扱う。
+#[test]
+fn war_shared_enemy_friend_api_handles_multilateral_participants() {
+    let war = War {
+        id: crate::common::WarId(1),
+        name: "Multilateral Test War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 0.0,
+        attackers: [CountryId(1), CountryId(3)].into_iter().collect(),
+        defenders: [CountryId(2), CountryId(4)].into_iter().collect(),
+        primary_attacker: Some(CountryId(1)),
+        primary_defender: Some(CountryId(2)),
+        war_goals: vec![],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+
+    use crate::war::data::WarSide;
+    assert_eq!(war.side_of(CountryId(1)), Some(WarSide::Attacker));
+    assert_eq!(war.side_of(CountryId(3)), Some(WarSide::Attacker));
+    assert_eq!(war.side_of(CountryId(2)), Some(WarSide::Defender));
+    assert_eq!(war.side_of(CountryId(4)), Some(WarSide::Defender));
+    assert_eq!(war.side_of(CountryId(99)), None);
+
+    assert!(war.is_participant(CountryId(3)));
+    assert!(!war.is_participant(CountryId(99)));
+
+    assert!(war.are_opponents(CountryId(1), CountryId(4)));
+    assert!(war.are_opponents(CountryId(3), CountryId(2)));
+    assert!(!war.are_opponents(CountryId(1), CountryId(3)));
+    assert!(!war.are_opponents(CountryId(2), CountryId(4)));
+    assert!(!war.are_opponents(CountryId(1), CountryId(99)));
+
+    assert_eq!(
+        war.opponents_of(CountryId(1)),
+        vec![CountryId(2), CountryId(4)]
+    );
+    assert_eq!(
+        war.opponents_of(CountryId(4)),
+        vec![CountryId(1), CountryId(3)]
+    );
+    assert_eq!(war.opponents_of(CountryId(99)), Vec::<CountryId>::new());
+
+    assert_eq!(war.sorted_attackers(), vec![CountryId(1), CountryId(3)]);
+    assert_eq!(war.sorted_defenders(), vec![CountryId(2), CountryId(4)]);
+}
+
+/// P21-016要求テスト: `primary_attacker`/`primary_defender`が`None`(旧Save由来)の場合、
+/// `primary_attacker_id()`/`primary_defender_id()`は集合内の最小`CountryId`へ
+/// 自動的にフォールバックする(旧Saveの`attackers`/`defenders`は常に単一要素)。
+#[test]
+fn primary_id_accessors_fall_back_to_min_of_set_when_unset() {
+    let war = War {
+        id: crate::common::WarId(1),
+        name: "Legacy Save War".to_string(),
+        start_date: "1936/01/01".to_string(),
+        end_date: None,
+        duration_days: 0,
+        war_score: 0.0,
+        attackers: [CountryId(5)].into_iter().collect(),
+        defenders: [CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
+        war_goals: vec![],
+        attacker_war_exhaustion: 0.0,
+        defender_war_exhaustion: 0.0,
+        occupied_states: std::collections::HashSet::new(),
+        status: crate::war::data::WarStatus::Active,
+        winner: None,
+        end_reason: None,
+        applied_terms: Vec::new(),
+        won_attacker_battles: 0,
+        won_defender_battles: 0,
+        processed_battle_ids: std::collections::HashSet::new(),
+    };
+
+    assert_eq!(war.primary_attacker_id(), CountryId(5));
+    assert_eq!(war.primary_defender_id(), CountryId(2));
+}
+
+/// P21-016要求テスト: `WarRegistry::is_country_at_war`/`wars_for_country`が
+/// 多国間参加者(主要国以外の支持国)についても正しく機能する。
+#[test]
+fn war_registry_is_country_at_war_and_wars_for_country_cover_supporters() {
+    let (c_reg, s_reg, mut d_reg, mut j_reg, mut w_reg) = setup_phase14_env();
+    j_reg.grant_completed_justification(
+        CountryId(1),
+        CountryId(2),
+        StateId(2),
+        "1936/01/01".to_string(),
+        None,
+        vec![CountryId(3)],
+        vec![],
+    );
+    let war_id = w_reg
+        .declare_war(
+            CountryId(1),
+            CountryId(2),
+            StateId(2),
+            "1936/01/31".to_string(),
+            &c_reg,
+            &s_reg,
+            &mut d_reg,
+            &mut j_reg,
+        )
+        .unwrap();
+
+    assert!(w_reg.is_country_at_war(CountryId(3)));
+    assert_eq!(w_reg.wars_for_country(CountryId(3)), vec![war_id]);
+    assert!(!w_reg.is_country_at_war(CountryId(999)));
+    assert!(w_reg.wars_for_country(CountryId(999)).is_empty());
 }
 
 #[test]
@@ -796,6 +1193,8 @@ fn test_phase16_war_score_breakdown_and_clamping() {
         war_score: 0.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![goal],
         attacker_war_exhaustion: 0.0,
         defender_war_exhaustion: 0.0,
@@ -841,6 +1240,8 @@ fn test_phase16_battle_results_sync_and_deduplication() {
         war_score: 0.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![],
         attacker_war_exhaustion: 0.0,
         defender_war_exhaustion: 0.0,
@@ -888,7 +1289,7 @@ fn test_phase16_battle_results_sync_and_deduplication() {
 #[test]
 fn test_phase16_capitulation_rules() {
     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
-    use crate::military::data::{DivisionStatus, Division, DivisionSize, DivisionType};
+    use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
     use crate::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
 
     let goal = WarGoal {
@@ -955,6 +1356,8 @@ fn test_phase16_capitulation_rules() {
         war_score: 50.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![goal],
         attacker_war_exhaustion: 0.0,
         defender_war_exhaustion: 0.0,
@@ -999,6 +1402,8 @@ fn test_phase16_peace_offer_validation() {
         war_score: 50.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![goal],
         attacker_war_exhaustion: 0.0,
         defender_war_exhaustion: 0.0,
@@ -1088,6 +1493,8 @@ fn test_phase16_sea_state_exclusion() {
         war_score: 0.0,
         attackers: vec![CountryId(1)].into_iter().collect(),
         defenders: vec![CountryId(2)].into_iter().collect(),
+        primary_attacker: None,
+        primary_defender: None,
         war_goals: vec![],
         attacker_war_exhaustion: 0.0,
         defender_war_exhaustion: 0.0,

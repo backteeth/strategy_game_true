@@ -700,14 +700,11 @@ pub fn calculate_frontline_border(
     war: &War,
     state_registry: &StateRegistry,
 ) -> (Vec<StateId>, Vec<StateId>, Vec<(StateId, StateId)>) {
-    let attacker = match war.attackers.iter().next() {
-        Some(&c) => c,
-        None => return (Vec::new(), Vec::new(), Vec::new()),
-    };
-    let defender = match war.defenders.iter().next() {
-        Some(&c) => c,
-        None => return (Vec::new(), Vec::new(), Vec::new()),
-    };
+    // P21-016: 前線境界の描画は既存どおり明示的な代表国
+    // (primary_attacker/primary_defender)を基準とした二国間の概念のまま据え置く
+    // (多国間参加者全体を結ぶ前線メッシュ描画は本タスクの対象外)。
+    let attacker = war.primary_attacker_id();
+    let defender = war.primary_defender_id();
 
     let mut border_pairs: Vec<(StateId, StateId)> = Vec::new();
     let mut attacker_front_set = HashSet::new();
@@ -769,8 +766,8 @@ pub fn update_or_create_frontline_for_war(
     state_registry: &StateRegistry,
     frontline_registry: &mut FrontlineRegistry,
 ) -> FrontlineId {
-    let attacker = *war.attackers.iter().next().unwrap();
-    let defender = *war.defenders.iter().next().unwrap();
+    let attacker = war.primary_attacker_id();
+    let defender = war.primary_defender_id();
 
     let (atk_front, def_front, pairs) = calculate_frontline_border(war, state_registry);
 
@@ -832,8 +829,8 @@ pub fn determine_offensive_objective(
     commanding_country: CountryId,
     state_registry: &StateRegistry,
 ) -> Option<StateId> {
-    let attacker = *war.attackers.iter().next()?;
-    let defender = *war.defenders.iter().next()?;
+    let attacker = war.primary_attacker_id();
+    let defender = war.primary_defender_id();
 
     if commanding_country == attacker {
         // 攻撃側初期目標: 戦争目標地域
@@ -1798,6 +1795,8 @@ mod tests {
             name: "Test War".to_string(),
             attackers: [CountryId(1)].into_iter().collect(),
             defenders: [CountryId(2)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![WarGoal {
                 attacker: CountryId(1),
                 defender: CountryId(2),
@@ -2570,6 +2569,8 @@ mod tests {
             name: "Second War".to_string(),
             attackers: [CountryId(1)].into_iter().collect(),
             defenders: [CountryId(2)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![],
             start_date: "1800/02/01".to_string(),
             end_date: None,
@@ -3953,6 +3954,8 @@ mod tests {
                 name: "Offensive Line Test War".to_string(),
                 attackers: [CountryId(1)].into_iter().collect(),
                 defenders: [CountryId(2)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
                 war_goals: vec![WarGoal {
                     attacker: CountryId(1),
                     defender: CountryId(2),

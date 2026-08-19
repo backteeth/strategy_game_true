@@ -1,0 +1,29 @@
+os = windows
+arch = x86_64
+rustc = rustc 1.97.1 (8bab26f4f 2026-07-14)
+cpu = 12th Gen Intel(R) Core(TM) i7-12700F
+logical_processors = 20
+total_physical_memory_gb = 31.8
+build_profile = release (cargo run --release / cargo build --release)
+measurement_date = 2026-08-17
+
+--- Background load observed before starting (PowerShell) ---
+Total Processor Time samples (1s interval, 3 samples): 4.47%, 7.00%, 7.67%
+Top CPU-time processes at time of check (not necessarily active during measurement):
+  vivaldi (browser), EACefSubProcess/EADesktop, lghub_agent, Code (VS Code),
+  rust-analyzer, LineMediaPlayer
+No deliberate process termination was performed (would require altering the
+user's environment without authorization); these applications remained
+running for the entire measurement session and are the most plausible source
+of the run-to-run scheduling jitter documented in 02_ab_same_session/.
+
+--- Notes on pre-existing data found in the working tree at session start ---
+Before this session, strategy_game/verification_logs/p20-008/baseline_verify_run1..5
+and strategy_game/verification_logs/phase-21/p21-010-perf-verify/baseline_verify_run1..5
+already existed (untracked). Byte-for-byte diff confirmed the phase-21 copies are
+identical duplicates of the p20-008 ones (see git history / session notes) - i.e. they
+were not a dedicated P21-010 A/B or scaling study, just a copy of an unrelated generic
+sweep, and their own timestamps (all 25 files within ~0.05s of each other) are not
+consistent with 5 independent `cargo run --release` invocations. They were not used as
+evidence for the judgment in this report; this directory's prior content was replaced
+with the fresh, session-controlled measurements below.

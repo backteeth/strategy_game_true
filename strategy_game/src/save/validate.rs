@@ -20,6 +20,7 @@ use crate::common::{
     FrontlineId, StateId, WarId,
 };
 use crate::country::CountryData;
+use crate::diplomacy::crisis::CrisisPhase;
 use crate::diplomacy::data::DiplomaticPairKey;
 use crate::military::battle::BattleStatus;
 use crate::military::data::DivisionDefinition;
@@ -153,6 +154,10 @@ struct RefIndex<'a> {
     divisions: &'a HashSet<DivisionId>,
     frontlines: &'a HashSet<FrontlineId>,
     battles: &'a HashSet<BattleId>,
+    /// P21-011: `DiplomaticCrisis::related_justification_id`の参照整合性検証用。
+    justifications: &'a HashSet<usize>,
+    /// P21-016: `WarJustification::source_crisis_id`の参照整合性検証用。
+    crises: &'a HashSet<DiplomaticCrisisId>,
 }
 
 fn technology_field_rank(field: TechnologyField) -> usize {
@@ -190,6 +195,13 @@ pub fn validate_save_game_v1(
     let division_ids: HashSet<DivisionId> = save.military.divisions.keys().copied().collect();
     let frontline_ids: HashSet<FrontlineId> = save.frontlines.frontlines.keys().copied().collect();
     let battle_ids: HashSet<BattleId> = save.battles.battles.keys().copied().collect();
+    let justification_ids: HashSet<usize> = save
+        .war_justifications
+        .justifications
+        .keys()
+        .copied()
+        .collect();
+    let crisis_ids: HashSet<DiplomaticCrisisId> = save.crises.crises.keys().copied().collect();
 
     let idx = RefIndex {
         countries: &country_ids,
@@ -198,6 +210,8 @@ pub fn validate_save_game_v1(
         divisions: &division_ids,
         frontlines: &frontline_ids,
         battles: &battle_ids,
+        justifications: &justification_ids,
+        crises: &crisis_ids,
     };
 
     validate_world_state(&save, context, &idx, &mut issues);
@@ -1012,6 +1026,87 @@ fn validate_war_justifications(
                 format!("references unknown {:?}", j.target_state),
             );
         }
+
+        // P21-016: `source_crisis_id`/`committed_attackers`/`committed_defenders`の検証。
+        if let Some(source_crisis_id) = j.source_crisis_id
+            && !idx.crises.contains(&source_crisis_id)
+        {
+            push(
+                issues,
+                SaveValidationCode::DanglingReference,
+                format!("{path}.source_crisis_id"),
+                format!("references unknown {source_crisis_id:?}"),
+            );
+        }
+
+        let mut seen_attackers: HashSet<CountryId> = HashSet::new();
+        for cid in &j.committed_attackers {
+            if !seen_attackers.insert(*cid) {
+                push(
+                    issues,
+                    SaveValidationCode::DuplicateId,
+                    format!("{path}.committed_attackers"),
+                    format!("{cid:?} appears more than once"),
+                );
+            }
+            if !idx.countries.contains(cid) {
+                push(
+                    issues,
+                    SaveValidationCode::DanglingReference,
+                    format!("{path}.committed_attackers"),
+                    format!("references unknown {cid:?}"),
+                );
+            }
+            if *cid == j.initiator || *cid == j.target {
+                push(
+                    issues,
+                    SaveValidationCode::SetOverlap,
+                    format!("{path}.committed_attackers"),
+                    format!("{cid:?} is the justification's own initiator/target"),
+                );
+            }
+        }
+
+        let mut seen_defenders: HashSet<CountryId> = HashSet::new();
+        for cid in &j.committed_defenders {
+            if !seen_defenders.insert(*cid) {
+                push(
+                    issues,
+                    SaveValidationCode::DuplicateId,
+                    format!("{path}.committed_defenders"),
+                    format!("{cid:?} appears more than once"),
+                );
+            }
+            if !idx.countries.contains(cid) {
+                push(
+                    issues,
+                    SaveValidationCode::DanglingReference,
+                    format!("{path}.committed_defenders"),
+                    format!("references unknown {cid:?}"),
+                );
+            }
+            if *cid == j.initiator || *cid == j.target {
+                push(
+                    issues,
+                    SaveValidationCode::SetOverlap,
+                    format!("{path}.committed_defenders"),
+                    format!("{cid:?} is the justification's own initiator/target"),
+                );
+            }
+        }
+
+        let cross_overlap: Vec<CountryId> = seen_attackers
+            .intersection(&seen_defenders)
+            .copied()
+            .collect();
+        if !cross_overlap.is_empty() {
+            push(
+                issues,
+                SaveValidationCode::SetOverlap,
+                format!("{path}.committed_attackers"),
+                format!("committed_attackers and committed_defenders overlap: {cross_overlap:?}"),
+            );
+        }
     }
 }
 
@@ -1047,6 +1142,30 @@ fn validate_wars(save: &SaveGameV1, idx: &RefIndex, issues: &mut Vec<SaveValidat
                 SaveValidationCode::SetOverlap,
                 format!("{path}.attackers"),
                 format!("attackers and defenders overlap: {overlap:?}"),
+            );
+        }
+
+        // P21-016: 明示的な代表国は必ず対応する陣営の集合内に含まれていなければならない
+        // (`None`は旧Save由来で許容、`primary_attacker_id()`が最小要素へ自動的に
+        // フォールバックするため問題ない)。
+        if let Some(primary_attacker) = war.primary_attacker
+            && !war.attackers.contains(&primary_attacker)
+        {
+            push(
+                issues,
+                SaveValidationCode::ParticipantMismatch,
+                format!("{path}.primary_attacker"),
+                format!("{primary_attacker:?} is not a member of attackers"),
+            );
+        }
+        if let Some(primary_defender) = war.primary_defender
+            && !war.defenders.contains(&primary_defender)
+        {
+            push(
+                issues,
+                SaveValidationCode::ParticipantMismatch,
+                format!("{path}.primary_defender"),
+                format!("{primary_defender:?} is not a member of defenders"),
             );
         }
 
@@ -1215,15 +1334,48 @@ fn validate_claims_and_crises(
             );
         }
 
-        let mut reactions: Vec<(&CountryId, _)> = crisis.third_party_reactions.iter().collect();
+        // P21-013: 第三国支持(`third_party_reactions`を再利用)の整合性検証。
+        // 「同一国家の重複支持」「同一国家による両陣営支持」は`HashMap<CountryId,_>`
+        // というストレージ自体がキーの一意性を保証するため構造的に発生し得ない
+        // (このRONがHashMap内で文字通りキー重複を含んでいた場合も、既存の
+        // `duplicate_hashmap_keys_in_ron_are_silently_overwritten_by_the_last_value`
+        // テストが示す通り、デシリアライズ時点で最後の値へ暗黙に統合されるため、
+        // ここへ到達する時点で既に単一エントリになっている)。「存在しないCrisis参照」も、
+        // このフィールド自体が各Crisisへネストされているため構造的に該当しない
+        // (フラットな別テーブル設計の場合のみ意味を持つ検証であり、この設計では不要)。
+        let mut reactions: Vec<(&CountryId, &crate::diplomacy::crisis::ThirdCountryReaction)> =
+            crisis.third_party_reactions.iter().collect();
         reactions.sort_by_key(|(k, _)| k.0);
-        for (cid, _) in reactions {
+        for (cid, reaction) in reactions {
             if !idx.countries.contains(cid) {
                 push(
                     issues,
                     SaveValidationCode::DanglingReference,
                     format!("{path}.third_party_reactions[{cid:?}]"),
                     format!("references unknown {cid:?}"),
+                );
+            }
+            if *cid == crisis.initiator || *cid == crisis.target {
+                push(
+                    issues,
+                    SaveValidationCode::SetOverlap,
+                    format!("{path}.third_party_reactions[{cid:?}]"),
+                    "a crisis belligerent (initiator or target) cannot be its own supporter",
+                );
+            }
+            if !matches!(
+                reaction,
+                crate::diplomacy::crisis::ThirdCountryReaction::SupportsInitiator
+                    | crate::diplomacy::crisis::ThirdCountryReaction::SupportsTarget
+            ) {
+                push(
+                    issues,
+                    SaveValidationCode::InvalidRange,
+                    format!("{path}.third_party_reactions[{cid:?}]"),
+                    format!(
+                        "{reaction:?} is not a valid P21-013 support side \
+                         (only SupportsInitiator/SupportsTarget are written by pledge_support)"
+                    ),
                 );
             }
         }
@@ -1266,9 +1418,68 @@ fn validate_claims_and_crises(
             push(
                 issues,
                 SaveValidationCode::NonFiniteValue,
-                path,
+                path.clone(),
                 "escalation/initiator_support/target_resistance/international_concern must be finite",
             );
+        }
+
+        // P21-011: 追加された参照フィールドの整合性検証。
+        if let Some(claim_id) = crisis.related_claim_id
+            && !save.claims.claims.contains_key(&claim_id)
+        {
+            push(
+                issues,
+                SaveValidationCode::DanglingReference,
+                format!("{path}.related_claim_id"),
+                format!("references unknown {claim_id:?}"),
+            );
+        }
+        if let Some(j_id) = crisis.related_justification_id {
+            if !idx.justifications.contains(&j_id) {
+                push(
+                    issues,
+                    SaveValidationCode::DanglingReference,
+                    format!("{path}.related_justification_id"),
+                    format!("references unknown WarJustification id {j_id}"),
+                );
+            }
+            // Escalating(拒否済み・宣戦待ち)以外でjustificationを保持しているのは
+            // 状態遷移規則違反を示す(WarStarted遷移時に`sync_crisis_on_war_declared`が
+            // `related_justification_id`を`None`へ戻す。declare_war自体が直前に
+            // justificationをRegistryから削除するため、WarStarted後もidを保持すると
+            // 必ずdangling referenceになってしまう)。
+            if crisis.current_phase != CrisisPhase::Escalating {
+                push(
+                    issues,
+                    SaveValidationCode::InvalidRange,
+                    format!("{path}.related_justification_id"),
+                    format!(
+                        "related_justification_id is set but phase is {:?} (expected Escalating)",
+                        crisis.current_phase
+                    ),
+                );
+            }
+        }
+        if let Some(war_id) = crisis.related_war_id {
+            if !idx.wars.contains(&war_id) {
+                push(
+                    issues,
+                    SaveValidationCode::DanglingReference,
+                    format!("{path}.related_war_id"),
+                    format!("references unknown {war_id:?}"),
+                );
+            }
+            if crisis.current_phase != CrisisPhase::WarStarted {
+                push(
+                    issues,
+                    SaveValidationCode::InvalidRange,
+                    format!("{path}.related_war_id"),
+                    format!(
+                        "related_war_id is set but phase is {:?} (expected WarStarted)",
+                        crisis.current_phase
+                    ),
+                );
+            }
         }
     }
 }
@@ -2488,6 +2699,8 @@ mod tests {
             name: "Test War".to_string(),
             attackers: [CountryId(0)].into_iter().collect(),
             defenders: [CountryId(1)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: vec![WarGoal {
                 attacker: CountryId(0),
                 defender: CountryId(1),
@@ -3081,6 +3294,151 @@ mod tests {
         assert!(has_code(&issues, SaveValidationCode::SetOverlap));
     }
 
+    /// P21-016要求テスト: `primary_attacker`が`attackers`集合の要素でない場合は拒否される。
+    #[test]
+    fn primary_attacker_not_in_attackers_is_rejected() {
+        let issues = issues_for(|save| {
+            save.wars.wars.get_mut(&WarId(0)).unwrap().primary_attacker = Some(CountryId(999));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-016要求テスト: `primary_defender`が`defenders`集合の要素でない場合は拒否される。
+    #[test]
+    fn primary_defender_not_in_defenders_is_rejected() {
+        let issues = issues_for(|save| {
+            save.wars.wars.get_mut(&WarId(0)).unwrap().primary_defender = Some(CountryId(999));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-016要求テスト: `primary_attacker`が`attackers`集合の要素であれば受理される。
+    #[test]
+    fn primary_attacker_in_attackers_is_accepted() {
+        let issues = issues_for(|save| {
+            save.wars.wars.get_mut(&WarId(0)).unwrap().primary_attacker = Some(CountryId(0));
+            save.wars.wars.get_mut(&WarId(0)).unwrap().primary_defender = Some(CountryId(1));
+        });
+        assert!(
+            issues.is_empty(),
+            "valid primary fields must be accepted, got {issues:?}"
+        );
+    }
+
+    fn seed_war_justification_for(
+        save: &mut SaveGameV1,
+        source_crisis_id: Option<DiplomaticCrisisId>,
+        committed_attackers: Vec<CountryId>,
+        committed_defenders: Vec<CountryId>,
+    ) {
+        save.war_justifications.justifications.insert(
+            0,
+            crate::war::justification::WarJustification {
+                id: 0,
+                initiator: CountryId(0),
+                target: CountryId(1),
+                target_state: StateId(1),
+                start_date: "1800/01/01".to_string(),
+                required_days: 30,
+                days_passed: 30,
+                is_ready: true,
+                source_crisis_id,
+                committed_attackers,
+                committed_defenders,
+            },
+        );
+        save.war_justifications.next_id = 1;
+    }
+
+    /// P21-016要求テスト: 存在しない`source_crisis_id`は参照切れとして拒否される。
+    #[test]
+    fn unknown_source_crisis_id_is_rejected() {
+        let issues = issues_for(|save| {
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(999)), vec![], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-016要求テスト: `committed_attackers`内の存在しない国家参照は拒否される。
+    #[test]
+    fn unknown_committed_attacker_is_rejected() {
+        let issues = issues_for(|save| {
+            seed_war_justification_for(save, None, vec![CountryId(999)], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-016要求テスト: `committed_attackers`内の重複は拒否される。
+    #[test]
+    fn duplicate_committed_attacker_is_rejected() {
+        let issues = issues_for(|save| {
+            seed_war_justification_for(save, None, vec![CountryId(0), CountryId(0)], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::DuplicateId));
+    }
+
+    /// P21-016要求テスト: `committed_attackers`と`committed_defenders`の重複
+    /// (同一国家が両陣営に同時に現れるデータ破損)は拒否される。
+    #[test]
+    fn committed_attackers_and_defenders_overlap_is_rejected() {
+        let issues = issues_for(|save| {
+            seed_war_justification_for(save, None, vec![CountryId(0)], vec![CountryId(0)]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::SetOverlap));
+    }
+
+    /// P21-016要求テスト: `committed_attackers`に正当化自身のinitiator/targetが
+    /// 含まれる(矛盾したデータ)場合は拒否される。
+    #[test]
+    fn committed_attacker_matching_own_initiator_or_target_is_rejected() {
+        let issues = issues_for(|save| {
+            // initiatorはCountryId(0), targetはCountryId(1)(seed_war_justification_for参照)。
+            seed_war_justification_for(save, None, vec![CountryId(1)], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::SetOverlap));
+    }
+
+    /// P21-016要求テスト: 妥当な`committed_attackers`/`committed_defenders`は受理される。
+    #[test]
+    fn valid_committed_supporters_are_accepted() {
+        let issues = issues_for(|save| {
+            save.countries.push(CountryData {
+                id: CountryId(2),
+                capital_state_id: StateId(3),
+                government_type: GovernmentType::Monarchy,
+                economic_system: EconomicSystem::FreeMarket,
+                ..CountryData::default()
+            });
+            save.states.push(StateData {
+                id: StateId(3),
+                owner_country_id: CountryId(2),
+                ..StateData::default()
+            });
+            seed_war_justification_for(save, None, vec![CountryId(2)], vec![]);
+        });
+        assert!(
+            issues.is_empty(),
+            "valid support snapshot must be accepted, got {issues:?}"
+        );
+    }
+
+    /// P21-016要求テスト: 実在する`source_crisis_id`は受理される。
+    #[test]
+    fn valid_source_crisis_id_is_accepted() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, None, None, None),
+            );
+            save.crises.next_id = 1;
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(
+            issues.is_empty(),
+            "valid source_crisis_id must be accepted, got {issues:?}"
+        );
+    }
+
     #[test]
     fn winner_not_a_participant_is_rejected() {
         let issues = issues_for(|save| {
@@ -3121,6 +3479,9 @@ mod tests {
                     required_days: 30,
                     days_passed: 0,
                     is_ready: false,
+                    source_crisis_id: None,
+                    committed_attackers: Vec::new(),
+                    committed_defenders: Vec::new(),
                 },
             );
             save.war_justifications.next_id = 1;
@@ -3141,6 +3502,7 @@ mod tests {
                     created_date: "1800/01/01".to_string(),
                     is_permanent: false,
                     source: ClaimSource::BorderDispute,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
                 },
             );
             save.claims.next_id = 1;
@@ -3167,6 +3529,9 @@ mod tests {
                     deadline_date: None,
                     international_concern: 0.0,
                     third_party_reactions: HashMap::new(),
+                    related_claim_id: None,
+                    related_justification_id: None,
+                    related_war_id: None,
                 },
             );
             save.crises.next_id = 1;
@@ -3195,11 +3560,273 @@ mod tests {
                     deadline_date: None,
                     international_concern: 0.0,
                     third_party_reactions: HashMap::new(),
+                    related_claim_id: None,
+                    related_justification_id: None,
+                    related_war_id: None,
                 },
             );
             save.crises.next_id = 1;
         });
         assert!(has_code(&issues, SaveValidationCode::SetOverlap));
+    }
+
+    fn crisis_with(
+        phase: CrisisPhase,
+        related_claim_id: Option<ClaimId>,
+        related_justification_id: Option<usize>,
+        related_war_id: Option<WarId>,
+    ) -> DiplomaticCrisis {
+        DiplomaticCrisis {
+            id: DiplomaticCrisisId(0),
+            initiator: CountryId(0),
+            target: CountryId(1),
+            war_goals: Vec::new(),
+            start_date: "1800/01/01".to_string(),
+            current_phase: phase,
+            escalation: 0.0,
+            initiator_support: 0.0,
+            target_resistance: 0.0,
+            days_in_phase: 0,
+            deadline_date: None,
+            international_concern: 0.0,
+            third_party_reactions: HashMap::new(),
+            related_claim_id,
+            related_justification_id,
+            related_war_id,
+        }
+    }
+
+    /// P21-011要求テスト: `related_claim_id`が存在しないClaimを指す場合は拒否される。
+    #[test]
+    fn unknown_related_claim_reference_is_rejected() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(
+                    CrisisPhase::ResolvedPeacefully,
+                    Some(ClaimId(999)),
+                    None,
+                    None,
+                ),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-011要求テスト: `related_justification_id`が存在しないWarJustificationを
+    /// 指す場合は拒否される。
+    #[test]
+    fn unknown_related_justification_reference_is_rejected() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, None, Some(999), None),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-011要求テスト: `related_justification_id`が設定されているのに
+    /// phaseがEscalating/WarStarted以外の場合は拒否される(状態遷移規則違反)。
+    #[test]
+    fn related_justification_id_with_wrong_phase_is_rejected() {
+        let issues = issues_for(|save| {
+            save.war_justifications.justifications.insert(
+                0,
+                WarJustification {
+                    id: 0,
+                    initiator: CountryId(0),
+                    target: CountryId(1),
+                    target_state: StateId(1),
+                    start_date: "1800/01/01".to_string(),
+                    required_days: 30,
+                    days_passed: 30,
+                    is_ready: true,
+                    source_crisis_id: None,
+                    committed_attackers: Vec::new(),
+                    committed_defenders: Vec::new(),
+                },
+            );
+            save.war_justifications.next_id = 1;
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::DemandSent, None, Some(0), None),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::InvalidRange));
+    }
+
+    /// 妥当な`related_justification_id`(存在し、phase=Escalating)は受理される。
+    #[test]
+    fn escalating_crisis_with_valid_related_justification_is_accepted() {
+        let issues = issues_for(|save| {
+            save.war_justifications.justifications.insert(
+                0,
+                WarJustification {
+                    id: 0,
+                    initiator: CountryId(0),
+                    target: CountryId(1),
+                    target_state: StateId(1),
+                    start_date: "1800/01/01".to_string(),
+                    required_days: 30,
+                    days_passed: 30,
+                    is_ready: true,
+                    source_crisis_id: None,
+                    committed_attackers: Vec::new(),
+                    committed_defenders: Vec::new(),
+                },
+            );
+            save.war_justifications.next_id = 1;
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, None, Some(0), None),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(issues.is_empty(), "expected no issues, got {issues:?}");
+    }
+
+    /// P21-011要求テスト: `related_war_id`が存在しないWarを指す場合は拒否される。
+    #[test]
+    fn unknown_related_war_reference_is_rejected() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::WarStarted, None, None, Some(WarId(999))),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-011要求テスト: `related_war_id`が設定されているのにphaseがWarStarted以外の
+    /// 場合は拒否される。
+    #[test]
+    fn related_war_id_with_wrong_phase_is_rejected() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, None, None, Some(WarId(0))),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::InvalidRange));
+    }
+
+    /// 妥当な`related_war_id`(baseline既存のWarId(0)、phase=WarStarted)は受理される。
+    #[test]
+    fn war_started_crisis_with_valid_related_war_is_accepted() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::WarStarted, None, None, Some(WarId(0))),
+            );
+            save.crises.next_id = 1;
+        });
+        assert!(issues.is_empty(), "expected no issues, got {issues:?}");
+    }
+
+    /// P21-013要求テスト: 支持国が存在しない場合は拒否される。
+    #[test]
+    fn unknown_support_reference_is_rejected() {
+        let issues = issues_for(|save| {
+            let mut crisis = crisis_with(CrisisPhase::DemandSent, None, None, None);
+            crisis.third_party_reactions.insert(
+                CountryId(999),
+                crate::diplomacy::crisis::ThirdCountryReaction::SupportsInitiator,
+            );
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-013要求テスト: initiator自身がその危機の支持国として記録されているのは拒否される。
+    #[test]
+    fn initiator_supporting_itself_is_rejected() {
+        let issues = issues_for(|save| {
+            let mut crisis = crisis_with(CrisisPhase::DemandSent, None, None, None);
+            crisis.third_party_reactions.insert(
+                CountryId(0), // crisis_with()のinitiator
+                crate::diplomacy::crisis::ThirdCountryReaction::SupportsTarget,
+            );
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::SetOverlap));
+    }
+
+    /// P21-013要求テスト: target自身がその危機の支持国として記録されているのは拒否される。
+    #[test]
+    fn target_supporting_itself_is_rejected() {
+        let issues = issues_for(|save| {
+            let mut crisis = crisis_with(CrisisPhase::DemandSent, None, None, None);
+            crisis.third_party_reactions.insert(
+                CountryId(1), // crisis_with()のtarget
+                crate::diplomacy::crisis::ThirdCountryReaction::SupportsInitiator,
+            );
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::SetOverlap));
+    }
+
+    /// P21-013要求テスト: `Neutral`/`CondemnsInitiator`(P21-013のドメインAPIが
+    /// 書き込まない値)は不正な支持陣営として拒否される。
+    #[test]
+    fn non_support_reaction_value_is_rejected_as_invalid_side() {
+        let issues = issues_for(|save| {
+            save.countries.push(CountryData {
+                id: CountryId(2),
+                capital_state_id: StateId(3),
+                government_type: GovernmentType::Monarchy,
+                economic_system: EconomicSystem::FreeMarket,
+                ..CountryData::default()
+            });
+            save.states.push(StateData {
+                id: StateId(3),
+                owner_country_id: CountryId(2),
+                ..StateData::default()
+            });
+            let mut crisis = crisis_with(CrisisPhase::DemandSent, None, None, None);
+            crisis.third_party_reactions.insert(
+                CountryId(2),
+                crate::diplomacy::crisis::ThirdCountryReaction::CondemnsInitiator,
+            );
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+        });
+        assert!(has_code(&issues, SaveValidationCode::InvalidRange));
+    }
+
+    /// 妥当な第三国支持(存在する国家・非当事国・SupportsInitiator/SupportsTarget)は受理される。
+    #[test]
+    fn valid_third_party_support_is_accepted() {
+        let issues = issues_for(|save| {
+            save.countries.push(CountryData {
+                id: CountryId(2),
+                capital_state_id: StateId(3),
+                government_type: GovernmentType::Monarchy,
+                economic_system: EconomicSystem::FreeMarket,
+                ..CountryData::default()
+            });
+            save.states.push(StateData {
+                id: StateId(3),
+                owner_country_id: CountryId(2),
+                ..StateData::default()
+            });
+            let mut crisis = crisis_with(CrisisPhase::DemandSent, None, None, None);
+            crisis.third_party_reactions.insert(
+                CountryId(2),
+                crate::diplomacy::crisis::ThirdCountryReaction::SupportsInitiator,
+            );
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+        });
+        assert!(issues.is_empty(), "expected no issues, got {issues:?}");
     }
 
     // ─── Registryのキー・次回ID ───────────────────────────────────────────────

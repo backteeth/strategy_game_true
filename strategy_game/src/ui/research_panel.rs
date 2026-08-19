@@ -6,6 +6,7 @@ use crate::localization::{
 use crate::research::allocation::InProgressTech;
 use crate::research::data::{TechnologyField, TechnologyRegistry};
 use crate::research::world_stage::WorldCivilizationState;
+use crate::ui::tab_bar::{TabBarRoot, ctrl_held};
 use crate::ui::{ActivePanel, PanelKind};
 use bevy::prelude::*;
 
@@ -44,7 +45,10 @@ pub struct ResearchPluginUI;
 impl Plugin for ResearchPluginUI {
     fn build(&self, app: &mut App) {
         app.insert_resource(ResearchPanelState::default())
-            .add_systems(OnEnter(GameState::Playing), setup_research_panel)
+            .add_systems(
+                OnEnter(GameState::Playing),
+                setup_research_panel.after(crate::ui::tab_bar::spawn_tab_bar),
+            )
             .add_systems(
                 Update,
                 (
@@ -63,39 +67,48 @@ fn setup_research_panel(
     mut commands: Commands,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
+    tab_bar_q: Query<Entity, With<TabBarRoot>>,
 ) {
-    // 画面左上に表示ボタンを配置
-    commands
-        .spawn((
-            ToggleResearchPanelButton,
-            Button,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(310.0),
-                top: Val::Px(45.0),
-                padding: UiRect::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.2, 0.3, 0.5, 0.9)),
-        ))
-        .with_children(|parent| {
-            let (text, marker) =
-                localized_text(&catalog, locale.0, "research_panel.toggle_button", vec![]);
-            parent.spawn((
-                text,
-                marker,
-                TextColor(Color::WHITE),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-            ));
+    // タブバー共通コンテナの子としてトグルボタンを配置(`ui::tab_bar`参照)
+    if let Ok(tab_bar) = tab_bar_q.single() {
+        commands.entity(tab_bar).with_children(|parent| {
+            parent
+                .spawn((
+                    ToggleResearchPanelButton,
+                    Button,
+                    Node {
+                        padding: UiRect::all(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.2, 0.3, 0.5, 0.9)),
+                ))
+                .with_children(|btn| {
+                    let (text, marker) =
+                        localized_text(&catalog, locale.0, "research_panel.toggle_button", vec![]);
+                    btn.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::WHITE),
+                        TextFont {
+                            font_size: FontSize::Px(12.0),
+                            ..default()
+                        },
+                    ));
+                });
         });
+    }
 
     // メインパネル（初期は非表示）
-    commands
+    // タイトルはスクロール対象の外(常に表示)、それ以外はスクロール可能な本体
+    // (`ui::scroll::spawn_scrollable_body`)へ入れる(`ui::scroll`ドキュメント参照:
+    // スクロールバーをスクロール対象の内側に置くと、つまみ自身も一緒にスクロールされ
+    // 見かけ上「動かない」ように見える不具合が実機で確認されているため)。
+    let research_panel_entity = commands
         .spawn((
             ResearchPanelRoot,
+            // P21-013: 背景自体もButton化し、子Button以外の余白をクリック/ホバーしても
+            // `Interaction`を確実に発行させる(`ui::load_confirm`の既存パターンを踏襲)。
+            Button,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(310.0),
@@ -106,11 +119,13 @@ fn setup_research_panel(
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(8.0),
                 display: Display::None,
-                overflow: Overflow::clip_y(),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 0.95)),
         ))
+        .id();
+    commands
+        .entity(research_panel_entity)
         .with_children(|parent| {
             let (text, marker) = localized_text(&catalog, locale.0, "research_panel.title", vec![]);
             parent.spawn((
@@ -123,116 +138,121 @@ fn setup_research_panel(
                 },
             ));
 
-            parent.spawn((
-                ResearchHeaderText,
-                Text::new(""),
-                LocalizedText::default(),
-                TextColor(Color::srgb(0.85, 0.85, 0.9)),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-            ));
+            crate::ui::scroll::spawn_scrollable_body(parent, Val::Px(8.0), |parent| {
+                parent.spawn((
+                    ResearchHeaderText,
+                    Text::new(""),
+                    LocalizedText::default(),
+                    TextColor(Color::srgb(0.85, 0.85, 0.9)),
+                    TextFont {
+                        font_size: FontSize::Px(12.0),
+                        ..default()
+                    },
+                ));
 
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(6.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|row| {
-                    let (text, marker) =
-                        localized_text(&catalog, locale.0, "research_panel.alloc_label", vec![]);
-                    row.spawn((
-                        text,
-                        marker,
-                        TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                        TextFont {
-                            font_size: FontSize::Px(12.0),
-                            ..default()
-                        },
-                    ));
-
-                    for field in TechnologyField::ALL {
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "research_panel.alloc_label",
+                            vec![],
+                        );
                         row.spawn((
-                            AllocationAdjustButton(field, 0.05),
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
+                            text,
+                            marker,
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(12.0),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgba(0.3, 0.35, 0.45, 1.0)),
-                        ))
-                        .with_children(|b| {
-                            let (text, marker) = localized_text(
-                                &catalog,
-                                locale.0,
-                                "research_panel.alloc_field_button",
-                                vec![("field", t(&catalog, locale.0, field.display_name()))],
-                            );
-                            b.spawn((
-                                text,
-                                marker,
-                                TextColor(Color::WHITE),
-                                TextFont {
-                                    font_size: FontSize::Px(11.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-                    }
-                });
+                        ));
 
-            parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(4.0),
-                    margin: UiRect::top(Val::Px(4.0)),
-                    ..default()
-                })
-                .with_children(|tab_row| {
-                    for field in TechnologyField::ALL {
-                        tab_row
-                            .spawn((
-                                ResearchTabButton(field),
+                        for field in TechnologyField::ALL {
+                            row.spawn((
+                                AllocationAdjustButton(field, 0.05),
                                 Button,
                                 Node {
-                                    padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
                                     ..default()
                                 },
-                                BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 1.0)),
+                                BackgroundColor(Color::srgba(0.3, 0.35, 0.45, 1.0)),
                             ))
-                            .with_children(|btn| {
+                            .with_children(|b| {
                                 let (text, marker) = localized_text(
                                     &catalog,
                                     locale.0,
-                                    field.display_name(),
-                                    vec![],
+                                    "research_panel.alloc_field_button",
+                                    vec![("field", t(&catalog, locale.0, field.display_name()))],
                                 );
-                                btn.spawn((
+                                b.spawn((
                                     text,
                                     marker,
                                     TextColor(Color::WHITE),
                                     TextFont {
-                                        font_size: FontSize::Px(13.0),
+                                        font_size: FontSize::Px(11.0),
                                         ..default()
                                     },
                                 ));
                             });
-                    }
-                });
+                        }
+                    });
 
-            parent.spawn((
-                TechListContainer,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    overflow: Overflow::clip_y(),
-                    flex_grow: 1.0,
-                    ..default()
-                },
-            ));
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(4.0),
+                        margin: UiRect::top(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|tab_row| {
+                        for field in TechnologyField::ALL {
+                            tab_row
+                                .spawn((
+                                    ResearchTabButton(field),
+                                    Button,
+                                    Node {
+                                        padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 1.0)),
+                                ))
+                                .with_children(|btn| {
+                                    let (text, marker) = localized_text(
+                                        &catalog,
+                                        locale.0,
+                                        field.display_name(),
+                                        vec![],
+                                    );
+                                    btn.spawn((
+                                        text,
+                                        marker,
+                                        TextColor(Color::WHITE),
+                                        TextFont {
+                                            font_size: FontSize::Px(13.0),
+                                            ..default()
+                                        },
+                                    ));
+                                });
+                        }
+                    });
+
+                parent.spawn((
+                    TechListContainer,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
+            });
         });
 }
 
@@ -244,7 +264,9 @@ fn toggle_research_panel_key(
     mut panel_q: Query<&mut Node, With<ResearchPanelRoot>>,
 ) {
     let mut toggle = false;
-    if keys.just_pressed(KeyCode::KeyR) {
+    // Ctrl+1: タブ切替は全パネル共通でCtrl+数字に統一
+    // (軍事パネル内の素のDigit1/2/3/7/8/9フロントライン操作キーとの衝突を避けるため)。
+    if keys.just_pressed(KeyCode::Digit1) && ctrl_held(&keys) {
         toggle = true;
     }
     for interaction in btn_q.iter() {
@@ -598,4 +620,111 @@ fn update_research_panel_ui(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::tab_bar::spawn_tab_bar;
+
+    fn build_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(ActivePanel::default());
+        app.insert_resource(ResearchPanelState::default());
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, toggle_research_panel_key);
+        app
+    }
+
+    fn press_ctrl_plus(app: &mut App, digit: KeyCode) {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::ControlLeft);
+        keys.press(digit);
+        app.insert_resource(keys);
+        app.update();
+    }
+
+    fn press_bare(app: &mut App, digit: KeyCode) {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(digit);
+        app.insert_resource(keys);
+        app.update();
+    }
+
+    #[test]
+    fn ctrl_plus_digit1_toggles_research_panel() {
+        let mut app = build_test_app();
+        press_ctrl_plus(&mut app, KeyCode::Digit1);
+
+        assert!(app.world().resource::<ResearchPanelState>().open);
+        assert_eq!(
+            app.world().resource::<ActivePanel>().current,
+            PanelKind::Research
+        );
+    }
+
+    #[test]
+    fn bare_digit1_alone_does_not_toggle_research_panel() {
+        let mut app = build_test_app();
+        press_bare(&mut app, KeyCode::Digit1);
+
+        assert!(
+            !app.world().resource::<ResearchPanelState>().open,
+            "Digit1 without Ctrl must not open the Research panel \
+             (reserved to avoid colliding with military_panel's frontline command keys)"
+        );
+    }
+
+    #[test]
+    fn toggle_button_is_spawned_as_a_child_of_the_shared_tab_bar() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Startup, (spawn_tab_bar, setup_research_panel).chain());
+        app.update();
+
+        let tab_bar = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::ui::tab_bar::TabBarRoot>>()
+            .single(app.world())
+            .expect("TabBarRoot must be spawned");
+        let button = app
+            .world_mut()
+            .query_filtered::<Entity, With<ToggleResearchPanelButton>>()
+            .single(app.world())
+            .expect("ToggleResearchPanelButton must be spawned");
+
+        assert_eq!(
+            app.world().entity(button).get::<ChildOf>().map(|c| c.0),
+            Some(tab_bar),
+            "the research toggle button must be a child of the shared TabBarRoot"
+        );
+    }
+
+    /// P21-013: `ResearchPanelRoot`自身が`Button`であることを確認する回帰テスト。これにより
+    /// 子Button以外の余白をクリック/ホバーしても`Interaction`が確実に発行され、
+    /// `map::selection::handle_state_click`等の既存「UIのHovered/Pressed中はマップ操作を
+    /// スキップする」ガードがこの領域にも効くようになる(`ui::load_confirm`の既存パターンと
+    /// 同じ)。
+    #[test]
+    fn research_panel_root_background_is_itself_a_button() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Startup, setup_research_panel);
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<ResearchPanelRoot>>()
+            .single(app.world())
+            .expect("ResearchPanelRoot must be spawned");
+        assert!(
+            app.world().entity(root).contains::<Button>(),
+            "ResearchPanelRoot's own background must be a Button so hovering it registers Interaction"
+        );
+    }
 }

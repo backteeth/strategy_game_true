@@ -45,6 +45,9 @@ fn setup_state_panel(
     commands
         .spawn((
             StatePanelRoot,
+            // P21-013: 背景自体もButton化し、子Button以外の余白をクリック/ホバーしても
+            // `Interaction`を確実に発行させる(`ui::load_confirm`の既存パターンを踏襲)。
+            Button,
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(0.0),
@@ -547,6 +550,31 @@ mod tests {
             .read()
             .map(|n| n.message.clone())
             .collect()
+    }
+
+    /// P21-013: `StatePanelRoot`自身が`Button`であることを確認する回帰テスト。これにより
+    /// 子Button(建設ボタン等)以外の余白をクリック/ホバーしても`Interaction`が確実に
+    /// 発行され、`map::selection::handle_state_click`等の既存「UIのHovered/Pressed中は
+    /// マップ操作をスキップする」ガードがこの領域にも効くようになる
+    /// (`ui::load_confirm`の既存パターンと同じ)。
+    #[test]
+    fn state_panel_root_background_is_itself_a_button() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Startup, setup_state_panel);
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<StatePanelRoot>>()
+            .single(app.world())
+            .expect("StatePanelRoot must be spawned");
+        assert!(
+            app.world().entity(root).contains::<Button>(),
+            "StatePanelRoot's own background must be a Button so hovering it registers Interaction"
+        );
     }
 
     fn state_with_deposit(id: StateId, owner: CountryId, has_deposit: bool) -> StateData {

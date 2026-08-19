@@ -241,11 +241,13 @@ impl CountryRegistry {
 }
 
 pub mod country_ai;
+pub mod power;
 
 use country_ai::{
     CountryAiRegistry, PendingAiWarDeclarations, emit_ai_war_declaration_notifications,
     handle_daily_country_ai,
 };
+use power::{CountryPowerRegistry, rebuild_country_power_monthly};
 
 // ─── プレイヤー国家 ──────────────────────────────────────────────────────────
 
@@ -264,6 +266,7 @@ impl Plugin for CountryPlugin {
             .insert_resource(PlayerCountry::default())
             .insert_resource(CountryAiRegistry::default())
             .insert_resource(PendingAiWarDeclarations::default())
+            .insert_resource(CountryPowerRegistry::default())
             .add_systems(
                 Update,
                 (
@@ -271,6 +274,14 @@ impl Plugin for CountryPlugin {
                     emit_ai_war_declaration_notifications.after(handle_daily_country_ai),
                 )
                     .in_set(DailySimulationSet::CountryAi)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P21-014: 月次進行(MonthChangedMessage)のたびに国家総合力を再評価する。
+                // 最終SetのUiUpdateに置き、同一フレーム内の他Setの変更を必ず反映する。
+                rebuild_country_power_monthly
+                    .in_set(DailySimulationSet::UiUpdate)
                     .run_if(in_state(GameState::Playing)),
             );
     }

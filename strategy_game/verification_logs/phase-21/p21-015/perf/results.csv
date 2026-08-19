@@ -1,0 +1,9 @@
+axis,country_count,crisis_count,great_power_count,mean_ms,max_ms
+crisis_scaling,1000,1,8,0.14723,0.15350
+crisis_scaling,1000,10,8,0.15785,0.23140
+crisis_scaling,1000,100,8,0.23643,0.38100
+crisis_scaling,1000,1000,8,0.93899,1.03030
+country_scaling,8,100,2,0.03692,0.05810
+country_scaling,100,100,8,0.09248,0.24300
+country_scaling,500,100,8,0.12244,0.15250
+country_scaling,1000,100,8,0.23210,0.30640

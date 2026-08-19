@@ -1,0 +1,6 @@
+crisis_count,mix,overall_mean_ms,overall_median_ms,overall_min_ms,overall_max_ms,diplomacy_mean_ms,diplomacy_median_ms,total_days_in_phase,expected_days_in_phase
+0,AllActive,0.23341,0.18810,0.16890,1.08740,0.03118,0.03010,0,0
+1,AllActive,0.22822,0.18530,0.16560,0.94220,0.03146,0.02950,70,70
+100,AllActive,0.23009,0.18320,0.16800,0.96630,0.03058,0.02930,7000,7000
+1000,AllActive,0.23717,0.18290,0.17080,0.98480,0.03426,0.03320,70000,70000
+1000,AllTerminal,0.22014,0.18150,0.16490,0.92360,0.03222,0.03170,0,0

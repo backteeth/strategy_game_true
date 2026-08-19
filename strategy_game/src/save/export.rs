@@ -319,6 +319,7 @@ mod tests {
             created_date: "1800/03/01".to_string(),
             is_permanent: false,
             source: ClaimSource::BorderDispute,
+            status: crate::diplomacy::claims::ClaimStatus::Active,
         });
         assert_eq!(claim_id, ClaimId(0));
 
@@ -337,6 +338,9 @@ mod tests {
             deadline_date: Some("1800/03/01".to_string()),
             international_concern: 5.0,
             third_party_reactions: HashMap::new(),
+            related_claim_id: None,
+            related_justification_id: None,
+            related_war_id: None,
         });
         assert_eq!(crisis_id, DiplomaticCrisisId(0));
 
@@ -495,6 +499,8 @@ mod tests {
             name: "Test War".to_string(),
             attackers: [CountryId(1)].into_iter().collect(),
             defenders: [CountryId(2)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: Vec::new(),
             start_date: "1801/01/01".to_string(),
             end_date: None,

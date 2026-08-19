@@ -23,7 +23,7 @@ use crate::economy::EconomyPlugin;
 use crate::economy::resources::{CountryStockpile, ResourceType, StateResourceDeposit};
 use crate::military::MilitaryPlugin;
 use crate::military::battle::BattleRegistry;
-use crate::military::data::{DivisionStatus, Division, DivisionDefinition, MilitaryRegistry};
+use crate::military::data::{Division, DivisionDefinition, DivisionStatus, MilitaryRegistry};
 use crate::politics::PoliticsPlugin;
 use crate::research::ResearchPlugin;
 use crate::state::StatePlugin;
@@ -349,6 +349,8 @@ fn inject_synthetic_world(app: &mut App, config: &WorkloadConfig) -> WorkloadCou
                 name: format!("Synthetic War {a} vs {b}"),
                 attackers,
                 defenders,
+                primary_attacker: Some(CountryId(a)),
+                primary_defender: Some(CountryId(b)),
                 war_goals: vec![WarGoal {
                     attacker: CountryId(a),
                     defender: CountryId(b),
@@ -660,7 +662,10 @@ pub fn validate_world_sanity(app: &App) -> Result<(), String> {
             ));
         }
         if !division.organization.is_finite() || !division.morale.is_finite() {
-            return Err(format!("Division {:?} has non-finite derived value", division.id));
+            return Err(format!(
+                "Division {:?} has non-finite derived value",
+                division.id
+            ));
         }
     }
 

@@ -66,6 +66,11 @@ fn setup_top_bar(
     commands
         .spawn((
             TopBarRoot,
+            // P21-013: 背景自体もButton化し、子Button以外の余白をクリック/ホバーしても
+            // `Interaction`を確実に発行させる(`ui::load_confirm`の既存パターンを踏襲)。
+            // これにより`map::selection::handle_state_click`等の既存「UIのHovered/Pressed中は
+            // マップ操作をスキップする」ガードがこの領域にも効くようになる。
+            Button,
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(0.0),
@@ -512,6 +517,27 @@ mod tests {
             .count();
         assert_eq!(save_count, 1, "exactly one SaveButton must be spawned");
         assert_eq!(load_count, 1, "exactly one LoadButton must be spawned");
+    }
+
+    /// P21-013: `TopBarRoot`自身が`Button`であることを確認する回帰テスト。これにより
+    /// 子Button(Save/Load/速度等)以外の余白をクリック/ホバーしても`Interaction`が
+    /// 確実に発行され、`map::selection::handle_state_click`等の既存「UIのHovered/Pressed中は
+    /// マップ操作をスキップする」ガードがこの領域にも効くようになる
+    /// (`ui::load_confirm`の既存パターンと同じ)。
+    #[test]
+    fn top_bar_root_background_is_itself_a_button() {
+        let mut app = build_ui_spawn_test_app();
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<TopBarRoot>>()
+            .single(app.world())
+            .expect("TopBarRoot must be spawned");
+        assert!(
+            app.world().entity(root).contains::<Button>(),
+            "TopBarRoot's own background must be a Button so hovering it registers Interaction"
+        );
     }
 
     #[test]

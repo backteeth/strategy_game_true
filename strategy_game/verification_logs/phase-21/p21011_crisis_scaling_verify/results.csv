@@ -1,0 +1,6 @@
+crisis_count,mix,overall_mean_ms,overall_median_ms,overall_min_ms,overall_max_ms,diplomacy_mean_ms,diplomacy_median_ms,still_demand_sent
+0,AllDemandSentFarDeadline,0.27430,0.22550,0.18640,1.06710,0.03818,0.03450,0
+1,AllDemandSentFarDeadline,0.26216,0.20430,0.18100,1.43130,0.03627,0.03260,1
+100,AllDemandSentFarDeadline,0.26747,0.21950,0.17930,1.06940,0.04196,0.04020,100
+1000,AllDemandSentFarDeadline,0.34213,0.28700,0.23800,1.36570,0.10922,0.10310,1000
+1000,AllTerminal,0.26441,0.20860,0.18180,1.47200,0.04188,0.03880,0

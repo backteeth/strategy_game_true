@@ -1,0 +1,29 @@
+P21-014 Country Power Evaluation Performance Summary
+=======================================================
+
+days_measured=35 month_boundary_day=31 seed=0xC0FFEE12345678
+
+--- scale=100 ---
+  countries=8 states=100 divisions=8 productive_buildings=200
+  overall day_tick: non_month_mean=0.11801ms non_month_max=0.55720ms month_change_day=0.23660ms
+  UiUpdate set:     non_month_mean=0.00334ms non_month_max=0.00930ms month_change_day=0.02080ms (delta=0.01746ms)
+  assessments=8 (== country_count: true) nan_count=0 duplicate_rank_count=0
+
+--- scale=500 ---
+  countries=25 states=500 divisions=25 productive_buildings=1000
+  overall day_tick: non_month_mean=0.12566ms non_month_max=0.61270ms month_change_day=0.31160ms
+  UiUpdate set:     non_month_mean=0.00361ms non_month_max=0.00800ms month_change_day=0.03600ms (delta=0.03239ms)
+  assessments=25 (== country_count: true) nan_count=0 duplicate_rank_count=0
+
+--- scale=1000 ---
+  countries=50 states=1000 divisions=50 productive_buildings=2000
+  overall day_tick: non_month_mean=0.17093ms non_month_max=0.58200ms month_change_day=0.77420ms
+  UiUpdate set:     non_month_mean=0.00350ms non_month_max=0.00600ms month_change_day=0.07030ms (delta=0.06680ms)
+  assessments=50 (== country_count: true) nan_count=0 duplicate_rank_count=0
+
+--- scale=2000 ---
+  countries=100 states=2000 divisions=100 productive_buildings=4000
+  overall day_tick: non_month_mean=0.25944ms non_month_max=0.98150ms month_change_day=1.20440ms
+  UiUpdate set:     non_month_mean=0.00348ms non_month_max=0.00480ms month_change_day=0.24330ms (delta=0.23982ms)
+  assessments=100 (== country_count: true) nan_count=0 duplicate_rank_count=0
+

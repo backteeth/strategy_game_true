@@ -477,6 +477,13 @@ pub fn apply_validated_save(world: &mut World, validated: ValidatedSaveGameV1) -
     match prepare_load(validated, world) {
         Ok(prepared) => {
             commit_load(world, prepared);
+            // P21-014: 国家総合力・国家ランクはSaveへ保存しない派生Resourceのため、
+            // ロード直後(次の月次進行を待たず)にCountry/State/Military/Buildingから
+            // 再構築する。全てのapply_validated_save呼び出し経路(GameState::Playing中
+            // からの再ロードを含む)を一律にカバーするため、ここで直接呼ぶ
+            // (`OnEnter(GameState::Playing)`だけでは、既にPlaying中のロードを
+            // 取りこぼす — 詳細は`country::power`のドキュメント参照)。
+            crate::country::power::rebuild_country_power_registry_from_world(world);
             ApplyLoadOutcome::Success
         }
         Err(error) => ApplyLoadOutcome::Failure(error),
@@ -724,6 +731,12 @@ mod tests {
             target_country: Some(CountryId(1)),
             claim_target_state: Some(StateId(0)),
             pending_crisis_claim: Some(crate::common::ClaimId(0)),
+            pending_crisis_accept: Some(crate::common::DiplomaticCrisisId(0)),
+            pending_crisis_reject: Some(crate::common::DiplomaticCrisisId(0)),
+            pending_support_pledge: Some((
+                crate::common::DiplomaticCrisisId(0),
+                crate::diplomacy::crisis_response::CrisisSupportSide::Initiator,
+            )),
         });
         world.insert_resource(MilitaryPanelState { open: true });
         world.insert_resource(PeacePanelState {
@@ -878,6 +891,8 @@ mod tests {
             name: "Test War".to_string(),
             attackers: [CountryId(0)].into_iter().collect(),
             defenders: [CountryId(1)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: Vec::new(),
             start_date: "1801/06/01".to_string(),
             end_date: None,
@@ -1866,6 +1881,7 @@ mod tests {
             created_date: "1801/01/01".to_string(),
             is_permanent: false,
             source: ClaimSource::BorderDispute,
+            status: crate::diplomacy::claims::ClaimStatus::Active,
         };
         save.claims = SavedClaimRegistry {
             claims: [(ClaimId(0), claim)].into_iter().collect(),
@@ -1885,6 +1901,9 @@ mod tests {
             deadline_date: None,
             international_concern: 5.0,
             third_party_reactions: HashMap::new(),
+            related_claim_id: None,
+            related_justification_id: None,
+            related_war_id: None,
         };
         save.crises = SavedCrisisRegistry {
             crises: [(DiplomaticCrisisId(0), crisis)].into_iter().collect(),
@@ -2161,6 +2180,9 @@ mod tests {
         let diplo = world.resource::<DiplomacyPanelState>();
         assert_eq!(diplo.claim_target_state, None);
         assert_eq!(diplo.pending_crisis_claim, None);
+        assert_eq!(diplo.pending_crisis_accept, None);
+        assert_eq!(diplo.pending_crisis_reject, None);
+        assert_eq!(diplo.pending_support_pledge, None);
     }
 
     #[test]
@@ -2351,6 +2373,8 @@ mod tests {
             name: "New War".to_string(),
             attackers: [CountryId(0)].into_iter().collect(),
             defenders: [CountryId(1)].into_iter().collect(),
+            primary_attacker: None,
+            primary_defender: None,
             war_goals: Vec::new(),
             start_date: "1801/07/01".to_string(),
             end_date: None,

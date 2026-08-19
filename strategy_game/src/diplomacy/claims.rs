@@ -13,6 +13,18 @@ pub enum ClaimSource {
     Debug,
 }
 
+/// 領土請求の状態(P21-011)。`#[serde(default)]`によりP21-010以前のセーブ
+/// (このフィールド自体が存在しない)は全て`Active`として読み込まれる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ClaimStatus {
+    /// 有効。新しいCrisisの根拠として使用可能。
+    #[default]
+    Active,
+    /// Crisisの平和的受諾により消費済み。対象州は既に譲渡されており、
+    /// 新しいCrisisの根拠として再利用できない(Claim自体は履歴として残す)。
+    Consumed,
+}
+
 /// 領土請求データ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerritorialClaim {
@@ -23,6 +35,9 @@ pub struct TerritorialClaim {
     pub created_date: String,
     pub is_permanent: bool,
     pub source: ClaimSource,
+    /// P21-011: 追加。既存(P21-010以前)Claimは`#[serde(default)]`により`Active`として読む。
+    #[serde(default)]
+    pub status: ClaimStatus,
 }
 
 /// 全領土請求を管理するリソース
@@ -144,7 +159,19 @@ impl ClaimRegistry {
             created_date,
             is_permanent: false,
             source,
+            status: ClaimStatus::Active,
         }))
+    }
+
+    /// P21-011: Crisisの平和的受諾により、Claimを消費済みへ変更する。
+    /// 既にConsumedの場合も含め、対象が存在しない場合のみ`false`を返す
+    /// (冪等: 同じ受諾処理が誤って複数回走っても安全)。
+    pub fn mark_consumed(&mut self, claim_id: ClaimId) -> bool {
+        let Some(claim) = self.claims.get_mut(&claim_id) else {
+            return false;
+        };
+        claim.status = ClaimStatus::Consumed;
+        true
     }
 }
 
@@ -362,5 +389,65 @@ mod tests {
         );
 
         assert_eq!(result, Err("diplomacy_error.claim.state_is_sea"));
+    }
+
+    /// P21-011要求テスト: 旧形式(`status`フィールド自体が存在しないRON、P21-010以前の
+    /// セーブ相当)を読み込んだ場合、`Active`として復元される(`#[serde(default)]`)。
+    #[test]
+    fn old_format_ron_without_status_field_loads_as_active() {
+        let claim = TerritorialClaim {
+            id: ClaimId(0),
+            claimant_country: CountryId(1),
+            target_state: StateId(2),
+            strength: 42.0,
+            created_date: "1800/01/01".to_string(),
+            is_permanent: false,
+            source: ClaimSource::Strategic,
+            status: ClaimStatus::Consumed,
+        };
+        let claim_ron = ron::to_string(&claim).unwrap();
+        assert!(claim_ron.contains("status"));
+        let without_status_field = claim_ron.replacen(",status:Consumed", "", 1);
+        assert_ne!(
+            without_status_field, claim_ron,
+            "test setup must actually remove the status field"
+        );
+        let restored: TerritorialClaim = ron::from_str(&without_status_field)
+            .expect("TerritorialClaim RON missing status must still deserialize (serde default)");
+        assert_eq!(restored.status, ClaimStatus::Active);
+        assert_eq!(restored.target_state, StateId(2));
+    }
+
+    /// `mark_consumed`は対象Claimが存在しない場合`false`を返し、存在する場合は
+    /// `Consumed`へ変更して`true`を返す(受諾後の再呼び出しに対しても冪等)。
+    #[test]
+    fn mark_consumed_transitions_active_to_consumed_and_is_idempotent() {
+        let (countries, states) = registries();
+        let mut registry = ClaimRegistry::default();
+        let id = registry
+            .create_claim(
+                CountryId(0),
+                CountryId(1),
+                StateId(1),
+                "1800/01/01".to_string(),
+                ClaimSource::Strategic,
+                &countries,
+                &states,
+            )
+            .unwrap();
+
+        assert!(
+            !registry.mark_consumed(ClaimId(999)),
+            "unknown id must return false"
+        );
+        assert!(registry.mark_consumed(id));
+        assert_eq!(
+            registry.claims.get(&id).unwrap().status,
+            ClaimStatus::Consumed
+        );
+        assert!(
+            registry.mark_consumed(id),
+            "marking an already-consumed claim again must still return true (idempotent)"
+        );
     }
 }

@@ -1,0 +1,749 @@
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\app\loader.rs:7:
+     InitialDiplomaticRelation,
+ };
+ use crate::economy::resources::StateResourceDeposit;
+[31m-use crate::military::data::{DivisionStatus, Division, DivisionDefinition, MilitaryRegistry};
+[0m[32m+use crate::military::data::{Division, DivisionDefinition, DivisionStatus, MilitaryRegistry};
+[0m use crate::research::data::{TechnologyDefinition, TechnologyRegistry};
+ use crate::research::world_stage::{WorldCivilizationState, WorldStageDefinition};
+ use crate::state::data::{StateData, StateRegistry};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\country\country_ai.rs:94:
+             CountryAiDecisionReason::NoBuildableState => "country_ai_reason.no_buildable_state",
+             CountryAiDecisionReason::NoResearchableTech => "country_ai_reason.no_researchable_tech",
+             CountryAiDecisionReason::PostWarCooldown => "country_ai_reason.post_war_cooldown",
+[31m-            CountryAiDecisionReason::NoAvailableDivisions => "country_ai_reason.no_available_divisions",
+[0m[32m+            CountryAiDecisionReason::NoAvailableDivisions => {
+[0m[32m+                "country_ai_reason.no_available_divisions"
+[0m[32m+            }
+[0m             CountryAiDecisionReason::NoReachableTargetCountry => {
+                 "country_ai_reason.no_reachable_target_country"
+             }
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\country\country_ai.rs:210:
+ ) -> Vec<u64> {
+     let mut power_by_country: Vec<u64> = Vec::new();
+     for division in military_registry.divisions.values() {
+[31m-        if division.manpower == 0 || division.status == crate::military::data::DivisionStatus::Destroyed {
+[0m[32m+        if division.manpower == 0
+[0m[32m+            || division.status == crate::military::data::DivisionStatus::Destroyed
+[0m[32m+        {
+[0m             continue;
+         }
+         let is_land = state_registry
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\country\country_ai.rs:1146:
+         current_state: StateId,
+         manpower: u64,
+     ) -> crate::military::data::Division {
+[31m-        use crate::military::data::{DivisionStatus, DivisionSize, DivisionType};
+[0m[32m+        use crate::military::data::{DivisionSize, DivisionStatus, DivisionType};
+[0m         crate::military::data::Division {
+             id: crate::common::DivisionId(0),
+             owner,
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\division_render.rs:1:
+ use crate::app::game_state::GameState;
+ use crate::common::{ArmyId, DivisionId, StateId};
+ use crate::country::CountryRegistry;
+[31m-use crate::map::division_selection::{DragSelectState, SelectedDivision, screen_to_world};
+[0m use crate::map::camera::GameCamera;
+[32m+use crate::map::division_selection::{DragSelectState, SelectedDivision, screen_to_world};
+[0m use crate::military::army::ArmyRegistry;
+ use crate::military::battle::{BattleRegistry, BattleStatus};
+ use crate::military::data::{DivisionStatus, MilitaryRegistry};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\division_render.rs:93:
+     state_registry: &StateRegistry,
+ ) -> std::collections::HashMap<DivisionId, Vec2> {
+     // 州ごとにグループ化して複数ユニットの重ね表示をオフセット
+[31m-    let mut state_division_indices: std::collections::HashMap<crate::common::StateId, Vec<DivisionId>> =
+[0m[31m-        std::collections::HashMap::new();
+[0m[32m+    let mut state_division_indices: std::collections::HashMap<
+[0m[32m+        crate::common::StateId,
+[0m[32m+        Vec<DivisionId>,
+[0m[32m+    > = std::collections::HashMap::new();
+[0m 
+     for (division_id, division) in military_registry.divisions.iter() {
+         state_division_indices
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\division_render.rs:504:
+ mod tests {
+     use super::*;
+     use crate::common::{CountryId, DivisionDefinitionId, DivisionId};
+[31m-    use crate::military::data::{DivisionStatus, Division, DivisionSize, DivisionType};
+[0m[32m+    use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
+[0m     use crate::state::data::StateData;
+ 
+     fn make_test_division(id: usize, owner: CountryId, state: StateId) -> Division {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\division_render.rs:575:
+ 
+         let mut army_registry = ArmyRegistry::default();
+         army_registry
+[31m-            .create_army(CountryId(1), &[DivisionId(1), DivisionId(2)], &military_registry)
+[0m[32m+            .create_army(
+[0m[32m+                CountryId(1),
+[0m[32m+                &[DivisionId(1), DivisionId(2)],
+[0m[32m+                &military_registry,
+[0m[32m+            )
+[0m             .unwrap();
+ 
+         let state_registry = StateRegistry::build(vec![state_at(1, Vec2::ZERO)]);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\division_render.rs:603:
+ 
+         let mut army_registry = ArmyRegistry::default();
+         army_registry
+[31m-            .create_army(CountryId(1), &[DivisionId(1), DivisionId(2)], &military_registry)
+[0m[32m+            .create_army(
+[0m[32m+                CountryId(1),
+[0m[32m+                &[DivisionId(1), DivisionId(2)],
+[0m[32m+                &military_registry,
+[0m[32m+            )
+[0m             .unwrap();
+ 
+         let state_registry = StateRegistry::build(vec![
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\mod.rs:1:
+[32m+pub mod camera;
+[0m /// map モジュール
+ /// カメラ、描画、州選択を統合するプラグインを提供する
+ pub mod division_render;
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\mod.rs:4:
+ pub mod division_selection;
+[31m-pub mod camera;
+[0m pub mod frontline_render;
+ pub mod frontline_selection;
+ pub mod offensive_line_selection;
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\map\mod.rs:9:
+ pub mod rendering;
+ pub mod selection;
+ 
+[31m-use division_render::DivisionRenderPlugin;
+[0m[31m-use division_selection::DivisionSelectionPlugin;
+[0m use bevy::prelude::*;
+ use camera::CameraPlugin;
+[32m+use division_render::DivisionRenderPlugin;
+[0m[32m+use division_selection::DivisionSelectionPlugin;
+[0m use frontline_render::FrontlineRenderPlugin;
+ use frontline_selection::FrontlineSelectionPlugin;
+ use offensive_line_selection::OffensiveLineSelectionPlugin;
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\movement.rs:22:
+                 Some(a) => a,
+                 None => continue,
+             };
+[31m-            if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating {
+[0m[32m+            if division.status == DivisionStatus::Fighting
+[0m[32m+                || division.status == DivisionStatus::Retreating
+[0m[32m+            {
+[0m                 continue;
+             }
+             if division.status != DivisionStatus::Moving {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\movement.rs:161:
+                 // 自国領への移動完了 → Idle（目的地到着時のみ）
+                 let arrived_at_destination = {
+                     let division = military_registry.divisions.get(&division_id);
+[31m-                    division.map(|a| a.target_state.is_none() && a.destination.is_none())
+[0m[32m+                    division
+[0m[32m+                        .map(|a| a.target_state.is_none() && a.destination.is_none())
+[0m                         .unwrap_or(false)
+                 };
+                 if arrived_at_destination
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\recruitment.rs:1:
+ use crate::common::{CountryId, DivisionDefinitionId, StateId};
+ use crate::country::CountryRegistry;
+[31m-use crate::military::data::{DivisionStatus, Division, MilitaryRegistry};
+[0m[32m+use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
+[0m use crate::state::data::StateRegistry;
+ use bevy::prelude::*;
+ use serde::{Deserialize, Serialize};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\supply.rs:15:
+             .get(&division.def_id)
+             .map(|d| d.supply_usage)
+             .unwrap_or(1.0);
+[31m-        *state_supply_usage.entry(division.current_state).or_insert(0.0) += usage;
+[0m[32m+        *state_supply_usage
+[0m[32m+            .entry(division.current_state)
+[0m[32m+            .or_insert(0.0) += usage;
+[0m     }
+ 
+     // Update state logistics ratio and apply to divisions
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\tests.rs:1:
+ #![cfg(test)]
+ #![allow(clippy::field_reassign_with_default)]
+ 
+[31m-use crate::common::{DivisionId, DivisionDefinitionId, CountryId, StateId};
+[0m[32m+use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
+[0m use crate::country::{CountryData, CountryRegistry};
+ use crate::military::data::{
+[31m-    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+[0m[32m+    Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
+[0m };
+ use crate::military::recruitment::{
+     RecruitFeasibility, cancel_recruitment, evaluate_recruit_feasibility, process_recruitment,
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\tests.rs:112:
+     country.available_manpower = 20_000;
+     country.treasury = 500.0;
+ 
+[31m-    request_recruitment(&mut country, &military_registry, DivisionDefinitionId(1), StateId(1)).unwrap();
+[0m[32m+    request_recruitment(
+[0m[32m+        &mut country,
+[0m[32m+        &military_registry,
+[0m[32m+        DivisionDefinitionId(1),
+[0m[32m+        StateId(1),
+[0m[32m+    )
+[0m[32m+    .unwrap();
+[0m     country_registry.countries.push(country);
+ 
+     // Progress 1 day
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\military\tests.rs:847:
+         "Exactly one battle should be created"
+     );
+     // 両ユニットが戦闘中
+[31m-    assert_eq!(mil.divisions[&DivisionId(0)].status, DivisionStatus::Fighting);
+[0m[31m-    assert_eq!(mil.divisions[&DivisionId(1)].status, DivisionStatus::Fighting);
+[0m[32m+    assert_eq!(
+[0m[32m+        mil.divisions[&DivisionId(0)].status,
+[0m[32m+        DivisionStatus::Fighting
+[0m[32m+    );
+[0m[32m+    assert_eq!(
+[0m[32m+        mil.divisions[&DivisionId(1)].status,
+[0m[32m+        DivisionStatus::Fighting
+[0m[32m+    );
+[0m }
+ 
+ #[test]
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\profiling.rs:23:
+ use crate::economy::resources::{CountryStockpile, ResourceType, StateResourceDeposit};
+ use crate::military::MilitaryPlugin;
+ use crate::military::battle::BattleRegistry;
+[31m-use crate::military::data::{DivisionStatus, Division, DivisionDefinition, MilitaryRegistry};
+[0m[32m+use crate::military::data::{Division, DivisionDefinition, DivisionStatus, MilitaryRegistry};
+[0m use crate::politics::PoliticsPlugin;
+ use crate::research::ResearchPlugin;
+ use crate::state::StatePlugin;
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\profiling.rs:660:
+             ));
+         }
+         if !division.organization.is_finite() || !division.morale.is_finite() {
+[31m-            return Err(format!("Division {:?} has non-finite derived value", division.id));
+[0m[32m+            return Err(format!(
+[0m[32m+                "Division {:?} has non-finite derived value",
+[0m[32m+                division.id
+[0m[32m+            ));
+[0m         }
+     }
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\save\runtime.rs:269:
+ /// 実行可能にするrun condition(P21-SAVE-003: 起動直後の「続きから」導線)。
+ /// `GameState::MainMenu`(起動直後、静的マスターRON読込中)では実行しない。
+ pub fn in_playing_or_country_selection(state: Res<State<GameState>>) -> bool {
+[31m-    matches!(state.get(), GameState::Playing | GameState::CountrySelection)
+[0m[32m+    matches!(
+[0m[32m+        state.get(),
+[0m[32m+        GameState::Playing | GameState::CountrySelection
+[0m[32m+    )
+[0m }
+ 
+ /// `PostUpdate`で実行されるロードシステム(排他的System、`&mut World`を直接受け取る)。
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\save\runtime.rs:1605:
+ 
+     #[test]
+     fn load_from_country_selection_success_sets_loaded_game_entry_mode_and_transitions_to_playing()
+[31m-     {
+[0m[32m+    {
+[0m         let temp_dir = TempTestDir::new("cs_success");
+         let mut app = setup_minimal_load_app_at_country_selection();
+         let config = temp_dir.save_file_config();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\ui\country_selection.rs:531:
+             .iter(app.world())
+             .next()
+             .expect("button entity must exist");
+[31m-        app.world_mut().entity_mut(entity).insert(Interaction::Pressed);
+[0m[32m+        app.world_mut()
+[0m[32m+            .entity_mut(entity)
+[0m[32m+            .insert(Interaction::Pressed);
+[0m     }
+ 
+     // ─── Startup/非自動実行 ──────────────────────────────────────────────────
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\ui\country_selection.rs:609:
+             .countries
+             .push(one_country());
+         app.update(); // setup_ui: preview.0 = Some(CountryId(0)) (first registered country)
+[31m-        assert_eq!(app.world().resource::<PreviewCountry>().0, Some(CountryId(0)));
+[0m[32m+        assert_eq!(
+[0m[32m+            app.world().resource::<PreviewCountry>().0,
+[0m[32m+            Some(CountryId(0))
+[0m[32m+        );
+[0m 
+         press_button::<ContinueButton>(&mut app);
+         app.update();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\ui\country_selection.rs:668:
+         app.world_mut().resource_mut::<LastLoadOutcome>().0 = Some(LoadOutcome::Failure {
+             path: std::path::PathBuf::from("saves/savegame_v1.ron"),
+             error: crate::save::runtime::LoadOperationError::ReadOrValidate(
+[31m-                crate::save::read::LoadSaveError::FileNotFound(
+[0m[31m-                    "saves/savegame_v1.ron".to_string(),
+[0m[31m-                ),
+[0m[32m+                crate::save::read::LoadSaveError::FileNotFound("saves/savegame_v1.ron".to_string()),
+[0m             ),
+         });
+         app.update();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\ui\peace_panel.rs:432:
+                 "peace_panel.capitulation_status",
+                 vec![
+                     ("defender", def_name.clone()),
+[31m-                    ("def_division", t(&catalog, locale.0, ready_key(def_has_division))),
+[0m[32m+                    (
+[0m[32m+                        "def_division",
+[0m[32m+                        t(&catalog, locale.0, ready_key(def_has_division)),
+[0m[32m+                    ),
+[0m                     ("atk_occ", atk_occ_def.to_string()),
+                     ("def_total", def_owned.len().to_string()),
+                     ("def_cap", t(&catalog, locale.0, cap_key(def_cap))),
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\ui\peace_panel.rs:439:
+                     ("attacker", atk_name.clone()),
+[31m-                    ("atk_division", t(&catalog, locale.0, ready_key(atk_has_division))),
+[0m[32m+                    (
+[0m[32m+                        "atk_division",
+[0m[32m+                        t(&catalog, locale.0, ready_key(atk_has_division)),
+[0m[32m+                    ),
+[0m                     ("def_occ", def_occ_atk.to_string()),
+                     ("atk_total", atk_owned.len().to_string()),
+                     ("atk_cap", t(&catalog, locale.0, cap_key(atk_cap))),
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\capitulation.rs:17:
+     military_registry: &MilitaryRegistry,
+ ) -> bool {
+     military_registry.divisions.values().any(|division| {
+[31m-        division.owner == country_id && division.status != DivisionStatus::Destroyed && division.manpower > 0
+[0m[32m+        division.owner == country_id
+[0m[32m+            && division.status != DivisionStatus::Destroyed
+[0m[32m+            && division.manpower > 0
+[0m     })
+ }
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:1:
+ use crate::app::time::DayChangedMessage;
+[31m-use crate::common::{DivisionId, CountryId, FrontlineId, StateId};
+[0m[32m+use crate::common::{CountryId, DivisionId, FrontlineId, StateId};
+[0m use crate::country::{CountryRegistry, PlayerCountry};
+[31m-use crate::military::data::{DivisionStatus, Division, MilitaryRegistry};
+[0m[32m+use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
+[0m use crate::military::pathfinding::find_path;
+ use crate::state::data::StateRegistry;
+ use crate::war::data::{War, WarRegistry, WarStatus};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:34:
+         match self {
+             MilitaryAiDecisionReason::NoActiveWar => "military_ai_reason.no_active_war",
+             MilitaryAiDecisionReason::NoValidFrontline => "military_ai_reason.no_valid_frontline",
+[31m-            MilitaryAiDecisionReason::NoAvailableDivision => "military_ai_reason.no_available_division",
+[0m[32m+            MilitaryAiDecisionReason::NoAvailableDivision => {
+[0m[32m+                "military_ai_reason.no_available_division"
+[0m[32m+            }
+[0m             MilitaryAiDecisionReason::NoReachableFrontline => {
+                 "military_ai_reason.no_reachable_frontline"
+             }
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:133:
+         return false;
+     }
+     // 戦闘中・撤退中の部隊は新規割当対象にしない（割当済み前線への所属維持は可）
+[31m-    if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating {
+[0m[32m+    if division.status == DivisionStatus::Fighting || division.status == DivisionStatus::Retreating
+[0m[32m+    {
+[0m         return false;
+     }
+     // 既に別の前線に所属している場合は対象外
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:140:
+[31m-    if frontline_registry.division_frontline_map.contains_key(&division.id) {
+[0m[32m+    if frontline_registry
+[0m[32m+        .division_frontline_map
+[0m[32m+        .contains_key(&division.id)
+[0m[32m+    {
+[0m         return false;
+     }
+     true
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:387:
+             a.owner == country_id
+                 && a.manpower > 0
+                 && a.status != DivisionStatus::Destroyed
+[31m-                && !frontline_registry.division_frontline_map.contains_key(&a.id)
+[0m[32m+                && !frontline_registry
+[0m[32m+                    .division_frontline_map
+[0m[32m+                    .contains_key(&a.id)
+[0m                 && state_registry
+                     .get(a.current_state)
+                     .map(|s| !s.is_sea)
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:681:
+     use crate::country::CountryData;
+     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
+     use crate::military::data::{
+[31m-        DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType,
+[0m[32m+        Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType,
+[0m     };
+     use crate::state::data::StateData;
+     use crate::war::frontline::update_all_frontlines;
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\military_ai.rs:1003:
+             organization: 100.0,
+             max_organization: 100.0,
+             status: DivisionStatus::Idle,
+[31m-            ..military_registry.divisions.get(&c2_division_id).unwrap().clone()
+[0m[32m+            ..military_registry
+[0m[32m+                .divisions
+[0m[32m+                .get(&c2_division_id)
+[0m[32m+                .unwrap()
+[0m[32m+                .clone()
+[0m         };
+         military_registry.add_division(a_c1);
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\peace.rs:150:
+         };
+ 
+         // 自国所有または自国支配の地域に居る場合は移動不要
+[31m-        if curr_state.owner_country_id == division.owner || curr_state.controller() == division.owner {
+[0m[32m+        if curr_state.owner_country_id == division.owner
+[0m[32m+            || curr_state.controller() == division.owner
+[0m[32m+        {
+[0m             continue;
+         }
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\peace.rs:162:
+             .filter(|&nid| {
+                 if let Some(ns) = state_registry.get(nid) {
+                     !ns.is_sea
+[31m-                        && (ns.controller() == division.owner || ns.owner_country_id == division.owner)
+[0m[32m+                        && (ns.controller() == division.owner
+[0m[32m+                            || ns.owner_country_id == division.owner)
+[0m                 } else {
+                     false
+                 }
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\peace.rs:185:
+             .states
+             .iter()
+             .filter(|s| {
+[31m-                !s.is_sea && (s.controller() == division.owner || s.owner_country_id == division.owner)
+[0m[32m+                !s.is_sea
+[0m[32m+                    && (s.controller() == division.owner || s.owner_country_id == division.owner)
+[0m             })
+             .map(|s| s.id)
+             .collect();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\tests.rs:2:
+ 
+ use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
+ use crate::military::data::{
+[31m-    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+[0m[32m+    Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
+[0m };
+ use crate::state::data::{StateData, StateRegistry};
+ use crate::war::data::{War, WarRegistry};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\src\war\tests.rs:888:
+ #[test]
+ fn test_phase16_capitulation_rules() {
+     use crate::diplomacy::crisis::{WarGoal, WarGoalType};
+[31m-    use crate::military::data::{DivisionStatus, Division, DivisionSize, DivisionType};
+[0m[32m+    use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
+[0m     use crate::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
+ 
+     let goal = WarGoal {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:29:
+ use strategy_game::military::MilitaryPlugin;
+ use strategy_game::military::battle::{BattleRegistry, BattleStatus};
+ use strategy_game::military::data::{
+[31m-    DivisionStatus, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+[0m[32m+    DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
+[0m };
+ use strategy_game::politics::PoliticsPlugin;
+ use strategy_game::politics::interest_groups::{InterestGroupState, InterestGroupType};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:532:
+     }
+ }
+ 
+[31m-fn snapshot_division_detail(division: &strategy_game::military::data::Division) -> DivisionDetailSnapshot {
+[0m[32m+fn snapshot_division_detail(
+[0m[32m+    division: &strategy_game::military::data::Division,
+[0m[32m+) -> DivisionDetailSnapshot {
+[0m     DivisionDetailSnapshot {
+         id: division.id,
+         owner: division.owner,
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:772:
+         .map(|&division_id| {
+             (
+                 division_id,
+[31m-                military_reg.divisions.get(&division_id).map(|division| division.owner),
+[0m[32m+                military_reg
+[0m[32m+                    .divisions
+[0m[32m+                    .get(&division_id)
+[0m[32m+                    .map(|division| division.owner),
+[0m             )
+         })
+         .collect();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:797:
+         active_war_count: active_count,
+         frontline_count: frontline_reg.frontlines.len(),
+         ai_division_destinations: ai_divisions.iter().map(|a| a.destination).collect(),
+[31m-        ai_division_paths: ai_divisions.iter().map(|a| a.current_path.clone()).collect(),
+[0m[32m+        ai_division_paths: ai_divisions
+[0m[32m+            .iter()
+[0m[32m+            .map(|a| a.current_path.clone())
+[0m[32m+            .collect(),
+[0m         ai_division_positions: ai_divisions.iter().map(|a| a.current_state).collect(),
+         ai_division_progresses: ai_divisions.iter().map(|a| a.movement_progress).collect(),
+         occupied_states_count: occupied,
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:1449:
+     app.update();
+ }
+ 
+[31m-fn boundary_division(snapshot: &SetBoundarySnapshot, division_id: DivisionId) -> DivisionDetailSnapshot {
+[0m[32m+fn boundary_division(
+[0m[32m+    snapshot: &SetBoundarySnapshot,
+[0m[32m+    division_id: DivisionId,
+[0m[32m+) -> DivisionDetailSnapshot {
+[0m     snapshot
+         .player_divisions
+         .iter()
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:1918:
+ 
+     // ─── FrontlineOrders 境界 (MilitaryAi の後続) ────────────────────────────
+     // FrontlineOrders直後: AI由来の移動命令が生成されていること (destination or path)
+[31m-    let has_dest = orders_snap.ai_division_destinations.iter().any(|d| d.is_some());
+[0m[32m+    let has_dest = orders_snap
+[0m[32m+        .ai_division_destinations
+[0m[32m+        .iter()
+[0m[32m+        .any(|d| d.is_some());
+[0m     let has_path = orders_snap.ai_division_paths.iter().any(|p| !p.is_empty());
+     assert!(
+         has_dest || has_path,
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\daily_system_integration_test.rs:2445:
+         .collect();
+     for division_id in &war_related_division_ids {
+         assert!(
+[31m-            !frontline_reg.division_frontline_map.contains_key(division_id),
+[0m[32m+            !frontline_reg
+[0m[32m+                .division_frontline_map
+[0m[32m+                .contains_key(division_id),
+[0m             "WarResolution直後: division_frontline_map に DivisionId({:?}) が残っていないこと",
+             division_id
+         );
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:5:
+ use strategy_game::military::battle::BattleRegistry;
+ use strategy_game::military::combat_calc::resolve_combat_day;
+ use strategy_game::military::data::{
+[31m-    DivisionStatus, Division, DivisionDefinition, DivisionSize, DivisionType, MilitaryRegistry,
+[0m[32m+    Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
+[0m };
+ use strategy_game::military::invasion::{occupy_state, process_division_arrival};
+ use strategy_game::state::data::{StateData, StateRegistry};
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:12:
+[31m-use strategy_game::war::capitulation::{evaluate_war_capitulation, CapitulationResult};
+[0m[32m+use strategy_game::war::capitulation::{CapitulationResult, evaluate_war_capitulation};
+[0m use strategy_game::war::combat::sync_battle_results_to_wars;
+ use strategy_game::war::data::{WarRegistry, WarStatus};
+[31m-use strategy_game::war::frontline::{update_all_frontlines, FrontlineRegistry};
+[0m[32m+use strategy_game::war::frontline::{FrontlineRegistry, update_all_frontlines};
+[0m use strategy_game::war::justification::WarJustificationRegistry;
+[31m-use strategy_game::war::peace::{execute_peace_settlement, PeaceTerm};
+[0m[32m+use strategy_game::war::peace::{PeaceTerm, execute_peace_settlement};
+[0m use strategy_game::war::war_score::process_war_score;
+ 
+ /// RONファイルからロードして、国家数が期待どおりであり、かつ全州（海域を除く）が
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:173:
+         supply_usage: 1.0,
+         maintenance_cost: 1.0,
+     };
+[31m-    military_reg.definitions.insert(DivisionDefinitionId(1), div_def);
+[0m[32m+    military_reg
+[0m[32m+        .definitions
+[0m[32m+        .insert(DivisionDefinitionId(1), div_def);
+[0m 
+     let attacker_country = CountryId(0); // Kingdom of Arcadia
+     let defender_country = CountryId(3); // Oceanic Magic Empire (今回直接接続した国家)
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:180:
+[31m-    let target_state = StateId(8);      // Oceanic の首都州 (State 8)
+[0m[32m+    let target_state = StateId(8); // Oceanic の首都州 (State 8)
+[0m     let attacker_border_state = StateId(1); // Arcadia の State 1 (State 8 と直接隣接)
+ 
+     // 隣接の直接確認
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:184:
+     let s1 = state_reg.get(attacker_border_state).unwrap();
+[31m-    assert!(s1.neighbors.contains(&target_state), "State 1 must border State 8");
+[0m[32m+    assert!(
+[0m[32m+        s1.neighbors.contains(&target_state),
+[0m[32m+        "State 1 must border State 8"
+[0m[32m+    );
+[0m 
+     // 2. 正当化プロセスと開戦 (War Declaration)
+     let start_date = "1936/01/01".to_string();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:223:
+     let frontline = frontline_reg.get_frontline_for_war(war_id);
+     assert!(frontline.is_some(), "Frontline should be created for war");
+     let fl = frontline.unwrap();
+[31m-    assert!(fl.border_region_pairs.contains(&(attacker_border_state, target_state)));
+[0m[32m+    assert!(
+[0m[32m+        fl.border_region_pairs
+[0m[32m+            .contains(&(attacker_border_state, target_state))
+[0m[32m+    );
+[0m 
+     // 4. 部隊配置と戦闘の開始 (Division Placement & Combat)
+     let atk_division = Division {
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:280:
+         combat_id: None,
+     };
+ 
+[31m-    military_reg.divisions.insert(atk_division.id, atk_division.clone());
+[0m[31m-    military_reg.divisions.insert(def_division.id, def_division.clone());
+[0m[32m+    military_reg
+[0m[32m+        .divisions
+[0m[32m+        .insert(atk_division.id, atk_division.clone());
+[0m[32m+    military_reg
+[0m[32m+        .divisions
+[0m[32m+        .insert(def_division.id, def_division.clone());
+[0m 
+     // 攻撃部隊が防御側のいる目標州に到着し、戦闘が自動開始されることを検証
+     process_division_arrival(
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:296:
+     );
+ 
+     let ongoing_battle = battle_reg.get_ongoing_battle_in_state(target_state);
+[31m-    assert!(ongoing_battle.is_some(), "Battle should be successfully started on target state");
+[0m[32m+    assert!(
+[0m[32m+        ongoing_battle.is_some(),
+[0m[32m+        "Battle should be successfully started on target state"
+[0m[32m+    );
+[0m 
+     // 戦闘計算 (Resolve Combat Day)
+     let (atk_loss, _, def_loss, _) = resolve_combat_day(&atk_division, &def_division, 0);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:303:
+[31m-    assert!(atk_loss > 0 || def_loss > 0, "Combat should deal damage to forces");
+[0m[32m+    assert!(
+[0m[32m+        atk_loss > 0 || def_loss > 0,
+[0m[32m+        "Combat should deal damage to forces"
+[0m[32m+    );
+[0m 
+     // 戦闘勝利のシミュレーションと戦争ログ集計
+     sync_battle_results_to_wars(&battle_reg, &mut war_reg);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:314:
+     occupy_state(StateId(23), attacker_country, &mut state_reg);
+     occupy_state(StateId(24), attacker_country, &mut state_reg);
+     let state_8 = state_reg.get(target_state).unwrap();
+[31m-    assert_eq!(state_8.controller_country, Some(attacker_country), "Target state should now be controlled by attacker");
+[0m[32m+    assert_eq!(
+[0m[32m+        state_8.controller_country,
+[0m[32m+        Some(attacker_country),
+[0m[32m+        "Target state should now be controlled by attacker"
+[0m[32m+    );
+[0m 
+     process_war_score(&state_reg, &mut war_reg);
+     let active_war = war_reg.wars.get(&war_id).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:321:
+[31m-    assert!(active_war.war_score > 0.0, "Attacker war score should be positive after occupying target state");
+[0m[32m+    assert!(
+[0m[32m+        active_war.war_score > 0.0,
+[0m[32m+        "Attacker war score should be positive after occupying target state"
+[0m[32m+    );
+[0m 
+     // 6. 降伏判定・講和 (Capitulation & Peace Treaty Settlement)
+     let cap_result = evaluate_war_capitulation(active_war, &state_reg, &military_reg);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:339:
+         &mut frontline_reg,
+     );
+ 
+[31m-    assert!(peace_res.is_ok(), "Peace settlement execution should succeed");
+[0m[32m+    assert!(
+[0m[32m+        peace_res.is_ok(),
+[0m[32m+        "Peace settlement execution should succeed"
+[0m[32m+    );
+[0m 
+     // 講和完了の検証
+     let ended_war = war_reg.wars.get(&war_id).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:346:
+[31m-    assert_eq!(ended_war.status, WarStatus::AttackerVictory, "War status should be AttackerVictory after peace");
+[0m[32m+    assert_eq!(
+[0m[32m+        ended_war.status,
+[0m[32m+        WarStatus::AttackerVictory,
+[0m[32m+        "War status should be AttackerVictory after peace"
+[0m[32m+    );
+[0m     assert!(ended_war.end_date.is_some(), "War end date should be set");
+[31m-    assert_eq!(ended_war.end_reason.as_deref(), Some("Defender Capitulation Settlement"));
+[0m[32m+    assert_eq!(
+[0m[32m+        ended_war.end_reason.as_deref(),
+[0m[32m+        Some("Defender Capitulation Settlement")
+[0m[32m+    );
+[0m 
+     // 講和により領土割譲（Target State の所有権が攻撃側に移動）したことを確認
+     let cceded_state = state_reg.get(target_state).unwrap();
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:352:
+[31m-    assert_eq!(cceded_state.owner_country_id, attacker_country, "Target state ownership should be ceded to attacker");
+[0m[32m+    assert_eq!(
+[0m[32m+        cceded_state.owner_country_id, attacker_country,
+[0m[32m+        "Target state ownership should be ceded to attacker"
+[0m[32m+    );
+[0m 
+     // 前線が削除・整理されたことを確認
+     let fl_after = frontline_reg.get_frontline_for_war(war_id);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\land_war_combat_peace_test.rs:356:
+[31m-    assert!(fl_after.is_none(), "Frontline should be removed after peace settlement");
+[0m[32m+    assert!(
+[0m[32m+        fl_after.is_none(),
+[0m[32m+        "Frontline should be removed after peace settlement"
+[0m[32m+    );
+[0m }
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\p21_save_003_end_to_end_test.rs:143:
+         .query_filtered::<Entity, With<T>>()
+         .iter(app.world())
+         .next()
+[31m-        .unwrap_or_else(|| panic!("button entity for {} must exist", std::any::type_name::<T>()));
+[0m[32m+        .unwrap_or_else(|| {
+[0m[32m+            panic!(
+[0m[32m+                "button entity for {} must exist",
+[0m[32m+                std::any::type_name::<T>()
+[0m[32m+            )
+[0m[32m+        });
+[0m     app.world_mut()
+         .entity_mut(entity)
+         .insert(Interaction::Pressed);
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\p21_save_003_end_to_end_test.rs:321:
+     );
+     assert!(app.world().resource::<GamePaused>().0);
+     assert!(
+[31m-        app.world().resource::<MilitaryRegistry>().divisions.is_empty(),
+[0m[32m+        app.world()
+[0m[32m+            .resource::<MilitaryRegistry>()
+[0m[32m+            .divisions
+[0m[32m+            .is_empty(),
+[0m         "a zero-division save must not gain debug divisions on a continue-load"
+     );
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\p21_save_003_end_to_end_test.rs:328:
+     // ── ロード後に再セーブできる ─────────────────────────────────────────────
+     send_save_request(&mut app);
+     app.update();
+[31m-    let resaved_contents =
+[0m[31m-        std::fs::read_to_string(app.world().resource::<SaveFileConfig>().path.final_path.clone())
+[0m[31m-            .unwrap();
+[0m[32m+    let resaved_contents = std::fs::read_to_string(
+[0m[32m+        app.world()
+[0m[32m+            .resource::<SaveFileConfig>()
+[0m[32m+            .path
+[0m[32m+            .final_path
+[0m[32m+            .clone(),
+[0m[32m+    )
+[0m[32m+    .unwrap();
+[0m     let resaved: strategy_game::save::SaveGameV1 = ron::from_str(&resaved_contents).unwrap();
+     assert_eq!(resaved.date.year, saved_year);
+ 
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\p21_save_003_end_to_end_test.rs:457:
+         other => panic!("expected a load failure (no save file yet), got {other:?}"),
+     }
+     assert_eq!(app.world().resource::<LoadExecutionCount>().0, 1);
+[31m-    assert_eq!(app.world().resource::<PlayerCountry>().0, before_player_country);
+[0m[32m+    assert_eq!(
+[0m[32m+        app.world().resource::<PlayerCountry>().0,
+[0m[32m+        before_player_country
+[0m[32m+    );
+[0m 
+     app.update();
+     assert_eq!(
+Diff in \\?\C:\Users\hirom\Desktop\strategy_game\strategy_game\tests\profile_workload_correctness_test.rs:198:
+ 
+     assert_eq!(counts_a.state_count, counts_b.state_count);
+     assert_eq!(counts_a.country_count, counts_b.country_count);
+[31m-    assert_eq!(counts_a.initial_division_count, counts_b.initial_division_count);
+[0m[32m+    assert_eq!(
+[0m[32m+        counts_a.initial_division_count,
+[0m[32m+        counts_b.initial_division_count
+[0m[32m+    );
+[0m     assert_eq!(counts_a.initial_war_count, counts_b.initial_war_count);
+ 
+     for _ in 0..20 {
