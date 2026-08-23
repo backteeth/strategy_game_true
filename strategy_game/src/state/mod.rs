@@ -2,6 +2,7 @@
 /// 州データと選択状態を管理する
 /// データ本体は DataLoaderPlugin が RON から読み込んで StateRegistry に注入する
 pub mod data;
+pub mod ownership;
 
 use crate::common::StateId;
 use bevy::prelude::*;

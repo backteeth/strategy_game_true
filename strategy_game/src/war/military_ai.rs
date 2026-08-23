@@ -807,6 +807,7 @@ mod tests {
             defenders: [CountryId(2)].into_iter().collect(),
             primary_attacker: None,
             primary_defender: None,
+            source_crisis_id: None,
             war_goals: vec![WarGoal {
                 attacker: CountryId(1),
                 defender: CountryId(2),

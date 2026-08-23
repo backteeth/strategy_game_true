@@ -54,6 +54,7 @@ fn primary_target_state(crisis: &crate::diplomacy::crisis::DiplomaticCrisis) -> 
 
 fn validate_target_responder(
     crisis_registry: &CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     responder: CountryId,
 ) -> Result<(), &'static str> {
@@ -67,43 +68,160 @@ fn validate_target_responder(
     if crisis.current_phase != CrisisPhase::DemandSent {
         return Err("diplomacy_error.crisis.not_awaiting_response");
     }
+    // P21-021: 消滅済み国家は最後通牒に応答できない(通常はapply_country_eliminationが
+    // 未解決Crisisを即座にCancelledByCountryEliminationへ遷移させるため構造的にも
+    // 起こり得ないが、Domain APIレベルの防御としてここでも明示的に検証する)。
+    if country_registry
+        .get(responder)
+        .is_none_or(|c| !c.is_active())
+    {
+        return Err("diplomacy_error.crisis.responder_missing");
+    }
     Ok(())
 }
 
 /// P21-011: 対象国が最後通牒を受諾できるかを検証する(実際には変更しない)。
 pub fn can_accept_demand(
     crisis_registry: &CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     responder: CountryId,
 ) -> Result<(), &'static str> {
-    validate_target_responder(crisis_registry, crisis_id, responder)
+    validate_target_responder(crisis_registry, country_registry, crisis_id, responder)
 }
 
 /// P21-011: 検証込みで最後通牒を受諾する。対象州の所有権をinitiatorへ平和的に
 /// 移譲し、根拠となったClaimを消費済みにし、Crisisを`ResolvedPeacefully`へ
-/// 遷移させる。検証に失敗した場合、Registry(`crises`・`claims`・`states`)は
-/// 一切変更しない。
+/// 遷移させる。検証に失敗した場合、Registry(`crises`・`claims`・`states`・
+/// `countries`)は一切変更しない。
+///
+/// P21-020: 州所有権移転は共通Domain API
+/// `state::ownership::preflight_transfer_state_ownership`/`apply_ownership_transfer`
+/// を経由する——対象州の現在所有国が`crisis.target`のままであることの検証と、
+/// 対象州が`crisis.target`の首都だった場合の決定論的な首都再配置(残存陸州が
+/// 無ければ講和自体を安全に拒否)を、War講和(`war::peace::execute_peace_settlement`)
+/// と全く同じ規則で行う。所有権移転が失敗した場合はClaimを消費せず、
+/// Crisisのフェーズも変更しない(以前は移転結果を無視して常にClaim消費・
+/// フェーズ遷移していた既存ギャップの修正)。
+///
+/// P21-020(ユーザー指摘対応): 対象州を目標とする別のActive War(このCrisisとは
+/// 無関係な、通常の正当化経路から始まったWar等)が既に存在する場合は受諾自体を
+/// 拒否する。`execute_peace_settlement`側(War講和)は所有権移転の成立時に
+/// 競合する他Warを自動的に白紙講和で失効させる設計(§後述)だが、`accept_demand`
+/// は外交上の平和的受諾という性質上、無関係な第三者間のWarへ副作用として
+/// 介入するのではなく、明示的に受諾を拒否して呼び出し元(プレイヤー/AI)へ
+/// 判断を委ねる(Warを終わらせる権限は本来その戦争の当事国にしかない)。
+/// この検証は`WarRegistry`を読み取るだけで済むため、既存の重い講和専用
+/// Registry群(Military/Battle/Diplomacy/Frontline)を`accept_demand`へ
+/// 追加する必要がない。
+#[allow(clippy::too_many_arguments)]
 pub fn accept_demand(
     crisis_registry: &mut CrisisRegistry,
     claim_registry: &mut ClaimRegistry,
     state_registry: &mut StateRegistry,
+    country_registry: &mut CountryRegistry,
+    war_registry: &mut crate::war::data::WarRegistry,
+    military_registry: &mut crate::military::data::MilitaryRegistry,
+    army_registry: &mut crate::military::army::ArmyRegistry,
+    frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
+    battle_registry: &mut crate::military::battle::BattleRegistry,
+    diplomacy_registry: &mut crate::diplomacy::data::DiplomacyRegistry,
+    justification_registry: &mut WarJustificationRegistry,
+    power_registry: &mut crate::country::power::CountryPowerRegistry,
+    current_date_str: &str,
     crisis_id: DiplomaticCrisisId,
     responder: CountryId,
 ) -> Result<(), &'static str> {
-    can_accept_demand(crisis_registry, crisis_id, responder)?;
+    can_accept_demand(crisis_registry, country_registry, crisis_id, responder)?;
 
     let crisis = crisis_registry.crises.get(&crisis_id).unwrap();
     let initiator = crisis.initiator;
+    let target = crisis.target;
     let target_state = primary_target_state(crisis);
     let related_claim_id = crisis.related_claim_id;
 
-    if let Some(state_id) = target_state {
-        // P21-010以前から存在する`transfer_region_ownership`は海州のみ拒否する。
-        // Claim/Crisis開始時点で既に非海州であることが検証済みのため
-        // (`ClaimRegistry::can_create_claim`のstate_is_sea拒否)、ここでの失敗は
-        // 通常発生しない。`war/peace.rs`の`CedeWarGoalRegion`と同じ規約で
-        // 結果を無視する。
-        let _ = state_registry.transfer_region_ownership(state_id, initiator);
+    if let Some(state_id) = target_state
+        && war_registry.wars.values().any(|w| {
+            w.status == crate::war::data::WarStatus::Active
+                && w.war_goals
+                    .iter()
+                    .any(|g| g.target_states.contains(&state_id))
+        })
+    {
+        return Err("diplomacy_error.crisis.target_state_contested_by_another_war");
+    }
+
+    // 実際の変更を一切行う前に、州所有権移転が可能かを検証する(全か無かの原子性)。
+    // P21-021: `LastOwnedLandState`(=targetがこの州を失うと陸州0になる)が
+    // 返った場合だけ、`country::elimination`の国家消滅Domain APIへフォールバック
+    // する(`war::peace::execute_peace_settlement`のCedeWarGoalRegion分岐と
+    // 全く同じフォールバック規則)。
+    enum CessionPlan {
+        Normal(crate::state::ownership::ValidatedOwnershipTransfer),
+        Elimination(crate::country::elimination::CountryEliminationPlan),
+    }
+    let cession_plan = match target_state {
+        Some(state_id) => {
+            match crate::state::ownership::preflight_transfer_state_ownership(
+                state_id,
+                target,
+                initiator,
+                state_registry,
+                country_registry,
+            ) {
+                Ok(plan) => Some(CessionPlan::Normal(plan)),
+                Err(crate::state::ownership::OwnershipTransferError::LastOwnedLandState) => {
+                    let elim_plan = crate::country::elimination::preflight_country_elimination(
+                        state_id,
+                        target,
+                        initiator,
+                        current_date_str,
+                        state_registry,
+                        country_registry,
+                    )
+                    .map_err(|e| e.localization_key())?;
+                    Some(CessionPlan::Elimination(elim_plan))
+                }
+                Err(e) => return Err(e.localization_key()),
+            }
+        }
+        None => None,
+    };
+
+    match cession_plan {
+        Some(CessionPlan::Normal(plan)) => {
+            crate::state::ownership::apply_ownership_transfer(
+                plan,
+                state_registry,
+                country_registry,
+            )
+            .map_err(|e| e.localization_key())?;
+        }
+        Some(CessionPlan::Elimination(elim_plan)) => {
+            // P21-021: targetの最後の所有陸州を移転すると同時に、国家消滅の全清掃を
+            // 行う。このCrisis自身(`crisis_id`)は清掃ループから除外され、以下の
+            // 最終ステップで通常どおり`ResolvedPeacefully`へ遷移する。
+            crate::country::elimination::apply_country_elimination(
+                elim_plan,
+                None,
+                Some(crisis_id),
+                current_date_str,
+                state_registry,
+                country_registry,
+                military_registry,
+                army_registry,
+                frontline_registry,
+                war_registry,
+                battle_registry,
+                diplomacy_registry,
+                crisis_registry,
+                claim_registry,
+                justification_registry,
+                power_registry,
+            )
+            .map_err(|e| e.localization_key())?;
+        }
+        None => {}
     }
     if let Some(claim_id) = related_claim_id {
         claim_registry.mark_consumed(claim_id);
@@ -118,10 +236,11 @@ pub fn accept_demand(
 /// P21-011: 対象国が最後通牒を拒否できるかを検証する(実際には変更しない)。
 pub fn can_reject_demand(
     crisis_registry: &CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     responder: CountryId,
 ) -> Result<(), &'static str> {
-    validate_target_responder(crisis_registry, crisis_id, responder)
+    validate_target_responder(crisis_registry, country_registry, crisis_id, responder)
 }
 
 /// P21-011: 検証込みで最後通牒を拒否する。initiatorへ即座に完成済みの
@@ -130,12 +249,13 @@ pub fn can_reject_demand(
 /// 場合、Registryは一切変更しない。
 pub fn reject_demand(
     crisis_registry: &mut CrisisRegistry,
+    country_registry: &CountryRegistry,
     justification_registry: &mut WarJustificationRegistry,
     crisis_id: DiplomaticCrisisId,
     responder: CountryId,
     current_date: String,
 ) -> Result<(), &'static str> {
-    can_reject_demand(crisis_registry, crisis_id, responder)?;
+    can_reject_demand(crisis_registry, country_registry, crisis_id, responder)?;
     apply_rejection(
         crisis_registry,
         justification_registry,
@@ -214,6 +334,7 @@ pub(crate) fn apply_rejection(
 /// 終結済み(ResolvedPeacefully/WarStarted/Cancelled)は撤回できない。
 pub fn can_withdraw_crisis(
     crisis_registry: &CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     initiator: CountryId,
 ) -> Result<(), &'static str> {
@@ -230,6 +351,15 @@ pub fn can_withdraw_crisis(
     ) {
         return Err("diplomacy_error.crisis.already_resolved");
     }
+    // P21-021: 消滅済み国家はCrisisを撤回できない(通常はapply_country_eliminationが
+    // 未解決Crisisを即座にCancelledByCountryEliminationへ遷移させるため構造的にも
+    // 起こり得ないが、Domain APIレベルの防御としてここでも明示的に検証する)。
+    if country_registry
+        .get(initiator)
+        .is_none_or(|c| !c.is_active())
+    {
+        return Err("diplomacy_error.crisis.initiator_missing");
+    }
     Ok(())
 }
 
@@ -239,11 +369,12 @@ pub fn can_withdraw_crisis(
 /// 検証に失敗した場合、Registryは一切変更しない。
 pub fn withdraw_crisis(
     crisis_registry: &mut CrisisRegistry,
+    country_registry: &CountryRegistry,
     justification_registry: &mut WarJustificationRegistry,
     crisis_id: DiplomaticCrisisId,
     initiator: CountryId,
 ) -> Result<(), &'static str> {
-    can_withdraw_crisis(crisis_registry, crisis_id, initiator)?;
+    can_withdraw_crisis(crisis_registry, country_registry, crisis_id, initiator)?;
 
     let crisis = crisis_registry.crises.get(&crisis_id).unwrap();
     let related_justification_id = crisis.related_justification_id;
@@ -340,7 +471,12 @@ pub fn can_pledge_support(
     if crisis.initiator == supporter || crisis.target == supporter {
         return Err("diplomacy_error.crisis.support_self");
     }
-    if country_registry.get(supporter).is_none() {
+    // P21-021: 消滅済み(Eliminated)国家は新たにCrisis支持を表明できない
+    // (§10: Domain APIレベルでの拒否)。
+    if country_registry
+        .get(supporter)
+        .is_none_or(|c| !c.is_active())
+    {
         return Err("diplomacy_error.crisis.support_country_missing");
     }
     if !crisis_is_awaiting_support_response(crisis, current_date) {
@@ -388,6 +524,7 @@ pub fn pledge_support(
 /// 従う — `withdraw_crisis`の`initiator`引数等と同じモデル)。
 pub fn can_withdraw_support(
     crisis_registry: &CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     supporter: CountryId,
     current_date: &GameDate,
@@ -398,6 +535,15 @@ pub fn can_withdraw_support(
         .ok_or("diplomacy_error.crisis.not_found")?;
     if !crisis_is_awaiting_support_response(crisis, current_date) {
         return Err("diplomacy_error.crisis.not_awaiting_response");
+    }
+    // P21-021: 消滅済み国家は支持撤回もできない(通常はapply_country_eliminationが
+    // 消滅国家自身のthird_party_reactionsエントリを全Crisisから即座に除去するため
+    // 構造的にも起こり得ないが、Domain APIレベルの防御としてここでも明示的に検証する)。
+    if country_registry
+        .get(supporter)
+        .is_none_or(|c| !c.is_active())
+    {
+        return Err("diplomacy_error.crisis.support_country_missing");
     }
     if !crisis.third_party_reactions.contains_key(&supporter) {
         return Err("diplomacy_error.crisis.support_not_found");
@@ -411,11 +557,18 @@ pub fn can_withdraw_support(
 /// 返さないため)。
 pub fn withdraw_support(
     crisis_registry: &mut CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     supporter: CountryId,
     current_date: &GameDate,
 ) -> Result<(), &'static str> {
-    can_withdraw_support(crisis_registry, crisis_id, supporter, current_date)?;
+    can_withdraw_support(
+        crisis_registry,
+        country_registry,
+        crisis_id,
+        supporter,
+        current_date,
+    )?;
     let crisis = crisis_registry.crises.get_mut(&crisis_id).unwrap();
     crisis.third_party_reactions.remove(&supporter);
     Ok(())
@@ -427,6 +580,7 @@ mod tests {
     use crate::diplomacy::claims::{ClaimSource, ClaimStatus, TerritorialClaim};
     use crate::diplomacy::crisis::WarGoal;
     use crate::state::data::StateData;
+    use crate::war::data::WarRegistry;
 
     fn make_state_registry(state_id: usize, owner: usize) -> StateRegistry {
         StateRegistry::build(vec![StateData {
@@ -495,6 +649,7 @@ mod tests {
         let mut crisis_registry = CrisisRegistry::default();
         let mut claim_registry = ClaimRegistry::default();
         let mut state_registry = make_state_registry(1, 1);
+        let mut country_registry = countries_with(&[0, 1]);
 
         let claim_id = seed_claim(&mut claim_registry, 0, 1);
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, Some(claim_id));
@@ -503,6 +658,16 @@ mod tests {
             &mut crisis_registry,
             &mut claim_registry,
             &mut state_registry,
+            &mut country_registry,
+            &mut WarRegistry::default(),
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/01/01",
             crisis_id,
             CountryId(1),
         )
@@ -526,6 +691,262 @@ mod tests {
         );
     }
 
+    /// P21-020(ユーザー指摘対応): 対象州を目標とする別のActive Warが既に
+    /// 存在する場合、要求受諾自体を拒否する(複数Warの同一州競合対策の
+    /// うち`accept_demand`側の選択)。Registryは一切変更しない。
+    #[test]
+    fn accept_demand_rejects_when_target_state_is_contested_by_another_active_war() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut claim_registry = ClaimRegistry::default();
+        let mut state_registry = make_state_registry(1, 1);
+        let mut country_registry = countries_with(&[0, 1]);
+
+        let claim_id = seed_claim(&mut claim_registry, 0, 1);
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, Some(claim_id));
+
+        // StateId(1)を目標とする、このCrisisとは無関係な別のActive Warが
+        // 既に存在する。
+        let mut war_registry = WarRegistry::default();
+        war_registry.wars.insert(
+            crate::common::WarId(0),
+            crate::war::data::War {
+                id: crate::common::WarId(0),
+                name: "Unrelated War".to_string(),
+                attackers: [CountryId(9)].into_iter().collect(),
+                defenders: [CountryId(1)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![crate::diplomacy::crisis::WarGoal {
+                    attacker: CountryId(9),
+                    defender: CountryId(1),
+                    goal_type: crate::diplomacy::crisis::WarGoalType::ConquerState,
+                    target_states: vec![StateId(1)],
+                    base_peace_cost: 20.0,
+                    international_concern: 10.0,
+                    completion: 0.0,
+                    is_primary: true,
+                }],
+                start_date: "1800/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: std::collections::HashSet::new(),
+                status: crate::war::data::WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: std::collections::HashSet::new(),
+            },
+        );
+
+        let result = accept_demand(
+            &mut crisis_registry,
+            &mut claim_registry,
+            &mut state_registry,
+            &mut country_registry,
+            &mut war_registry,
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/01/01",
+            crisis_id,
+            CountryId(1),
+        );
+
+        assert_eq!(
+            result,
+            Err("diplomacy_error.crisis.target_state_contested_by_another_war")
+        );
+        assert_eq!(
+            state_registry.get(StateId(1)).unwrap().owner_country_id,
+            CountryId(1),
+            "failed accept must not mutate state ownership"
+        );
+        assert_eq!(
+            claim_registry.claims.get(&claim_id).unwrap().status,
+            ClaimStatus::Active,
+            "failed accept must not consume the claim"
+        );
+        assert_eq!(
+            crisis_registry
+                .crises
+                .get(&crisis_id)
+                .unwrap()
+                .current_phase,
+            CrisisPhase::DemandSent,
+            "failed accept must not transition the crisis phase"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P21-020: accept_demandが共通所有権移転Domain APIを経由することの検証
+    // (§14要求18,32,33,34,43)。
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// 要求テスト33: 要求受諾で対象州がtargetの首都だった場合、決定論的に
+    /// 残存陸州(最小StateId)へ再配置される。
+    #[test]
+    fn accept_demand_reassigns_capital_when_ceding_the_targets_capital() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut claim_registry = ClaimRegistry::default();
+        let mut state_registry = StateRegistry::build(vec![
+            StateData {
+                id: StateId(1),
+                owner_country_id: CountryId(1),
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(2),
+                owner_country_id: CountryId(1),
+                ..Default::default()
+            },
+        ]);
+        let mut country_registry = CountryRegistry {
+            countries: vec![
+                crate::country::CountryData {
+                    id: CountryId(0),
+                    ..Default::default()
+                },
+                crate::country::CountryData {
+                    id: CountryId(1),
+                    capital_state_id: StateId(1), // 割譲対象州が首都
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let claim_id = seed_claim(&mut claim_registry, 0, 1);
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, Some(claim_id));
+
+        accept_demand(
+            &mut crisis_registry,
+            &mut claim_registry,
+            &mut state_registry,
+            &mut country_registry,
+            &mut WarRegistry::default(),
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/01/01",
+            crisis_id,
+            CountryId(1),
+        )
+        .expect("ceding the capital must still succeed when another land state remains");
+
+        assert_eq!(
+            state_registry.get(StateId(1)).unwrap().owner_country_id,
+            CountryId(0)
+        );
+        assert_eq!(
+            country_registry.get(CountryId(1)).unwrap().capital_state_id,
+            StateId(2),
+            "the target's capital must be reassigned to its remaining land state"
+        );
+        assert_eq!(
+            claim_registry.claims.get(&claim_id).unwrap().status,
+            ClaimStatus::Consumed
+        );
+    }
+
+    /// P21-021要求: targetが対象州以外に陸州を一切持たない場合、要求受諾は
+    /// 「安全に拒否」ではなく国家消滅(完全併合)をトリガーする——対象州は
+    /// initiatorへ移転し、target(CountryId(1))は`CountryStatus::Eliminated`
+    /// へ遷移し(`CountryRegistry`からは物理削除されない)、Claimは消費され、
+    /// Crisis自身は`ResolvedPeacefully`(`CancelledByCountryElimination`では
+    /// ない——受諾成功というこのCrisis自身の結末を、国家消滅清掃が上書きしない)。
+    /// P21-020時点の旧挙動("safely rejected")はこのテストが意図的に反転させる
+    /// (旧テスト名・旧アサーションは本タスクの対象外仕様だったため置き換える)。
+    #[test]
+    fn accept_demand_with_no_remaining_land_state_triggers_country_elimination() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut claim_registry = ClaimRegistry::default();
+        let mut state_registry = StateRegistry::build(vec![StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            ..Default::default()
+        }]);
+        let mut country_registry = CountryRegistry {
+            countries: vec![
+                crate::country::CountryData {
+                    id: CountryId(0),
+                    ..Default::default()
+                },
+                crate::country::CountryData {
+                    id: CountryId(1),
+                    capital_state_id: StateId(1), // 唯一の所有陸州かつ首都
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let claim_id = seed_claim(&mut claim_registry, 0, 1);
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, Some(claim_id));
+
+        accept_demand(
+            &mut crisis_registry,
+            &mut claim_registry,
+            &mut state_registry,
+            &mut country_registry,
+            &mut WarRegistry::default(),
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/06/15",
+            crisis_id,
+            CountryId(1),
+        )
+        .expect("accepting a demand for the target's last land state must trigger elimination, not fail");
+
+        assert_eq!(
+            state_registry.get(StateId(1)).unwrap().owner_country_id,
+            CountryId(0),
+            "the final state must transfer to the initiator"
+        );
+        let eliminated = country_registry.get(CountryId(1)).unwrap();
+        assert!(
+            eliminated.is_eliminated(),
+            "the target must transition to Eliminated, not be dropped from the registry"
+        );
+        assert_eq!(
+            eliminated.status,
+            crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/06/15".to_string(),
+                annexed_by: CountryId(0),
+            }
+        );
+        assert_eq!(
+            claim_registry.claims.get(&claim_id).unwrap().status,
+            ClaimStatus::Consumed,
+            "the fulfilling claim must be marked Consumed (not Invalidated, which is for the eliminated country's own outgoing claims)"
+        );
+        assert_eq!(
+            crisis_registry
+                .crises
+                .get(&crisis_id)
+                .unwrap()
+                .current_phase,
+            CrisisPhase::ResolvedPeacefully,
+            "this crisis resolved peacefully via acceptance; elimination cleanup must not overwrite it to CancelledByCountryElimination"
+        );
+    }
+
     /// 要求テスト: initiator以外(第三者)は受諾できない。
     #[test]
     fn accept_demand_rejects_non_target_responder() {
@@ -538,6 +959,16 @@ mod tests {
             &mut crisis_registry,
             &mut claim_registry,
             &mut state_registry,
+            &mut CountryRegistry::default(),
+            &mut WarRegistry::default(),
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/01/01",
             crisis_id,
             CountryId(0), // initiator自身、targetではない
         );
@@ -567,6 +998,16 @@ mod tests {
             &mut crisis_registry,
             &mut claim_registry,
             &mut state_registry,
+            &mut CountryRegistry::default(),
+            &mut WarRegistry::default(),
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/01/01",
             crisis_id,
             CountryId(1),
         );
@@ -578,11 +1019,13 @@ mod tests {
     #[test]
     fn reject_demand_grants_completed_justification_and_escalates() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
 
         reject_demand(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -635,6 +1078,7 @@ mod tests {
 
         reject_demand(
             &mut crisis_registry,
+            &countries,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -654,6 +1098,7 @@ mod tests {
     #[test]
     fn reject_demand_snapshot_excludes_neutral_and_condemning_reactions() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
         crisis_registry
@@ -671,6 +1116,7 @@ mod tests {
 
         reject_demand(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -690,6 +1136,7 @@ mod tests {
     #[test]
     fn reject_demand_snapshot_is_sorted_by_country_id_ascending() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
         // 挿入順をわざと降順にして、出力が挿入順ではなくID順であることを確認する。
@@ -704,6 +1151,7 @@ mod tests {
 
         reject_demand(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -720,15 +1168,62 @@ mod tests {
         );
     }
 
+    /// P21-021: 消滅済み国家はDomain APIレベルで最後通牒に応答(拒否)できない
+    /// (UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn reject_demand_rejects_an_eliminated_responder() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut country_registry = countries_with(&[0, 1]);
+        let mut justification_registry = WarJustificationRegistry::default();
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
+        country_registry.get_mut(CountryId(1)).unwrap().status =
+            crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1799/12/01".to_string(),
+                annexed_by: CountryId(9),
+            };
+
+        let result = reject_demand(
+            &mut crisis_registry,
+            &country_registry,
+            &mut justification_registry,
+            crisis_id,
+            CountryId(1),
+            "1800/01/15".to_string(),
+        );
+
+        assert_eq!(result, Err("diplomacy_error.crisis.responder_missing"));
+        assert!(justification_registry.justifications.is_empty());
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで最後通牒を受諾もできない。
+    #[test]
+    fn can_accept_demand_rejects_an_eliminated_responder() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut country_registry = countries_with(&[0, 1]);
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
+        country_registry.get_mut(CountryId(1)).unwrap().status =
+            crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1799/12/01".to_string(),
+                annexed_by: CountryId(9),
+            };
+
+        let result =
+            can_accept_demand(&crisis_registry, &country_registry, crisis_id, CountryId(1));
+
+        assert_eq!(result, Err("diplomacy_error.crisis.responder_missing"));
+    }
+
     /// 要求テスト: 拒否は対象国以外からは行えない。
     #[test]
     fn reject_demand_rejects_non_target_responder() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
 
         let result = reject_demand(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(0),
@@ -743,11 +1238,13 @@ mod tests {
     #[test]
     fn withdraw_during_demand_sent_cancels_without_justification() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
 
         withdraw_crisis(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(0),
@@ -768,10 +1265,12 @@ mod tests {
     #[test]
     fn withdraw_during_escalating_cancels_granted_justification() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
         reject_demand(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -788,6 +1287,7 @@ mod tests {
 
         withdraw_crisis(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(0),
@@ -812,6 +1312,7 @@ mod tests {
     #[test]
     fn withdraw_rejects_already_resolved_crisis() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
         crisis_registry
@@ -822,6 +1323,7 @@ mod tests {
 
         let result = withdraw_crisis(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(0),
@@ -830,15 +1332,51 @@ mod tests {
         assert_eq!(result, Err("diplomacy_error.crisis.already_resolved"));
     }
 
+    /// P21-021: 消滅済み国家はDomain APIレベルでCrisisを撤回できない
+    /// (UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn withdraw_crisis_rejects_an_eliminated_initiator() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut country_registry = countries_with(&[0, 1]);
+        let mut justification_registry = WarJustificationRegistry::default();
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
+        country_registry.get_mut(CountryId(0)).unwrap().status =
+            crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1799/12/01".to_string(),
+                annexed_by: CountryId(9),
+            };
+
+        let result = withdraw_crisis(
+            &mut crisis_registry,
+            &country_registry,
+            &mut justification_registry,
+            crisis_id,
+            CountryId(0),
+        );
+
+        assert_eq!(result, Err("diplomacy_error.crisis.initiator_missing"));
+        assert_eq!(
+            crisis_registry
+                .crises
+                .get(&crisis_id)
+                .unwrap()
+                .current_phase,
+            CrisisPhase::DemandSent,
+            "the crisis must survive rejection unchanged"
+        );
+    }
+
     /// 要求テスト: 撤回は当事国(initiator)以外からは行えない。
     #[test]
     fn withdraw_rejects_non_initiator() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
 
         let result = withdraw_crisis(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -851,10 +1389,12 @@ mod tests {
     #[test]
     fn sync_crisis_on_war_declared_transitions_matching_crisis() {
         let mut crisis_registry = CrisisRegistry::default();
+        let country_registry = countries_with(&[0, 1]);
         let mut justification_registry = WarJustificationRegistry::default();
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
         reject_demand(
             &mut crisis_registry,
+            &country_registry,
             &mut justification_registry,
             crisis_id,
             CountryId(1),
@@ -1148,6 +1688,7 @@ mod tests {
 
         withdraw_support(
             &mut crisis_registry,
+            &countries,
             crisis_id,
             CountryId(2),
             &before_deadline(),
@@ -1179,16 +1720,64 @@ mod tests {
     #[test]
     fn withdraw_support_fails_for_a_country_that_never_pledged() {
         let mut crisis_registry = CrisisRegistry::default();
+        let countries = countries_with(&[0, 1, 2]);
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
 
         let result = withdraw_support(
             &mut crisis_registry,
+            &countries,
             crisis_id,
             CountryId(2),
             &before_deadline(),
         );
 
         assert_eq!(result, Err("diplomacy_error.crisis.support_not_found"));
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで支持撤回もできない
+    /// (UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn withdraw_support_rejects_an_eliminated_supporter() {
+        let mut crisis_registry = CrisisRegistry::default();
+        let mut countries = countries_with(&[0, 1, 2]);
+        let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, None);
+        pledge_support(
+            &mut crisis_registry,
+            &countries,
+            crisis_id,
+            CountryId(2),
+            CrisisSupportSide::Initiator,
+            &before_deadline(),
+        )
+        .unwrap();
+        countries.get_mut(CountryId(2)).unwrap().status =
+            crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1799/12/01".to_string(),
+                annexed_by: CountryId(9),
+            };
+
+        let result = withdraw_support(
+            &mut crisis_registry,
+            &countries,
+            crisis_id,
+            CountryId(2),
+            &before_deadline(),
+        );
+
+        assert_eq!(
+            result,
+            Err("diplomacy_error.crisis.support_country_missing")
+        );
+        assert_eq!(
+            crisis_registry
+                .crises
+                .get(&crisis_id)
+                .unwrap()
+                .third_party_reactions
+                .get(&CountryId(2)),
+            Some(&ThirdCountryReaction::SupportsInitiator),
+            "the pledge must survive rejection unchanged"
+        );
     }
 
     /// 要求テスト: 期限到達後(=タイムアウト処理により既にEscalatingへ遷移済み)は
@@ -1224,6 +1813,7 @@ mod tests {
         );
         let withdraw_result = withdraw_support(
             &mut crisis_registry,
+            &countries,
             crisis_id,
             CountryId(2),
             &before_deadline(),
@@ -1279,6 +1869,7 @@ mod tests {
         );
         let withdraw_result = withdraw_support(
             &mut crisis_registry,
+            &countries,
             crisis_id,
             CountryId(2),
             &on_deadline_day(),
@@ -1327,6 +1918,7 @@ mod tests {
         );
         let withdraw_result = withdraw_support(
             &mut crisis_registry,
+            &countries,
             crisis_id,
             CountryId(2),
             &after_deadline(),
@@ -1394,7 +1986,7 @@ mod tests {
         let mut crisis_registry = CrisisRegistry::default();
         let mut claim_registry = ClaimRegistry::default();
         let mut state_registry = make_state_registry(1, 1);
-        let countries = countries_with(&[0, 1, 2]);
+        let mut countries = countries_with(&[0, 1, 2]);
         let claim_id = seed_claim(&mut claim_registry, 0, 1);
         let crisis_id = seed_demand_sent_crisis(&mut crisis_registry, 0, 1, 1, Some(claim_id));
         pledge_support(
@@ -1411,6 +2003,16 @@ mod tests {
             &mut crisis_registry,
             &mut claim_registry,
             &mut state_registry,
+            &mut countries,
+            &mut WarRegistry::default(),
+            &mut crate::military::data::MilitaryRegistry::default(),
+            &mut crate::military::army::ArmyRegistry::default(),
+            &mut crate::war::frontline::FrontlineRegistry::default(),
+            &mut crate::military::battle::BattleRegistry::default(),
+            &mut crate::diplomacy::data::DiplomacyRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut crate::country::power::CountryPowerRegistry::default(),
+            "1800/01/01",
             crisis_id,
             CountryId(1),
         )

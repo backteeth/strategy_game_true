@@ -147,13 +147,15 @@ impl Plugin for DiplomacyPluginUI {
                 (
                     toggle_diplomacy_panel_key,
                     sync_target_country_from_selected_state,
-                    handle_diplomacy_action_buttons,
-                    handle_claim_command_buttons,
-                    handle_crisis_command_buttons,
+                    handle_diplomacy_action_buttons
+                        .run_if(crate::country::player_can_issue_commands),
+                    handle_claim_command_buttons.run_if(crate::country::player_can_issue_commands),
+                    handle_crisis_command_buttons.run_if(crate::country::player_can_issue_commands),
                     // P21-013: 同一フレームでの日付変更(AI日次応答)との競合裁定のため、
                     // `handle_daily_diplomacy`より後に明示的に配置する(関数doc参照)。
                     handle_crisis_support_command_buttons
-                        .after(crate::diplomacy::update::handle_daily_diplomacy),
+                        .after(crate::diplomacy::update::handle_daily_diplomacy)
+                        .run_if(crate::country::player_can_issue_commands),
                     update_diplomacy_panel_ui,
                     update_country_power_info_ui,
                 )
@@ -369,6 +371,11 @@ fn handle_diplomacy_action_buttons(
     let Some(proposer) = country_registry.get(p_cid) else {
         return;
     };
+    // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家の外交行動
+    // (関係改善/悪化・条約提案/破棄・正当化・宣戦布告)を一括で拒否する。
+    if !proposer.is_active() {
+        return;
+    }
 
     for (interaction, btn) in imp_q.iter() {
         if *interaction == Interaction::Pressed {
@@ -421,7 +428,9 @@ fn handle_diplomacy_action_buttons(
             let target_cid = btn.0;
             let treaty_type = btn.1;
 
-            if let Some(target) = country_registry.get(target_cid) {
+            if let Some(target) = country_registry.get(target_cid)
+                && target.is_active()
+            {
                 let rel = diplo_registry.get_or_default(p_cid, target_cid);
                 let breakdown =
                     calculate_proposal_score(treaty_type, proposer, target, &rel, &state_registry);
@@ -745,6 +754,16 @@ fn execute_crisis_confirm_accept(
     crisis_registry: &mut CrisisRegistry,
     claim_registry: &mut ClaimRegistry,
     state_registry: &mut StateRegistry,
+    country_registry: &mut CountryRegistry,
+    war_registry: &mut WarRegistry,
+    military_registry: &mut crate::military::data::MilitaryRegistry,
+    army_registry: &mut crate::military::army::ArmyRegistry,
+    frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
+    battle_registry: &mut crate::military::battle::BattleRegistry,
+    diplomacy_registry: &mut DiplomacyRegistry,
+    justification_registry: &mut WarJustificationRegistry,
+    power_registry: &mut crate::country::power::CountryPowerRegistry,
+    current_date_str: &str,
     responder: CountryId,
     notif_writer: &mut MessageWriter<GameNotification>,
     locale: &CurrentLocale,
@@ -760,6 +779,16 @@ fn execute_crisis_confirm_accept(
         crisis_registry,
         claim_registry,
         state_registry,
+        country_registry,
+        war_registry,
+        military_registry,
+        army_registry,
+        frontline_registry,
+        battle_registry,
+        diplomacy_registry,
+        justification_registry,
+        power_registry,
+        current_date_str,
         crisis_id,
         responder,
     ) {
@@ -786,6 +815,7 @@ fn execute_crisis_confirm_accept(
 fn execute_crisis_confirm_reject(
     diplo_state: &mut DiplomacyPanelState,
     crisis_registry: &mut CrisisRegistry,
+    country_registry: &CountryRegistry,
     justification_registry: &mut WarJustificationRegistry,
     responder: CountryId,
     date: &GameDate,
@@ -800,6 +830,7 @@ fn execute_crisis_confirm_reject(
 
     match crisis_response::reject_demand(
         crisis_registry,
+        country_registry,
         justification_registry,
         crisis_id,
         responder,
@@ -824,8 +855,10 @@ fn execute_crisis_confirm_reject(
 }
 
 /// P21-011: initiatorによるCrisis撤回(確認なしの単発操作)。
+#[allow(clippy::too_many_arguments)]
 fn execute_crisis_withdraw(
     crisis_registry: &mut CrisisRegistry,
+    country_registry: &CountryRegistry,
     justification_registry: &mut WarJustificationRegistry,
     crisis_id: DiplomaticCrisisId,
     initiator: CountryId,
@@ -835,6 +868,7 @@ fn execute_crisis_withdraw(
 ) {
     match crisis_response::withdraw_crisis(
         crisis_registry,
+        country_registry,
         justification_registry,
         crisis_id,
         initiator,
@@ -923,6 +957,7 @@ fn execute_support_confirm(
 #[allow(clippy::too_many_arguments)]
 fn execute_support_withdraw(
     crisis_registry: &mut CrisisRegistry,
+    country_registry: &CountryRegistry,
     crisis_id: DiplomaticCrisisId,
     supporter: CountryId,
     current_date: &GameDate,
@@ -930,7 +965,13 @@ fn execute_support_withdraw(
     locale: &CurrentLocale,
     catalog: &TranslationCatalog,
 ) {
-    match crisis_response::withdraw_support(crisis_registry, crisis_id, supporter, current_date) {
+    match crisis_response::withdraw_support(
+        crisis_registry,
+        country_registry,
+        crisis_id,
+        supporter,
+        current_date,
+    ) {
         Ok(()) => {
             notif_writer.write(GameNotification {
                 message: t(catalog, locale.0, "diplomacy_panel.notif_support_withdrawn"),
@@ -1008,6 +1049,7 @@ fn handle_crisis_support_command_buttons(
             ),
             CrisisCommand::WithdrawSupport(crisis_id) => execute_support_withdraw(
                 &mut crisis_registry,
+                &country_registry,
                 crisis_id,
                 player,
                 &date,
@@ -1124,7 +1166,10 @@ fn execute_crisis_confirm(
     claim_registry: &ClaimRegistry,
     player: CountryId,
     target: CountryId,
+    country_registry: &CountryRegistry,
     state_registry: &StateRegistry,
+    diplomacy_registry: &DiplomacyRegistry,
+    war_registry: &WarRegistry,
     date: &GameDate,
     notif_writer: &mut MessageWriter<GameNotification>,
     locale: &CurrentLocale,
@@ -1143,7 +1188,16 @@ fn execute_crisis_confirm(
         return;
     };
 
-    match crisis_registry.start_crisis(claim, player, target, date.display(), state_registry) {
+    match crisis_registry.start_crisis(
+        claim,
+        player,
+        target,
+        date.display(),
+        country_registry,
+        state_registry,
+        diplomacy_registry,
+        war_registry,
+    ) {
         Ok(_) => {
             notif_writer.write(GameNotification {
                 message: t(catalog, locale.0, "diplomacy_panel.notif_crisis_started"),
@@ -1171,10 +1225,14 @@ fn handle_crisis_command_buttons(
     mut claim_registry: ResMut<ClaimRegistry>,
     mut state_registry: ResMut<StateRegistry>,
     mut justification_registry: ResMut<WarJustificationRegistry>,
+    mut country_registry: ResMut<CountryRegistry>,
+    mut diplomacy_registry: ResMut<DiplomacyRegistry>,
+    mut war_registry: ResMut<WarRegistry>,
     date: Res<GameDate>,
     mut notif_writer: MessageWriter<GameNotification>,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
+    mut elimination_regs: crate::diplomacy::update::EliminationSideEffectRegistries,
 ) {
     let Some(player) = player_country.0 else {
         return;
@@ -1198,7 +1256,10 @@ fn handle_crisis_command_buttons(
                 &claim_registry,
                 player,
                 target,
+                &country_registry,
                 &state_registry,
+                &diplomacy_registry,
+                &war_registry,
                 &date,
                 &mut notif_writer,
                 &locale,
@@ -1213,6 +1274,16 @@ fn handle_crisis_command_buttons(
                 &mut crisis_registry,
                 &mut claim_registry,
                 &mut state_registry,
+                &mut country_registry,
+                &mut war_registry,
+                &mut elimination_regs.military_registry,
+                &mut elimination_regs.army_registry,
+                &mut elimination_regs.frontline_registry,
+                &mut elimination_regs.battle_registry,
+                &mut diplomacy_registry,
+                &mut justification_registry,
+                &mut elimination_regs.power_registry,
+                &date.display(),
                 player,
                 &mut notif_writer,
                 &locale,
@@ -1225,6 +1296,7 @@ fn handle_crisis_command_buttons(
             CrisisCommand::ConfirmReject => execute_crisis_confirm_reject(
                 &mut diplo_state,
                 &mut crisis_registry,
+                &country_registry,
                 &mut justification_registry,
                 player,
                 &date,
@@ -1234,6 +1306,7 @@ fn handle_crisis_command_buttons(
             ),
             CrisisCommand::Withdraw(crisis_id) => execute_crisis_withdraw(
                 &mut crisis_registry,
+                &country_registry,
                 &mut justification_registry,
                 crisis_id,
                 player,
@@ -1322,6 +1395,70 @@ fn update_diplomacy_panel_ui(
     let Some(target) = country_registry.get(target_cid) else {
         return;
     };
+
+    // P21-021: 消滅済み国家を選択した場合は、消滅情報(消滅日・併合国・旧首都)のみを
+    // 表示し、外交行動ボタン類は一切スpawnしない(閲覧は可能だが行動は取れない、
+    // という要求を「行動ボタン自体を存在させない」ことで実現する——Domain APIレベルの
+    // 拒否と合わせた二重の防御であり、無効化された(押せない)ボタンを別途描画する
+    // 複雑さを避ける)。
+    if let crate::country::CountryStatus::Eliminated {
+        eliminated_date,
+        annexed_by,
+    } = &target.status
+    {
+        let header_args = vec![("country", target.name.clone())];
+        let header_info = tf(
+            &catalog,
+            locale.0,
+            "diplomacy_panel.eliminated_country_header",
+            header_args.clone(),
+        );
+        if header_text.0 != header_info {
+            *header_text = Text::new(header_info);
+        }
+        header_marker.key = "diplomacy_panel.eliminated_country_header";
+        header_marker.args = header_args;
+
+        if let Some(children) = children_opt {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
+
+        let annexer_name = country_registry
+            .get(*annexed_by)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+        let capital_name = state_registry
+            .get(target.capital_state_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+        let info_args = vec![
+            ("date", eliminated_date.clone()),
+            ("annexer", annexer_name),
+            ("capital", capital_name),
+        ];
+
+        commands.entity(container_entity).with_children(|parent| {
+            let (text, marker) = localized_text(
+                &catalog,
+                locale.0,
+                "diplomacy_panel.eliminated_country_info",
+                info_args,
+            );
+            parent.spawn((
+                text,
+                marker,
+                TextColor(Color::srgb(0.75, 0.75, 0.75)),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+            ));
+        });
+        return;
+    }
+
     let rel = diplo_registry.get_or_default(p_cid, target_cid);
 
     let header_args = vec![
@@ -2233,7 +2370,7 @@ fn update_diplomacy_panel_ui(
                                 "diplomacy_panel.claim_line",
                                 vec![
                                     ("state", st_name),
-                                    ("source", format!("{:?}", claim.source)),
+                                    ("source", t(&catalog, locale.0, claim.source.display_name())),
                                     ("date", claim.created_date.clone()),
                                 ],
                             );
@@ -2333,7 +2470,11 @@ fn update_diplomacy_panel_ui(
                                     claim,
                                     p_cid,
                                     target_cid,
+                                    &country_registry,
                                     &state_registry,
+                                    &diplo_registry,
+                                    &war_registry,
+                                    &date.display(),
                                 ) {
                                     Ok(()) => {
                                         claim_col
@@ -2389,6 +2530,103 @@ fn update_diplomacy_panel_ui(
                                 }
                             }
                         });
+                    }
+                }
+            });
+
+        // ── P21-018: 外国Claim一覧セクション ────────────────────────
+        // 上の「自国Claim」セクションはp_cid(プレイヤー)がclaimantのClaimしか
+        // 表示しないため、AI国家がプレイヤーまたは選択中の外国に対して持つClaimは
+        // 別途表示する必要がある(§13: 「選択中の外国またはプレイヤーを対象とする
+        // 外国Claim」)。既存UIのレイアウト・スクロール・JA/EN対応の仕組みを
+        // そのまま流用する最小限の追加(専用の大画面は作らない)。
+        parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    margin: UiRect::top(Val::Px(12.0)),
+                    padding: UiRect::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.08, 0.06, 0.1, 0.9)),
+            ))
+            .with_children(|sec| {
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "diplomacy_panel.foreign_claims_header",
+                    vec![],
+                );
+                sec.spawn((
+                    text,
+                    marker,
+                    TextColor(Color::srgb(0.8, 0.6, 0.8)),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                ));
+
+                let mut foreign_claims: Vec<_> = claim_registry
+                    .claims
+                    .values()
+                    .filter(|c| c.claimant_country != p_cid)
+                    .filter(|c| {
+                        state_registry.get(c.target_state).is_some_and(|s| {
+                            s.owner_country_id == p_cid || s.owner_country_id == target_cid
+                        })
+                    })
+                    .collect();
+                foreign_claims.sort_by_key(|c| (c.claimant_country.0, c.target_state.0));
+
+                if foreign_claims.is_empty() {
+                    let (text, marker) = localized_text(
+                        &catalog,
+                        locale.0,
+                        "diplomacy_panel.foreign_claims_none",
+                        vec![],
+                    );
+                    sec.spawn((
+                        text,
+                        marker,
+                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                    ));
+                } else {
+                    for claim in foreign_claims {
+                        let claimant_name = country_registry
+                            .get(claim.claimant_country)
+                            .map(|c| c.name.clone())
+                            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+                        let st_name = state_registry
+                            .get(claim.target_state)
+                            .map(|s| s.name.clone())
+                            .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+
+                        let (text, marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "diplomacy_panel.foreign_claim_line",
+                            vec![
+                                ("claimant", claimant_name),
+                                ("state", st_name),
+                                ("source", t(&catalog, locale.0, claim.source.display_name())),
+                                ("date", claim.created_date.clone()),
+                            ],
+                        );
+                        sec.spawn((
+                            text,
+                            marker,
+                            TextColor(Color::srgb(0.9, 0.75, 0.85)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                        ));
                     }
                 }
             });
@@ -2489,6 +2727,9 @@ fn update_diplomacy_panel_ui(
                             }
                             CrisisPhase::WarStarted => "diplomacy_panel.crisis_phase_war_started",
                             CrisisPhase::Cancelled => "diplomacy_panel.crisis_phase_cancelled",
+                            CrisisPhase::CancelledByCountryElimination => {
+                                "diplomacy_panel.crisis_phase_cancelled_by_country_elimination"
+                            }
                         };
 
                         sec.spawn(Node {
@@ -2983,6 +3224,23 @@ fn spawn_country_power_block(
         },
     ));
 
+    // P21-021: 消滅済み国家は「評価中」ではなく明示的に「消滅」バッジを表示する
+    // (CountryPowerRegistryにエントリが無い状態は両者で共通するため、
+    // country.statusで先に判定する)。
+    if !country.is_active() {
+        let (text, marker) = localized_text(catalog, locale, "country_status.eliminated", vec![]);
+        parent.spawn((
+            text,
+            marker,
+            TextColor(Color::srgb(0.7, 0.4, 0.4)),
+            TextFont {
+                font_size: FontSize::Px(11.0),
+                ..default()
+            },
+        ));
+        return;
+    }
+
     let Some(assessment) = power_registry.get(country_id) else {
         let (text, marker) =
             localized_text(catalog, locale, "diplomacy_panel.power_pending", vec![]);
@@ -3173,12 +3431,150 @@ mod tests {
         app.insert_resource(ClaimRegistry::default());
         app.insert_resource(CrisisRegistry::default());
         app.insert_resource(WarJustificationRegistry::default());
+        app.insert_resource(DiplomacyRegistry::default());
+        app.insert_resource(WarRegistry::default());
+        app.insert_resource(crate::military::data::MilitaryRegistry::default());
+        app.insert_resource(crate::military::army::ArmyRegistry::default());
+        app.insert_resource(crate::war::frontline::FrontlineRegistry::default());
+        app.insert_resource(crate::military::battle::BattleRegistry::default());
+        app.insert_resource(crate::country::power::CountryPowerRegistry::default());
         app
     }
 
     fn press(app: &mut App, bundle: impl Bundle) {
         app.world_mut().spawn((bundle, Interaction::Pressed));
         app.update();
+    }
+
+    fn eliminate(app: &mut App, id: CountryId) {
+        app.world_mut()
+            .resource_mut::<CountryRegistry>()
+            .get_mut(id)
+            .unwrap()
+            .status = crate::country::CountryStatus::Eliminated {
+            eliminated_date: "1936/01/01".to_string(),
+            annexed_by: CountryId(9),
+        };
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで関係改善命令を拒否される
+    /// (UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn handle_diplomacy_action_buttons_rejects_improve_relations_from_an_eliminated_country() {
+        let mut app = build_test_app();
+        eliminate(&mut app, CountryId(0));
+        app.add_systems(Update, handle_diplomacy_action_buttons);
+
+        press(&mut app, ImproveRelationsButton(CountryId(1)));
+
+        let diplo_registry = app.world().resource::<DiplomacyRegistry>();
+        assert!(
+            diplo_registry
+                .get(CountryId(0), CountryId(1))
+                .and_then(|r| r.active_activity.as_ref())
+                .is_none(),
+            "an eliminated country must not be able to start a relation-improvement activity"
+        );
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで関係悪化命令も拒否される。
+    #[test]
+    fn handle_diplomacy_action_buttons_rejects_harm_relations_from_an_eliminated_country() {
+        let mut app = build_test_app();
+        eliminate(&mut app, CountryId(0));
+        app.add_systems(Update, handle_diplomacy_action_buttons);
+
+        press(&mut app, HarmRelationsButton(CountryId(1)));
+
+        let diplo_registry = app.world().resource::<DiplomacyRegistry>();
+        assert!(
+            diplo_registry
+                .get(CountryId(0), CountryId(1))
+                .and_then(|r| r.active_activity.as_ref())
+                .is_none(),
+            "an eliminated country must not be able to start a relation-harming activity"
+        );
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで条約提案(同盟/NAP等)も拒否される。
+    #[test]
+    fn handle_diplomacy_action_buttons_rejects_treaty_proposal_from_an_eliminated_country() {
+        let mut app = build_test_app();
+        eliminate(&mut app, CountryId(0));
+        app.add_systems(Update, handle_diplomacy_action_buttons);
+
+        press(
+            &mut app,
+            ProposeTreatyButton(CountryId(1), TreatyType::NonAggressionPact),
+        );
+
+        let diplo_registry = app.world().resource::<DiplomacyRegistry>();
+        assert!(
+            diplo_registry
+                .get(CountryId(0), CountryId(1))
+                .map(|r| r.treaties.is_empty())
+                .unwrap_or(true),
+            "an eliminated country must not be able to propose a treaty"
+        );
+    }
+
+    /// P21-021: 消滅済み国家を対象とした条約提案もDomain APIレベルで拒否される
+    /// (提案元は健在だが、相手国が消滅済みのケース)。
+    #[test]
+    fn handle_diplomacy_action_buttons_rejects_treaty_proposal_targeting_an_eliminated_country() {
+        let mut app = build_test_app();
+        eliminate(&mut app, CountryId(1));
+        app.add_systems(Update, handle_diplomacy_action_buttons);
+
+        press(
+            &mut app,
+            ProposeTreatyButton(CountryId(1), TreatyType::NonAggressionPact),
+        );
+
+        let diplo_registry = app.world().resource::<DiplomacyRegistry>();
+        assert!(
+            diplo_registry
+                .get(CountryId(0), CountryId(1))
+                .map(|r| r.treaties.is_empty())
+                .unwrap_or(true),
+            "proposing a treaty to an eliminated country must be rejected"
+        );
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで条約破棄命令も拒否される。
+    #[test]
+    fn handle_diplomacy_action_buttons_rejects_treaty_break_from_an_eliminated_country() {
+        let mut app = build_test_app();
+        {
+            let mut diplo_registry = app.world_mut().resource_mut::<DiplomacyRegistry>();
+            let rel = diplo_registry
+                .get_or_create_mut(CountryId(0), CountryId(1))
+                .unwrap();
+            rel.treaties.push(ActiveTreaty {
+                treaty_type: TreatyType::NonAggressionPact,
+                countries: (CountryId(0), CountryId(1)),
+                signed_date: "1800/01/01".to_string(),
+                is_active: true,
+            });
+        }
+        eliminate(&mut app, CountryId(0));
+        app.add_systems(Update, handle_diplomacy_action_buttons);
+
+        press(
+            &mut app,
+            BreakTreatyButton(CountryId(1), TreatyType::NonAggressionPact),
+        );
+
+        let diplo_registry = app.world().resource::<DiplomacyRegistry>();
+        assert_eq!(
+            diplo_registry
+                .get(CountryId(0), CountryId(1))
+                .unwrap()
+                .treaties
+                .len(),
+            1,
+            "an eliminated country must not be able to break its own existing treaty"
+        );
     }
 
     /// 要求テスト項目7: 外交UI(Command経路)からClaim作成。
@@ -4403,6 +4799,142 @@ mod tests {
         assert!(
             app.world().entity(root).contains::<Button>(),
             "DiplomacyPanelRoot's own background must be a Button so hovering it registers Interaction"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P21-018: AI生成Claim(第三国からのClaim)を既存Claim UIへ表示する確認
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// 要求テスト75-77: AI生成Claim(claimant≠player)が、選択中の外国(target_cid)を
+    /// 対象とする場合、新設の外国Claimセクションにclaimant名・対象州名・ClaimSource
+    /// (レビュー指摘対応: `ClaimSource::display_name()`経由の翻訳キーで、既定ロケール
+    /// である日本語の自然な表示文字列として)が表示される。
+    #[test]
+    fn foreign_ai_claim_against_selected_country_is_rendered() {
+        let mut app = build_render_test_app();
+        // claimant=CountryId(2)(第三国)が、選択中のtarget_country=CountryId(1)の
+        // 所有州(StateId(1))に対してAI生成したClaim。
+        app.world_mut()
+            .resource_mut::<ClaimRegistry>()
+            .add_claim(TerritorialClaim {
+                id: ClaimId(0),
+                claimant_country: CountryId(2),
+                target_state: StateId(1),
+                strength: 50.0,
+                created_date: "1800/06/01".to_string(),
+                is_permanent: false,
+                source: ClaimSource::AiExpansion,
+                status: crate::diplomacy::claims::ClaimStatus::Active,
+            });
+        app.update();
+
+        let joined = all_texts(&mut app).join("\n");
+        assert!(
+            joined.contains("AIによる拡張"),
+            "the foreign claim's source must render as the localized ja-JP text (not the raw \
+             Rust Debug identifier \"AiExpansion\"): {joined}"
+        );
+        assert!(
+            !joined.contains("AiExpansion"),
+            "the raw Debug identifier must never leak into the rendered UI text: {joined}"
+        );
+        assert!(
+            joined.contains("1800/06/01"),
+            "the foreign claim's date must be rendered: {joined}"
+        );
+    }
+
+    /// 要求テスト75: AI生成Claim(claimant≠player)がプレイヤー自身の州を対象とする場合も、
+    /// (選択中の外国が誰であっても)外国Claimセクションに表示される。
+    #[test]
+    fn foreign_ai_claim_against_player_is_rendered_regardless_of_selected_country() {
+        let mut app = build_render_test_app();
+        // プレイヤー(CountryId(0))所有の州を追加する。
+        {
+            let mut state_registry = app.world_mut().resource_mut::<StateRegistry>();
+            state_registry.get_mut(StateId(2)).unwrap().owner_country_id = CountryId(0);
+        }
+        app.world_mut()
+            .resource_mut::<ClaimRegistry>()
+            .add_claim(TerritorialClaim {
+                id: ClaimId(0),
+                claimant_country: CountryId(2),
+                target_state: StateId(2),
+                strength: 50.0,
+                created_date: "1800/06/01".to_string(),
+                is_permanent: false,
+                source: ClaimSource::AiExpansion,
+                status: crate::diplomacy::claims::ClaimStatus::Active,
+            });
+        app.update();
+
+        let joined = all_texts(&mut app).join("\n");
+        assert!(
+            joined.contains("AIによる拡張"),
+            "a foreign claim against the player must render its localized ja-JP source text \
+             even though target_country (CountryId(1)) is a different country: {joined}"
+        );
+    }
+
+    /// 要求テスト78: 外国Claimセクション追加後も外交パネルのスクロール構造が維持される。
+    #[test]
+    fn foreign_claims_section_preserves_diplomacy_panel_scroll() {
+        let mut app = build_render_test_app();
+        app.world_mut()
+            .resource_mut::<ClaimRegistry>()
+            .add_claim(TerritorialClaim {
+                id: ClaimId(0),
+                claimant_country: CountryId(2),
+                target_state: StateId(1),
+                strength: 50.0,
+                created_date: "1800/06/01".to_string(),
+                is_permanent: false,
+                source: ClaimSource::AiExpansion,
+                status: crate::diplomacy::claims::ClaimStatus::Active,
+            });
+        app.update();
+
+        let scroll_body_count = app
+            .world_mut()
+            .query_filtered::<(&ScrollPosition, &bevy::ui::RelativeCursorPosition), Without<TabBarRoot>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(scroll_body_count, 1);
+    }
+
+    /// 要求テスト77: `ClaimSource`(既存5variant+`AiExpansion`)の表示がロケール切替に
+    /// 追随する(補足指摘対応: JA/EN両方で自然な表示文字列になっていることを確認する)。
+    #[test]
+    fn claim_source_text_follows_locale_switch() {
+        let mut app = build_render_test_app();
+        app.world_mut()
+            .resource_mut::<ClaimRegistry>()
+            .add_claim(TerritorialClaim {
+                id: ClaimId(0),
+                claimant_country: CountryId(2),
+                target_state: StateId(1),
+                strength: 50.0,
+                created_date: "1800/06/01".to_string(),
+                is_permanent: false,
+                source: ClaimSource::AiExpansion,
+                status: crate::diplomacy::claims::ClaimStatus::Active,
+            });
+        app.update();
+
+        let ja_joined = all_texts(&mut app).join("\n");
+        assert!(ja_joined.contains("AIによる拡張"));
+
+        app.world_mut().resource_mut::<CurrentLocale>().0 = crate::localization::Locale::EnUs;
+        app.update();
+        let en_joined = all_texts(&mut app).join("\n");
+        assert!(
+            en_joined.contains("AI Expansion"),
+            "switching locale to en-US must render the English claim source text: {en_joined}"
+        );
+        assert!(
+            !en_joined.contains("AiExpansion"),
+            "the raw Debug identifier must never leak into the rendered UI text: {en_joined}"
         );
     }
 }

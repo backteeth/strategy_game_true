@@ -1,0 +1,28 @@
+P21-019 performance profiling: execute_peace_settlement lineage resolution
+==============================================================================
+
+[12.1] Claim履歴スケーリング(crises=100, participants=1/side, crisis由来War)
+  claims=   100: 0.0396 ms
+  claims=  1000: 0.0019 ms
+  claims= 10000: 0.0044 ms
+  claims= 50000: 0.0078 ms
+
+[12.2] Crisis履歴スケーリング(claims=100, participants=1/side, crisis由来War)
+  crises=   100: 0.0047 ms
+  crises=  1000: 0.0019 ms
+  crises= 10000: 0.0038 ms
+
+[12.3] War参加国スケーリング(claims=100, crises=100, crisis由来War)
+  participants/side=    1: 0.0022 ms
+  participants/side=   10: 0.0049 ms
+  participants/side=  100: 0.0013 ms
+  participants/side= 1000: 0.0010 ms
+
+[12.4] 通常War(source_crisis_id=None)との比較(claims=50000, crises=10000, participants=1000/side)
+  normal war:        0.0081 ms
+  crisis-derived war: 0.0078 ms
+
+[12.5] 非講和フレーム: handle_daily_war_resolutionはevaluate_war_capitulationが
+CapitulationResult::Noneを返す限りexecute_peace_settlement自体を一切呼ばない
+(src/war/update.rs、match capitulation結果でNone分岐のみ空処理)。よって
+lineage解決コード自体は非講和フレームで実行されず、追加コストは構造的に0。

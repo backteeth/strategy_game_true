@@ -1797,6 +1797,7 @@ mod tests {
             defenders: [CountryId(2)].into_iter().collect(),
             primary_attacker: None,
             primary_defender: None,
+            source_crisis_id: None,
             war_goals: vec![WarGoal {
                 attacker: CountryId(1),
                 defender: CountryId(2),
@@ -2571,6 +2572,7 @@ mod tests {
             defenders: [CountryId(2)].into_iter().collect(),
             primary_attacker: None,
             primary_defender: None,
+            source_crisis_id: None,
             war_goals: vec![],
             start_date: "1800/02/01".to_string(),
             end_date: None,
@@ -3956,6 +3958,7 @@ mod tests {
                 defenders: [CountryId(2)].into_iter().collect(),
                 primary_attacker: None,
                 primary_defender: None,
+                source_crisis_id: None,
                 war_goals: vec![WarGoal {
                     attacker: CountryId(1),
                     defender: CountryId(2),

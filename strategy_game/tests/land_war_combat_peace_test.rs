@@ -1,6 +1,8 @@
 use std::collections::{HashSet, VecDeque};
 use strategy_game::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use strategy_game::country::CountryData;
+use strategy_game::diplomacy::claims::ClaimRegistry;
+use strategy_game::diplomacy::crisis::CrisisRegistry;
 use strategy_game::diplomacy::data::DiplomacyRegistry;
 use strategy_game::military::battle::BattleRegistry;
 use strategy_game::military::combat_calc::resolve_combat_day;
@@ -146,7 +148,7 @@ fn test_land_war_declaration_combat_and_peace_flow() {
 
     let countries_ron = std::fs::read_to_string("assets/data/countries.ron").unwrap();
     let countries: Vec<CountryData> = ron::from_str(&countries_ron).unwrap();
-    let country_reg = strategy_game::country::CountryRegistry { countries };
+    let mut country_reg = strategy_game::country::CountryRegistry { countries };
 
     let mut diplomacy_reg = DiplomacyRegistry::default();
     let mut justification_reg = WarJustificationRegistry::default();
@@ -154,6 +156,7 @@ fn test_land_war_declaration_combat_and_peace_flow() {
     let mut frontline_reg = FrontlineRegistry::default();
     let mut military_reg = MilitaryRegistry::default();
     let mut battle_reg = BattleRegistry::default();
+    let mut army_reg = strategy_game::military::army::ArmyRegistry::default();
 
     // 師団定義の追加
     let div_def = DivisionDefinition {
@@ -337,6 +340,12 @@ fn test_land_war_declaration_combat_and_peace_flow() {
         &mut battle_reg,
         &mut diplomacy_reg,
         &mut frontline_reg,
+        &mut CrisisRegistry::default(),
+        &mut ClaimRegistry::default(),
+        &mut country_reg,
+        &mut army_reg,
+        &mut justification_reg,
+        &mut strategy_game::country::power::CountryPowerRegistry::default(),
     );
 
     assert!(peace_res.is_ok(), "Peace settlement execution should succeed");

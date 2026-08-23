@@ -100,11 +100,14 @@ impl WarJustificationRegistry {
             return Err("war_error.justify.self");
         }
 
-        // 国家の存在チェック
-        if country_registry.get(initiator).is_none() {
+        // 国家の存在チェック(P21-021: 消滅済み国家は正当化の開始国にも対象国にもなれない)
+        if country_registry
+            .get(initiator)
+            .is_none_or(|c| !c.is_active())
+        {
             return Err("war_error.justify.initiator_missing");
         }
-        if country_registry.get(target).is_none() {
+        if country_registry.get(target).is_none_or(|c| !c.is_active()) {
             return Err("war_error.justify.target_missing");
         }
 

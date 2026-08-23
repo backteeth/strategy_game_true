@@ -453,6 +453,7 @@ pub fn process_war_preparation_ai(
     _war_registry: &WarRegistry,
     diplomacy_registry: &DiplomacyRegistry,
     justification_registry: &mut WarJustificationRegistry,
+    crisis_registry: &CrisisRegistry,
     ai_state: &mut CountryAiState,
     power_by_country: &[u64],
     land_states_by_controller: &[Vec<StateId>],
@@ -464,6 +465,19 @@ pub fn process_war_preparation_ai(
         .any(|j| j.initiator == country_id);
 
     if is_justifying {
+        ai_state.mode = CountryAiMode::PreparingWar;
+        ai_state.decision_reason = CountryAiDecisionReason::JustificationInProgress;
+        return;
+    }
+
+    // P21-017(二次レビュー対応): 自国開始の未解決Crisis(まだ正当化が生まれていない
+    // DemandSent中も含む)が進行中なら、Crisisと独立した通常の正当化探索を並行して
+    // 始めない。Crisis経由でない生の正当化(この関数自身が開始するもの)は、Claim/
+    // Crisisシステムと無関係に隣接する到達可能な敵州を選ぶため、放置すると同じ
+    // 対象国/州へCrisisと生正当化が二重に進行し得る(例: Crisisが平和的に受諾された
+    // 後も、並行して開始されていた生正当化だけが生き残りReadyになって不要な宣戦が
+    // 起きる)。
+    if crisis_registry.has_unresolved_crisis_initiated_by(country_id) {
         ai_state.mode = CountryAiMode::PreparingWar;
         ai_state.decision_reason = CountryAiDecisionReason::JustificationInProgress;
         return;
@@ -671,6 +685,7 @@ pub fn process_daily_country_ai(
     let mut ai_country_ids: Vec<CountryId> = country_registry
         .countries
         .iter()
+        .filter(|c| c.is_active())
         .map(|c| c.id)
         .filter(|&cid| Some(cid) != player_cid)
         .collect();
@@ -750,6 +765,7 @@ pub fn process_daily_country_ai(
                     war_registry,
                     diplomacy_registry,
                     justification_registry,
+                    &*crisis_registry,
                     ai_state,
                     power_map.as_slice(),
                     land_map.as_slice(),
@@ -1355,5 +1371,118 @@ mod tests {
         // 正当化(justification)の内容で検証する。
         let ai_state = country_ai_registry.ai_states.get(&CountryId(0)).unwrap();
         assert_eq!(ai_state.mode, CountryAiMode::PreparingWar);
+    }
+
+    /// P21-017(二次レビュー対応・§27指摘2への対応): 自国開始の未解決Crisisが
+    /// 進行中のAIは、`process_war_preparation_ai`が(戦力優位・到達可能な隣国という
+    /// 条件を満たしていても)通常の正当化を独立に開始しない。上の
+    /// `test_war_preparation_ai_starts_justification_via_optimized_path`と全く
+    /// 同じ環境(Strong(0)がWeak(1)に対し130%以上の戦力優位、隣接)を使い、
+    /// 唯一の違いはStrong(0)自身が開始した未解決Crisis(DemandSent)を事前に
+    /// 挿入している点 — 以前はこのガードが無かったため、同じ対象国/州へ
+    /// Crisis経由の正当化と生の正当化が並行して進行し得た(例: Crisisが
+    /// 平和的に受諾された後も、並行して開始された生正当化だけが生き残り
+    /// Readyになって不要な宣戦が起きる)。
+    #[test]
+    fn process_war_preparation_ai_does_not_start_a_competing_justification_while_a_crisis_is_unresolved()
+     {
+        let player_country = PlayerCountry(None);
+
+        let strong = CountryData {
+            id: CountryId(0),
+            name: "Strong".to_string(),
+            capital_state_id: StateId(0),
+            treasury: 1000.0,
+            ..default()
+        };
+        let weak = CountryData {
+            id: CountryId(1),
+            name: "Weak".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 1000.0,
+            ..default()
+        };
+        let mut country_registry = CountryRegistry {
+            countries: vec![strong, weak],
+        };
+
+        let s0 = StateData {
+            id: StateId(0),
+            owner_country_id: CountryId(0),
+            neighbors: vec![StateId(1)],
+            ..default()
+        };
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(0)],
+            ..default()
+        };
+        let state_registry = StateRegistry::build(vec![s0, s1]);
+
+        let mut military_registry = MilitaryRegistry::default();
+        military_registry.add_division(make_test_division(CountryId(0), StateId(0), 10_000));
+        military_registry.add_division(make_test_division(CountryId(1), StateId(1), 1_000));
+
+        let building_registry = crate::building::data::BuildingRegistry::default();
+        let mut war_registry = WarRegistry::default();
+        let mut diplomacy_registry = DiplomacyRegistry::default();
+        let tech_registry = TechnologyRegistry::default();
+        let world_state = WorldCivilizationState::default();
+        let mut justification_registry = WarJustificationRegistry::default();
+        let mut frontline_registry = crate::war::frontline::FrontlineRegistry::default();
+        let mut military_ai_registry = MilitaryAiRegistry::default();
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let mut pending_ai_wars = Vec::new();
+
+        // Strong(0)自身が開始した、まだ解決していないCrisis(全く別の対象・州に
+        // 対するものでもよい — このテストでは同じClaim由来かどうかを問わず、
+        // 「未解決の自国開始Crisisがある」というだけで生の正当化探索が
+        // 止まることを確認する)。
+        let mut crisis_registry = CrisisRegistry::default();
+        crisis_registry.add_crisis(crate::diplomacy::crisis::DiplomaticCrisis {
+            id: crate::common::DiplomaticCrisisId(0),
+            initiator: CountryId(0),
+            target: CountryId(1),
+            war_goals: vec![],
+            start_date: "1800/01/01".to_string(),
+            current_phase: crate::diplomacy::crisis::CrisisPhase::DemandSent,
+            escalation: 0.0,
+            initiator_support: 0.0,
+            target_resistance: 0.0,
+            days_in_phase: 0,
+            deadline_date: Some("1800/01/31".to_string()),
+            international_concern: 0.0,
+            third_party_reactions: HashMap::new(),
+            related_claim_id: None,
+            related_justification_id: None,
+            related_war_id: None,
+        });
+
+        process_daily_country_ai(
+            7,
+            "1800/01/08",
+            &player_country,
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            &military_registry,
+            &mut war_registry,
+            &mut diplomacy_registry,
+            &tech_registry,
+            &world_state,
+            &mut justification_registry,
+            &mut frontline_registry,
+            &mut military_ai_registry,
+            &mut country_ai_registry,
+            &mut pending_ai_wars,
+            &mut crisis_registry,
+        );
+
+        assert!(
+            justification_registry.justifications.is_empty(),
+            "未解決の自国開始Crisisがある間は、戦力優位・到達可能な隣国が\
+             存在してもprocess_war_preparation_aiは競合する正当化を開始しないこと"
+        );
     }
 }

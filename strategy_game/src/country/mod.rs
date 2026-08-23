@@ -152,6 +152,39 @@ pub struct CountryData {
     /// 募集キュー
     #[serde(default)]
     pub recruitment_queue: Vec<crate::military::recruitment::RecruitmentQueueItem>,
+
+    /// P21-021: 国家の活動状態(Active/Eliminated)。旧Save(このフィールドが
+    /// 存在しない)は`#[serde(default)]`により`Active`として読み込む。
+    #[serde(default)]
+    pub status: CountryStatus,
+}
+
+/// P21-021: 国家の活動状態。`CountryRegistry`から国家を物理削除せず、この
+/// フィールドだけを明示的に変更することでWar/Claim/Crisis等の履歴参照を
+/// 保つ(CountryIdは不変・再利用しない)。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub enum CountryStatus {
+    #[default]
+    Active,
+    /// 最後の所有陸州を失い消滅した(完全併合)。国家復活・解放はP21-021の
+    /// 対象外——`Eliminated`から`Active`へ戻す経路は存在しない。
+    Eliminated {
+        /// 消滅した日付(既存`GameDate::display()`と同じ`"YYYY/MM/DD"`形式)。
+        eliminated_date: String,
+        /// 併合した国家(常に実在するActive国家であることをelimination
+        /// Domain APIが検証してから設定する)。
+        annexed_by: CountryId,
+    },
+}
+
+impl CountryStatus {
+    /// 表示用の翻訳キー(P20-009の`display_name`規約)。
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CountryStatus::Active => "country_status.active",
+            CountryStatus::Eliminated { .. } => "country_status.eliminated",
+        }
+    }
 }
 
 impl Default for CountryData {
@@ -182,6 +215,7 @@ impl Default for CountryData {
             total_military_equipment_available: 0.0,
             monthly_military_expenses: 0.0,
             recruitment_queue: Vec::new(),
+            status: CountryStatus::Active,
         }
     }
 }
@@ -190,6 +224,30 @@ impl CountryData {
     /// bevy::Color として国家色を取得する
     pub fn bevy_color(&self) -> Color {
         Color::srgb(self.map_color[0], self.map_color[1], self.map_color[2])
+    }
+
+    /// P21-021: 現在Activeか(`is_eliminated()`の否定と一致する、唯一の判定関数)。
+    /// runtimeロジックは`matches!(status, ...)`を直接複製せず、必ずこの
+    /// メソッド(または`is_eliminated()`)を経由する。
+    pub fn is_active(&self) -> bool {
+        matches!(self.status, CountryStatus::Active)
+    }
+
+    /// P21-021: 消滅済みか。
+    pub fn is_eliminated(&self) -> bool {
+        !self.is_active()
+    }
+
+    /// P21-021: 「現在の」首都州(Active国家のみ`Some`)。Eliminated国家は
+    /// 所有州が無いため`None`——`capital_state_id`フィールド自体は
+    /// 「最後の歴史的首都」として保持し続け、履歴表示にはそちらを直接使う。
+    /// runtime処理(validation・AI・UI通常表示)はこのメソッド経由で判定する。
+    pub fn current_capital_state_id(&self) -> Option<StateId> {
+        if self.is_active() {
+            Some(self.capital_state_id)
+        } else {
+            None
+        }
     }
 }
 
@@ -218,6 +276,321 @@ mod tests {
         let country: CountryData = ron::from_str(ron).expect("minimal country RON must parse");
         assert_eq!(country.available_manpower, 100_000);
     }
+
+    /// P21-021要求: `status`フィールド自体が存在しない旧Save(P21-020以前)は
+    /// `#[serde(default)]`により`CountryStatus::Active`として復元される。
+    #[test]
+    fn old_format_ron_without_status_field_loads_as_active() {
+        let ron = r#"(
+            id: (0),
+            name: "Test Country",
+            map_color: (0.5, 0.5, 0.5),
+            capital_state_id: (0),
+            treasury: 5000.0,
+            government_type: Monarchy,
+            economic_system: Mercantilism,
+            stockpile: (amounts: {}),
+        )"#;
+        let country: CountryData = ron::from_str(ron).expect("minimal country RON must parse");
+        assert_eq!(country.status, CountryStatus::Active);
+        assert!(country.is_active());
+        assert!(!country.is_eliminated());
+    }
+
+    /// P21-021要求: `CountryStatus::Eliminated`(eliminated_date/annexed_by込み)が
+    /// RON往復で完全に保持される。
+    #[test]
+    fn eliminated_status_round_trips_through_ron() {
+        let country = CountryData {
+            id: CountryId(1),
+            status: CountryStatus::Eliminated {
+                eliminated_date: "1850/03/15".to_string(),
+                annexed_by: CountryId(0),
+            },
+            ..CountryData::default()
+        };
+        let ron_text = ron::to_string(&country).unwrap();
+        let restored: CountryData = ron::from_str(&ron_text).unwrap();
+        assert_eq!(restored.status, country.status);
+        assert!(restored.is_eliminated());
+        assert_eq!(restored.current_capital_state_id(), None);
+    }
+
+    #[test]
+    fn current_capital_state_id_is_only_some_for_active_countries() {
+        let mut country = CountryData {
+            id: CountryId(1),
+            capital_state_id: StateId(5),
+            ..CountryData::default()
+        };
+        assert_eq!(country.current_capital_state_id(), Some(StateId(5)));
+
+        country.status = CountryStatus::Eliminated {
+            eliminated_date: "1800/01/01".to_string(),
+            annexed_by: CountryId(0),
+        };
+        assert_eq!(
+            country.current_capital_state_id(),
+            None,
+            "an eliminated country's historical capital_state_id must not be reported as current"
+        );
+        assert_eq!(
+            country.capital_state_id,
+            StateId(5),
+            "the raw field must still keep the last historical capital"
+        );
+    }
+
+    #[test]
+    fn active_country_ids_excludes_eliminated_countries_and_stays_sorted() {
+        let registry = CountryRegistry {
+            countries: vec![
+                CountryData {
+                    id: CountryId(2),
+                    ..CountryData::default()
+                },
+                CountryData {
+                    id: CountryId(0),
+                    status: CountryStatus::Eliminated {
+                        eliminated_date: "1800/01/01".to_string(),
+                        annexed_by: CountryId(2),
+                    },
+                    ..CountryData::default()
+                },
+                CountryData {
+                    id: CountryId(1),
+                    ..CountryData::default()
+                },
+            ],
+        };
+        assert_eq!(
+            registry.active_country_ids(),
+            vec![CountryId(1), CountryId(2)]
+        );
+    }
+
+    // ─── P21-021: プレイヤー国家消滅UX ───────────────────────────────────────
+
+    #[test]
+    fn player_elimination_mode_only_allows_commands_when_not_eliminated() {
+        assert!(PlayerEliminationMode::NotEliminated.player_can_act());
+        assert!(!PlayerEliminationMode::DefeatOverlayPending.player_can_act());
+        assert!(!PlayerEliminationMode::Spectating.player_can_act());
+    }
+
+    fn detect_test_app(player: CountryId, status: CountryStatus) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(PlayerCountry(Some(player)));
+        app.insert_resource(CountryRegistry {
+            countries: vec![CountryData {
+                id: player,
+                status,
+                ..CountryData::default()
+            }],
+        });
+        app.insert_resource(PlayerEliminationMode::default());
+        app.add_systems(Update, detect_player_elimination);
+        app
+    }
+
+    #[test]
+    fn detect_player_elimination_transitions_to_defeat_overlay_pending() {
+        let mut app = detect_test_app(
+            CountryId(0),
+            CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(1),
+            },
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerEliminationMode>(),
+            PlayerEliminationMode::DefeatOverlayPending
+        );
+    }
+
+    #[test]
+    fn detect_player_elimination_does_nothing_while_active() {
+        let mut app = detect_test_app(CountryId(0), CountryStatus::Active);
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerEliminationMode>(),
+            PlayerEliminationMode::NotEliminated
+        );
+    }
+
+    #[test]
+    fn detect_player_elimination_does_not_revert_spectating_back_to_pending() {
+        let mut app = detect_test_app(
+            CountryId(0),
+            CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(1),
+            },
+        );
+        *app.world_mut().resource_mut::<PlayerEliminationMode>() =
+            PlayerEliminationMode::Spectating;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerEliminationMode>(),
+            PlayerEliminationMode::Spectating,
+            "once the player has dismissed the overlay and is spectating, detection must not \
+             revert that back to DefeatOverlayPending on subsequent frames"
+        );
+    }
+
+    #[test]
+    fn player_can_issue_commands_run_condition_reflects_the_mode() {
+        #[derive(Resource, Default)]
+        struct CallCount(u32);
+        fn count_up(mut n: ResMut<CallCount>) {
+            n.0 += 1;
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(PlayerEliminationMode::NotEliminated);
+        // 直接run conditionを呼ぶのではなく、実際のSystem run_ifとして機能することを
+        // 「gateされたSystemが実行された回数」で確認する(実際のBevyスケジューラを
+        // 通す検証方法)。
+        app.insert_resource(CallCount::default());
+        app.add_systems(Update, count_up.run_if(player_can_issue_commands));
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<CallCount>().0,
+            1,
+            "NotEliminated must allow the gated system to run"
+        );
+
+        *app.world_mut().resource_mut::<PlayerEliminationMode>() =
+            PlayerEliminationMode::DefeatOverlayPending;
+        app.update();
+        assert_eq!(
+            app.world().resource::<CallCount>().0,
+            1,
+            "DefeatOverlayPending must block the gated system"
+        );
+
+        *app.world_mut().resource_mut::<PlayerEliminationMode>() =
+            PlayerEliminationMode::Spectating;
+        app.update();
+        assert_eq!(
+            app.world().resource::<CallCount>().0,
+            1,
+            "Spectating must also block the gated system (observing only, no commands)"
+        );
+    }
+
+    // ─── P22-001: プレイヤー世界征服UX ───────────────────────────────────────
+
+    fn victory_test_app(countries: Vec<CountryData>, player: Option<CountryId>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(PlayerCountry(player));
+        app.insert_resource(CountryRegistry { countries });
+        app.insert_resource(PlayerVictoryMode::default());
+        app.insert_resource(crate::app::time::GameDate::new(1850, 6, 15));
+        app.add_systems(Update, detect_player_victory);
+        app
+    }
+
+    fn active_country(id: usize) -> CountryData {
+        CountryData {
+            id: CountryId(id),
+            ..CountryData::default()
+        }
+    }
+
+    fn eliminated_country(id: usize, annexed_by: usize) -> CountryData {
+        CountryData {
+            id: CountryId(id),
+            status: CountryStatus::Eliminated {
+                eliminated_date: "1849/01/01".to_string(),
+                annexed_by: CountryId(annexed_by),
+            },
+            ..CountryData::default()
+        }
+    }
+
+    #[test]
+    fn detect_player_victory_transitions_when_player_is_the_last_active_country() {
+        let mut app = victory_test_app(
+            vec![
+                active_country(0),
+                eliminated_country(1, 0),
+                eliminated_country(2, 0),
+            ],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerVictoryMode>(),
+            PlayerVictoryMode::VictoryOverlayPending {
+                victory_date: "1850/06/15".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn detect_player_victory_does_nothing_while_a_rival_is_still_active() {
+        let mut app = victory_test_app(
+            vec![
+                active_country(0),
+                active_country(1),
+                eliminated_country(2, 0),
+            ],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerVictoryMode>(),
+            PlayerVictoryMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_player_victory_does_nothing_when_the_player_itself_is_eliminated() {
+        // 生き残りの1か国が存在するが、それはプレイヤーではない(=プレイヤーは
+        // 消滅済みで観戦中)。「最後の生存国」判定はActive国家だけを見るため、
+        // 消滅済みのプレイヤーがここで誤って「勝利」扱いにならないことを確認する。
+        let mut app = victory_test_app(
+            vec![eliminated_country(0, 1), active_country(1)],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerVictoryMode>(),
+            PlayerVictoryMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_player_victory_does_nothing_for_a_degenerate_single_country_world() {
+        let mut app = victory_test_app(vec![active_country(0)], Some(CountryId(0)));
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerVictoryMode>(),
+            PlayerVictoryMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_player_victory_does_not_revert_acknowledged_back_to_pending() {
+        let mut app = victory_test_app(
+            vec![active_country(0), eliminated_country(1, 0)],
+            Some(CountryId(0)),
+        );
+        *app.world_mut().resource_mut::<PlayerVictoryMode>() = PlayerVictoryMode::Acknowledged;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PlayerVictoryMode>(),
+            PlayerVictoryMode::Acknowledged,
+            "once the player has dismissed the overlay, detection must not revert that back \
+             to VictoryOverlayPending on subsequent frames"
+        );
+    }
 }
 
 // ─── レジストリ ──────────────────────────────────────────────────────────────
@@ -238,9 +611,25 @@ impl CountryRegistry {
     pub fn get_mut(&mut self, id: CountryId) -> Option<&mut CountryData> {
         self.countries.iter_mut().find(|c| c.id == id)
     }
+
+    /// P21-021: 現在Activeな国家のCountryId一覧を`CountryId`昇順で返す
+    /// (HashMap/Vec走査順に依存しない決定論)。AI・PowerTier等、候補国を
+    /// 列挙する全箇所がこのメソッドを共有し、`is_active()`判定を個別に
+    /// 複製しない。
+    pub fn active_country_ids(&self) -> Vec<CountryId> {
+        let mut ids: Vec<CountryId> = self
+            .countries
+            .iter()
+            .filter(|c| c.is_active())
+            .map(|c| c.id)
+            .collect();
+        ids.sort_by_key(|id| id.0);
+        ids
+    }
 }
 
 pub mod country_ai;
+pub mod elimination;
 pub mod power;
 
 use country_ai::{
@@ -255,6 +644,118 @@ use power::{CountryPowerRegistry, rebuild_country_power_monthly};
 #[derive(Resource, Default, Debug)]
 pub struct PlayerCountry(pub Option<CountryId>);
 
+/// P21-021: プレイヤー国家の消滅UXの進行状態。`CountryData.status`自体は
+/// Saveされるが、この列挙体自体はSaveへ含めない(Load直後は常に`NotEliminated`
+/// から始まり、`detect_player_elimination`が同じフレーム/日でロード後の
+/// `CountryStatus`を見て即座に`DefeatOverlayPending`へ再遷移する——「観戦を
+/// 既に選んでいた」という細かい経緯までは復元しないが、「消滅している」という
+/// 事実自体は`CountryStatus`から毎回正しく再導出されるため、Load後に
+/// プレイヤー操作が誤って許可されたままになることはない)。
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerEliminationMode {
+    #[default]
+    NotEliminated,
+    /// 消滅直後、まだ敗北オーバーレイを閉じていない。
+    DefeatOverlayPending,
+    /// 敗北オーバーレイを閉じ、観戦モードで継続中(情報閲覧・ゲーム進行は可能)。
+    Spectating,
+}
+
+impl PlayerEliminationMode {
+    /// プレイヤーが自国家として新しい行動(募兵・建設・移動・外交・Claim・
+    /// Crisis・War等)を起こせるか。`DefeatOverlayPending`/`Spectating`の
+    /// いずれでも`false`(観戦モードでも自国コマンドは発行できない——
+    /// 消滅している以上、当然どちらの状態でもコマンドの主体になり得ない)。
+    pub fn player_can_act(self) -> bool {
+        matches!(self, PlayerEliminationMode::NotEliminated)
+    }
+}
+
+/// P21-021: プレイヤー国家が消滅した瞬間を検知し、`PlayerEliminationMode`を
+/// `DefeatOverlayPending`へ遷移させる。`CountryStatus`(正規のソース)を
+/// 毎フレーム参照するため、消滅の実際の発生経路(War講和・Crisis要求受諾の
+/// いずれでも)を問わず、また通常プレイでもLoad直後でも同じ1箇所で検知する。
+/// 既に`DefeatOverlayPending`/`Spectating`であれば何もしない(冪等)。
+pub fn detect_player_elimination(
+    player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
+    mut mode: ResMut<PlayerEliminationMode>,
+) {
+    if *mode != PlayerEliminationMode::NotEliminated {
+        return;
+    }
+    let Some(player_id) = player_country.0 else {
+        return;
+    };
+    if country_registry
+        .get(player_id)
+        .is_some_and(|c| c.is_eliminated())
+    {
+        *mode = PlayerEliminationMode::DefeatOverlayPending;
+    }
+}
+
+/// P21-021: プレイヤーが自国コマンドを発行できるかを表すBevy `run_if`条件。
+/// 募兵・建設・移動・外交・Claim・Crisis・War・講和の各ボタンハンドラSystemに
+/// `.run_if(player_can_issue_commands)`として付与し、Domain APIレベルの
+/// `is_active()`検証(§10)に加えて、System自体を実行させない形の防御を
+/// 二重にする(UIボタンの非表示/無効化漏れがあっても、この条件がSystem
+/// レベルで最終防衛線になる)。
+pub fn player_can_issue_commands(mode: Res<PlayerEliminationMode>) -> bool {
+    mode.player_can_act()
+}
+
+/// P22-001: プレイヤーが世界征服(残る唯一のActive国家)を達成したかのUX進行状態。
+/// `PlayerEliminationMode`と対を成す――どちらも`CountryRegistry`(正規のソース)を
+/// 毎フレーム参照して再導出する一時的なUI状態であり、Saveへは含めない
+/// (Load直後は常に`NotConcluded`から始まり、`detect_player_victory`が同じフレームで
+/// ロード後の`CountryRegistry`を見て即座に`VictoryOverlayPending`へ再遷移する)。
+/// プレイヤーが消滅済みなら`detect_player_victory`はこの状態を`NotConcluded`から
+/// 動かさない(消滅している国家が同時に「最後の生存国」になることはあり得ない
+/// ――`active_country_ids()`は`is_active()`な国家しか含まないため)。
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub enum PlayerVictoryMode {
+    #[default]
+    NotConcluded,
+    /// 世界征服達成直後、まだ勝利オーバーレイを閉じていない。到達した日付を
+    /// 検知した瞬間の値として保持する(`CountryStatus::Eliminated.eliminated_date`と
+    /// 同じ理由――遷移後もゲーム内時間は進み続けるため、表示時点ではなく
+    /// 達成時点の日付を固定表示する)。
+    VictoryOverlayPending { victory_date: String },
+    /// 勝利オーバーレイを閉じ、プレイを継続中。
+    Acknowledged,
+}
+
+/// P22-001: プレイヤーが世界で唯一のActive国家になった瞬間を検知し、
+/// `PlayerVictoryMode`を`VictoryOverlayPending`へ遷移させる。
+/// `CountryRegistry::active_country_ids()`(P21-021由来の唯一の列挙経路)を
+/// 毎フレーム参照するため、最後の敵国がWar講和・Crisis要求受諾のいずれで
+/// 消滅した場合でも同じ1箇所で検知する。既に`VictoryOverlayPending`/
+/// `Acknowledged`であれば何もしない(冪等)。1か国しか存在しない世界
+/// (征服する相手が最初から存在しない縮退ケース)では発火しない。
+pub fn detect_player_victory(
+    player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
+    game_date: Res<crate::app::time::GameDate>,
+    mut mode: ResMut<PlayerVictoryMode>,
+) {
+    if *mode != PlayerVictoryMode::NotConcluded {
+        return;
+    }
+    if country_registry.countries.len() <= 1 {
+        return;
+    }
+    let Some(player_id) = player_country.0 else {
+        return;
+    };
+    let active_ids = country_registry.active_country_ids();
+    if active_ids.len() == 1 && active_ids[0] == player_id {
+        *mode = PlayerVictoryMode::VictoryOverlayPending {
+            victory_date: game_date.display(),
+        };
+    }
+}
+
 // ─── プラグイン ──────────────────────────────────────────────────────────────
 
 /// 国家関連プラグイン
@@ -267,6 +768,8 @@ impl Plugin for CountryPlugin {
             .insert_resource(CountryAiRegistry::default())
             .insert_resource(PendingAiWarDeclarations::default())
             .insert_resource(CountryPowerRegistry::default())
+            .insert_resource(PlayerEliminationMode::default())
+            .insert_resource(PlayerVictoryMode::default())
             .add_systems(
                 Update,
                 (
@@ -281,6 +784,27 @@ impl Plugin for CountryPlugin {
                 // P21-014: 月次進行(MonthChangedMessage)のたびに国家総合力を再評価する。
                 // 最終SetのUiUpdateに置き、同一フレーム内の他Setの変更を必ず反映する。
                 rebuild_country_power_monthly
+                    .in_set(DailySimulationSet::UiUpdate)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P21-021: 消滅検知は毎フレーム軽量(Option比較+HashMap 1回引き)なため
+                // 専用Setを設けず、他の日次進行とは独立にUiUpdateへ置く
+                // (Load直後の最初のフレームでも即座に検知できるよう、
+                // DayChangedMessage待ちにはしない)。
+                detect_player_elimination
+                    .in_set(DailySimulationSet::UiUpdate)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P22-001: 消滅検知と同じ理由でUiUpdateへ置く(毎フレーム軽量、
+                // Load直後の最初のフレームでも即座に検知できるようDayChangedMessage
+                // 待ちにしない)。`detect_player_elimination`とは読み書きするResourceが
+                // 完全に独立している(前者はPlayerEliminationMode、後者は
+                // PlayerVictoryMode)ため、明示的な順序制約は不要。
+                detect_player_victory
                     .in_set(DailySimulationSet::UiUpdate)
                     .run_if(in_state(GameState::Playing)),
             );

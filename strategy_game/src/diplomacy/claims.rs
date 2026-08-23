@@ -11,6 +11,30 @@ pub enum ClaimSource {
     Cultural,
     Strategic,
     Debug,
+    /// P21-018: AI国家が月次評価で自動生成したClaim。旧Save(このvariant追加前)には
+    /// 出現しないため後方互換上の懸念はない(読み込み側は既存variantのみを期待する
+    /// 旧バージョンでのみ問題になり得るが、本バージョンの`ClaimSource`はenum全体が
+    /// `#[serde(default)]`無しの通常デシリアライズのため、新規に書き出したSaveを
+    /// 古いバイナリで読む場合を除き影響しない)。
+    AiExpansion,
+}
+
+impl ClaimSource {
+    /// 表示用の翻訳キー(P20-009の`display_name`規約、`PowerTier`/`CountryAiMode`と同じ形)。
+    /// UI側で`localization::t()`により言語ごとの表示名へ解決する。
+    /// レビュー指摘対応(P21-018): それまで`diplomacy_panel.rs`は`format!("{:?}",
+    /// claim.source)`でDebug表示していたため、JA UIでも"AiExpansion"等の生の
+    /// Rust識別子がそのまま出ていた。全variantをここで一括して翻訳キー化する。
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ClaimSource::Historical => "claim_source.historical",
+            ClaimSource::BorderDispute => "claim_source.border_dispute",
+            ClaimSource::Cultural => "claim_source.cultural",
+            ClaimSource::Strategic => "claim_source.strategic",
+            ClaimSource::Debug => "claim_source.debug",
+            ClaimSource::AiExpansion => "claim_source.ai_expansion",
+        }
+    }
 }
 
 /// 領土請求の状態(P21-011)。`#[serde(default)]`によりP21-010以前のセーブ
@@ -23,6 +47,22 @@ pub enum ClaimStatus {
     /// Crisisの平和的受諾により消費済み。対象州は既に譲渡されており、
     /// 新しいCrisisの根拠として再利用できない(Claim自体は履歴として残す)。
     Consumed,
+    /// P21-021: claimant国家が消滅したため無効化された。対象州が譲渡されて
+    /// 「達成された」`Consumed`とは意味が異なる(請求者自身がもう存在しない
+    /// ため、根拠として使いようがない)ため区別する。
+    Invalidated,
+}
+
+impl ClaimStatus {
+    /// 表示用の翻訳キー(P20-009の`display_name`規約)。P21-019: War画面のCrisis由来
+    /// 戦争目標表示で、元Claimの状態(Active/Consumed)を示すために使う。
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ClaimStatus::Active => "claim_status.active",
+            ClaimStatus::Consumed => "claim_status.consumed",
+            ClaimStatus::Invalidated => "claim_status.invalidated",
+        }
+    }
 }
 
 /// 領土請求データ
@@ -98,10 +138,18 @@ impl ClaimRegistry {
         if claimant == target {
             return Err("diplomacy_error.claim.self");
         }
-        if country_registry.get(claimant).is_none() {
+        // P21-021: 消滅済み(Eliminated)国家は新しいClaimの請求者にも対象にもなれない
+        // (§10: Domain APIレベルでの拒否)。`get(..).is_none_or(...)`により、
+        // 存在しない場合と消滅済みの場合の両方を同じ`_missing`翻訳キーで扱う
+        // (target側は`state.owner_country_id != target`の所有者検証でも構造的に
+        // 保護されるが、claimant側にはそれが無いため明示的な検証が必要)。
+        if country_registry
+            .get(claimant)
+            .is_none_or(|c| !c.is_active())
+        {
             return Err("diplomacy_error.claim.claimant_missing");
         }
-        if country_registry.get(target).is_none() {
+        if country_registry.get(target).is_none_or(|c| !c.is_active()) {
             return Err("diplomacy_error.claim.target_missing");
         }
 
@@ -166,11 +214,22 @@ impl ClaimRegistry {
     /// P21-011: Crisisの平和的受諾により、Claimを消費済みへ変更する。
     /// 既にConsumedの場合も含め、対象が存在しない場合のみ`false`を返す
     /// (冪等: 同じ受諾処理が誤って複数回走っても安全)。
+    ///
+    /// P21-021: 既に`Invalidated`(請求者国家が消滅済み)のClaimは`Consumed`へ
+    /// 降格させない——`Invalidated`は請求者自身がもう存在しないという、
+    /// `Consumed`(目標達成)より強い終端状態であり、一度確定したら後から
+    /// 「達成された」に上書きされてはならない。この不変条件により、
+    /// `apply_country_elimination`が請求者消滅によるClaim無効化を行った後、
+    /// 同じ請求に紐づくCrisis由来War(消滅国家が主要参加国の別War)が
+    /// `execute_peace_settlement`経由で無条件に`mark_consumed`を呼んでも、
+    /// 呼び出し順に関わらず安全に`Invalidated`のまま保たれる。
     pub fn mark_consumed(&mut self, claim_id: ClaimId) -> bool {
         let Some(claim) = self.claims.get_mut(&claim_id) else {
             return false;
         };
-        claim.status = ClaimStatus::Consumed;
+        if claim.status != ClaimStatus::Invalidated {
+            claim.status = ClaimStatus::Consumed;
+        }
         true
     }
 }
@@ -418,6 +477,51 @@ mod tests {
         assert_eq!(restored.target_state, StateId(2));
     }
 
+    /// P21-018要求テスト(§8): 新しい`ClaimSource::AiExpansion`variantがRON経由で
+    /// 往復できる(serde追加のみで旧バリアントの読み込みに影響しないことを確認)。
+    #[test]
+    fn ai_expansion_claim_source_round_trips_through_ron() {
+        let claim = TerritorialClaim {
+            id: ClaimId(0),
+            claimant_country: CountryId(1),
+            target_state: StateId(2),
+            strength: 50.0,
+            created_date: "1800/01/01".to_string(),
+            is_permanent: false,
+            source: ClaimSource::AiExpansion,
+            status: ClaimStatus::Active,
+        };
+        let ron = ron::to_string(&claim).unwrap();
+        let restored: TerritorialClaim = ron::from_str(&ron).unwrap();
+        assert_eq!(restored.source, ClaimSource::AiExpansion);
+    }
+
+    /// P21-018要求テスト(§8, 要求49-50への対応): `create_claim`はstrengthを
+    /// 呼び出し元から受け取らず常に固定値50.0を書き込むため、NaN・値域外strengthは
+    /// この経路からは構造的に発生し得ない(そもそも入力として渡す手段が存在しない)。
+    /// AI生成Claim(`ClaimSource::AiExpansion`含む)がこの不変条件を満たすことを
+    /// 固定して記録する(P21-017完了報告と同じ「既存APIの実際の形を正とする」方針)。
+    #[test]
+    fn create_claim_always_produces_finite_in_range_strength() {
+        let (countries, states) = registries();
+        let mut registry = ClaimRegistry::default();
+        let id = registry
+            .create_claim(
+                CountryId(0),
+                CountryId(1),
+                StateId(1),
+                "1800/01/01".to_string(),
+                ClaimSource::AiExpansion,
+                &countries,
+                &states,
+            )
+            .unwrap();
+        let claim = registry.claims.get(&id).unwrap();
+        assert!(claim.strength.is_finite());
+        assert!((0.0..=100.0).contains(&claim.strength));
+        assert_eq!(claim.strength, 50.0);
+    }
+
     /// `mark_consumed`は対象Claimが存在しない場合`false`を返し、存在する場合は
     /// `Consumed`へ変更して`true`を返す(受諾後の再呼び出しに対しても冪等)。
     #[test]
@@ -448,6 +552,33 @@ mod tests {
         assert!(
             registry.mark_consumed(id),
             "marking an already-consumed claim again must still return true (idempotent)"
+        );
+    }
+
+    /// P21-021要求: `Invalidated`(請求者国家消滅)は`Consumed`より強い終端状態
+    /// であり、後から`mark_consumed`が呼ばれても降格しない。
+    #[test]
+    fn mark_consumed_does_not_downgrade_an_invalidated_claim() {
+        let (countries, states) = registries();
+        let mut registry = ClaimRegistry::default();
+        let id = registry
+            .create_claim(
+                CountryId(0),
+                CountryId(1),
+                StateId(1),
+                "1800/01/01".to_string(),
+                ClaimSource::Strategic,
+                &countries,
+                &states,
+            )
+            .unwrap();
+        registry.claims.get_mut(&id).unwrap().status = ClaimStatus::Invalidated;
+
+        assert!(registry.mark_consumed(id));
+        assert_eq!(
+            registry.claims.get(&id).unwrap().status,
+            ClaimStatus::Invalidated,
+            "mark_consumed must not overwrite Invalidated back to Consumed"
         );
     }
 }

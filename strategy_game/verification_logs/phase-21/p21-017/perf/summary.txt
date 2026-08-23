@@ -1,0 +1,61 @@
+P21-017 performance profiling (2nd review: active_wars axis added)
+=====================================================================
+
+[15.1] Claim count scaling (countries=1000, active_wars=0)
+  claims=   100 (  best_case_all_eligible): 0.2006 ms, crises_started=100
+  claims=   100 (worst_case_none_eligible): 0.0455 ms, crises_started=0
+  claims=  1000 (  best_case_all_eligible): 2.5734 ms, crises_started=1000
+  claims=  1000 (worst_case_none_eligible): 0.3100 ms, crises_started=0
+  claims= 10000 (  best_case_all_eligible): 8.0982 ms, crises_started=1000
+  claims= 10000 (worst_case_none_eligible): 4.6910 ms, crises_started=0
+  claims= 50000 (  best_case_all_eligible): 35.4503 ms, crises_started=1000
+  claims= 50000 (worst_case_none_eligible): 29.6947 ms, crises_started=0
+
+[15.1 補足] active_wars scaling (countries=1000, claims=10000, all eligible)
+  active_wars=   0: 8.0543 ms (claims=10000, crises_started=1000)
+  active_wars= 100: 11.2999 ms (claims=10000, crises_started=1000)
+  active_wars=1000: 33.1138 ms (claims=10000, crises_started=1000)
+
+[15.2] Non-month-change day (System-level, MessageReader-only cost)
+  claims=   100: 0.00541 ms/frame over 200 frames (evaluations=0, must be 0)
+  claims=  1000: 0.00479 ms/frame over 200 frames (evaluations=0, must be 0)
+  claims= 10000: 0.00474 ms/frame over 200 frames (evaluations=0, must be 0)
+  claims= 50000: 0.00416 ms/frame over 200 frames (evaluations=0, must be 0)
+
+[15.3] Full monthly evaluation (System-level, via MonthChangedMessage)
+  countries= 100 claims/country= 1 active_wars=   0 (  each_ai_starts_one): 0.3510 ms, started=100
+  countries= 100 claims/country= 1 active_wars= 100 (  each_ai_starts_one): 0.4823 ms, started=100
+  countries= 100 claims/country= 1 active_wars=1000 (  each_ai_starts_one): 2.5870 ms, started=100
+  countries= 100 claims/country= 1 active_wars=   0 (    no_ai_starts_any): 0.1865 ms, started=0
+  countries= 100 claims/country= 1 active_wars= 100 (    no_ai_starts_any): 0.1867 ms, started=0
+  countries= 100 claims/country= 1 active_wars=1000 (    no_ai_starts_any): 0.4024 ms, started=0
+  countries= 100 claims/country=10 active_wars=   0 (  each_ai_starts_one): 0.6393 ms, started=100
+  countries= 100 claims/country=10 active_wars= 100 (  each_ai_starts_one): 0.8287 ms, started=100
+  countries= 100 claims/country=10 active_wars=1000 (  each_ai_starts_one): 3.3479 ms, started=100
+  countries= 100 claims/country=10 active_wars=   0 (    no_ai_starts_any): 0.5177 ms, started=0
+  countries= 100 claims/country=10 active_wars= 100 (    no_ai_starts_any): 0.3695 ms, started=0
+  countries= 100 claims/country=10 active_wars=1000 (    no_ai_starts_any): 0.6255 ms, started=0
+  countries= 500 claims/country= 1 active_wars=   0 (  each_ai_starts_one): 0.9939 ms, started=500
+  countries= 500 claims/country= 1 active_wars= 100 (  each_ai_starts_one): 1.9604 ms, started=500
+  countries= 500 claims/country= 1 active_wars=1000 (  each_ai_starts_one): 13.1383 ms, started=500
+  countries= 500 claims/country= 1 active_wars=   0 (    no_ai_starts_any): 0.4496 ms, started=0
+  countries= 500 claims/country= 1 active_wars= 100 (    no_ai_starts_any): 0.4617 ms, started=0
+  countries= 500 claims/country= 1 active_wars=1000 (    no_ai_starts_any): 0.7577 ms, started=0
+  countries= 500 claims/country=10 active_wars=   0 (  each_ai_starts_one): 3.5048 ms, started=500
+  countries= 500 claims/country=10 active_wars= 100 (  each_ai_starts_one): 4.2132 ms, started=500
+  countries= 500 claims/country=10 active_wars=1000 (  each_ai_starts_one): 17.4480 ms, started=500
+  countries= 500 claims/country=10 active_wars=   0 (    no_ai_starts_any): 1.9174 ms, started=0
+  countries= 500 claims/country=10 active_wars= 100 (    no_ai_starts_any): 1.6639 ms, started=0
+  countries= 500 claims/country=10 active_wars=1000 (    no_ai_starts_any): 3.8695 ms, started=0
+  countries=1000 claims/country= 1 active_wars=   0 (  each_ai_starts_one): 2.4780 ms, started=1000
+  countries=1000 claims/country= 1 active_wars= 100 (  each_ai_starts_one): 4.4988 ms, started=1000
+  countries=1000 claims/country= 1 active_wars=1000 (  each_ai_starts_one): 27.2348 ms, started=1000
+  countries=1000 claims/country= 1 active_wars=   0 (    no_ai_starts_any): 1.0764 ms, started=0
+  countries=1000 claims/country= 1 active_wars= 100 (    no_ai_starts_any): 0.7316 ms, started=0
+  countries=1000 claims/country= 1 active_wars=1000 (    no_ai_starts_any): 1.1399 ms, started=0
+  countries=1000 claims/country=10 active_wars=   0 (  each_ai_starts_one): 9.6496 ms, started=1000
+  countries=1000 claims/country=10 active_wars= 100 (  each_ai_starts_one): 11.0087 ms, started=1000
+  countries=1000 claims/country=10 active_wars=1000 (  each_ai_starts_one): 33.9582 ms, started=1000
+  countries=1000 claims/country=10 active_wars=   0 (    no_ai_starts_any): 5.4405 ms, started=0
+  countries=1000 claims/country=10 active_wars= 100 (    no_ai_starts_any): 5.2050 ms, started=0
+  countries=1000 claims/country=10 active_wars=1000 (    no_ai_starts_any): 6.9356 ms, started=0

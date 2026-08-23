@@ -20,7 +20,10 @@ use crate::war::frontline::{
 };
 use crate::war::justification::WarJustificationRegistry;
 use crate::war::military_ai::{MilitaryAiRegistry, handle_daily_military_ai};
-use crate::war::update::{handle_daily_war_prep, handle_daily_war_resolution};
+use crate::war::update::{
+    ReportedPeaceSettlementErrors, handle_daily_war_prep, handle_daily_war_resolution,
+    mark_ai_registries_dirty_daily,
+};
 use bevy::prelude::*;
 
 pub struct WarPlugin;
@@ -31,11 +34,18 @@ impl Plugin for WarPlugin {
             .insert_resource(WarJustificationRegistry::default())
             .insert_resource(FrontlineRegistry::default())
             .insert_resource(MilitaryAiRegistry::default())
+            .insert_resource(ReportedPeaceSettlementErrors::default())
             .add_systems(
                 Update,
                 (
                     handle_daily_war_prep.in_set(DailySimulationSet::WarPreparation),
                     handle_daily_war_resolution.in_set(DailySimulationSet::WarResolution),
+                    // P21-020: `handle_daily_war_resolution`から分離(Bevyのfunction-system
+                    // 引数上限のため)。同一日内の実行順(旧実装ではこのSystemの内容が
+                    // 講和処理の後に実行されていた)を保つため明示的に`.after()`で固定する。
+                    mark_ai_registries_dirty_daily
+                        .in_set(DailySimulationSet::WarResolution)
+                        .after(handle_daily_war_resolution),
                     handle_daily_military_ai.in_set(DailySimulationSet::MilitaryAi),
                     handle_daily_frontline_plans.in_set(DailySimulationSet::FrontlineOrders),
                 )

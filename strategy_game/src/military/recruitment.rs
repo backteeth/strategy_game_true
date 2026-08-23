@@ -1,6 +1,6 @@
 use crate::common::{CountryId, DivisionDefinitionId, StateId};
 use crate::country::CountryRegistry;
-use crate::military::data::{DivisionStatus, Division, MilitaryRegistry};
+use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,10 @@ pub fn request_recruitment(
     division_id: DivisionDefinitionId,
     target_state: StateId,
 ) -> Result<(), &'static str> {
+    if !country.is_active() {
+        return Err("Country is eliminated");
+    }
+
     let def = military_registry
         .definitions
         .get(&division_id)
@@ -109,6 +113,9 @@ pub fn cancel_recruitment(
     military_registry: &MilitaryRegistry,
     queue_index: usize,
 ) -> Result<(), &'static str> {
+    if !country.is_active() {
+        return Err("Country is eliminated");
+    }
     if queue_index >= country.recruitment_queue.len() {
         return Err("Invalid queue index");
     }

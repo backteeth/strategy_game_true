@@ -1,0 +1,32 @@
+P21-018 performance profiling
+=====================================================================
+
+[15.1] State/border scaling
+  states=   100 countries=   8 border_edges=   198: 0.0930 ms, candidate_claimants=8 candidates=198
+  states=   500 countries=  25 border_edges=   998: 0.2207 ms, candidate_claimants=25 candidates=998
+  states=  1000 countries=  50 border_edges=  1998: 0.3496 ms, candidate_claimants=50 candidates=1998
+  states=  2000 countries= 100 border_edges=  3998: 0.7077 ms, candidate_claimants=100 candidates=3998
+  states= 10000 countries= 500 border_edges= 19998: 4.3807 ms, candidate_claimants=500 candidates=19979
+
+[15.2] Claim history scaling (countries=1000, states=2000)
+  claims=   100: 1.3294 ms, candidate_claimants=1000
+  claims=  1000: 1.3252 ms, candidate_claimants=1000
+  claims= 10000: 2.0094 ms, candidate_claimants=1000
+  claims= 50000: 5.3384 ms, candidate_claimants=1000
+
+[15.3] Non-month-change day (System-level, MessageReader-only cost)
+  claims=   100: 0.00450 ms/frame over 200 frames (evaluations=0, must be 0)
+  claims=  1000: 0.00462 ms/frame over 200 frames (evaluations=0, must be 0)
+  claims= 10000: 0.00435 ms/frame over 200 frames (evaluations=0, must be 0)
+  claims= 50000: 0.00446 ms/frame over 200 frames (evaluations=0, must be 0)
+
+P21-018 performance profiling (review response: multilateral-war at_war_pairs fix)
+=====================================================================
+
+[15.1補足] multilateral-war scaling (claim_country_count=1000, states=2000)
+War参加国はclaim_country_count以降のIDへ完全分離(claimant候補は一切参加しない)。
+  wars=    0 participants/side=   0: build_at_war_pairs(参考測定・比較用、pairs=        0)=   0.0040 ms  |  collect_ai_claim_candidates(実際にP21-018が使う経路)=  1.2741 ms, candidate_claimants=1000
+  wars=  100 participants/side=  10: build_at_war_pairs(参考測定・比較用、pairs=    10000)=   0.4586 ms  |  collect_ai_claim_candidates(実際にP21-018が使う経路)=  1.2541 ms, candidate_claimants=1000
+  wars= 1000 participants/side=  10: build_at_war_pairs(参考測定・比較用、pairs=   100000)=   4.2421 ms  |  collect_ai_claim_candidates(実際にP21-018が使う経路)=  1.9762 ms, candidate_claimants=1000
+  wars=  100 participants/side= 100: build_at_war_pairs(参考測定・比較用、pairs=  1000000)=  65.3321 ms  |  collect_ai_claim_candidates(実際にP21-018が使う経路)=  2.0837 ms, candidate_claimants=1000
+  wars= 1000 participants/side= 100: build_at_war_pairs(参考測定・比較用、pairs= 10000000)= 970.5640 ms  |  collect_ai_claim_candidates(実際にP21-018が使う経路)=  8.7728 ms, candidate_claimants=1000

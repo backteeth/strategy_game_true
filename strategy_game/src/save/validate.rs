@@ -379,6 +379,17 @@ fn validate_countries(
     issues: &mut Vec<SaveValidationIssue>,
 ) {
     let mut seen: HashSet<CountryId> = HashSet::new();
+
+    // P21-021: `Active`国家は陸州を1つ以上所有し、`Eliminated`国家は陸州を
+    // 一切所有しない、という不変条件を検証するための、国家ごとの所有陸州数
+    // (`countries × states`の総当たりを避けるため一度だけ集計する)。
+    let mut owned_land_state_count: HashMap<CountryId, u32> = HashMap::new();
+    for s in save.states.iter().filter(|s| !s.is_sea) {
+        *owned_land_state_count
+            .entry(s.owner_country_id)
+            .or_insert(0) += 1;
+    }
+
     for (i, c) in save.countries.iter().enumerate() {
         let base = format!("countries[{i}]");
         if !seen.insert(c.id) {
@@ -391,6 +402,7 @@ fn validate_countries(
         }
 
         validate_capital(save, c, &base, idx, issues);
+        validate_country_status(save, c, &base, &owned_land_state_count, issues);
 
         if !c.treasury.is_finite() {
             push(
@@ -525,18 +537,199 @@ fn validate_capital(
         );
         return;
     }
-    if let Some(capital) = save.states.iter().find(|s| s.id == c.capital_state_id)
-        && capital.owner_country_id != c.id
-    {
-        push(
-            issues,
-            SaveValidationCode::OwnershipMismatch,
-            format!("{base}.capital_state_id"),
-            format!(
-                "capital {:?} is owned by {:?}, not {:?}",
-                c.capital_state_id, capital.owner_country_id, c.id
-            ),
-        );
+    if let Some(capital) = save.states.iter().find(|s| s.id == c.capital_state_id) {
+        // P21-021: `capital_state_id`は`Eliminated`国家にとって「最後の歴史的首都」
+        // であり、消滅と同時に(併合先へ)所有権が移るため、この国家自身が
+        // 現在も所有していることは要求しない(`is_active()`のみが正規の判定経路——
+        // `current_capital_state_id()`が同じ規則をruntime側で共有する)。
+        if c.is_active() && capital.owner_country_id != c.id {
+            push(
+                issues,
+                SaveValidationCode::OwnershipMismatch,
+                format!("{base}.capital_state_id"),
+                format!(
+                    "capital {:?} is owned by {:?}, not {:?}",
+                    c.capital_state_id, capital.owner_country_id, c.id
+                ),
+            );
+        }
+        // P21-020: `state::ownership::transfer_state_ownership`は海州を新首都候補から
+        // 除外するため、正規経路では発生し得ない。手動改変等の異常データを想定した
+        // 防御的検証(実マップに海州は一件も無いことを確認済み——§2調査)。
+        if capital.is_sea {
+            push(
+                issues,
+                SaveValidationCode::OwnershipMismatch,
+                format!("{base}.capital_state_id"),
+                format!("capital {:?} is a sea state", c.capital_state_id),
+            );
+        }
+    }
+}
+
+/// P21-021: `CountryStatus`の不変条件を検証する。
+///
+/// - `Active`国家は陸州を1つ以上所有していなければならない(0だと、正常な
+///   `state::ownership`/`country::elimination`移転経路では到達できないはずの
+///   壊れた状態——本来は`Eliminated`へ遷移しているべき)。
+/// - `Eliminated`国家は陸州を一切所有していてはならない(消滅の定義そのもの)。
+/// - `Eliminated`国家の`annexed_by`は、自分自身ではない、実在する`Active`な
+///   別の`CountryData`を参照していなければならない。
+/// - `Eliminated`国家はActive Warの参加国(攻撃側・防御側いずれの陣営にも)
+///   であってはならない(`country::elimination::apply_country_elimination`が
+///   消滅時に必ず主要参加War終結・支持国除去のいずれかを行うため)。
+fn validate_country_status(
+    save: &SaveGameV1,
+    c: &CountryData,
+    base: &str,
+    owned_land_state_count: &HashMap<CountryId, u32>,
+    issues: &mut Vec<SaveValidationIssue>,
+) {
+    let owned = owned_land_state_count.get(&c.id).copied().unwrap_or(0);
+
+    match &c.status {
+        crate::country::CountryStatus::Active => {
+            if owned == 0 {
+                push(
+                    issues,
+                    SaveValidationCode::EmptyCollection,
+                    format!("{base}.status"),
+                    format!("{:?} is Active but owns no land state", c.id),
+                );
+            }
+        }
+        crate::country::CountryStatus::Eliminated { annexed_by, .. } => {
+            if owned != 0 {
+                push(
+                    issues,
+                    SaveValidationCode::InvalidRange,
+                    format!("{base}.status"),
+                    format!(
+                        "{:?} is Eliminated but still owns {owned} land state(s)",
+                        c.id
+                    ),
+                );
+            }
+
+            if *annexed_by == c.id {
+                push(
+                    issues,
+                    SaveValidationCode::OwnershipMismatch,
+                    format!("{base}.status.annexed_by"),
+                    format!("{:?} cannot annex itself", c.id),
+                );
+            } else {
+                match save.countries.iter().find(|other| other.id == *annexed_by) {
+                    None => push(
+                        issues,
+                        SaveValidationCode::DanglingReference,
+                        format!("{base}.status.annexed_by"),
+                        format!("references unknown {annexed_by:?}"),
+                    ),
+                    Some(annexer) if !annexer.is_active() => push(
+                        issues,
+                        SaveValidationCode::OwnershipMismatch,
+                        format!("{base}.status.annexed_by"),
+                        format!("annexer {annexed_by:?} must be Active, not Eliminated"),
+                    ),
+                    Some(_) => {}
+                }
+            }
+
+            let is_active_war_participant = save.wars.wars.values().any(|w| {
+                w.status == crate::war::data::WarStatus::Active
+                    && (w.attackers.contains(&c.id) || w.defenders.contains(&c.id))
+            });
+            if is_active_war_participant {
+                push(
+                    issues,
+                    SaveValidationCode::ParticipantMismatch,
+                    format!("{base}.status"),
+                    format!(
+                        "{:?} is Eliminated but still participates in an Active War",
+                        c.id
+                    ),
+                );
+            }
+
+            // P21-021(ユーザー指摘対応§7): 軍事参照が残っていないこと
+            // (`country::elimination::apply_country_elimination`が消滅時に
+            // 全Division解散+募兵キュー自体は`CountryData`のフィールドとして
+            // 消滅国家ごと保持され続けるため個別クリアは行わないが、消滅国家に
+            // 募兵キューが残るのは正常なゲームプレイでは到達し得ない壊れた
+            // 状態であるため、Save検証で拒否する)。
+            if save.military.divisions.values().any(|d| d.owner == c.id) {
+                push(
+                    issues,
+                    SaveValidationCode::ParticipantMismatch,
+                    format!("{base}.status"),
+                    format!(
+                        "{:?} is Eliminated but still owns at least one Division",
+                        c.id
+                    ),
+                );
+            }
+            if save.armies.armies.values().any(|a| a.owner == c.id) {
+                push(
+                    issues,
+                    SaveValidationCode::ParticipantMismatch,
+                    format!("{base}.status"),
+                    format!("{:?} is Eliminated but still owns at least one Army", c.id),
+                );
+            }
+            if !c.recruitment_queue.is_empty() {
+                push(
+                    issues,
+                    SaveValidationCode::ParticipantMismatch,
+                    format!("{base}.recruitment_queue"),
+                    format!(
+                        "{:?} is Eliminated but still has a non-empty recruitment queue",
+                        c.id
+                    ),
+                );
+            }
+
+            // 未解決Crisisの当事国として残っていないこと。
+            let is_unresolved_crisis_party = save.crises.crises.values().any(|crisis| {
+                (crisis.initiator == c.id || crisis.target == c.id)
+                    && crate::diplomacy::crisis::is_unresolved_phase(crisis.current_phase)
+            });
+            if is_unresolved_crisis_party {
+                push(
+                    issues,
+                    SaveValidationCode::ParticipantMismatch,
+                    format!("{base}.status"),
+                    format!(
+                        "{:?} is Eliminated but still participates in an unresolved Crisis",
+                        c.id
+                    ),
+                );
+            }
+
+            // 正当化(WarJustification)の要求国/対象国として残っていないこと。
+            let is_justification_party = save
+                .war_justifications
+                .justifications
+                .values()
+                .any(|j| j.initiator == c.id || j.target == c.id);
+            if is_justification_party {
+                push(
+                    issues,
+                    SaveValidationCode::ParticipantMismatch,
+                    format!("{base}.status"),
+                    format!(
+                        "{:?} is Eliminated but still participates in a WarJustification",
+                        c.id
+                    ),
+                );
+            }
+
+            // PowerTier/ランキング(`CountryPowerRegistry`)はSaveの一部として
+            // 永続化されない(New Game/Load後/月次に`evaluate_country_power`で
+            // 常に再構築される派生データ)ため、ここでの検証対象には含まれない
+            // ——再構築自体が`is_active()`でEliminated国家を除外するよう既に
+            // 実装されている(構造的に保証される)。
+        }
     }
 }
 
@@ -1028,15 +1221,78 @@ fn validate_war_justifications(
         }
 
         // P21-016: `source_crisis_id`/`committed_attackers`/`committed_defenders`の検証。
-        if let Some(source_crisis_id) = j.source_crisis_id
-            && !idx.crises.contains(&source_crisis_id)
-        {
-            push(
-                issues,
-                SaveValidationCode::DanglingReference,
-                format!("{path}.source_crisis_id"),
-                format!("references unknown {source_crisis_id:?}"),
-            );
+        if let Some(source_crisis_id) = j.source_crisis_id {
+            if !idx.crises.contains(&source_crisis_id) {
+                push(
+                    issues,
+                    SaveValidationCode::DanglingReference,
+                    format!("{path}.source_crisis_id"),
+                    format!("references unknown {source_crisis_id:?}"),
+                );
+            }
+
+            // P21-016(二次レビュー対応): `apply_rejection`は通常、正当化のinitiator/targetを
+            // 元Crisisと同じ値から生成するため一致するはずだが、手動編集等によるSave破損
+            // (initiator/targetだけ差し替えられ、由来のCrisisと矛盾する状態)はここで検出する。
+            if let Some(crisis) = save.crises.crises.get(&source_crisis_id) {
+                if crisis.initiator != j.initiator {
+                    push(
+                        issues,
+                        SaveValidationCode::ParticipantMismatch,
+                        format!("{path}.source_crisis_id"),
+                        format!(
+                            "justification.initiator {:?} does not match source crisis's \
+                             initiator {:?}",
+                            j.initiator, crisis.initiator
+                        ),
+                    );
+                }
+                if crisis.target != j.target {
+                    push(
+                        issues,
+                        SaveValidationCode::ParticipantMismatch,
+                        format!("{path}.source_crisis_id"),
+                        format!(
+                            "justification.target {:?} does not match source crisis's target {:?}",
+                            j.target, crisis.target
+                        ),
+                    );
+                }
+
+                // P21-016(二次レビュー対応、可能な範囲でのClaim ID整合性検証):
+                // 元Crisisが`related_claim_id`を持つ場合、そのClaimの請求国・対象州が
+                // Crisis/Justificationの当事者と食い違っていないかを確認する
+                // (Claim自体の参照切れは既存の`unknown_related_claim_reference_is_rejected`
+                // が別途検証済みのため、ここでは実在するClaimの中身の整合性のみを見る)。
+                if let Some(claim_id) = crisis.related_claim_id
+                    && let Some(claim) = save.claims.claims.get(&claim_id)
+                {
+                    if claim.claimant_country != crisis.initiator {
+                        push(
+                            issues,
+                            SaveValidationCode::ParticipantMismatch,
+                            format!("{path}.source_crisis_id"),
+                            format!(
+                                "source crisis's claim {:?} claimant {:?} does not match \
+                                 the crisis's initiator {:?}",
+                                claim_id, claim.claimant_country, crisis.initiator
+                            ),
+                        );
+                    }
+                    if claim.target_state != j.target_state {
+                        push(
+                            issues,
+                            SaveValidationCode::ParticipantMismatch,
+                            format!("{path}.source_crisis_id"),
+                            format!(
+                                "source crisis's claim {:?} target_state {:?} does not match \
+                                 the justification's target_state {:?}",
+                                claim_id, claim.target_state, j.target_state
+                            ),
+                        );
+                    }
+                }
+            }
         }
 
         let mut seen_attackers: HashSet<CountryId> = HashSet::new();
@@ -1169,6 +1425,128 @@ fn validate_wars(save: &SaveGameV1, idx: &RefIndex, issues: &mut Vec<SaveValidat
             );
         }
 
+        // P21-016(二次レビュー対応): `War.source_crisis_id`(このWarを生んだCrisisへの
+        // 来歴)自体の参照整合性。Crisis経由でない通常の二国間Warでは`None`のため無条件で
+        // 素通りする。
+        if let Some(source_crisis_id) = war.source_crisis_id {
+            if !idx.crises.contains(&source_crisis_id) {
+                push(
+                    issues,
+                    SaveValidationCode::DanglingReference,
+                    format!("{path}.source_crisis_id"),
+                    format!("references unknown {source_crisis_id:?}"),
+                );
+            }
+
+            // P21-019: `validate_war_justifications`が既に行っているCrisis↔Claim
+            // 整合性検証と全く同じパターンを、War自身についても行う
+            // (`War.primary_attacker`/`primary_defender`とCrisisのinitiator/target、
+            // およびCrisisが参照するClaimのclaimant/target_stateとの食い違いを検出する)。
+            // `primary_attacker_id()`/`primary_defender_id()`はattackers/defendersが
+            // 空だとpanicするため、Save検証コードでは絶対に呼ばない
+            // (空集合自体は上のEmptyCollectionチェックが別途検出する)。
+            if let Some(crisis) = save.crises.crises.get(&source_crisis_id) {
+                let war_attacker = war
+                    .primary_attacker
+                    .or_else(|| war.attackers.iter().copied().min_by_key(|c| c.0));
+                let war_defender = war
+                    .primary_defender
+                    .or_else(|| war.defenders.iter().copied().min_by_key(|c| c.0));
+
+                if war_attacker.is_some() && war_attacker != Some(crisis.initiator) {
+                    push(
+                        issues,
+                        SaveValidationCode::ParticipantMismatch,
+                        format!("{path}.source_crisis_id"),
+                        format!(
+                            "war's primary attacker {:?} does not match source crisis's \
+                             initiator {:?}",
+                            war_attacker, crisis.initiator
+                        ),
+                    );
+                }
+                if war_defender.is_some() && war_defender != Some(crisis.target) {
+                    push(
+                        issues,
+                        SaveValidationCode::ParticipantMismatch,
+                        format!("{path}.source_crisis_id"),
+                        format!(
+                            "war's primary defender {:?} does not match source crisis's \
+                             target {:?}",
+                            war_defender, crisis.target
+                        ),
+                    );
+                }
+
+                if let Some(claim_id) = crisis.related_claim_id
+                    && let Some(claim) = save.claims.claims.get(&claim_id)
+                {
+                    if claim.claimant_country != crisis.initiator {
+                        push(
+                            issues,
+                            SaveValidationCode::ParticipantMismatch,
+                            format!("{path}.source_crisis_id"),
+                            format!(
+                                "source crisis's claim {:?} claimant {:?} does not match \
+                                 the crisis's initiator {:?}",
+                                claim_id, claim.claimant_country, crisis.initiator
+                            ),
+                        );
+                    }
+
+                    // P21-019フォローアップ(ユーザー指摘対応、2026-08-21): 単なる
+                    // `war_goals.first()`依存ではなく、`related_claim_id`のClaimを正として
+                    // 「1 Claim = 1対象州」という不変条件そのものを明示的に検証する。
+                    // Crisis/Warそれぞれの全`war_goals`の全`target_states`を合算した集合が
+                    // Claimのtarget_state一つだけと完全に一致することを確認する
+                    // (旧実装は`.first()`同士の比較のみで、2件目以降のwar_goalや
+                    // target_statesに余分な/矛盾する値が紛れ込んでいても検出できなかった)。
+                    let crisis_target_states: Vec<StateId> = crisis
+                        .war_goals
+                        .iter()
+                        .flat_map(|g| g.target_states.iter().copied())
+                        .collect();
+                    if crisis_target_states != vec![claim.target_state] {
+                        push(
+                            issues,
+                            SaveValidationCode::ParticipantMismatch,
+                            format!("{path}.source_crisis_id"),
+                            format!(
+                                "source crisis's war_goals target_states {:?} must be exactly \
+                                 [claim {:?}'s target_state {:?}] (the '1 claim = 1 target \
+                                 state' invariant)",
+                                crisis_target_states, claim_id, claim.target_state
+                            ),
+                        );
+                    }
+
+                    // War自身のwar_goalsについても同じ不変条件を検証する(§フォローアップ
+                    // 指摘: Crisis↔Claimの整合性だけでなく、War.war_goals自体の対象州も
+                    // Claimと一致している必要がある。既存はWar側のこの検証を一切行って
+                    // いなかったため、壊れたSaveがvalidationを通過し、ロード後の講和で
+                    // `resolve_crisis_war_lineage`が食い違いを検出して永久に失敗し得た)。
+                    let war_target_states: Vec<StateId> = war
+                        .war_goals
+                        .iter()
+                        .flat_map(|g| g.target_states.iter().copied())
+                        .collect();
+                    if war_target_states != vec![claim.target_state] {
+                        push(
+                            issues,
+                            SaveValidationCode::ParticipantMismatch,
+                            format!("{path}.war_goals"),
+                            format!(
+                                "war's war_goals target_states {:?} must be exactly \
+                                 [claim {:?}'s target_state {:?}] (the '1 claim = 1 target \
+                                 state' invariant)",
+                                war_target_states, claim_id, claim.target_state
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
         let mut participants: Vec<CountryId> = war
             .attackers
             .iter()
@@ -1237,6 +1615,32 @@ fn validate_wars(save: &SaveGameV1, idx: &RefIndex, issues: &mut Vec<SaveValidat
                         SaveValidationCode::DanglingReference,
                         format!("{gpath}.target_states[{si}]"),
                         format!("references unknown {sid:?}"),
+                    );
+                    continue;
+                }
+
+                // P21-020: `war.status == Active`の場合のみ、War goal対象州の現在の
+                // 法的所有国がまだgoal.defenderのままであることを検証する。Ended War
+                // (講和後、所有権が正当に動いた後の履歴)は対象外
+                // (§12要求: 「Ended Warの履歴は、講和後に所有者が変わっているため
+                // Active Warと同じ所有者条件を要求しない」)。この不一致を放置すると、
+                // ロード後の`execute_peace_settlement`が
+                // `state::ownership::preflight_transfer_state_ownership`の
+                // `CurrentOwnerMismatch`で永久に講和失敗し得る、壊れたSaveを
+                // 検出せずに通してしまう。
+                if war.status == crate::war::data::WarStatus::Active
+                    && let Some(state) = save.states.iter().find(|s| s.id == *sid)
+                    && state.owner_country_id != goal.defender
+                {
+                    push(
+                        issues,
+                        SaveValidationCode::OwnershipMismatch,
+                        format!("{gpath}.target_states[{si}]"),
+                        format!(
+                            "state {:?} is owned by {:?}, but this Active war's goal expects \
+                             defender {:?} to still own it",
+                            sid, state.owner_country_id, goal.defender
+                        ),
                     );
                 }
             }
@@ -2701,6 +3105,7 @@ mod tests {
             defenders: [CountryId(1)].into_iter().collect(),
             primary_attacker: None,
             primary_defender: None,
+            source_crisis_id: None,
             war_goals: vec![WarGoal {
                 attacker: CountryId(0),
                 defender: CountryId(1),
@@ -2968,6 +3373,13 @@ mod tests {
         assert!(has_code(&issues, SaveValidationCode::OwnershipMismatch));
     }
 
+    /// P21-020 §14要求61: 首都が海州のSaveを拒否する。
+    #[test]
+    fn capital_that_is_a_sea_state_is_rejected() {
+        let issues = issues_for(|save| save.states[0].is_sea = true);
+        assert!(has_code(&issues, SaveValidationCode::OwnershipMismatch));
+    }
+
     #[test]
     fn unknown_state_owner_is_rejected() {
         let issues = issues_for(|save| save.states[2].owner_country_id = CountryId(999));
@@ -3196,6 +3608,275 @@ mod tests {
                 .def_id = DivisionDefinitionId(999);
         });
         assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    // ─── P21-021: 国家消滅 ───────────────────────────────────────────────────
+
+    /// baseline_save()のcountry1(CountryId(1))を、他の不変条件(所有陸州0・
+    /// Active War非参加)も満たした状態で`Eliminated`へ遷移させる共通セットアップ。
+    /// 個々のテストがこの上に、検証対象の1つの違反条件だけを追加する。
+    fn eliminate_country1_cleanly(save: &mut SaveGameV1) {
+        for state in save.states.iter_mut() {
+            if state.owner_country_id == CountryId(1) {
+                state.owner_country_id = CountryId(0);
+            }
+        }
+        save.wars.wars.get_mut(&WarId(0)).unwrap().status = WarStatus::WhitePeace;
+        save.countries[1].status = crate::country::CountryStatus::Eliminated {
+            eliminated_date: "1800/06/01".to_string(),
+            annexed_by: CountryId(0),
+        };
+    }
+
+    #[test]
+    fn cleanly_eliminated_country_passes_validation() {
+        let issues = issues_for(eliminate_country1_cleanly);
+        assert!(
+            issues.is_empty(),
+            "a cleanly-eliminated country must not raise any issue, got {issues:?}"
+        );
+    }
+
+    /// 要求(§7): 正常な消滅SaveについてSave→validate→Load→再validateも確認する。
+    /// `ValidatedSaveGameV1::into_inner()`で取り出した(=Loadが適用したのと同じ)
+    /// データを、RON往復も経由したうえで再度検証し、冪等に有効であることを示す。
+    #[test]
+    fn cleanly_eliminated_country_survives_a_save_load_round_trip_and_revalidates() {
+        let statics = static_data();
+        let mut save = baseline_save();
+        eliminate_country1_cleanly(&mut save);
+
+        let validated = validate_save_game_v1(save, &statics.context())
+            .expect("a cleanly-eliminated country's save must validate");
+        let loaded = validated.into_inner();
+
+        // RON往復(実際のSave/Load経路と同じシリアライズ形式)。
+        let ron_text = ron::to_string(&loaded).expect("save must serialize to RON");
+        let reloaded: SaveGameV1 =
+            ron::from_str(&ron_text).expect("save must deserialize back from RON");
+        assert_eq!(
+            reloaded.countries[1].status,
+            crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(0),
+            }
+        );
+
+        let re_validated = validate_save_game_v1(reloaded, &statics.context());
+        assert!(
+            re_validated.is_ok(),
+            "re-validating the loaded save must succeed idempotently, got {:?}",
+            re_validated.err()
+        );
+    }
+
+    #[test]
+    fn active_country_with_no_land_state_is_rejected() {
+        let issues = issues_for(|save| {
+            for state in save.states.iter_mut() {
+                if state.owner_country_id == CountryId(1) {
+                    state.owner_country_id = CountryId(0);
+                }
+            }
+            // country1のstatusはActiveのまま(デフォルト)。
+        });
+        assert!(has_code(&issues, SaveValidationCode::EmptyCollection));
+    }
+
+    #[test]
+    fn eliminated_country_still_owning_a_land_state_is_rejected() {
+        let issues = issues_for(|save| {
+            save.wars.wars.get_mut(&WarId(0)).unwrap().status = WarStatus::WhitePeace;
+            save.countries[1].status = crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(0),
+            };
+            // state1/state2の所有権は移していない=陸州を保有したまま。
+        });
+        assert!(has_code(&issues, SaveValidationCode::InvalidRange));
+    }
+
+    #[test]
+    fn eliminated_country_annexed_by_itself_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.countries[1].status = crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(1),
+            };
+        });
+        assert!(has_code(&issues, SaveValidationCode::OwnershipMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_annexed_by_an_unknown_country_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.countries[1].status = crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(999),
+            };
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    #[test]
+    fn eliminated_country_annexed_by_another_eliminated_country_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            // annexerであるcountry0自身もEliminatedにする(annexed_byは実在するが非Active)。
+            save.countries[0].status = crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/05/01".to_string(),
+                annexed_by: CountryId(1),
+            };
+        });
+        assert!(has_code(&issues, SaveValidationCode::OwnershipMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_still_an_active_war_participant_is_rejected() {
+        let issues = issues_for(|save| {
+            for state in save.states.iter_mut() {
+                if state.owner_country_id == CountryId(1) {
+                    state.owner_country_id = CountryId(0);
+                }
+            }
+            save.countries[1].status = crate::country::CountryStatus::Eliminated {
+                eliminated_date: "1800/06/01".to_string(),
+                annexed_by: CountryId(0),
+            };
+            // War(0)はActiveのまま(country1が引き続きdefender)。
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_still_owning_a_division_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            let division = make_division(1, CountryId(1), StateId(0));
+            save.military.divisions.insert(division.id, division);
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_still_owning_an_army_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.armies.armies.insert(
+                ArmyId(1),
+                Army {
+                    id: ArmyId(1),
+                    owner: CountryId(1),
+                    name: "Ghost Army".to_string(),
+                    member_division_ids: vec![],
+                },
+            );
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_with_a_nonempty_recruitment_queue_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.countries[1].recruitment_queue.push(
+                crate::military::recruitment::RecruitmentQueueItem {
+                    division_id: DivisionDefinitionId(0),
+                    target_state: StateId(0),
+                    days_remaining: 5,
+                    total_days: 10,
+                },
+            );
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_as_an_unresolved_crisis_party_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                DiplomaticCrisis {
+                    id: DiplomaticCrisisId(0),
+                    initiator: CountryId(0),
+                    target: CountryId(1),
+                    war_goals: vec![],
+                    start_date: "1800/01/01".to_string(),
+                    current_phase: CrisisPhase::DemandSent,
+                    escalation: 0.0,
+                    initiator_support: 0.0,
+                    target_resistance: 0.0,
+                    days_in_phase: 0,
+                    deadline_date: None,
+                    international_concern: 0.0,
+                    third_party_reactions: HashMap::new(),
+                    related_claim_id: None,
+                    related_justification_id: None,
+                    related_war_id: None,
+                },
+            );
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    #[test]
+    fn eliminated_country_resolved_crisis_party_is_not_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                DiplomaticCrisis {
+                    id: DiplomaticCrisisId(0),
+                    initiator: CountryId(0),
+                    target: CountryId(1),
+                    war_goals: vec![],
+                    start_date: "1800/01/01".to_string(),
+                    current_phase: CrisisPhase::CancelledByCountryElimination,
+                    escalation: 0.0,
+                    initiator_support: 0.0,
+                    target_resistance: 0.0,
+                    days_in_phase: 0,
+                    deadline_date: None,
+                    international_concern: 0.0,
+                    third_party_reactions: HashMap::new(),
+                    related_claim_id: None,
+                    related_justification_id: None,
+                    related_war_id: None,
+                },
+            );
+        });
+        assert!(
+            !has_code(&issues, SaveValidationCode::ParticipantMismatch),
+            "a terminal (resolved) crisis referencing the eliminated country must not be \
+             flagged — only unresolved ones must, got {issues:?}"
+        );
+    }
+
+    #[test]
+    fn eliminated_country_as_a_justification_party_is_rejected() {
+        let issues = issues_for(|save| {
+            eliminate_country1_cleanly(save);
+            save.war_justifications.justifications.insert(
+                0,
+                WarJustification {
+                    id: 0,
+                    initiator: CountryId(0),
+                    target: CountryId(1),
+                    target_state: StateId(0),
+                    start_date: "1800/01/01".to_string(),
+                    required_days: 30,
+                    days_passed: 30,
+                    is_ready: true,
+                    source_crisis_id: None,
+                    committed_attackers: vec![],
+                    committed_defenders: vec![],
+                },
+            );
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
     }
 
     // ─── 外交・戦争 ──────────────────────────────────────────────────────────
@@ -3436,6 +4117,505 @@ mod tests {
         assert!(
             issues.is_empty(),
             "valid source_crisis_id must be accepted, got {issues:?}"
+        );
+    }
+
+    /// P21-016要求テスト(二次レビュー対応): `WarJustification.initiator`が由来Crisisの
+    /// `initiator`と一致しない(Save破損)場合は拒否される。
+    #[test]
+    fn justification_initiator_mismatch_with_source_crisis_is_rejected() {
+        let issues = issues_for(|save| {
+            save.countries.push(CountryData {
+                id: CountryId(2),
+                capital_state_id: StateId(3),
+                government_type: GovernmentType::Monarchy,
+                economic_system: EconomicSystem::FreeMarket,
+                ..CountryData::default()
+            });
+            save.states.push(StateData {
+                id: StateId(3),
+                owner_country_id: CountryId(2),
+                ..StateData::default()
+            });
+            // crisis_with()のinitiatorは常にCountryId(0)固定なので、initiatorだけ
+            // CountryId(2)へ差し替えたCrisisを直接構築する(targetはCountryId(1)のまま
+            // 一致させ、initiator不一致だけを単独で検証する)。
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                DiplomaticCrisis {
+                    id: DiplomaticCrisisId(0),
+                    initiator: CountryId(2),
+                    target: CountryId(1),
+                    war_goals: Vec::new(),
+                    start_date: "1800/01/01".to_string(),
+                    current_phase: CrisisPhase::Escalating,
+                    escalation: 0.0,
+                    initiator_support: 0.0,
+                    target_resistance: 0.0,
+                    days_in_phase: 0,
+                    deadline_date: None,
+                    international_concern: 0.0,
+                    third_party_reactions: HashMap::new(),
+                    related_claim_id: None,
+                    related_justification_id: None,
+                    related_war_id: None,
+                },
+            );
+            save.crises.next_id = 1;
+            // justification.initiatorはseed_war_justification_forの既定でCountryId(0)
+            // (Crisisのinitiator=CountryId(2)と食い違う)。
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-016要求テスト(二次レビュー対応): `WarJustification.target`が由来Crisisの
+    /// `target`と一致しない(Save破損)場合は拒否される。
+    #[test]
+    fn justification_target_mismatch_with_source_crisis_is_rejected() {
+        let issues = issues_for(|save| {
+            save.countries.push(CountryData {
+                id: CountryId(2),
+                capital_state_id: StateId(3),
+                government_type: GovernmentType::Monarchy,
+                economic_system: EconomicSystem::FreeMarket,
+                ..CountryData::default()
+            });
+            save.states.push(StateData {
+                id: StateId(3),
+                owner_country_id: CountryId(2),
+                ..StateData::default()
+            });
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                DiplomaticCrisis {
+                    id: DiplomaticCrisisId(0),
+                    initiator: CountryId(0),
+                    target: CountryId(2),
+                    war_goals: Vec::new(),
+                    start_date: "1800/01/01".to_string(),
+                    current_phase: CrisisPhase::Escalating,
+                    escalation: 0.0,
+                    initiator_support: 0.0,
+                    target_resistance: 0.0,
+                    days_in_phase: 0,
+                    deadline_date: None,
+                    international_concern: 0.0,
+                    third_party_reactions: HashMap::new(),
+                    related_claim_id: None,
+                    related_justification_id: None,
+                    related_war_id: None,
+                },
+            );
+            save.crises.next_id = 1;
+            // justification.targetはseed_war_justification_forの既定でCountryId(1)
+            // (Crisisのtarget=CountryId(2)と食い違う)。
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-016要求テスト(二次レビュー対応): initiator/targetが由来Crisisと一致する
+    /// 正常な組み合わせは受理される(`crisis_with`のCrisisは常にinitiator=0/target=1)。
+    #[test]
+    fn justification_pair_matching_source_crisis_is_accepted() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, None, None, None),
+            );
+            save.crises.next_id = 1;
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(
+            issues.is_empty(),
+            "a justification pair matching its source crisis must be accepted, got {issues:?}"
+        );
+    }
+
+    /// P21-016要求テスト(二次レビュー対応、Claim ID整合性): 由来Crisisが参照する
+    /// Claimの請求国が、そのCrisisのinitiatorと食い違う(Save破損)場合は拒否される。
+    #[test]
+    fn source_crisis_claim_claimant_mismatch_is_rejected() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(1), // crisis.initiator(=0)と食い違う
+                    target_state: StateId(1),
+                    strength: 10.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: ClaimSource::BorderDispute,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, Some(ClaimId(0)), None, None),
+            );
+            save.crises.next_id = 1;
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-016要求テスト(二次レビュー対応、Claim ID整合性): 由来Crisisが参照する
+    /// Claimの対象州が、Justificationの`target_state`と食い違う(Save破損)場合は
+    /// 拒否される。
+    #[test]
+    fn source_crisis_claim_target_state_mismatch_is_rejected() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(0), // justification.target_state(=1)と食い違う
+                    strength: 10.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: ClaimSource::BorderDispute,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, Some(ClaimId(0)), None, None),
+            );
+            save.crises.next_id = 1;
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-016要求テスト(二次レビュー対応、Claim ID整合性): 請求国・対象州とも
+    /// 一致する正常なClaimは受理される。
+    #[test]
+    fn source_crisis_with_consistent_claim_is_accepted() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(1),
+                    strength: 10.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: ClaimSource::BorderDispute,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::Escalating, Some(ClaimId(0)), None, None),
+            );
+            save.crises.next_id = 1;
+            seed_war_justification_for(save, Some(DiplomaticCrisisId(0)), vec![], vec![]);
+        });
+        assert!(
+            issues.is_empty(),
+            "a consistent claim/crisis/justification chain must be accepted, got {issues:?}"
+        );
+    }
+
+    /// P21-016要求テスト(二次レビュー対応): `War.source_crisis_id`が存在しないCrisisを
+    /// 参照する場合は参照切れとして拒否される。
+    #[test]
+    fn unknown_war_source_crisis_id_is_rejected() {
+        let issues = issues_for(|save| {
+            save.wars.wars.get_mut(&WarId(0)).unwrap().source_crisis_id =
+                Some(DiplomaticCrisisId(999));
+        });
+        assert!(has_code(&issues, SaveValidationCode::DanglingReference));
+    }
+
+    /// P21-016要求テスト(二次レビュー対応): `War.source_crisis_id`が実在するCrisisを
+    /// 参照する場合は受理される。
+    #[test]
+    fn valid_war_source_crisis_id_is_accepted() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::WarStarted, None, None, Some(WarId(0))),
+            );
+            save.crises.next_id = 1;
+            save.wars.wars.get_mut(&WarId(0)).unwrap().source_crisis_id =
+                Some(DiplomaticCrisisId(0));
+        });
+        assert!(
+            issues.is_empty(),
+            "a valid War.source_crisis_id must be accepted, got {issues:?}"
+        );
+    }
+
+    /// P21-019要求テスト37: Warのprimary attackerが、由来Crisisのinitiatorと
+    /// 食い違う場合は拒否される。
+    #[test]
+    fn war_primary_attacker_crisis_initiator_mismatch_is_rejected() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::WarStarted, None, None, Some(WarId(0))),
+            );
+            save.crises.next_id = 1;
+            let war = save.wars.wars.get_mut(&WarId(0)).unwrap();
+            war.source_crisis_id = Some(DiplomaticCrisisId(0));
+            // baselineのattackers={0}のままだが、明示的なprimary_attackerを
+            // crisis.initiator(0)とは異なる値へ差し替える。
+            war.attackers = [CountryId(7)].into_iter().collect();
+            war.primary_attacker = Some(CountryId(7));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-019要求テスト37: Warのprimary defenderが、由来Crisisのtargetと
+    /// 食い違う場合は拒否される。
+    #[test]
+    fn war_primary_defender_crisis_target_mismatch_is_rejected() {
+        let issues = issues_for(|save| {
+            save.crises.crises.insert(
+                DiplomaticCrisisId(0),
+                crisis_with(CrisisPhase::WarStarted, None, None, Some(WarId(0))),
+            );
+            save.crises.next_id = 1;
+            let war = save.wars.wars.get_mut(&WarId(0)).unwrap();
+            war.source_crisis_id = Some(DiplomaticCrisisId(0));
+            war.defenders = [CountryId(7)].into_iter().collect();
+            war.primary_defender = Some(CountryId(7));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-019要求テスト39: 由来Crisisが参照するClaimのclaimantが、Crisisの
+    /// initiatorと食い違う場合は拒否される(`validate_war_justifications`が既に
+    /// 持つ検証パターンを`War`側にも適用する)。
+    #[test]
+    fn war_crisis_claim_claimant_mismatch_is_rejected() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                crate::diplomacy::claims::TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(9), // crisis.initiator(0)と食い違う
+                    target_state: StateId(1),
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: crate::diplomacy::claims::ClaimSource::Strategic,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            let mut crisis = crisis_with(
+                CrisisPhase::WarStarted,
+                Some(ClaimId(0)),
+                None,
+                Some(WarId(0)),
+            );
+            crisis.war_goals = save.wars.wars.get(&WarId(0)).unwrap().war_goals.clone();
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+            save.wars.wars.get_mut(&WarId(0)).unwrap().source_crisis_id =
+                Some(DiplomaticCrisisId(0));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-019要求テスト40: 由来Crisisが参照するClaimのtarget_stateが、Crisis自身の
+    /// war_goal target_stateと食い違う場合は拒否される。
+    #[test]
+    fn war_crisis_claim_target_state_mismatch_is_rejected() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                crate::diplomacy::claims::TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(99), // crisisのwar_goal target_state(1)と食い違う
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: crate::diplomacy::claims::ClaimSource::Strategic,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            let mut crisis = crisis_with(
+                CrisisPhase::WarStarted,
+                Some(ClaimId(0)),
+                None,
+                Some(WarId(0)),
+            );
+            crisis.war_goals = save.wars.wars.get(&WarId(0)).unwrap().war_goals.clone();
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+            save.wars.wars.get_mut(&WarId(0)).unwrap().source_crisis_id =
+                Some(DiplomaticCrisisId(0));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-019フォローアップ要求テスト(ユーザー指摘対応): Crisis自身の
+    /// war_goalsはClaimと正しく一致しているが、**War自身のwar_goals**だけが
+    /// 食い違う場合を拒否する。この検証はCrisis↔Claimの整合性だけでは
+    /// 発見できず、War側専用のチェックが無ければ壊れたSaveが通過してしまう
+    /// (ロード後の講和で`resolve_crisis_war_lineage`が食い違いを検出して
+    /// 永久に失敗し得るケース)。
+    #[test]
+    fn war_own_war_goals_target_state_mismatch_with_claim_is_rejected() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                crate::diplomacy::claims::TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(1), // baselineの正しいtarget_state
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: crate::diplomacy::claims::ClaimSource::Strategic,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            let mut crisis = crisis_with(
+                CrisisPhase::WarStarted,
+                Some(ClaimId(0)),
+                None,
+                Some(WarId(0)),
+            );
+            // Crisis側のwar_goalsはClaimと正しく一致させる。
+            crisis.war_goals = save.wars.wars.get(&WarId(0)).unwrap().war_goals.clone();
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+            let war = save.wars.wars.get_mut(&WarId(0)).unwrap();
+            war.source_crisis_id = Some(DiplomaticCrisisId(0));
+            // War自身のwar_goalsだけを対象州違いへ壊す(Crisis側は正しいまま)。
+            war.war_goals[0].target_states = vec![StateId(50)];
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-020 §14要求63: Active WarのWar goal対象州の法的所有国がgoal.defenderと
+    /// 食い違うSaveを拒否する。放置するとロード後の講和が
+    /// `state::ownership::preflight_transfer_state_ownership`の
+    /// `CurrentOwnerMismatch`で永久に失敗し得る。
+    #[test]
+    fn active_war_target_state_owner_mismatch_with_defender_is_rejected() {
+        let issues = issues_for(|save| {
+            // baselineのtarget_state(StateId(1))はdefender(CountryId(1))の首都でも
+            // あるため、先に首都を残存州(StateId(2))へ動かしておく――この検証が
+            // 「Active WarのWar goal所有者不一致」を確実に捉えていることを、
+            // 既存の首都不整合検証と混同せず示すため。
+            save.countries[1].capital_state_id = StateId(2);
+            // baselineのWar(0)はAttacker=0/Defender=1、target_state=StateId(1)
+            // (元々CountryId(1)所有)。所有者をattacker自身へ差し替える
+            // (戦争中に何らかの経路で既に移転済み、という壊れたデータを模する)。
+            save.states[1].owner_country_id = CountryId(0);
+        });
+        assert!(has_code(&issues, SaveValidationCode::OwnershipMismatch));
+    }
+
+    /// P21-020 §14要求64: Ended War(講和後の履歴)は、対象州の所有者が
+    /// defenderから変わっていても誤って拒否しない(Active War専用の検証)。
+    #[test]
+    fn ended_war_target_state_owner_change_is_not_falsely_rejected() {
+        let issues = issues_for(|save| {
+            let war = save.wars.wars.get_mut(&WarId(0)).unwrap();
+            war.status = WarStatus::AttackerVictory;
+            war.winner = Some(CountryId(0));
+            war.end_date = Some("1800/06/01".to_string());
+            // baselineのtarget_state(StateId(1))は元defender(CountryId(1))の首都でも
+            // あるため、首都も実際の講和と同じく残存州(StateId(2))へ再配置してから
+            // 割譲する(さもないと首都不整合という別の既存検証に引っかかり、
+            // このテストが検証したい「Ended Warは所有者変更を拒否しない」という
+            // 論点をぼかしてしまう)。
+            save.countries[1].capital_state_id = StateId(2);
+            // 講和で実際にattackerへ割譲された後の状態を模す。
+            save.states[1].owner_country_id = CountryId(0);
+        });
+        assert!(!has_code(&issues, SaveValidationCode::OwnershipMismatch));
+    }
+
+    /// P21-019フォローアップ要求テスト(ユーザー指摘対応): Crisisのwar_goalsに、
+    /// Claimのtarget_stateと一致する要素に加えて余分なtarget_stateが
+    /// 紛れ込んでいる場合を拒否する。旧`.first()`依存の検証では、先頭要素さえ
+    /// 一致していれば2件目以降の矛盾する値を検出できなかった
+    /// (「1 Claim = 1対象州」不変条件の明示的な検証で初めて検出できる)。
+    #[test]
+    fn crisis_war_goals_with_extra_target_state_beyond_the_claim_is_rejected() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                crate::diplomacy::claims::TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(1),
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: crate::diplomacy::claims::ClaimSource::Strategic,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            let mut crisis = crisis_with(
+                CrisisPhase::WarStarted,
+                Some(ClaimId(0)),
+                None,
+                Some(WarId(0)),
+            );
+            crisis.war_goals = save.wars.wars.get(&WarId(0)).unwrap().war_goals.clone();
+            // 先頭要素(StateId(1))はClaimと一致するが、余分な2件目を追加する。
+            crisis.war_goals[0].target_states.push(StateId(2));
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+            save.wars.wars.get_mut(&WarId(0)).unwrap().source_crisis_id =
+                Some(DiplomaticCrisisId(0));
+        });
+        assert!(has_code(&issues, SaveValidationCode::ParticipantMismatch));
+    }
+
+    /// P21-019要求テスト: War/Crisis/Claimの三者が完全に整合するlineageは受理される
+    /// (誤検出しないことの確認)。
+    #[test]
+    fn valid_war_crisis_claim_lineage_is_accepted() {
+        let issues = issues_for(|save| {
+            save.claims.claims.insert(
+                ClaimId(0),
+                crate::diplomacy::claims::TerritorialClaim {
+                    id: ClaimId(0),
+                    claimant_country: CountryId(0),
+                    target_state: StateId(1),
+                    strength: 50.0,
+                    created_date: "1800/01/01".to_string(),
+                    is_permanent: false,
+                    source: crate::diplomacy::claims::ClaimSource::Strategic,
+                    status: crate::diplomacy::claims::ClaimStatus::Active,
+                },
+            );
+            save.claims.next_id = 1;
+            let mut crisis = crisis_with(
+                CrisisPhase::WarStarted,
+                Some(ClaimId(0)),
+                None,
+                Some(WarId(0)),
+            );
+            crisis.war_goals = save.wars.wars.get(&WarId(0)).unwrap().war_goals.clone();
+            save.crises.crises.insert(DiplomaticCrisisId(0), crisis);
+            save.crises.next_id = 1;
+            save.wars.wars.get_mut(&WarId(0)).unwrap().source_crisis_id =
+                Some(DiplomaticCrisisId(0));
+        });
+        assert!(
+            issues.is_empty(),
+            "a fully consistent War/Crisis/Claim lineage must be accepted, got {issues:?}"
         );
     }
 

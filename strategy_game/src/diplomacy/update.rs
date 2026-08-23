@@ -13,6 +13,7 @@ use crate::diplomacy::data::{DiplomacyRegistry, DiplomaticPairKey, TreatyType};
 use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::state::data::StateRegistry;
 use crate::ui::notification::GameNotification;
+use crate::war::data::WarRegistry;
 use crate::war::justification::WarJustificationRegistry;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -35,22 +36,39 @@ pub const AI_CRISIS_SUPPORT_RELATION_MARGIN: f32 = 25.0;
 #[derive(Resource, Default, Debug)]
 pub struct AiSupportEvaluationCount(pub usize);
 
+/// P21-021: `accept_demand`が国家消滅発生時に内部で`country::elimination::
+/// apply_country_elimination`(Warの講和処理と同じ清掃API)を呼ぶために必要な
+/// 追加Registry群を1つのSystemParamへまとめる。`handle_daily_diplomacy`は既に
+/// BevyのSystemParamタプル引数数上限(16)に近く、これらを個別の引数として
+/// 追加すると上限を超えるため、`localization::Loc`と同じ「複数Resourceを
+/// 1つのSystemParamへ束ねる」パターンを踏襲する(3a/3b/3cの既存実行順序を
+/// 崩す独立Systemへの分割は行わない)。
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct EliminationSideEffectRegistries<'w> {
+    pub military_registry: ResMut<'w, crate::military::data::MilitaryRegistry>,
+    pub army_registry: ResMut<'w, crate::military::army::ArmyRegistry>,
+    pub frontline_registry: ResMut<'w, crate::war::frontline::FrontlineRegistry>,
+    pub battle_registry: ResMut<'w, crate::military::battle::BattleRegistry>,
+    pub power_registry: ResMut<'w, crate::country::power::CountryPowerRegistry>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_daily_diplomacy(
     mut day_events: MessageReader<DayChangedMessage>,
     mut diplomacy_registry: ResMut<DiplomacyRegistry>,
     player_country: Res<PlayerCountry>,
     mut notif_writer: MessageWriter<GameNotification>,
-    country_registry: Res<CountryRegistry>,
+    mut country_registry: ResMut<CountryRegistry>,
     date: Res<GameDate>,
     mut justification_registry: ResMut<WarJustificationRegistry>,
     mut state_registry: ResMut<crate::state::data::StateRegistry>,
     mut crisis_registry: ResMut<CrisisRegistry>,
     mut claim_registry: ResMut<ClaimRegistry>,
-    power_registry: Res<CountryPowerRegistry>,
+    mut war_registry: ResMut<WarRegistry>,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
     mut support_call_counter: Option<ResMut<AiSupportEvaluationCount>>,
+    mut elimination_regs: EliminationSideEffectRegistries,
 ) {
     // P21-015修正: 3aのAI支持判断だけは、同一フレームに`DayChangedMessage`が複数件
     // (高速進行等で1フレームに複数日が進んだ場合)積まれていても、フレームにつき
@@ -68,11 +86,15 @@ pub fn handle_daily_diplomacy(
         // 3. 外交危機の日次進行 (P21-010: 既存の状態遷移規則が存在しないため、
         // 接続範囲は`days_in_phase`のインクリメントのみに限定する。フェーズ自動遷移・
         // 自動終結・自動宣戦は実装しない[対象外: 新しい外交ルール]。terminal state
-        // [ResolvedPeacefully/WarStarted/Cancelled]は既存実装どおり日数を進めない)。
+        // [ResolvedPeacefully/WarStarted/Cancelled/P21-021:CancelledByCountryElimination]
+        // は既存実装どおり日数を進めない)。
         for crisis in crisis_registry.crises.values_mut() {
             if !matches!(
                 crisis.current_phase,
-                CrisisPhase::ResolvedPeacefully | CrisisPhase::WarStarted | CrisisPhase::Cancelled
+                CrisisPhase::ResolvedPeacefully
+                    | CrisisPhase::WarStarted
+                    | CrisisPhase::Cancelled
+                    | CrisisPhase::CancelledByCountryElimination
             ) {
                 crisis.days_in_phase += 1;
             }
@@ -92,7 +114,7 @@ pub fn handle_daily_diplomacy(
                 &mut crisis_registry,
                 &diplomacy_registry,
                 &country_registry,
-                &power_registry,
+                &elimination_regs.power_registry,
                 &player_country,
                 &date,
             );
@@ -112,8 +134,14 @@ pub fn handle_daily_diplomacy(
             &mut claim_registry,
             &mut state_registry,
             &mut justification_registry,
-            &diplomacy_registry,
-            &country_registry,
+            &mut diplomacy_registry,
+            &mut country_registry,
+            &mut war_registry,
+            &mut elimination_regs.military_registry,
+            &mut elimination_regs.army_registry,
+            &mut elimination_regs.frontline_registry,
+            &mut elimination_regs.battle_registry,
+            &mut elimination_regs.power_registry,
             &player_country,
             &date,
             &mut notif_writer,
@@ -255,7 +283,7 @@ pub fn handle_daily_diplomacy(
 /// (呼び出し元で既に構築済み)を使い、`CountryRegistry::get`のO(n)線形探索を避ける。
 fn compute_ally_power_by_country(
     diplomacy_registry: &DiplomacyRegistry,
-    country_by_id: &HashMap<CountryId, &CountryData>,
+    country_by_id: &HashMap<CountryId, CountryData>,
 ) -> HashMap<CountryId, f32> {
     let mut result: HashMap<CountryId, f32> = HashMap::new();
     for (key, relation) in diplomacy_registry.relations.iter() {
@@ -292,7 +320,7 @@ fn compute_ally_power_by_country(
 fn crisis_support_adjusted_power(
     crisis: &DiplomaticCrisis,
     ally_power_by_country: &HashMap<CountryId, f32>,
-    country_by_id: &HashMap<CountryId, &CountryData>,
+    country_by_id: &HashMap<CountryId, CountryData>,
     diplomacy_registry: &DiplomacyRegistry,
 ) -> (f32, f32) {
     let mut target_delta = 0.0f32;
@@ -501,8 +529,14 @@ fn evaluate_ai_crisis_responses(
     claim_registry: &mut ClaimRegistry,
     state_registry: &mut StateRegistry,
     justification_registry: &mut WarJustificationRegistry,
-    diplomacy_registry: &DiplomacyRegistry,
-    country_registry: &CountryRegistry,
+    diplomacy_registry: &mut DiplomacyRegistry,
+    country_registry: &mut CountryRegistry,
+    war_registry: &mut WarRegistry,
+    military_registry: &mut crate::military::data::MilitaryRegistry,
+    army_registry: &mut crate::military::army::ArmyRegistry,
+    frontline_registry: &mut crate::war::frontline::FrontlineRegistry,
+    battle_registry: &mut crate::military::battle::BattleRegistry,
+    power_registry: &mut CountryPowerRegistry,
     player_country: &PlayerCountry,
     date: &GameDate,
     notif_writer: &mut MessageWriter<GameNotification>,
@@ -510,10 +544,13 @@ fn evaluate_ai_crisis_responses(
     catalog: &TranslationCatalog,
 ) {
     // crisis件数 × country数の総当たりを避けるため、O(1)引き用のマップを日次1回だけ構築する。
-    let country_by_id: HashMap<CountryId, &CountryData> = country_registry
+    // P21-020: `accept_demand`が`&mut CountryRegistry`を要求するようになったため、
+    // ループ内で`country_registry`を可変借用できるよう、ここでは借用ではなく
+    // 複製(実マップは6か国程度、`.clone()`のコストは無視できる)を保持する。
+    let country_by_id: HashMap<CountryId, CountryData> = country_registry
         .countries
         .iter()
-        .map(|c| (c.id, c))
+        .map(|c| (c.id, c.clone()))
         .collect();
     let ally_power_by_country = compute_ally_power_by_country(diplomacy_registry, &country_by_id);
 
@@ -583,12 +620,23 @@ fn evaluate_ai_crisis_responses(
                 crisis_registry,
                 claim_registry,
                 state_registry,
+                country_registry,
+                war_registry,
+                military_registry,
+                army_registry,
+                frontline_registry,
+                battle_registry,
+                diplomacy_registry,
+                justification_registry,
+                power_registry,
+                &date.display(),
                 crisis_id,
                 target,
             );
         } else {
             let _ = crisis_response::reject_demand(
                 crisis_registry,
+                country_registry,
                 justification_registry,
                 crisis_id,
                 target,
@@ -633,8 +681,8 @@ mod tests {
         }
     }
 
-    fn country_by_id_of(countries: &[CountryData]) -> HashMap<CountryId, &CountryData> {
-        countries.iter().map(|c| (c.id, c)).collect()
+    fn country_by_id_of(countries: &[CountryData]) -> HashMap<CountryId, CountryData> {
+        countries.iter().map(|c| (c.id, c.clone())).collect()
     }
 
     fn alliance_registry(pairs: &[(usize, usize)]) -> DiplomacyRegistry {

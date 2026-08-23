@@ -1,0 +1,71 @@
+P21-021 国家消滅処理 性能プロファイル
+=====================================
+
+== 軸1: 無関係な他War総数(W) (D=10,C=10,X=10,J=10固定、state_count=2000、5回平均) ==
+other_war_count | elapsed_ms(mean of 5)
+       0 | 0.0124 (country_count=100)
+      10 | 0.0387 (country_count=100)
+     100 | 0.2298 (country_count=100)
+    1000 | 2.0719 (country_count=100)
+
+== 軸2: division_count のスケーリング(他は10固定、5回平均) ==
+division_count | elapsed_ms(mean of 5)
+       0 | 0.0397 (country_count=100)
+      10 | 0.0365 (country_count=100)
+     100 | 0.0425 (country_count=100)
+    1000 | 0.1113 (country_count=100)
+
+== 軸2: claim_count のスケーリング(他は10固定、5回平均) ==
+claim_count | elapsed_ms(mean of 5)
+       0 | 0.0372 (country_count=100)
+      10 | 0.0360 (country_count=100)
+     100 | 0.0389 (country_count=100)
+    1000 | 0.0569 (country_count=100)
+
+== 軸2: crisis_count のスケーリング(他は10固定、5回平均) ==
+crisis_count | elapsed_ms(mean of 5)
+       0 | 0.0355 (country_count=100)
+      10 | 0.0398 (country_count=100)
+     100 | 0.0398 (country_count=100)
+    1000 | 0.0630 (country_count=100)
+
+== 軸2: justification_count のスケーリング(他は10固定、5回平均) ==
+justification_count | elapsed_ms(mean of 5)
+       0 | 0.0377 (country_count=100)
+      10 | 0.0383 (country_count=100)
+     100 | 0.0420 (country_count=100)
+    1000 | 0.0774 (country_count=100)
+
+== 軸3: 世界の総国家数(N、state_countで間接指定) (D=C=X=J=10固定、5回平均) ==
+state_count | country_count | elapsed_ms(mean of 5)
+     200 |     10 | 0.0169
+    2000 |    100 | 0.0360
+    8000 |    400 | 0.2202
+
+== 軸4/5: 日次CountryAi Setコスト(state_count=2000, country_count>=100) ==
+eliminated_count | mean(ms) | p50(ms) | p95(ms)
+       0 | 0.09851 | 0.08140 | 0.19010
+      10 | 0.09019 | 0.07760 | 0.08680
+      50 | 0.07001 | 0.05970 | 0.07190
+
+消滅国家が増えるほどCountryAi Setの実測コストが悪化しないこと(むしろ
+軽くなる傾向)を示す——is_active()フィルタがループ本体の外(候補国リスト
+構築時)で1回だけ適用されるため、消滅国家1件あたりの追加コストはO(1)未満
+(ループにすら入らない)。
+
+== Big-O分析 ==
+- 軸1(他War総数W): O(W) ——`war_registry.wars`全体を1回走査してtargetが
+参加するWarを見つける必要があり(逆引きインデックスを持たない既存設計)、
+これは`invalidate_other_wars_targeting_state`等の既存コードと同じ
+パターンであり新規の非効率ではない。target自身に無関係なWarは
+フィルタで即座に除外されるため、Wごとの追加コストはO(1)。
+- 軸2(Division/Claim/Crisis/Justification): いずれもO(該当件数)の
+単純な1パスフィルタ+代入であり、他の集合との総当たり(O(N×M))は
+一切存在しない。
+- 軸3(総国家数N): `CountryRegistry`が`Vec`ベースのため`get`/`get_mut`は
+O(N)(既存設計、本タスクで新規に導入したものではない)。消滅処理内で
+`country_registry.get_mut(eliminated_country)`を呼ぶ回数は定数(2回)
+のため、全体としてO(N)。実運用規模(数十国)では無視できるコスト。
+- 軸4/5: `is_active()`フィルタはAI候補国リスト構築時に1回だけ適用され、
+消滅国家はループ本体に一切入らない(O(1)未満、スキップではなく
+そもそも列挙されない)。

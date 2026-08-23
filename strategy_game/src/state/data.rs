@@ -262,8 +262,23 @@ impl StateRegistry {
             .collect()
     }
 
-    /// 法的領土所有権の変更
-    pub fn transfer_region_ownership(
+    /// P21-020: 法的領土所有権の無条件変更(現在所有国の検証も首都再配置も行わない)。
+    ///
+    /// **通常のゲームプレイロジックから直接呼んではならない** ——
+    /// `crate::state::ownership::transfer_state_ownership`(現在所有国の検証・
+    /// 首都再配置・原子性を持つ共通Domain API)を使うこと。
+    ///
+    /// P21-020(ユーザー指摘対応): 可視性を`pub(crate)`から`pub(in crate::state)`
+    /// (`state`モジュール配下——`state::data`自身と`state::ownership`のみ)へ
+    /// 絞った。`pub(crate)`では`war`・`diplomacy`・`map`等どのモジュールからも
+    /// 呼べてしまい、ドキュメント上の警告だけでは共通APIの迂回を防止できない
+    /// ため。`state::ownership::apply_ownership_transfer`の内部実装としては
+    /// 引き続き再利用する(owner_country_id/controller/占領進捗/原所有者/war_id
+    /// の正常化ロジックを1箇所だけに保つため)。他モジュールが低レベルの
+    /// unchecked挙動そのものをテストしたい場合は、下記の`#[cfg(test)]`専用
+    /// ヘルパー(`test_transfer_region_ownership_unchecked`)を使うこと——
+    /// それ以外の用途では常に安全な`state::ownership`側のAPIを使う。
+    pub(in crate::state) fn transfer_region_ownership_unchecked(
         &mut self,
         state_id: StateId,
         new_owner: CountryId,
@@ -282,5 +297,19 @@ impl StateRegistry {
         state.war_id = None;
 
         Ok(())
+    }
+
+    /// P21-020(ユーザー指摘対応): テスト専用の`transfer_region_ownership_unchecked`
+    /// 公開ラッパー。`#[cfg(test)]`のため本番ビルドには一切含まれず、`state`
+    /// モジュール外からunchecked版の挙動(海州拒否等)を直接検証したい場合にのみ
+    /// 使う。通常ゲームロジックが誤って本番コードから呼べないことをコンパイル時に
+    /// 保証する(テストビルドでしか存在しない関数のため)。
+    #[cfg(test)]
+    pub fn test_transfer_region_ownership_unchecked(
+        &mut self,
+        state_id: StateId,
+        new_owner: CountryId,
+    ) -> Result<(), &'static str> {
+        self.transfer_region_ownership_unchecked(state_id, new_owner)
     }
 }

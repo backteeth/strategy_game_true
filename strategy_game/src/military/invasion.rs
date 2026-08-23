@@ -385,6 +385,7 @@ mod tests {
             defenders: [c2].iter().cloned().collect(),
             primary_attacker: None,
             primary_defender: None,
+            source_crisis_id: None,
             war_goals: vec![],
             war_score: 0.0,
             attacker_war_exhaustion: 0.0,

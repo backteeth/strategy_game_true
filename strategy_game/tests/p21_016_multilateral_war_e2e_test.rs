@@ -14,6 +14,7 @@ use strategy_game::country::{CountryRegistry, PlayerCountry};
 use strategy_game::diplomacy::claims::ClaimRegistry;
 use strategy_game::diplomacy::crisis::{CrisisPhase, CrisisRegistry};
 use strategy_game::diplomacy::crisis_response::{self, CrisisSupportSide};
+use strategy_game::diplomacy::data::DiplomacyRegistry;
 use strategy_game::state::data::StateRegistry;
 use strategy_game::war::data::WarRegistry;
 
@@ -182,11 +183,24 @@ fn create_claim_and_start_crisis(
     let date_str = world
         .resource::<strategy_game::app::time::GameDate>()
         .display();
+    let country_registry = world.resource::<CountryRegistry>().clone_for_test();
     let state_registry = world.resource::<StateRegistry>().clone_for_test();
-    let mut crisis_registry = world.resource_mut::<CrisisRegistry>();
-    crisis_registry
-        .start_crisis(&claim, claimant, target, date_str, &state_registry)
-        .expect("valid claim must allow crisis start")
+    world.resource_scope(|world, mut crisis_registry: Mut<CrisisRegistry>| {
+        let diplomacy_registry = world.resource::<DiplomacyRegistry>();
+        let war_registry = world.resource::<WarRegistry>();
+        crisis_registry
+            .start_crisis(
+                &claim,
+                claimant,
+                target,
+                date_str,
+                &country_registry,
+                &state_registry,
+                diplomacy_registry,
+                war_registry,
+            )
+            .expect("valid claim must allow crisis start")
+    })
 }
 
 impl CloneForTest for StateRegistry {

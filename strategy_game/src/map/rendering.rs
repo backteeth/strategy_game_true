@@ -262,9 +262,9 @@ mod tests {
 
     /// P21-004 spec #20: 講和による領土割譲後、州の色が新所有国の色になることを検証する。
     /// `war::peace::execute_peace_settlement`のCedeWarGoalRegion経路が実際に呼ぶ
-    /// `StateRegistry::transfer_region_ownership`(owner_country_idとcontroller_countryを
-    /// 両方新所有国へ更新する)をそのまま使い、占領(controllerのみ変化)ではなく
-    /// 割譲(ownerも変化)のケースを別途直接検証する。
+    /// 共通Domain API `state::ownership::transfer_state_ownership`(P21-020、
+    /// owner_country_idとcontroller_countryを両方新所有国へ更新する)をそのまま使い、
+    /// 占領(controllerのみ変化)ではなく割譲(ownerも変化)のケースを別途直接検証する。
     #[test]
     fn state_sprite_color_updates_to_new_owner_after_peace_cession() {
         let original_owner = crate::common::CountryId(1);
@@ -281,10 +281,21 @@ mod tests {
         app.update();
 
         {
-            let mut state_registry = app.world_mut().resource_mut::<StateRegistry>();
-            state_registry
-                .transfer_region_ownership(state_id, new_owner)
-                .unwrap();
+            let mut system_state: bevy::ecs::system::SystemState<(
+                ResMut<StateRegistry>,
+                ResMut<CountryRegistry>,
+            )> = bevy::ecs::system::SystemState::new(app.world_mut());
+            let (mut state_registry, mut country_registry) = system_state
+                .get_mut(app.world_mut())
+                .expect("StateRegistry/CountryRegistry must exist in the test app");
+            crate::state::ownership::transfer_state_ownership(
+                state_id,
+                original_owner,
+                new_owner,
+                &mut state_registry,
+                &mut country_registry,
+            )
+            .unwrap();
         }
         app.update();
 

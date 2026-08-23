@@ -19,6 +19,7 @@ use strategy_game::diplomacy::update::handle_daily_diplomacy;
 use strategy_game::localization::{CurrentLocale, TranslationCatalog};
 use strategy_game::state::data::StateRegistry;
 use strategy_game::ui::notification::GameNotification;
+use strategy_game::war::data::WarRegistry;
 use strategy_game::war::justification::WarJustificationRegistry;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -39,10 +40,15 @@ fn build_lightweight_diplomacy_app() -> App {
     app.insert_resource(CountryRegistry::default());
     app.insert_resource(StateRegistry::build(vec![]));
     app.insert_resource(WarJustificationRegistry::default());
+    app.insert_resource(WarRegistry::default());
     app.insert_resource(ClaimRegistry::default());
     app.insert_resource(strategy_game::country::power::CountryPowerRegistry::default());
     app.insert_resource(CurrentLocale::default());
     app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+    app.insert_resource(strategy_game::military::data::MilitaryRegistry::default());
+    app.insert_resource(strategy_game::military::army::ArmyRegistry::default());
+    app.insert_resource(strategy_game::war::frontline::FrontlineRegistry::default());
+    app.insert_resource(strategy_game::military::battle::BattleRegistry::default());
     app.add_message::<GameNotification>();
 
     app.add_systems(
@@ -333,17 +339,24 @@ mod real_map_e2e {
                 .unwrap()
                 .clone();
             let date_str = world.resource::<GameDate>().display();
+            let country_registry = world.resource::<CountryRegistry>().clone_for_test();
             let state_registry = world.resource::<StateRegistry>().clone_for_test();
-            let mut crisis_registry = world.resource_mut::<CrisisRegistry>();
-            crisis_registry
-                .start_crisis(
-                    &claim,
-                    CountryId(0),
-                    CountryId(1),
-                    date_str,
-                    &state_registry,
-                )
-                .expect("valid claim must allow crisis start")
+            world.resource_scope(|world, mut crisis_registry: Mut<CrisisRegistry>| {
+                let diplomacy_registry = world.resource::<DiplomacyRegistry>();
+                let war_registry = world.resource::<WarRegistry>();
+                crisis_registry
+                    .start_crisis(
+                        &claim,
+                        CountryId(0),
+                        CountryId(1),
+                        date_str,
+                        &country_registry,
+                        &state_registry,
+                        diplomacy_registry,
+                        war_registry,
+                    )
+                    .expect("valid claim must allow crisis start")
+            })
         };
 
         (claim_id, crisis_id)
@@ -351,26 +364,62 @@ mod real_map_e2e {
 
     /// 実データE2E: 受諾により州が移転しClaimが消費され、save往復後も維持される。
     #[test]
+    #[allow(clippy::type_complexity)]
     fn accept_demand_transfers_state_and_survives_save_round_trip() {
         let mut app = setup_app_in_playing();
         // StateId(4)"Forest Research Zone"はCountryId(1)所有だが首都ではない
         // (首都StateId(3)を移転すると`capital_state_id`不整合でsave検証に失敗するため)。
         let (claim_id, crisis_id) = create_claim_and_start_crisis(&mut app, StateId(4));
 
-        app.world_mut()
-            .resource_scope(|world, mut crisis_registry: Mut<CrisisRegistry>| {
-                world.resource_scope(|world, mut claim_registry: Mut<ClaimRegistry>| {
-                    let mut state_registry = world.resource_mut::<StateRegistry>();
-                    crisis_response::accept_demand(
-                        &mut crisis_registry,
-                        &mut claim_registry,
-                        &mut state_registry,
-                        crisis_id,
-                        CountryId(1),
-                    )
-                    .expect("target must be able to accept the demand");
-                });
-            });
+        let current_date = app.world().resource::<GameDate>().display();
+        let mut system_state: bevy::ecs::system::SystemState<(
+            ResMut<CrisisRegistry>,
+            ResMut<ClaimRegistry>,
+            ResMut<StateRegistry>,
+            ResMut<CountryRegistry>,
+            ResMut<WarRegistry>,
+            ResMut<strategy_game::military::data::MilitaryRegistry>,
+            ResMut<strategy_game::military::army::ArmyRegistry>,
+            ResMut<strategy_game::war::frontline::FrontlineRegistry>,
+            ResMut<strategy_game::military::battle::BattleRegistry>,
+            ResMut<DiplomacyRegistry>,
+            ResMut<WarJustificationRegistry>,
+            ResMut<strategy_game::country::power::CountryPowerRegistry>,
+        )> = bevy::ecs::system::SystemState::new(app.world_mut());
+        let (
+            mut crisis_registry,
+            mut claim_registry,
+            mut state_registry,
+            mut country_registry,
+            mut war_registry,
+            mut military_registry,
+            mut army_registry,
+            mut frontline_registry,
+            mut battle_registry,
+            mut diplomacy_registry,
+            mut justification_registry,
+            mut power_registry,
+        ) = system_state
+            .get_mut(app.world_mut())
+            .expect("all accept_demand resources must be present in the real App world");
+        crisis_response::accept_demand(
+            &mut crisis_registry,
+            &mut claim_registry,
+            &mut state_registry,
+            &mut country_registry,
+            &mut war_registry,
+            &mut military_registry,
+            &mut army_registry,
+            &mut frontline_registry,
+            &mut battle_registry,
+            &mut diplomacy_registry,
+            &mut justification_registry,
+            &mut power_registry,
+            &current_date,
+            crisis_id,
+            CountryId(1),
+        )
+        .expect("target must be able to accept the demand");
 
         assert_eq!(
             app.world()
@@ -434,8 +483,10 @@ mod real_map_e2e {
             .resource_scope(|world, mut crisis_registry: Mut<CrisisRegistry>| {
                 world.resource_scope(
                     |_world, mut justification_registry: Mut<WarJustificationRegistry>| {
+                        let country_registry = _world.resource::<CountryRegistry>();
                         crisis_response::reject_demand(
                             &mut crisis_registry,
+                            country_registry,
                             &mut justification_registry,
                             crisis_id,
                             CountryId(1),
@@ -536,8 +587,10 @@ mod real_map_e2e {
             .resource_scope(|world, mut crisis_registry: Mut<CrisisRegistry>| {
                 world.resource_scope(
                     |_world, mut justification_registry: Mut<WarJustificationRegistry>| {
+                        let country_registry = _world.resource::<CountryRegistry>();
                         crisis_response::withdraw_crisis(
                             &mut crisis_registry,
+                            country_registry,
                             &mut justification_registry,
                             crisis_id,
                             CountryId(0),

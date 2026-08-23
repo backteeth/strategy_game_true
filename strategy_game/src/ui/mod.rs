@@ -5,6 +5,8 @@ pub mod load_confirm;
 pub mod military_panel;
 pub mod notification;
 pub mod peace_panel;
+pub mod player_elimination;
+pub mod player_victory;
 pub mod politics_panel;
 pub mod research_panel;
 pub mod scroll;
@@ -20,6 +22,8 @@ use diplomacy_panel::DiplomacyPluginUI;
 use economy_panel::EconomyPanelPlugin;
 use load_confirm::LoadConfirmPlugin;
 use military_panel::MilitaryPanelPlugin;
+use player_elimination::PlayerEliminationPlugin;
+use player_victory::PlayerVictoryPlugin;
 use politics_panel::PoliticsPluginUI;
 use research_panel::ResearchPluginUI;
 use state_panel::StatePanelPlugin;
@@ -163,6 +167,8 @@ impl Plugin for UiPlugin {
             .add_plugins(MilitaryPanelPlugin)
             .add_plugins(peace_panel::PeacePanelPlugin)
             .add_plugins(LoadConfirmPlugin)
+            .add_plugins(PlayerEliminationPlugin)
+            .add_plugins(PlayerVictoryPlugin)
             .add_plugins(TopBarPlugin)
             .add_plugins(crate::ui::scrollbar::ScrollbarPlugin)
             .init_resource::<crate::ui::scroll::CursorOverScrollableUi>()

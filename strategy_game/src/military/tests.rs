@@ -2,7 +2,7 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
-use crate::country::{CountryData, CountryRegistry};
+use crate::country::{CountryData, CountryRegistry, CountryStatus};
 use crate::military::data::{
     Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
 };
@@ -156,6 +156,48 @@ fn test_recruitment_cancellation() {
     assert_eq!(country.recruitment_queue.len(), 0);
     assert_eq!(country.available_manpower, 20_000);
     assert_eq!(country.treasury, 500.0);
+}
+
+#[test]
+fn p21_021_request_recruitment_rejects_an_eliminated_country() {
+    let registry = setup_registry();
+    let mut country = CountryData::default();
+    country.available_manpower = 20_000;
+    country.treasury = 500.0;
+    country.status = CountryStatus::Eliminated {
+        eliminated_date: "1936/01/01".to_string(),
+        annexed_by: CountryId(9),
+    };
+
+    let result = request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1));
+    assert!(result.is_err());
+    assert_eq!(country.recruitment_queue.len(), 0);
+    assert_eq!(
+        country.available_manpower, 20_000,
+        "no mutation on rejection"
+    );
+}
+
+#[test]
+fn p21_021_cancel_recruitment_rejects_an_eliminated_country() {
+    let registry = setup_registry();
+    let mut country = CountryData::default();
+    country.available_manpower = 20_000;
+    country.treasury = 500.0;
+    request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1)).unwrap();
+
+    country.status = CountryStatus::Eliminated {
+        eliminated_date: "1936/01/01".to_string(),
+        annexed_by: CountryId(9),
+    };
+
+    let result = cancel_recruitment(&mut country, &registry, 0);
+    assert!(result.is_err());
+    assert_eq!(
+        country.recruitment_queue.len(),
+        1,
+        "the queue entry must survive rejection"
+    );
 }
 
 // P21-001: evaluate_recruit_feasibility (副作用のない募兵可否判定)
@@ -724,6 +766,7 @@ fn setup_war(c1: CountryId, c2: CountryId) -> WarRegistry {
         defenders: [c2].iter().cloned().collect(),
         primary_attacker: None,
         primary_defender: None,
+        source_crisis_id: None,
         war_goals: vec![],
         war_score: 0.0,
         attacker_war_exhaustion: 0.0,

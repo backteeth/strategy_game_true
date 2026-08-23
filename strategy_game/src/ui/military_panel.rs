@@ -190,14 +190,15 @@ impl Plugin for MilitaryPanelPlugin {
                     toggle_military_panel_key,
                     update_military_panel_ui,
                     update_recruit_button_ui,
-                    handle_recruit_buttons,
+                    handle_recruit_buttons.run_if(crate::country::player_can_issue_commands),
                     update_frontline_command_buttons_ui,
-                    handle_frontline_command_buttons,
+                    handle_frontline_command_buttons
+                        .run_if(crate::country::player_can_issue_commands),
                     update_army_ui,
-                    handle_army_command_buttons,
+                    handle_army_command_buttons.run_if(crate::country::player_can_issue_commands),
                     handle_army_list_row_clicks,
                     update_stop_movement_ui,
-                    handle_stop_movement_button,
+                    handle_stop_movement_button.run_if(crate::country::player_can_issue_commands),
                 )
                     .run_if(in_state(GameState::Playing)),
             )
@@ -205,8 +206,10 @@ impl Plugin for MilitaryPanelPlugin {
                 Update,
                 (
                     update_army_frontline_ui,
-                    handle_army_frontline_command_buttons,
-                    handle_frontline_assignment_attempted,
+                    handle_army_frontline_command_buttons
+                        .run_if(crate::country::player_can_issue_commands),
+                    handle_frontline_assignment_attempted
+                        .run_if(crate::country::player_can_issue_commands),
                     cancel_frontline_select_mode_on_panel_close,
                 )
                     .run_if(in_state(GameState::Playing)),
@@ -215,7 +218,8 @@ impl Plugin for MilitaryPanelPlugin {
                 Update,
                 (
                     update_offensive_line_ui,
-                    handle_offensive_line_command_buttons,
+                    handle_offensive_line_command_buttons
+                        .run_if(crate::country::player_can_issue_commands),
                     cancel_offensive_line_edit_on_panel_close,
                 )
                     .run_if(in_state(GameState::Playing)),
@@ -1647,6 +1651,7 @@ fn update_frontline_command_buttons_ui(
 fn handle_frontline_command_buttons(
     btn_q: Query<(&Interaction, &FrontlineCommandButton), Changed<Interaction>>,
     player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
     war_registry: Res<WarRegistry>,
     military_registry: Res<MilitaryRegistry>,
     selected_division: Res<SelectedDivision>,
@@ -1655,6 +1660,13 @@ fn handle_frontline_command_buttons(
     let Some(player_cid) = player_country.0 else {
         return;
     };
+    // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家の前線命令を拒否する。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
     let Some(active_war) = war_registry.get_active_war_for_country(player_cid) else {
         return;
     };
@@ -1703,11 +1715,13 @@ fn execute_stop_movement(
     military_registry: &mut MilitaryRegistry,
     selected_division_ids: &[DivisionId],
     player_cid: CountryId,
+    country_registry: &CountryRegistry,
 ) {
     for &division_id in selected_division_ids {
         crate::map::division_selection::stop_division_movement(
             division_id,
             player_cid,
+            country_registry,
             military_registry,
         );
     }
@@ -1781,6 +1795,7 @@ fn update_stop_movement_ui(
 fn handle_stop_movement_button(
     btn_q: Query<&Interaction, (With<StopMovementButton>, Changed<Interaction>)>,
     player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
     mut military_registry: ResMut<MilitaryRegistry>,
     selected_division: Res<SelectedDivision>,
 ) {
@@ -1793,7 +1808,12 @@ fn handle_stop_movement_button(
             continue;
         }
         let selected_ids = selected_division.sorted_ids();
-        execute_stop_movement(&mut military_registry, &selected_ids, player_cid);
+        execute_stop_movement(
+            &mut military_registry,
+            &selected_ids,
+            player_cid,
+            &country_registry,
+        );
     }
 }
 
@@ -2078,6 +2098,7 @@ fn update_army_ui(
 fn handle_army_command_buttons(
     btn_q: Query<(&Interaction, &ArmyCommandButton), Changed<Interaction>>,
     player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
     military_registry: Res<MilitaryRegistry>,
     selected_division: Res<SelectedDivision>,
     mut army_registry: ResMut<ArmyRegistry>,
@@ -2086,6 +2107,13 @@ fn handle_army_command_buttons(
     let Some(player_cid) = player_country.0 else {
         return;
     };
+    // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家のArmy命令を拒否する。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
 
     for (interaction, btn) in btn_q.iter() {
         if *interaction != Interaction::Pressed {
@@ -2256,6 +2284,7 @@ fn update_army_frontline_ui(
 fn handle_army_frontline_command_buttons(
     btn_q: Query<(&Interaction, &ArmyFrontlineCommandButton), Changed<Interaction>>,
     player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
     army_registry: Res<ArmyRegistry>,
     selected_army: Res<SelectedArmy>,
     mut frontline_registry: ResMut<FrontlineRegistry>,
@@ -2267,6 +2296,14 @@ fn handle_army_frontline_command_buttons(
     let Some(player_cid) = player_country.0 else {
         return;
     };
+    // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家の
+    // 攻勢線(前線選択モード)命令を拒否する。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
 
     for (interaction, btn) in btn_q.iter() {
         if *interaction != Interaction::Pressed {
@@ -2541,6 +2578,7 @@ fn update_offensive_line_ui(
 fn handle_offensive_line_command_buttons(
     btn_q: Query<(&Interaction, &OffensiveLineCommandButton), Changed<Interaction>>,
     player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
     army_registry: Res<ArmyRegistry>,
     selected_army: Res<SelectedArmy>,
     state_registry: Res<StateRegistry>,
@@ -2554,6 +2592,13 @@ fn handle_offensive_line_command_buttons(
     let Some(player_cid) = player_country.0 else {
         return;
     };
+    // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家の攻勢線編集命令を拒否する。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
 
     for (interaction, btn) in btn_q.iter() {
         if *interaction != Interaction::Pressed {
@@ -2642,7 +2687,7 @@ fn cancel_offensive_line_edit_on_panel_close(
 mod tests {
     use super::*;
     use crate::common::StateId;
-    use crate::country::CountryData;
+    use crate::country::{CountryData, CountryStatus};
     use crate::localization::MISSING_KEY_MARKER_PREFIX;
     use crate::military::data::{Division, DivisionDefinition, DivisionSize, DivisionType};
     use crate::state::data::StateData;
@@ -2927,6 +2972,7 @@ mod tests {
                 defenders: [enemy_cid].into_iter().collect(),
                 primary_attacker: None,
                 primary_defender: None,
+                source_crisis_id: None,
                 war_goals: Vec::new(),
                 start_date: "1800/01/01".to_string(),
                 end_date: None,
@@ -2980,6 +3026,18 @@ mod tests {
         app.insert_resource(PlayerCountry(Some(player_cid)));
         app.insert_resource(SelectedDivision {
             division_ids: [own_division_id].into_iter().collect(),
+        });
+        app.insert_resource(CountryRegistry {
+            countries: vec![
+                CountryData {
+                    id: player_cid,
+                    ..Default::default()
+                },
+                CountryData {
+                    id: enemy_cid,
+                    ..Default::default()
+                },
+            ],
         });
 
         (app, own_division_id, enemy_division_id, fl_id)
@@ -3202,6 +3260,18 @@ mod tests {
             division_ids: [own_division_1].into_iter().collect(),
         });
         app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
+        app.insert_resource(CountryRegistry {
+            countries: vec![
+                CountryData {
+                    id: player_cid,
+                    ..Default::default()
+                },
+                CountryData {
+                    id: enemy_cid,
+                    ..Default::default()
+                },
+            ],
+        });
 
         (app, own_division_1, own_division_2, enemy_division)
     }
@@ -3616,6 +3686,43 @@ mod tests {
         }
     }
 
+    /// P21-021: 消滅済み国家は移動停止ボタン経由でもDomain APIレベルで拒否される。
+    #[test]
+    fn handle_stop_movement_button_rejects_an_eliminated_country() {
+        let (mut app, own_division_1, own_division_2, _enemy_division) =
+            build_army_command_test_app();
+        set_moving_with_order(&mut app, own_division_1, StateId(9));
+        set_moving_with_order(&mut app, own_division_2, StateId(9));
+
+        app.world_mut()
+            .resource_mut::<CountryRegistry>()
+            .get_mut(CountryId(1))
+            .unwrap()
+            .status = CountryStatus::Eliminated {
+            eliminated_date: "1936/01/01".to_string(),
+            annexed_by: CountryId(9),
+        };
+
+        app.world_mut()
+            .resource_mut::<SelectedDivision>()
+            .division_ids = [own_division_1, own_division_2].into_iter().collect();
+        app.add_systems(Update, handle_stop_movement_button);
+        press_stop_movement_button(&mut app);
+
+        app.update();
+
+        let mil = app.world().resource::<MilitaryRegistry>();
+        for id in [own_division_1, own_division_2] {
+            let d = &mil.divisions[&id];
+            assert_eq!(
+                d.status,
+                DivisionStatus::Moving,
+                "the move order must survive rejection"
+            );
+            assert_eq!(d.destination, Some(StateId(9)));
+        }
+    }
+
     /// P21-004A spec #5: 選択されていないDivisionの移動命令は変化しない。
     #[test]
     fn handle_stop_movement_button_leaves_unselected_division_unaffected() {
@@ -3811,6 +3918,7 @@ mod tests {
             defenders: [CountryId(2)].into_iter().collect(),
             primary_attacker: None,
             primary_defender: None,
+            source_crisis_id: None,
             war_goals: vec![],
             start_date: "1800/01/01".to_string(),
             end_date: None,

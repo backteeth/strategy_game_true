@@ -2,8 +2,10 @@ use crate::app::game_state::GameState;
 use crate::app::time::GameDate;
 use crate::common::WarId;
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::diplomacy::claims::ClaimRegistry;
+use crate::diplomacy::crisis::CrisisRegistry;
 use crate::diplomacy::data::DiplomacyRegistry;
-use crate::localization::{CurrentLocale, TranslationCatalog, localized_text, t, tf, translate};
+use crate::localization::{CurrentLocale, TranslationCatalog, localized_text, t, translate};
 use crate::military::battle::BattleRegistry;
 use crate::military::data::MilitaryRegistry;
 use crate::state::data::StateRegistry;
@@ -14,6 +16,7 @@ use crate::war::capitulation::{
 };
 use crate::war::data::{WarRegistry, WarStatus};
 use crate::war::peace::{PeaceOffer, PeaceTerm, can_accept_peace_offer, execute_peace_settlement};
+use crate::war::update::ReportedPeaceSettlementErrors;
 use crate::war::war_score::calculate_war_score;
 use bevy::prelude::*;
 
@@ -51,7 +54,7 @@ impl Plugin for PeacePanelPlugin {
                 Update,
                 (
                     toggle_peace_panel,
-                    handle_peace_action_buttons,
+                    handle_peace_action_buttons.run_if(crate::country::player_can_issue_commands),
                     update_peace_panel_ui,
                 )
                     .run_if(in_state(GameState::Playing)),
@@ -188,9 +191,13 @@ fn handle_peace_action_buttons(
     mut battle_registry: ResMut<BattleRegistry>,
     mut diplomacy_registry: ResMut<DiplomacyRegistry>,
     mut frontline_registry: ResMut<crate::war::frontline::FrontlineRegistry>,
+    mut crisis_registry: ResMut<CrisisRegistry>,
+    mut claim_registry: ResMut<ClaimRegistry>,
+    mut country_registry: ResMut<CountryRegistry>,
+    mut reported_errors: ResMut<ReportedPeaceSettlementErrors>,
     mut notif_writer: MessageWriter<GameNotification>,
-    locale: Res<CurrentLocale>,
-    catalog: Res<TranslationCatalog>,
+    loc: crate::localization::Loc,
+    mut elimination_extras: PeaceSettlementEliminationExtras,
 ) {
     let player_id = match player_country.0 {
         Some(id) => id,
@@ -230,6 +237,7 @@ fn handle_peace_action_buttons(
             &war_registry,
             Some(&state_registry),
             Some(&military_registry),
+            Some(&country_registry),
             &current_date_str,
         ) {
             Ok(()) => {
@@ -247,31 +255,68 @@ fn handle_peace_action_buttons(
                     &mut battle_registry,
                     &mut diplomacy_registry,
                     &mut frontline_registry,
+                    &mut crisis_registry,
+                    &mut claim_registry,
+                    &mut country_registry,
+                    &mut elimination_extras.army_registry,
+                    &mut elimination_extras.justification_registry,
+                    &mut elimination_extras.power_registry,
                 );
 
-                if result.is_ok() {
-                    notif_writer.write(GameNotification {
-                        message: tf(
-                            &catalog,
-                            locale.0,
-                            "peace_panel.notif_peace_enacted",
-                            vec![("term", t(&catalog, locale.0, btn.term.display_name()))],
-                        ),
-                    });
+                match result {
+                    Ok(()) => {
+                        // P21-020(ユーザー指摘対応): プレイヤー講和の成功でも、
+                        // 自動降伏エラーの重複抑止記録を必ず掃除する
+                        // (`ReportedPeaceSettlementErrors::retain_only_active_wars`
+                        // 参照——自動失敗の記録がこのWarに残ったまま手動講和で
+                        // 終戦した場合、記録が永久に残ってしまう既存ギャップの修正)。
+                        reported_errors.retain_only_active_wars(&war_registry);
+                        notif_writer.write(GameNotification {
+                            message: loc.tf(
+                                "peace_panel.notif_peace_enacted",
+                                vec![("term", loc.t(btn.term.display_name()))],
+                            ),
+                        });
+                    }
+                    Err(err_msg) => {
+                        // P21-020: `execute_peace_settlement`のErrを無言で捨てず、
+                        // `can_accept_peace_offer`のErr(直上の`Err(err_msg)`分岐)と
+                        // 同じ`peace_panel.notif_offer_rejected`翻訳キー経由で
+                        // プレイヤーへ理由を示す(所有者不一致・最後の所有陸州・
+                        // lineage不整合等、共通Domain APIが返す翻訳キーはいずれも
+                        // 既存の`localization::t()`で解決できる)。
+                        notif_writer.write(GameNotification {
+                            message: loc.tf(
+                                "peace_panel.notif_offer_rejected",
+                                vec![("reason", loc.t(err_msg))],
+                            ),
+                        });
+                    }
                 }
             }
             Err(err_msg) => {
                 notif_writer.write(GameNotification {
-                    message: tf(
-                        &catalog,
-                        locale.0,
+                    message: loc.tf(
                         "peace_panel.notif_offer_rejected",
-                        vec![("reason", t(&catalog, locale.0, err_msg))],
+                        vec![("reason", loc.t(err_msg))],
                     ),
                 });
             }
         }
     }
+}
+
+/// P21-021: `handle_peace_action_buttons`が国家消滅発生時に内部で
+/// `country::elimination::apply_country_elimination`を呼ぶために必要な
+/// `ArmyRegistry`/`WarJustificationRegistry`を1つのSystemParamへまとめる。
+/// この関数は既にBevyのSystemParamタプル引数数上限(16)に達しているため、
+/// `localization::Loc`と同じ「複数Resourceを1つのSystemParamへ束ねる」
+/// パターンを踏襲する。
+#[derive(bevy::ecs::system::SystemParam)]
+struct PeaceSettlementEliminationExtras<'w> {
+    army_registry: ResMut<'w, crate::military::army::ArmyRegistry>,
+    justification_registry: ResMut<'w, crate::war::justification::WarJustificationRegistry>,
+    power_registry: ResMut<'w, crate::country::power::CountryPowerRegistry>,
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -284,6 +329,8 @@ fn update_peace_panel_ui(
     state_registry: Res<StateRegistry>,
     military_registry: Res<MilitaryRegistry>,
     diplomacy_registry: Res<DiplomacyRegistry>,
+    crisis_registry: Res<CrisisRegistry>,
+    claim_registry: Res<ClaimRegistry>,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
     mut q_panel: Query<&mut Node, With<PeacePanelRoot>>,
@@ -433,6 +480,57 @@ fn update_peace_panel_ui(
                 },
             ));
 
+            // P21-019: Crisis由来Warの戦争目標を最小限表示する(§9)。
+            // 既存の`war.name`は州名を含むものの、翻訳されない・claimant/対象国/
+            // Claim状態を構造化して示さないため、新たに1行追加する。通常War
+            // (`source_crisis_id.is_none()`)では一切表示しない。
+            if let Some(crisis_id) = war.source_crisis_id
+                && let Some(crisis) = crisis_registry.crises.get(&crisis_id)
+            {
+                let claimant_name = country_registry
+                    .get(crisis.initiator)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+                let target_name = country_registry
+                    .get(crisis.target)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+                let goal_state_id = crisis
+                    .war_goals
+                    .first()
+                    .and_then(|g| g.target_states.first());
+                let state_name = goal_state_id
+                    .and_then(|&sid| state_registry.get(sid))
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+                let claim_status_text = crisis
+                    .related_claim_id
+                    .and_then(|cid| claim_registry.claims.get(&cid))
+                    .map(|c| t(&catalog, locale.0, c.status.display_name()))
+                    .unwrap_or_else(|| t(&catalog, locale.0, "common.unknown"));
+
+                let (text, marker) = localized_text(
+                    &catalog,
+                    locale.0,
+                    "peace_panel.crisis_war_goal",
+                    vec![
+                        ("claimant", claimant_name),
+                        ("target", target_name),
+                        ("state", state_name),
+                        ("claim_status", claim_status_text),
+                    ],
+                );
+                parent.spawn((
+                    text,
+                    marker,
+                    TextColor(Color::srgb(0.8, 0.6, 0.9)),
+                    TextFont {
+                        font_size: FontSize::Px(11.0),
+                        ..default()
+                    },
+                ));
+            }
+
             // 降伏進捗状況
             let def_cap = check_defender_capitulation(war, &state_registry, &military_registry);
             let atk_cap = check_attacker_capitulation(war, &state_registry, &military_registry);
@@ -519,6 +617,7 @@ fn update_peace_panel_ui(
                 &war_registry,
                 Some(&state_registry),
                 Some(&military_registry),
+                Some(&country_registry),
                 &current_date_str,
             );
 
@@ -580,6 +679,7 @@ fn update_peace_panel_ui(
                     &war_registry,
                     Some(&state_registry),
                     Some(&military_registry),
+                    Some(&country_registry),
                     &current_date_str,
                 );
 
@@ -805,6 +905,407 @@ mod tests {
         app.init_resource::<ButtonInput<KeyCode>>();
         app.add_systems(Update, toggle_peace_panel);
         app
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P21-019: Crisis由来War戦争目標のUI表示
+    // ─────────────────────────────────────────────────────────────────────
+
+    use crate::common::{CountryId, StateId};
+    use crate::country::CountryData;
+    use crate::diplomacy::claims::{ClaimSource, ClaimStatus, TerritorialClaim};
+    use crate::diplomacy::crisis::{CrisisPhase, DiplomaticCrisis, WarGoal, WarGoalType};
+    use crate::state::data::StateData;
+    use crate::war::data::War;
+
+    /// claimant=CountryId(0)がtarget=CountryId(1)のStateId(1)へ、Crisis由来War
+    /// (WarId(0))で交戦中の完全なレンダリング用環境を構築する。
+    fn build_crisis_war_render_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.insert_resource(GameDate::new(1936, 3, 1));
+        app.insert_resource(PlayerCountry(Some(CountryId(0))));
+        app.insert_resource(PeacePanelState {
+            open: true,
+            selected_war_id: None,
+        });
+
+        app.insert_resource(CountryRegistry {
+            countries: vec![
+                CountryData {
+                    id: CountryId(0),
+                    name: "Claimant Nation".to_string(),
+                    ..CountryData::default()
+                },
+                CountryData {
+                    id: CountryId(1),
+                    name: "Target Nation".to_string(),
+                    ..CountryData::default()
+                },
+            ],
+        });
+        app.insert_resource(StateRegistry::build(vec![
+            StateData {
+                id: StateId(0),
+                owner_country_id: CountryId(0),
+                name: "Home State".to_string(),
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(1),
+                owner_country_id: CountryId(1),
+                name: "Contested State".to_string(),
+                ..Default::default()
+            },
+        ]));
+        app.insert_resource(MilitaryRegistry::default());
+        app.insert_resource(DiplomacyRegistry::default());
+
+        let mut claim_registry = ClaimRegistry::default();
+        claim_registry.claims.insert(
+            crate::common::ClaimId(0),
+            TerritorialClaim {
+                id: crate::common::ClaimId(0),
+                claimant_country: CountryId(0),
+                target_state: StateId(1),
+                strength: 50.0,
+                created_date: "1936/01/01".to_string(),
+                is_permanent: false,
+                source: ClaimSource::Strategic,
+                status: ClaimStatus::Active,
+            },
+        );
+        app.insert_resource(claim_registry);
+
+        let mut crisis_registry = CrisisRegistry::default();
+        crisis_registry.crises.insert(
+            crate::common::DiplomaticCrisisId(0),
+            DiplomaticCrisis {
+                id: crate::common::DiplomaticCrisisId(0),
+                initiator: CountryId(0),
+                target: CountryId(1),
+                war_goals: vec![WarGoal {
+                    attacker: CountryId(0),
+                    defender: CountryId(1),
+                    goal_type: WarGoalType::ConquerState,
+                    target_states: vec![StateId(1)],
+                    base_peace_cost: 20.0,
+                    international_concern: 10.0,
+                    completion: 0.0,
+                    is_primary: true,
+                }],
+                start_date: "1936/01/01".to_string(),
+                current_phase: CrisisPhase::WarStarted,
+                escalation: 100.0,
+                initiator_support: 0.0,
+                target_resistance: 0.0,
+                days_in_phase: 0,
+                deadline_date: None,
+                international_concern: 0.0,
+                third_party_reactions: std::collections::HashMap::new(),
+                related_claim_id: Some(crate::common::ClaimId(0)),
+                related_justification_id: None,
+                related_war_id: None,
+            },
+        );
+        app.insert_resource(crisis_registry);
+
+        let mut war_registry = WarRegistry::default();
+        war_registry.wars.insert(
+            WarId(0),
+            War {
+                id: WarId(0),
+                name: "Test Crisis War".to_string(),
+                attackers: [CountryId(0)].into_iter().collect(),
+                defenders: [CountryId(1)].into_iter().collect(),
+                primary_attacker: Some(CountryId(0)),
+                primary_defender: Some(CountryId(1)),
+                source_crisis_id: Some(crate::common::DiplomaticCrisisId(0)),
+                war_goals: vec![WarGoal {
+                    attacker: CountryId(0),
+                    defender: CountryId(1),
+                    goal_type: WarGoalType::ConquerState,
+                    target_states: vec![StateId(1)],
+                    base_peace_cost: 20.0,
+                    international_concern: 10.0,
+                    completion: 0.0,
+                    is_primary: true,
+                }],
+                start_date: "1936/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: std::collections::HashSet::new(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: std::collections::HashSet::new(),
+            },
+        );
+        app.insert_resource(war_registry);
+
+        app.add_systems(Startup, (spawn_tab_bar, setup_peace_panel).chain());
+        app.add_systems(Update, update_peace_panel_ui);
+        app.update();
+        app
+    }
+
+    fn all_texts(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .collect()
+    }
+
+    /// 要求テスト48,49: Crisis由来Warの戦争目標(claimant名・対象国名・
+    /// target_state名)が表示される。
+    #[test]
+    fn crisis_war_goal_shows_claimant_target_and_state_names() {
+        let mut app = build_crisis_war_render_app();
+        let joined = all_texts(&mut app).join("\n");
+        assert!(joined.contains("Claimant Nation"), "{joined}");
+        assert!(joined.contains("Target Nation"), "{joined}");
+        assert!(joined.contains("Contested State"), "{joined}");
+    }
+
+    /// 要求テスト48(Claim状態表示): 元Claimの状態(Active)も表示される。
+    #[test]
+    fn crisis_war_goal_shows_claim_status() {
+        let mut app = build_crisis_war_render_app();
+        let joined = all_texts(&mut app).join("\n");
+        assert!(
+            joined.contains("Active") || joined.contains("有効"),
+            "claim status must be rendered: {joined}"
+        );
+    }
+
+    /// 要求テスト50: 通常War(`source_crisis_id: None`)ではCrisis戦争目標行を
+    /// 表示しない。
+    #[test]
+    fn normal_war_does_not_show_crisis_war_goal_line() {
+        let mut app = build_crisis_war_render_app();
+        app.world_mut()
+            .resource_mut::<WarRegistry>()
+            .wars
+            .get_mut(&WarId(0))
+            .unwrap()
+            .source_crisis_id = None;
+        app.update();
+
+        let joined = all_texts(&mut app).join("\n");
+        assert!(
+            !joined.contains("Contested State"),
+            "a normal war must not render the crisis-origin war goal line: {joined}"
+        );
+    }
+
+    /// 要求テスト51: ロケール切替でCrisis戦争目標表示も更新される
+    /// (既定ロケールはja-JP、`crate::localization::DEFAULT_LOCALE`参照)。
+    #[test]
+    fn crisis_war_goal_text_follows_locale_switch() {
+        let mut app = build_crisis_war_render_app();
+        let ja_joined = all_texts(&mut app).join("\n");
+        assert!(ja_joined.contains("外交危機由来の戦争目標"), "{ja_joined}");
+
+        app.world_mut().resource_mut::<CurrentLocale>().0 = crate::localization::Locale::EnUs;
+        app.update();
+        let en_joined = all_texts(&mut app).join("\n");
+        assert!(
+            en_joined.contains("claims"),
+            "switching to en-US must render the English crisis war goal text: {en_joined}"
+        );
+    }
+
+    /// 要求テスト52: Crisis戦争目標行を追加しても、既存のスクロール構造・
+    /// 講和アクションボタンは維持される。
+    #[test]
+    fn crisis_war_goal_line_preserves_scroll_and_peace_action_buttons() {
+        let mut app = build_crisis_war_render_app();
+
+        let scroll_body_count = app
+            .world_mut()
+            .query_filtered::<&ScrollPosition, With<PeacePanelContentContainer>>()
+            .iter(app.world())
+            .count();
+        // PeacePanelContentContainer自体はScrollPositionを持たないため、
+        // 代わりに`ui::scroll`が生成するスクロール本体全体の存在を確認する。
+        let _ = scroll_body_count;
+        let any_scroll_position = app
+            .world_mut()
+            .query::<&ScrollPosition>()
+            .iter(app.world())
+            .count();
+        assert!(
+            any_scroll_position >= 1,
+            "the peace panel's scrollable body must still exist"
+        );
+
+        let button_count = app
+            .world_mut()
+            .query::<&PeaceActionButton>()
+            .iter(app.world())
+            .count();
+        assert!(
+            button_count > 0,
+            "existing peace action buttons must still render alongside the new crisis war goal line"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P21-020: `execute_peace_settlement`のErrをUIが無言で捨てず、翻訳済み
+    // エラー通知として表示することの検証(§14要求47,48,49,53)。
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// `build_crisis_war_render_app`と同じCrisis由来War環境に、
+    /// `handle_peace_action_buttons`自体を実行するのに必要なResource
+    /// (BattleRegistry/FrontlineRegistry/GameNotificationメッセージ登録)を
+    /// 追加し、`can_accept_peace_offer`を通過できるよう`war_score`を十分に
+    /// 上げた状態で返す。
+    fn build_peace_action_test_app() -> App {
+        let mut app = build_crisis_war_render_app();
+        app.add_message::<GameNotification>();
+        app.insert_resource(BattleRegistry::default());
+        app.insert_resource(crate::war::frontline::FrontlineRegistry::default());
+        app.insert_resource(ReportedPeaceSettlementErrors::default());
+        app.insert_resource(crate::military::army::ArmyRegistry::default());
+        app.insert_resource(crate::war::justification::WarJustificationRegistry::default());
+        app.insert_resource(crate::country::power::CountryPowerRegistry::default());
+        app.world_mut()
+            .resource_mut::<WarRegistry>()
+            .wars
+            .get_mut(&WarId(0))
+            .unwrap()
+            .war_score = 100.0;
+        app.add_systems(Update, handle_peace_action_buttons);
+        app
+    }
+
+    fn press_peace_action_button(app: &mut App, war_id: WarId, term: PeaceTerm) {
+        app.world_mut().spawn((
+            Button,
+            Interaction::Pressed,
+            PeaceActionButton { war_id, term },
+        ));
+        app.update();
+    }
+
+    fn drain_notifications(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .resource_mut::<Messages<GameNotification>>()
+            .drain()
+            .map(|n| n.message)
+            .collect()
+    }
+
+    /// 要求テスト47,53: `execute_peace_settlement`が失敗した場合、翻訳済みの
+    /// エラー通知が表示され、講和ボタンは(パネル構造上)引き続き利用可能。
+    #[test]
+    fn peace_settlement_failure_shows_translated_error_notification() {
+        let mut app = build_peace_action_test_app();
+        // Crisis由来lineageを壊す(related_claim_idを外す)ことで、
+        // `can_accept_peace_offer`は通過するが`execute_peace_settlement`の
+        // `resolve_crisis_war_lineage`が拒否するようにする。
+        app.world_mut()
+            .resource_mut::<CrisisRegistry>()
+            .crises
+            .get_mut(&crate::common::DiplomaticCrisisId(0))
+            .unwrap()
+            .related_claim_id = None;
+
+        press_peace_action_button(&mut app, WarId(0), PeaceTerm::CedeWarGoalRegion);
+
+        let notifications = drain_notifications(&mut app);
+        assert_eq!(
+            notifications.len(),
+            1,
+            "exactly one notification must be sent"
+        );
+        assert!(
+            notifications[0].contains("linked territorial claim")
+                || notifications[0].contains("領土請求"),
+            "the notification must include the translated lineage-missing-claim reason, got: {:?}",
+            notifications[0]
+        );
+
+        // War自体はActiveのまま(部分適用されていない)。
+        assert_eq!(
+            app.world()
+                .resource::<WarRegistry>()
+                .wars
+                .get(&WarId(0))
+                .unwrap()
+                .status,
+            WarStatus::Active
+        );
+    }
+
+    /// 要求テスト48: 成功時にはエラー通知は残らず、成功通知のみが送られる。
+    #[test]
+    fn peace_settlement_success_shows_no_error_notification() {
+        let mut app = build_peace_action_test_app();
+
+        press_peace_action_button(&mut app, WarId(0), PeaceTerm::CedeWarGoalRegion);
+
+        let notifications = drain_notifications(&mut app);
+        assert_eq!(notifications.len(), 1);
+        assert!(
+            !notifications[0].to_lowercase().contains("fail") && !notifications[0].contains("失敗"),
+            "a successful settlement must not show a failure-shaped notification, got: {:?}",
+            notifications[0]
+        );
+    }
+
+    /// 要求(ユーザー指摘対応): 「自動降伏失敗→重複抑止記録追加→プレイヤーが
+    /// 手動講和成功→記録削除」を確認する。自動降伏の失敗記録が、無関係な
+    /// プレイヤー講和の成功パスでは掃除されず永久に残ってしまう既存ギャップの
+    /// 修正確認。
+    #[test]
+    fn manual_peace_success_clears_a_previously_reported_auto_capitulation_failure() {
+        let mut app = build_peace_action_test_app();
+        // 自動降伏が過去にこのWarへ失敗を記録していた状態を模す。
+        app.world_mut()
+            .resource_mut::<ReportedPeaceSettlementErrors>()
+            .reported
+            .insert((WarId(0), "war_error.peace.some_previous_auto_failure"));
+
+        press_peace_action_button(&mut app, WarId(0), PeaceTerm::CedeWarGoalRegion);
+
+        // 講和が成功したことを確認したうえで、
+        let notifications = drain_notifications(&mut app);
+        assert_eq!(notifications.len(), 1);
+        assert!(
+            !notifications[0].to_lowercase().contains("fail") && !notifications[0].contains("失敗"),
+            "the manual settlement must succeed, got: {:?}",
+            notifications[0]
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WarRegistry>()
+                .wars
+                .get(&WarId(0))
+                .unwrap()
+                .status,
+            WarStatus::AttackerVictory
+        );
+
+        // このWarの古い自動降伏失敗記録が消えていることを確認する。
+        assert!(
+            !app.world()
+                .resource::<ReportedPeaceSettlementErrors>()
+                .reported
+                .iter()
+                .any(|&(w, _)| w == WarId(0)),
+            "a manual peace success must clear this war's previously-reported auto-\
+             capitulation failure entries, not leave them orphaned forever"
+        );
     }
 
     fn press_ctrl_plus(app: &mut App, digit: KeyCode) {

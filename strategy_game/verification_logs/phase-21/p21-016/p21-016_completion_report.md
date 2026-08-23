@@ -2,7 +2,7 @@
 
 ## 1. 最終判定
 
-**COMPLETE WITH MANUAL VERIFICATION PENDING**
+**COMPLETE WITH MANUAL VERIFICATION PENDING**(二次レビュー対応後、§28)
 
 `cargo check --all-targets` / `cargo test --lib` / `cargo test --tests` / `cargo clippy
 --all-targets --all-features -- -D warnings` / `cargo build --release` / `git diff
@@ -10,6 +10,14 @@
 Crisis拒否→支持スナップショット確定→AI宣戦布告→多国間War参加→敵味方判定共有API
 →save往復までの全経路を確認済み。ただし本タスクでは対話的GUIセッションを
 実行していない(§25参照)。
+
+**二次レビューで5件の指摘を受け、すべて修正・再検証済み**(§28に詳細): (1)
+justification↔Crisis↔Claimの整合性検証の欠落、(2)宣戦後にCrisis来歴が消える
+問題(`War.source_crisis_id`未実装)、(3)実戦闘・占領・講和への直接接続検証の不足
+(レビュー対応の中で`war/peace.rs::execute_peace_settlement`に未修正の
+`.iter().next()`が残っていたことも発見・修正)、(4)代表国フォールバックが
+架空の`CountryId(0)`を捏造するリスク、(5)性能測定規模が要求(最大1000 War・
+陣営あたり100参加国)に未達。
 
 ---
 
@@ -322,25 +330,29 @@ JA/EN両方のローカライズキーを追加。
 |---|---|---|---|
 | 仕様書記載の想定ベースライン | 760 | 173 | 933 |
 | 開始時(実測、P21-015終了時点と一致) | 760 | 173 | 933 |
-| 終了時(実測) | 782 (+22) | 174 (+1) | 956 (+23) |
+| 初回パス終了時(実測) | 782 (+22) | 174 (+1) | 956 (+23) |
+| 二次レビュー対応後(実測、§28) | 797 (+15) | 174 (+0) | 971 (+15) |
 
 仕様書の想定ベースラインは実測値と完全に一致した(P21-014/015のような食い違いは
-発生しなかった)。
+発生しなかった)。二次レビュー対応で追加した15件は全てlib単体テスト(§28参照)。
 
 ---
 
 ## 16. 品質ゲート結果
 
 - `cargo check --all-targets` — 成功(0エラー、複数回の中間チェックも含め全て成功)。
-- `cargo test --lib` — 782 passed / 0 failed。
-- `cargo test --tests`(デフォルト並列度、ヘッドレスGPUテスト含む) — 956 passed
-  (lib 782 + 統合174) / 0 failed。
+- `cargo test --lib` — 二次レビュー対応後 797 passed / 0 failed。
+- `cargo test --tests`(デフォルト並列度、ヘッドレスGPUテスト含む) — 971 passed
+  (lib 797 + 統合174) / 0 failed。
 - `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
   (`grant_completed_justification`の引数増加(7引数)に対し既存慣例通り
   `#[allow(clippy::too_many_arguments)]`を付与)。
 - `cargo build --release` — 成功。
 - `git diff --check` — エラーなし(LF→CRLF警告のみ、既存の全ファイルで共通の
   無害な警告)。
+
+上記は二次レビュー対応(§28)を含めた最終状態での結果。初回パス終了時点では
+782 lib / 956 合計だった。
 
 各`cargo test --tests`実行後、ヘッドレスレンダーテストが汚したチェックイン済み
 スクリーンショット(P20-007/P20-009/P21-SAVE-002E)を`git checkout --`で復元した
@@ -371,46 +383,57 @@ P21-016と無関係な11ファイル(`map/division_render.rs`・`map/mod.rs`・
 
 ---
 
-## 18. 性能測定方法と結果
+## 18. 性能測定方法と結果(二次レビュー対応で軸2を要求規模まで拡張、§28参照)
 
 一時プロファイラ`src/bin/profile_p21_016.rs`(測定後削除済み、Cargo.tomlの
 `[[bin]]`エントリも削除済み)で2軸を測定、結果は
-`verification_logs/phase-21/p21-016/perf/{results.csv,summary.txt}`に保存。
+`verification_logs/phase-21/p21-016/perf/{results.csv,summary.txt}`に保存
+(下表は二次レビュー対応後の最終測定値)。
 
 **軸1: 支持スナップショット生成(`crisis_response::reject_demand`経由、
 third_party_reactions件数でスケーリング、200回試行)**
 
 | 件数 | mean(ms) | p50(ms) | p95(ms) |
 |---|---|---|---|
-| 0 | 0.0002 | 0.0002 | 0.0002 |
+| 0 | 0.0001 | 0.0001 | 0.0002 |
 | 8 | 0.0003 | 0.0003 | 0.0004 |
-| 100 | 0.0023 | 0.0023 | 0.0024 |
-| 1000 | 0.0182 | 0.0176 | 0.0192 |
+| 100 | 0.0025 | 0.0024 | 0.0027 |
+| 1000 | 0.0176 | 0.0173 | 0.0197 |
 
 `third_party_reactions`件数に対しほぼ線形にスケールしており(0→1000件で
 約110倍の増加に対し処理時間も約110倍)、`build_support_snapshot`の
 `O(reactions)`実装通りの挙動を確認した。1000件という非現実的な規模でも
 0.02ms未満であり、日次シミュレーションへの影響は無視できる。
 
-**軸2: 敵味方判定共有API(War数×陣営あたり参加国数、2000回試行)**
+**軸2: 敵味方判定共有API(War数×陣営あたり参加国数、最大1000 War×陣営あたり
+100参加国、要求規模まで拡張測定。2000回試行、War数×参加国数≥50,000の
+組み合わせのみプロファイラ自体の実行時間を抑えるため200回試行)**
 
 | war_count | participants/side | is_country_at_war mean(ms) | are_countries_at_war mean(ms) |
 |---|---|---|---|
-| 1 | 1 | 0.00005 | 0.00004 |
+| 1 | 1 | 0.00004 | 0.00004 |
 | 1 | 8 | 0.00004 | 0.00004 |
-| 1 | 50 | 0.00007 | 0.00004 |
-| 10 | 1 | 0.00005 | 0.00020 |
-| 10 | 8 | 0.00006 | 0.00019 |
-| 10 | 50 | 0.00016 | 0.00020 |
-| 100 | 1 | 0.00084 | 0.00170 |
-| 100 | 8 | 0.00073 | 0.00176 |
-| 100 | 50 | 0.00027 | 0.00179 |
+| 1 | 50 | 0.00004 | 0.00004 |
+| 1 | 100 | 0.00004 | 0.00004 |
+| 10 | 1 | 0.00018 | 0.00021 |
+| 10 | 8 | 0.00017 | 0.00019 |
+| 10 | 50 | 0.00004 | 0.00020 |
+| 10 | 100 | 0.00011 | 0.00019 |
+| 100 | 1 | 0.00062 | 0.00172 |
+| 100 | 8 | 0.00075 | 0.00172 |
+| 100 | 50 | 0.00040 | 0.00171 |
+| 100 | 100 | 0.00121 | 0.00173 |
+| **1000** | **1** | 0.01627 | 0.01991 |
+| **1000** | **8** | 0.01762 | 0.02081 |
+| **1000** | **50** | 0.01148 | 0.02089 |
+| **1000** | **100** | 0.00639 | **0.02327** |
 
 両APIとも`war_count`に対してほぼ線形(`self.wars.values()`を走査する実装通り)、
 `participants_per_side`には(誤差範囲内で)ほぼ無依存——`HashSet::contains`が
 O(1)であるため、1陣営あたりの参加国数がいくら増えても単一クエリのコストは
-増えない。100 War規模でも1クエリ0.002ms未満であり、実際のゲーム規模
-(6か国、同時進行War数はごく少数)を大幅に上回る余裕がある。
+増えない。要求された最大規模(1000 War×陣営あたり100参加国)でも1クエリ
+0.024ms未満であり、実際のゲーム規模(6か国、同時進行War数はごく少数)を
+大幅に上回る余裕がある。
 
 ---
 
@@ -431,6 +454,13 @@ O(1)であるため、1陣営あたりの参加国数がいくら増えても単
   (§8参照)。
 - P21-013の既存テスト1件が、P21-016による意図的な仕様反転の結果としてREDになった
   (バグではなく想定内の反転、§13参照)。
+- **二次レビュー対応中に発見**: `war/peace.rs::execute_peace_settlement`に、
+  §2/§4/§10で「事前調査済み・無変更で正しい」と報告していたにもかかわらず、
+  実際には未修正の`war.attackers.iter().next()`/`war.defenders.iter().next()`
+  (領土移転先・winner・休戦相手の選定に使われる)が残っていた。初回パスの
+  事前調査は`peace.rs`内の別関数(`relocate_hostile_territory_divisions`、
+  多国間対応済み)を見て「ファイル全体が正しい」と誤って一般化していたのが原因。
+  `primary_attacker_id()`/`primary_defender_id()`へ修正済み(§28参照)。
 
 ---
 
@@ -459,20 +489,21 @@ O(1)であるため、1陣営あたりの参加国数がいくら増えても単
 
 ## 23. 保護対象ファイル・既存回帰チェック
 
-`combat.rs`・`occupation.rs`・`peace.rs`・`military_ai.rs`・`military/invasion.rs`は
-無変更。既存の全956テスト(旧933+新23)がP21-016適用後も成功しており、
-P21-011〜015の既存機能(Crisis状態機械・支持表明・AI応答・国力ランク・AI支持判断)への
-回帰は確認されていない。
+`combat.rs`・`occupation.rs`・`military_ai.rs`・`military/invasion.rs`は無変更。
+`peace.rs`は二次レビュー対応で1関数のみ修正(§20・§28参照)。既存の全971テスト
+(旧933+新38)がP21-016適用後も成功しており、P21-011〜015の既存機能(Crisis状態
+機械・支持表明・AI応答・国力ランク・AI支持判断)への回帰は確認されていない。
+さらに二次レビュー対応で、`combat.rs`/`occupation.rs`/`peace.rs`が実際に多国間
+参加者を正しく扱うことを直接exerciseするテストを追加した(§28参照、初回パスでは
+コード読解による確認のみだった)。
 
 ---
 
 ## 24. 既知の未対応事項
 
-- 仕様書§10が挙げていた「justification-pair-matches-crisis-parties」
-  (正当化のinitiator/targetとCrisis自体のinitiator/targetが一致するかの整合性検証)は
-  実装していない。`apply_rejection`が両者を同じ値から生成するため実際には
-  乖離し得ないが、Save手動編集による破損は理論上検出されない。将来的に必要になれば
-  `validate_war_justifications`へ追加できる。
+初回パス時点で「justification-pair-matches-crisis-parties」検証が未実装だった件は
+二次レビュー対応(§28)で実装済み。二次レビュー後の時点で残っている既知の
+未対応事項はない(§28の5項目はすべて対応済み)。
 
 ---
 
@@ -509,4 +540,144 @@ Crisis支持コミットメントを、拒否/期限切れ時点のスナップ�
 ## 27. メモリ更新内容
 
 `project_p21_016_multilateral_war.md`を新規作成し、`MEMORY.md`のインデックスへ
-追記、`project_phase21_status.md`の末尾サマリーを更新した。
+追記、`project_phase21_status.md`の末尾サマリーを更新した(二次レビュー対応後、
+§28の内容も反映して再更新)。
+
+---
+
+## 28. 二次レビュー対応(2026-08-20)
+
+初回パスの完了報告に対し、5件の指摘を受けた。すべて再検証・修正済み。
+
+### 28.1 指摘1: Save整合性検証(justification↔Crisis↔Claim)の欠落
+
+`validate_war_justifications`に、`WarJustification.source_crisis_id`が
+`Some`の場合の追加検証を実装:
+- **initiator不一致を拒否**: `justification.initiator != crisis.initiator`なら
+  `ParticipantMismatch`。
+- **target不一致を拒否**: `justification.target != crisis.target`なら
+  `ParticipantMismatch`。
+- **正常な組み合わせを受理**: 両者が一致する場合は問題なし。
+- **Claim ID整合性(可能な範囲で)**: 由来Crisisが`related_claim_id`を持つ場合、
+  そのClaimの`claimant_country`がCrisisの`initiator`と、`target_state`が
+  Justificationの`target_state`と一致するかを検証。Claim自体の参照切れは
+  既存の`unknown_related_claim_reference_is_rejected`(P21-011由来)が別途検証
+  済みのため、ここでは実在するClaimの中身の整合性のみを見る。
+
+新規テスト(+8、`src/save/validate.rs`):
+`justification_initiator_mismatch_with_source_crisis_is_rejected`、
+`justification_target_mismatch_with_source_crisis_is_rejected`、
+`justification_pair_matching_source_crisis_is_accepted`、
+`source_crisis_claim_claimant_mismatch_is_rejected`、
+`source_crisis_claim_target_state_mismatch_is_rejected`、
+`source_crisis_with_consistent_claim_is_accepted`、
+`unknown_war_source_crisis_id_is_rejected`、`valid_war_source_crisis_id_is_accepted`
+(最後の2件は28.2の`War.source_crisis_id`自体の参照整合性検証に対応)。
+
+### 28.2 指摘2: War開始後にCrisis来歴が消える
+
+`War`に`source_crisis_id: Option<DiplomaticCrisisId>`を追加(`#[serde(default)]`、
+旧Save/通常の二国間Warでは`None`)。`declare_war`が正当化を消費する直前に
+`justification.source_crisis_id`を読み取り、そのままWarへ引き継ぐ
+(`committed_attackers`/`committed_defenders`と同じタイミング・同じ借用スコープで
+読む)。これにより、宣戦後もWarから元Crisisを`war.source_crisis_id`経由で
+逆引きできる。Save検証にも`War.source_crisis_id`の参照整合性チェックを追加
+(§28.1参照)。全てのWarリテラル構築箇所(既存24+箇所)へ`source_crisis_id: None`
+を追加(通常の二国間Warは`None`のまま)。
+
+### 28.3 指摘3: 実際の戦闘参加の直接検証が不足
+
+`process_combat`(`war/combat.rs`)・`process_occupation`(`war/occupation.rs`)は
+初回パス時点でテストが一切存在しなかった(コード読解のみで「正しい」と
+判断していた)。二次レビュー対応で5件の直接テストを追加(`src/war/tests.rs`):
+
+- `attacker_side_supporter_division_can_attack_defender_via_process_combat` —
+  攻撃側支持国の師団が防御側代表国の師団と同じ州にいる場合、`process_combat`
+  経由で実際に被害が生じることを確認。
+- `same_side_divisions_never_engage_in_combat` — 攻撃側代表国と攻撃側支持国、
+  および防御側代表国と防御側支持国(いずれも同陣営ペア)は`process_combat`で
+  交戦しないことを確認。
+- `supporter_occupation_succeeds_via_process_occupation` — 攻撃側支持国の師団が
+  防御側代表国所有の州を`process_occupation`経由で実際に占領完了
+  (`controller_country`が支持国自身になる)まで進むことを確認。
+- `peace_settlement_clears_hostility_for_all_participants_including_supporters` —
+  講和成立後、代表国・支持国を問わず全参加国間の`are_countries_at_war`/
+  `is_country_at_war`が`false`になることを確認。
+- `hostility_persists_only_for_a_still_active_second_war` — 支持国が別のWar
+  (War B)にも参加している場合、War Aだけが講和で終結しても、War Bが
+  Activeである限り`is_country_at_war`/`are_countries_at_war`が正しく維持
+  されることを確認。
+
+**このテスト追加の過程で、`war/peace.rs::execute_peace_settlement`に未修正の
+`war.attackers.iter().next()`/`war.defenders.iter().next()`が残っていることを
+発見した**(初回パスの事前調査が同ファイル内の別関数を見て「ファイル全体が
+正しい」と誤って一般化していたのが原因、§20参照)。領土移転先・winner・休戦相手
+(`diplomacy_registry.set_truce`)の選定に使われていたため、`primary_attacker_id()`/
+`primary_defender_id()`へ修正した。この修正により、`war_error.peace.no_attacker`/
+`no_defender`という2つのエラーキーが到達不能になった(空集合は`declare_war`が
+構造的に作れないため元々`Err`経路は事実上デッドコードだったが、アクセサが
+`panic`する設計(§28.4)に変わったことで、`Result`の`?`によるエラー伝播自体が
+不要になった)。コード・テストでの参照は元々存在しなかったため、この変更に
+伴う破壊的変更はない(未使用となったローカライズキー2件は害がないため残置)。
+
+### 28.4 指摘4: 主導国フォールバックの安全性
+
+**既存Save validationの空陣営拒否(そのまま維持、新規追加なし)**:
+`src/save/validate.rs`の`validate_wars`関数、`empty_attackers_is_rejected`/
+`empty_defenders_is_rejected`テスト(いずれもP21-016以前、P20-16時代から存在)。
+`war.attackers.is_empty()`/`war.defenders.is_empty()`なら`EmptyCollection`で
+拒否する既存チェックがそのまま該当要件を満たしていたため、変更不要と確認した。
+
+**`declare_war`が空陣営を作れないことの直接テスト(新規追加)**:
+`declare_war_never_produces_empty_attacker_or_defender_sets` — 支持国が全員
+(存在しない国家IDのみで)個別除外される最悪ケースでも、`attackers`/`defenders`
+は要求国/対象国自身を常に無条件で含むため空にならないことを確認。
+
+**アクセサの再設計(架空のCountryId(0)を返さない)**:
+`primary_attacker_id()`/`primary_defender_id()`の`.unwrap_or(CountryId(0))`
+フォールバックを`.expect("...")`(panic)へ変更。上記2つの安全策
+(Save validationの空集合拒否 + `declare_war`の構造的な空集合不能性)により、
+この関数が呼ばれる時点で`attackers`/`defenders`が空であることはあってはならない
+不変条件違反であり、実在しない国を実在するかのように装う値を返すより、
+ここで明示的にpanicする方が安全と判断した。新規`#[should_panic]`テスト
+`primary_attacker_id_panics_instead_of_fabricating_a_country_on_a_truly_empty_set`
+で、`declare_war`を経由しない直接構築(唯一の再現経路)によるpanicを確認。
+
+### 28.5 指摘5: 性能測定条件が未達
+
+軸2(敵味方判定共有API)を要求規模(最大1000 War・陣営あたり最大100参加国)まで
+拡張して再測定した。結果は§18に統合済み。最大規模(1000 War×100参加国)でも
+1クエリあたり0.024ms未満で、両APIとも`war_count`に線形・`participants_per_side`に
+ほぼ無依存という初回パスの結論が、より大きなスケールでも変わらず成立することを
+確認した。
+
+### 28.6 二次レビュー対応の最終品質ゲート
+
+`cargo check --all-targets` / `cargo test --lib`(797 passed) / `cargo test --tests`
+(971 passed) / `cargo clippy --all-targets --all-features -- -D warnings`(0
+warnings) / `cargo build --release` / `git diff --check` すべて成功。
+`cargo fmt --all -- --check`は、P21-016が触れた全ファイルで0 diffを再確認
+(このタスク以前から存在する無関係な44 hunks/11ファイルの既存driftのみ残存、
+§17と同一、意図的に未着手)。ヘッドレステストが汚したスクリーンショットは
+毎回`git checkout --`で復元済み。
+
+### 28.7 二次レビュー対応の変更・新規ファイル一覧
+
+**追加変更**:
+- `src/war/data.rs` — `source_crisis_id`フィールド追加、`declare_war`が
+  引き継ぐよう変更、`primary_attacker_id`/`primary_defender_id`をpanic方式へ
+  再設計。
+- `src/save/validate.rs` — justification↔crisis↔claim整合性検証、
+  `War.source_crisis_id`参照整合性検証を追加。
+- `src/war/peace.rs` — `execute_peace_settlement`の`.iter().next()`を
+  `primary_attacker_id()`/`primary_defender_id()`へ修正(バグ修正)。
+- `src/war/tests.rs` — 多国間戦闘/占領/講和の直接テスト5件、空集合系テスト2件を
+  追加。
+- 既存24+箇所の`War`リテラル構築(`src/war/{tests,military_ai,frontline}.rs`・
+  `src/military/{tests,update,invasion}.rs`・`src/save/{validate,apply,export}.rs`・
+  `src/ui/military_panel.rs`・`src/map/{frontline_render,frontline_selection,
+  offensive_line_selection}.rs`・`src/profiling.rs`・
+  `tests/{p21_005_army_frontline_e2e_test,p21_008_army_offensive_e2e_test}.rs`)
+  へ`source_crisis_id: None`を追加(ロジック変更なし)。
+
+**新規テスト内訳(+15、全てlib単体テスト)**: §28.1(+8)、§28.3(+5)、§28.4(+2)。

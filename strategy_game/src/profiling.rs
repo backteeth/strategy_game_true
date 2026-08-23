@@ -351,6 +351,7 @@ fn inject_synthetic_world(app: &mut App, config: &WorkloadConfig) -> WorkloadCou
                 defenders,
                 primary_attacker: Some(CountryId(a)),
                 primary_defender: Some(CountryId(b)),
+                source_crisis_id: None,
                 war_goals: vec![WarGoal {
                     attacker: CountryId(a),
                     defender: CountryId(b),

@@ -63,8 +63,9 @@ pub struct CountryPowerAssessment {
 /// 全国家の国家総合力評価結果を保持するリソース。
 ///
 /// Country/State/Military/Buildingから`evaluate_country_power`で毎回再構築する派生
-/// データであり、この型自体を外部から直接書き換える公開APIは提供しない
-/// (`CountryPlugin`経由の再評価のみが正規の更新経路)。
+/// データであり、この型自体を外部から直接書き換える公開APIは基本的に提供しない
+/// (`CountryPlugin`経由の再評価のみが正規の更新経路)。唯一の例外は
+/// `remove_country`(P21-021: 国家消滅時の即時除外、`pub(crate)`)。
 #[derive(Resource, Debug, Default, Clone)]
 pub struct CountryPowerRegistry {
     assessments: HashMap<CountryId, CountryPowerAssessment>,
@@ -93,6 +94,19 @@ impl CountryPowerRegistry {
     /// (`MainMenu`/`CountrySelection`中などUI側が「評価中」を表示すべき状態)。
     pub fn last_evaluated_date(&self) -> Option<&str> {
         self.last_evaluated_date.as_deref()
+    }
+
+    /// P21-021: 国家消滅時に、月次再評価を待たず即座にランキング・PowerTierから
+    /// 除外する(`country::elimination::apply_country_elimination`専用の唯一の
+    /// 例外——他の全ロジックは引き続きこの型を`CountryPlugin`経由の完全再評価
+    /// でのみ更新する)。除外対象国家自身の評価が即座に消えることが目的であり、
+    /// 残存国家の`world_rank`(1始まりの順位数値)は次回の定期再評価まで
+    /// 詰め直さない(順位に欠番が生じ得るが、除外対象自身がAI支持判断・
+    /// UI表示・`ordered_country_ids()`のいずれからも即座に見えなくなることは
+    /// 保証される)。存在しないIdに対しては何もしない。
+    pub(crate) fn remove_country(&mut self, id: CountryId) {
+        self.assessments.remove(&id);
+        self.ordered_country_ids.retain(|&cid| cid != id);
     }
 }
 
@@ -210,6 +224,10 @@ pub fn evaluate_country_power(
     let raw: Vec<RawEntry> = country_registry
         .countries
         .iter()
+        // P21-021: 消滅済み(Eliminated)国家はPowerTier評価の対象外
+        // (§12: is_active()をAI列挙点で共有する)。GreatPower/RegionalPower
+        // の枠は現存する国家だけで争われる。
+        .filter(|c| c.is_active())
         .map(|c| {
             let mil = sanitize_raw(military_by_country.get(c.id.0).copied().unwrap_or(0) as f64);
             let eco = sanitize_raw(economic_by_country.get(&c.id).copied().unwrap_or(0.0));
@@ -1173,5 +1191,55 @@ mod tests {
         assert_eq!(registry.country_count(), 1);
         assert!(registry.get(CountryId(999)).is_none());
         assert_eq!(registry.get(CountryId(0)).unwrap().population_raw, 0.0);
+    }
+
+    // ─── P21-021: 国家消滅時の即時除外 ────────────────────────────────────────
+
+    /// 要求(P21-021 §3): `remove_country`が対象国家を`get`/`ordered_country_ids`
+    /// の両方から即座に除外し、他国のエントリには一切影響しない。
+    #[test]
+    fn remove_country_excludes_from_get_and_ordered_ids_immediately() {
+        let country_registry = countries(&[0, 1, 2]);
+        let state_registry = states(vec![
+            state(0, 0, 100_000),
+            state(1, 1, 50_000),
+            state(2, 2, 10_000),
+        ]);
+        let military_registry = MilitaryRegistry::default();
+        let building_registry = BuildingRegistry::default();
+
+        let mut registry = evaluate_country_power(
+            &country_registry,
+            &state_registry,
+            &military_registry,
+            &building_registry,
+            "1800/01/01".to_string(),
+        );
+        assert_eq!(registry.country_count(), 3);
+        assert!(registry.get(CountryId(1)).is_some());
+
+        registry.remove_country(CountryId(1));
+
+        assert!(
+            registry.get(CountryId(1)).is_none(),
+            "the eliminated country's assessment must be gone immediately"
+        );
+        assert!(
+            !registry.ordered_country_ids().contains(&CountryId(1)),
+            "the eliminated country must not appear in the ranking list immediately"
+        );
+        assert_eq!(registry.country_count(), 2);
+        assert!(
+            registry.get(CountryId(0)).is_some() && registry.get(CountryId(2)).is_some(),
+            "surviving countries' entries must be untouched"
+        );
+    }
+
+    /// `remove_country`は存在しないCountryIdに対して何もしない(panicしない)。
+    #[test]
+    fn remove_country_is_a_no_op_for_a_nonexistent_id() {
+        let mut registry = CountryPowerRegistry::default();
+        registry.remove_country(CountryId(999));
+        assert_eq!(registry.country_count(), 0);
     }
 }

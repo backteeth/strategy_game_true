@@ -29,8 +29,8 @@ impl Plugin for StatePanelPlugin {
                 Update,
                 (
                     update_state_panel,
-                    handle_build_buttons,
-                    handle_cancel_queue_buttons,
+                    handle_build_buttons.run_if(crate::country::player_can_issue_commands),
+                    handle_cancel_queue_buttons.run_if(crate::country::player_can_issue_commands),
                 )
                     .run_if(in_state(GameState::Playing)),
             );
@@ -279,6 +279,14 @@ fn handle_build_buttons(
         return;
     };
 
+    // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家の建設命令を拒否する。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
+
     let Some(state) = state_registry.get(state_id) else {
         return;
     };
@@ -438,6 +446,10 @@ fn handle_cancel_queue_buttons(
         let Some(country) = country_registry.get_mut(player_cid) else {
             return;
         };
+        // P21-021: run_ifとは独立に、Domain APIレベルでも消滅済み国家の建設キャンセルを拒否する。
+        if !country.is_active() {
+            return;
+        }
 
         if let Some(item) = country.construction_queue.pop() {
             let refund = item.paid_cost * REFUND_RATIO;
@@ -612,6 +624,31 @@ mod tests {
         );
     }
 
+    /// P21-021: 消滅済み国家はDomain APIレベルで建設命令を拒否される
+    /// (UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn handle_build_buttons_rejects_an_eliminated_country() {
+        let state = state_with_deposit(StateId(0), CountryId(0), false);
+        let mut app = build_test_app(state);
+        app.world_mut()
+            .resource_mut::<CountryRegistry>()
+            .get_mut(CountryId(0))
+            .unwrap()
+            .status = crate::country::CountryStatus::Eliminated {
+            eliminated_date: "1936/01/01".to_string(),
+            annexed_by: CountryId(9),
+        };
+
+        press_build_button(&mut app, BuildingType::CrystalRefinery);
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert_eq!(
+            country_registry.countries[0].construction_queue.len(),
+            0,
+            "an eliminated country must not be able to start construction"
+        );
+    }
+
     #[test]
     fn crystal_refinery_build_request_succeeds_without_deposit() {
         let state = state_with_deposit(StateId(0), CountryId(0), false);
@@ -720,5 +757,52 @@ mod tests {
             country_registry.countries[0].construction_queue[0].building_type,
             BuildingType::Mine
         );
+    }
+
+    /// P21-021: 消滅済み国家はDomain APIレベルで建設キャンセル命令も拒否される
+    /// (UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn handle_cancel_queue_buttons_rejects_an_eliminated_country() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<GameNotification>();
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Update, handle_cancel_queue_buttons);
+        app.insert_resource(PlayerCountry(Some(CountryId(0))));
+        app.insert_resource(CountryRegistry {
+            countries: vec![CountryData {
+                id: CountryId(0),
+                treasury: 0.0,
+                construction_queue: vec![ConstructionQueueItem {
+                    state_id: StateId(0),
+                    building_type: BuildingType::Mine,
+                    target_level: 1,
+                    progress: 0.0,
+                    required_progress: 10.0,
+                    paid_cost: 100.0,
+                    status: ConstructionStatus::InQueue,
+                }],
+                status: crate::country::CountryStatus::Eliminated {
+                    eliminated_date: "1936/01/01".to_string(),
+                    annexed_by: CountryId(9),
+                },
+                ..CountryData::default()
+            }],
+        });
+
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::KeyC);
+        app.insert_resource(keys);
+
+        app.update();
+
+        let country_registry = app.world().resource::<CountryRegistry>();
+        assert_eq!(
+            country_registry.countries[0].construction_queue.len(),
+            1,
+            "an eliminated country's queue must survive rejection"
+        );
+        assert_eq!(country_registry.countries[0].treasury, 0.0);
     }
 }

@@ -98,7 +98,7 @@ impl Plugin for DivisionSelectionPlugin {
                 Update,
                 (
                     handle_division_selection,
-                    handle_movement_order,
+                    handle_movement_order.run_if(crate::country::player_can_issue_commands),
                     prune_selected_division,
                 )
                     .run_if(in_state(GameState::Playing)),
@@ -309,6 +309,7 @@ pub(crate) fn handle_movement_order(
     windows: Query<&Window>,
     camera_q: Query<&Transform, With<GameCamera>>,
     player_country: Res<PlayerCountry>,
+    country_registry: Res<crate::country::CountryRegistry>,
     state_registry: Res<StateRegistry>,
     war_registry: Res<WarRegistry>,
     selected_division: Res<SelectedDivision>,
@@ -387,6 +388,7 @@ pub(crate) fn handle_movement_order(
             division_id,
             target,
             player_cid,
+            &country_registry,
             &state_registry,
             &war_registry,
             &mut military_registry,
@@ -402,11 +404,21 @@ fn try_issue_move_order(
     division_id: DivisionId,
     target: crate::common::StateId,
     player_cid: crate::common::CountryId,
+    country_registry: &crate::country::CountryRegistry,
     state_registry: &StateRegistry,
     war_registry: &WarRegistry,
     military_registry: &mut MilitaryRegistry,
     battle_registry: &BattleRegistry,
 ) {
+    // P21-021: 消滅済み国家は自国師団への移動命令を一切発行できない
+    // (Domain APIレベルでの拒否。UIのrun_ifだけに依存しない)。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
+
     // ユニット存在確認（撃破済み選択防止）
     let Some(division) = military_registry.divisions.get(&division_id) else {
         warn!(
@@ -546,8 +558,17 @@ fn try_issue_move_order(
 pub(crate) fn stop_division_movement(
     division_id: DivisionId,
     player_cid: crate::common::CountryId,
+    country_registry: &crate::country::CountryRegistry,
     military_registry: &mut MilitaryRegistry,
 ) {
+    // P21-021: 消滅済み国家は自国師団の移動停止命令も発行できない。
+    if country_registry
+        .get(player_cid)
+        .is_none_or(|c| !c.is_active())
+    {
+        return;
+    }
+
     let Some(division) = military_registry.divisions.get_mut(&division_id) else {
         return;
     };
@@ -574,6 +595,17 @@ pub(crate) fn stop_division_movement(
 mod tests {
     use super::*;
     use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
+    use crate::country::{CountryData, CountryRegistry, CountryStatus};
+
+    fn active_country_registry(id: CountryId) -> CountryRegistry {
+        CountryRegistry {
+            countries: vec![CountryData {
+                id,
+                status: CountryStatus::Active,
+                ..CountryData::default()
+            }],
+        }
+    }
     use crate::map::division_render::division_display_positions;
     use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
     use crate::state::data::StateData;
@@ -1192,6 +1224,7 @@ mod tests {
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
+        app.insert_resource(active_country_registry(CountryId(1)));
         app.insert_resource(WarRegistry::default());
         app.insert_resource(BattleRegistry::default());
         app.init_resource::<crate::state::SelectedState>();
@@ -1239,6 +1272,124 @@ mod tests {
         assert_eq!(division2.status, DivisionStatus::Idle);
     }
 
+    /// P21-021: 消滅済み国家は自国師団への移動命令をDomain APIレベルで
+    /// 発行できない(UIのrun_ifだけに依存しない直接検証)。
+    #[test]
+    fn handle_movement_order_rejects_an_eliminated_player_country() {
+        let mut military_registry = MilitaryRegistry::default();
+        let a1 = make_test_division(1, CountryId(1), StateId(1));
+        military_registry.divisions.insert(a1.id, a1);
+
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(2)],
+            world_position: [0.0, 0.0],
+            size: [100.0, 100.0],
+            ..Default::default()
+        };
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(1)],
+            world_position: [300.0, 0.0],
+            size: [100.0, 100.0],
+            ..Default::default()
+        };
+        let state_registry = StateRegistry::build(vec![s1, s2]);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_systems(Update, handle_movement_order);
+        app.init_resource::<crate::map::frontline_selection::FrontlineSelectMode>();
+
+        app.insert_resource(military_registry);
+        app.insert_resource(state_registry);
+        app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
+        app.insert_resource(CountryRegistry {
+            countries: vec![CountryData {
+                id: CountryId(1),
+                status: CountryStatus::Eliminated {
+                    eliminated_date: "1936/01/01".to_string(),
+                    annexed_by: CountryId(9),
+                },
+                ..CountryData::default()
+            }],
+        });
+        app.insert_resource(WarRegistry::default());
+        app.insert_resource(BattleRegistry::default());
+        app.init_resource::<crate::state::SelectedState>();
+        app.insert_resource(SelectedDivision {
+            division_ids: [DivisionId(1)].into_iter().collect(),
+        });
+
+        let mut mouse = ButtonInput::<MouseButton>::default();
+        mouse.press(MouseButton::Right);
+        app.insert_resource(mouse);
+
+        app.world_mut()
+            .spawn((Camera2d, GameCamera, Transform::default()));
+
+        let mut window = Window {
+            resolution: WindowResolution::new(800, 600),
+            ..default()
+        };
+        let window_size = Vec2::new(800.0, 600.0);
+        let target_world = Vec2::new(300.0, 0.0);
+        let half_size = window_size * 0.5;
+        let ndc = target_world / half_size;
+        let raw_ndc = Vec2::new(ndc.x, -ndc.y);
+        let screen = (raw_ndc + Vec2::ONE) * 0.5 * window_size;
+        window.set_cursor_position(Some(screen));
+        app.world_mut().spawn(window);
+
+        app.update();
+
+        let military_registry = app.world().resource::<MilitaryRegistry>();
+        let division1 = military_registry.divisions.get(&DivisionId(1)).unwrap();
+        assert_eq!(
+            division1.destination, None,
+            "an eliminated country's divisions must not receive move orders"
+        );
+        assert_eq!(division1.status, DivisionStatus::Idle);
+    }
+
+    /// P21-021: 消滅済み国家は自国師団の移動停止命令もDomain APIレベルで拒否される。
+    #[test]
+    fn stop_division_movement_rejects_an_eliminated_country() {
+        let mut military_registry = MilitaryRegistry::default();
+        let mut division = make_test_division(1, CountryId(1), StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(5));
+        military_registry.divisions.insert(division.id, division);
+
+        let eliminated_registry = CountryRegistry {
+            countries: vec![CountryData {
+                id: CountryId(1),
+                status: CountryStatus::Eliminated {
+                    eliminated_date: "1936/01/01".to_string(),
+                    annexed_by: CountryId(9),
+                },
+                ..CountryData::default()
+            }],
+        };
+
+        stop_division_movement(
+            DivisionId(1),
+            CountryId(1),
+            &eliminated_registry,
+            &mut military_registry,
+        );
+
+        let d = &military_registry.divisions[&DivisionId(1)];
+        assert_eq!(
+            d.destination,
+            Some(StateId(5)),
+            "the move order must survive rejection"
+        );
+        assert_eq!(d.status, DivisionStatus::Moving);
+    }
+
     /// P21-005要求テスト項目34: 前線選択モード中の右クリックは移動命令へ漏れない
     /// (前線設定操作の右クリック=キャンセル操作が、既存の移動命令発行と衝突しない)。
     #[test]
@@ -1275,6 +1426,7 @@ mod tests {
         app.insert_resource(military_registry);
         app.insert_resource(state_registry);
         app.insert_resource(crate::country::PlayerCountry(Some(CountryId(1))));
+        app.insert_resource(active_country_registry(CountryId(1)));
         app.insert_resource(WarRegistry::default());
         app.insert_resource(BattleRegistry::default());
         app.init_resource::<crate::state::SelectedState>();
@@ -1325,7 +1477,12 @@ mod tests {
         division.movement_progress = 0.4;
         military_registry.divisions.insert(division.id, division);
 
-        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+        stop_division_movement(
+            DivisionId(1),
+            CountryId(1),
+            &active_country_registry(CountryId(1)),
+            &mut military_registry,
+        );
 
         let d = &military_registry.divisions[&DivisionId(1)];
         assert_eq!(d.destination, None);
@@ -1352,7 +1509,12 @@ mod tests {
             .insert(division.id, division.clone());
 
         // CountryId(1)としてCountryId(2)所有の師団を止めようとしても無視される
-        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+        stop_division_movement(
+            DivisionId(1),
+            CountryId(1),
+            &active_country_registry(CountryId(1)),
+            &mut military_registry,
+        );
 
         let d = &military_registry.divisions[&DivisionId(1)];
         assert_eq!(d.destination, division.destination);
@@ -1378,7 +1540,12 @@ mod tests {
             .create_army(CountryId(1), &[DivisionId(1)], &military_registry)
             .unwrap();
 
-        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+        stop_division_movement(
+            DivisionId(1),
+            CountryId(1),
+            &active_country_registry(CountryId(1)),
+            &mut military_registry,
+        );
 
         assert_eq!(
             army_registry.army_for_division(DivisionId(1)),
@@ -1402,7 +1569,12 @@ mod tests {
         // 戦闘中は既に移動関連フィールドが空になっている想定(start_battle_betweenの挙動)
         military_registry.divisions.insert(division.id, division);
 
-        stop_division_movement(DivisionId(1), CountryId(1), &mut military_registry);
+        stop_division_movement(
+            DivisionId(1),
+            CountryId(1),
+            &active_country_registry(CountryId(1)),
+            &mut military_registry,
+        );
 
         let d = &military_registry.divisions[&DivisionId(1)];
         assert_eq!(

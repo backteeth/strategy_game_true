@@ -25,6 +25,7 @@ use strategy_game::diplomacy::update::handle_daily_diplomacy;
 use strategy_game::localization::{CurrentLocale, TranslationCatalog};
 use strategy_game::state::data::{StateData, StateRegistry};
 use strategy_game::ui::notification::GameNotification;
+use strategy_game::war::data::WarRegistry;
 use strategy_game::war::justification::WarJustificationRegistry;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -98,10 +99,15 @@ fn build_lightweight_ai_support_app(great_power_id: usize) -> App {
     });
     app.insert_resource(StateRegistry::build(vec![]));
     app.insert_resource(WarJustificationRegistry::default());
+    app.insert_resource(WarRegistry::default());
     app.insert_resource(ClaimRegistry::default());
     app.insert_resource(power_registry_with_great_power(great_power_id));
     app.insert_resource(CurrentLocale::default());
     app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+    app.insert_resource(strategy_game::military::data::MilitaryRegistry::default());
+    app.insert_resource(strategy_game::military::army::ArmyRegistry::default());
+    app.insert_resource(strategy_game::war::frontline::FrontlineRegistry::default());
+    app.insert_resource(strategy_game::military::battle::BattleRegistry::default());
     app.add_message::<GameNotification>();
 
     app.add_systems(
@@ -604,11 +610,24 @@ mod real_map_e2e {
             .unwrap()
             .clone();
         let date_str = world.resource::<GameDate>().display();
+        let country_registry = world.resource::<CountryRegistry>().clone_for_test();
         let state_registry = world.resource::<StateRegistry>().clone_for_test();
-        let mut crisis_registry = world.resource_mut::<CrisisRegistry>();
-        crisis_registry
-            .start_crisis(&claim, claimant, target, date_str, &state_registry)
-            .expect("valid claim must allow crisis start")
+        world.resource_scope(|world, mut crisis_registry: Mut<CrisisRegistry>| {
+            let diplomacy_registry = world.resource::<DiplomacyRegistry>();
+            let war_registry = world.resource::<WarRegistry>();
+            crisis_registry
+                .start_crisis(
+                    &claim,
+                    claimant,
+                    target,
+                    date_str,
+                    &country_registry,
+                    &state_registry,
+                    diplomacy_registry,
+                    war_registry,
+                )
+                .expect("valid claim must allow crisis start")
+        })
     }
 
     trait CloneForTest {
@@ -789,6 +808,7 @@ mod real_map_e2e {
 
         crisis_response::withdraw_support(
             &mut app.world_mut().resource_mut::<CrisisRegistry>(),
+            &countries,
             crisis_id,
             player,
             &current_date,

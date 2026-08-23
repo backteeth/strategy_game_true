@@ -1,4 +1,4 @@
-use crate::common::{CountryId, StateId, WarId};
+use crate::common::{CountryId, DiplomaticCrisisId, StateId, WarId};
 use crate::diplomacy::crisis::WarGoal;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,11 @@ pub struct War {
     /// P21-016: 防御側の代表国。`primary_attacker`と同じ規約。
     #[serde(default)]
     pub primary_defender: Option<CountryId>,
+    /// P21-016(二次レビュー対応): このWarを生んだCrisis(ある場合)。宣戦布告が消費する
+    /// `WarJustification::source_crisis_id`をそのまま引き継ぐ。Crisis経由でない通常の
+    /// 二国間War、および旧Save(フィールド自体が存在しない)では`None`。
+    #[serde(default)]
+    pub source_crisis_id: Option<DiplomaticCrisisId>,
     pub war_goals: Vec<WarGoal>,
     pub start_date: String,
     #[serde(default)]
@@ -73,24 +78,31 @@ impl War {
     /// 攻撃側の代表国を返す。`primary_attacker`が設定されていればそれを、
     /// 未設定(旧Save)なら`attackers`集合内の最小`CountryId`を返す
     /// (旧Saveの`attackers`は常に単一要素なので一意に定まる)。
+    ///
+    /// P21-016(二次レビュー対応): `attackers`が空の場合に架空の`CountryId(0)`を
+    /// 捏造して返すことはしない——`declare_war`は必ず`initiator`を挿入してから
+    /// Warを構築するため、また`save::validate`の`EmptyCollection`検証(旧仕様から
+    /// 存在)が空集合のWarを含むSaveを拒否するため、この関数が呼ばれる時点で
+    /// `attackers`が空であることはあってはならない不変条件違反であり、実在しない国を
+    /// 実在するかのように装う値を返すよりも、ここで明示的にpanicする方が安全。
     pub fn primary_attacker_id(&self) -> CountryId {
         self.primary_attacker.unwrap_or_else(|| {
-            self.attackers
-                .iter()
-                .copied()
-                .min_by_key(|c| c.0)
-                .unwrap_or(CountryId(0))
+            self.attackers.iter().copied().min_by_key(|c| c.0).expect(
+                "War.attackers must never be empty (guaranteed by declare_war always inserting \
+                 the initiator, and by save::validate's EmptyCollection check) - fabricating \
+                 CountryId(0) here would silently impersonate a country that may not exist",
+            )
         })
     }
 
-    /// 防御側の代表国を返す。`primary_attacker_id`と同じ規約。
+    /// 防御側の代表国を返す。`primary_attacker_id`と同じ規約(空集合ならpanicする)。
     pub fn primary_defender_id(&self) -> CountryId {
         self.primary_defender.unwrap_or_else(|| {
-            self.defenders
-                .iter()
-                .copied()
-                .min_by_key(|c| c.0)
-                .unwrap_or(CountryId(0))
+            self.defenders.iter().copied().min_by_key(|c| c.0).expect(
+                "War.defenders must never be empty (guaranteed by declare_war always inserting \
+                 the target, and by save::validate's EmptyCollection check) - fabricating \
+                 CountryId(0) here would silently impersonate a country that may not exist",
+            )
         })
     }
 
@@ -250,10 +262,16 @@ impl WarRegistry {
             return Err("war_error.declare.self");
         }
 
-        if country_registry.get(initiator).is_none() {
+        // P21-021: 消滅済み(Eliminated)国家は新しい戦争の宣戦布告国にも対象国にも
+        // なれない(§10/§13: Domain APIレベルでの拒否。プレイヤー国家が消滅済みの
+        // 場合を含む)。
+        if country_registry
+            .get(initiator)
+            .is_none_or(|c| !c.is_active())
+        {
             return Err("war_error.declare.initiator_missing");
         }
-        if country_registry.get(target).is_none() {
+        if country_registry.get(target).is_none_or(|c| !c.is_active()) {
             return Err("war_error.declare.target_missing");
         }
 
@@ -325,11 +343,12 @@ impl WarRegistry {
         // (正当化がReadyになった時点で確定済み、`WarJustificationRegistry::get_ready_justification`が
         // 返す借用の生存中に読み取る)を読む。CrisisRegistryへの再問い合わせは行わない
         // (どのCrisisに由来するか国ペアから逆引きする曖昧さを避けるため)。
-        let (committed_attackers, committed_defenders) = {
+        let (source_crisis_id, committed_attackers, committed_defenders) = {
             let justification = justification_registry
                 .get_ready_justification(initiator, target, target_state)
                 .ok_or("war_error.declare.no_justification")?;
             (
+                justification.source_crisis_id,
                 justification.committed_attackers.clone(),
                 justification.committed_defenders.clone(),
             )
@@ -410,6 +429,7 @@ impl WarRegistry {
             defenders,
             primary_attacker: Some(initiator),
             primary_defender: Some(target),
+            source_crisis_id,
             war_goals: vec![war_goal],
             start_date,
             end_date: None,
