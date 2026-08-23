@@ -19,8 +19,11 @@ pub struct PlayerEliminationOverlayRoot;
 #[derive(Component)]
 struct PlayerEliminationBodyText;
 
+/// `pub`: P22-002の統合テストが実ボタン押下(`Interaction::Pressed`)経由で
+/// 敗北オーバーレイの解除フローを外部crateのtests/から駆動するために公開する
+/// (`ui::peace_panel::PeaceActionButton`と同じ理由)。
 #[derive(Component)]
-struct ContinueSpectatingButton;
+pub struct ContinueSpectatingButton;
 
 pub struct PlayerEliminationPlugin;
 

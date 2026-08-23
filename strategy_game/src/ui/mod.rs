@@ -14,6 +14,7 @@ pub mod scrollbar;
 pub mod state_panel;
 pub mod tab_bar;
 pub mod top_bar;
+pub mod world_conclusion;
 
 use crate::localization::LocalizationPlugin;
 use bevy::prelude::*;
@@ -29,6 +30,7 @@ use research_panel::ResearchPluginUI;
 use state_panel::StatePanelPlugin;
 use tab_bar::TabBarPlugin;
 use top_bar::TopBarPlugin;
+use world_conclusion::WorldConclusionPlugin;
 
 /// 現在開いているパネルの識別子
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -169,6 +171,7 @@ impl Plugin for UiPlugin {
             .add_plugins(LoadConfirmPlugin)
             .add_plugins(PlayerEliminationPlugin)
             .add_plugins(PlayerVictoryPlugin)
+            .add_plugins(WorldConclusionPlugin)
             .add_plugins(TopBarPlugin)
             .add_plugins(crate::ui::scrollbar::ScrollbarPlugin)
             .init_resource::<crate::ui::scroll::CursorOverScrollableUi>()

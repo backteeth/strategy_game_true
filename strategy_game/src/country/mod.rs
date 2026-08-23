@@ -591,6 +591,158 @@ mod tests {
              to VictoryOverlayPending on subsequent frames"
         );
     }
+
+    // ─── P22-002: 観戦中の世界統一検知 ───────────────────────────────────────
+
+    fn conclusion_test_app(countries: Vec<CountryData>, player: Option<CountryId>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(PlayerCountry(player));
+        app.insert_resource(CountryRegistry { countries });
+        app.insert_resource(WorldConclusionMode::default());
+        app.insert_resource(crate::app::time::GameDate::new(1850, 6, 15));
+        app.add_systems(Update, detect_world_conclusion);
+        app
+    }
+
+    #[test]
+    fn detect_world_conclusion_transitions_when_player_is_eliminated_and_one_rival_remains_active()
+    {
+        let mut app = conclusion_test_app(
+            vec![eliminated_country(0, 1), active_country(1)],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert!(matches!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::OverlayPending { .. }
+        ));
+    }
+
+    #[test]
+    fn detect_world_conclusion_records_the_winner_id_and_conclusion_date() {
+        let mut app = conclusion_test_app(
+            vec![
+                eliminated_country(0, 2),
+                eliminated_country(1, 2),
+                active_country(2),
+            ],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::OverlayPending {
+                winner_country_id: CountryId(2),
+                conclusion_date: "1850/06/15".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_nothing_while_the_player_is_still_active() {
+        let mut app = conclusion_test_app(
+            vec![active_country(0), eliminated_country(1, 0)],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_nothing_when_the_player_itself_is_the_sole_survivor() {
+        // これはP22-001(`detect_player_victory`)が扱うべきケースであり、
+        // P22-002は「プレイヤーが消滅済み」を前提とするため発火しない。
+        let mut app = conclusion_test_app(
+            vec![active_country(0), eliminated_country(1, 0)],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_nothing_when_two_or_more_rivals_remain_active() {
+        let mut app = conclusion_test_app(
+            vec![
+                eliminated_country(0, 1),
+                active_country(1),
+                active_country(2),
+            ],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_nothing_when_no_country_is_active() {
+        let mut app = conclusion_test_app(
+            vec![eliminated_country(0, 1), eliminated_country(1, 0)],
+            Some(CountryId(0)),
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_nothing_for_a_degenerate_single_country_world() {
+        let mut app = conclusion_test_app(vec![eliminated_country(0, 0)], Some(CountryId(0)));
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::NotConcluded
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_not_revert_acknowledged_back_to_pending() {
+        let mut app = conclusion_test_app(
+            vec![eliminated_country(0, 1), active_country(1)],
+            Some(CountryId(0)),
+        );
+        *app.world_mut().resource_mut::<WorldConclusionMode>() = WorldConclusionMode::Acknowledged;
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            WorldConclusionMode::Acknowledged,
+            "once dismissed, detection must not revert that back to OverlayPending on \
+             subsequent frames"
+        );
+    }
+
+    #[test]
+    fn detect_world_conclusion_does_not_update_again_after_multiple_days_once_pending() {
+        let mut app = conclusion_test_app(
+            vec![eliminated_country(0, 1), active_country(1)],
+            Some(CountryId(0)),
+        );
+        app.update();
+        let first = app.world().resource::<WorldConclusionMode>().clone();
+        // 日付が進んでも(GameDateを直接書き換えても)、既にPendingになった後は
+        // 再評価されず、記録済みの成立日・勝者が上書きされないことを確認する。
+        *app.world_mut().resource_mut::<crate::app::time::GameDate>() =
+            crate::app::time::GameDate::new(1850, 7, 1);
+        app.update();
+        app.update();
+        assert_eq!(
+            *app.world().resource::<WorldConclusionMode>(),
+            first,
+            "must not re-evaluate or overwrite an already-pending conclusion on later frames"
+        );
+    }
 }
 
 // ─── レジストリ ──────────────────────────────────────────────────────────────
@@ -756,6 +908,74 @@ pub fn detect_player_victory(
     }
 }
 
+/// P22-002: 観戦中(プレイヤー消滅後)に他国同士の決着で世界が統一された際の
+/// 終戦通知UX進行状態。`PlayerVictoryMode`の「プレイヤー自身が最後の生存国」
+/// と対称な、「プレイヤー以外の1か国が最後の生存国」ケースを扱う。
+/// `PlayerEliminationMode`/`PlayerVictoryMode`と同じ理由でSaveへは含めない
+/// (`CountryRegistry`から毎フレーム再導出するランタイムUI状態)。
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub enum WorldConclusionMode {
+    #[default]
+    NotConcluded,
+    /// 世界統一成立直後、まだ観戦者向けオーバーレイを閉じていない。
+    /// 到達した日付を検知した瞬間の値として保持する
+    /// (`PlayerVictoryMode::VictoryOverlayPending`と同じ理由――敗北オーバーレイを
+    /// 閉じた日ではなく、実際にActive国家が1か国になった日を固定表示する)。
+    OverlayPending {
+        winner_country_id: CountryId,
+        conclusion_date: String,
+    },
+    /// オーバーレイを閉じ、観戦を継続中。
+    Acknowledged,
+}
+
+/// P22-002: プレイヤーが消滅済みの状態で、プレイヤー以外の1か国だけが
+/// 世界で唯一のActive国家になった瞬間を検知し、`WorldConclusionMode`を
+/// `OverlayPending`へ遷移させる。`detect_player_victory`(プレイヤー自身が
+/// 唯一の生存国のケース)とは、プレイヤーが消滅済みかどうかで判定条件が
+/// 完全に排他的なため、同時に両方のPendingへ遷移することはあり得ない。
+/// 既に`OverlayPending`/`Acknowledged`であれば何もしない(冪等)。1か国しか
+/// 存在しない世界(縮退ケース)、およびActive国家が0か国の場合は発火しない。
+///
+/// System実行順序: `DailySimulationSet::UiUpdate`(最終Set)に置くことで、
+/// 同じフレーム内で先行するWarResolution等による州所有権移転・国家消滅の
+/// 反映後に判定する。`detect_player_elimination`/`detect_player_victory`の
+/// 後に`.after()`で固定しているが、これはResourceの読み書きが競合するためではなく
+/// (`WorldConclusionMode`はどちらとも独立)、「消滅判定・勝利判定が確定した後の
+/// 状態を読む」という一貫したフレーム内順序を明示するための保険であり、
+/// UI側の表示抑制(`ui::world_conclusion::sync_world_conclusion_overlay`が
+/// `PlayerEliminationMode`を見て敗北オーバーレイより先に表示しないよう制御する)
+/// と対になる設計判断である。
+pub fn detect_world_conclusion(
+    player_country: Res<PlayerCountry>,
+    country_registry: Res<CountryRegistry>,
+    game_date: Res<crate::app::time::GameDate>,
+    mut mode: ResMut<WorldConclusionMode>,
+) {
+    if *mode != WorldConclusionMode::NotConcluded {
+        return;
+    }
+    if country_registry.countries.len() <= 1 {
+        return;
+    }
+    let Some(player_id) = player_country.0 else {
+        return;
+    };
+    if !country_registry
+        .get(player_id)
+        .is_some_and(|c| c.is_eliminated())
+    {
+        return;
+    }
+    let active_ids = country_registry.active_country_ids();
+    if active_ids.len() == 1 && active_ids[0] != player_id {
+        *mode = WorldConclusionMode::OverlayPending {
+            winner_country_id: active_ids[0],
+            conclusion_date: game_date.display(),
+        };
+    }
+}
+
 // ─── プラグイン ──────────────────────────────────────────────────────────────
 
 /// 国家関連プラグイン
@@ -770,6 +990,7 @@ impl Plugin for CountryPlugin {
             .insert_resource(CountryPowerRegistry::default())
             .insert_resource(PlayerEliminationMode::default())
             .insert_resource(PlayerVictoryMode::default())
+            .insert_resource(WorldConclusionMode::default())
             .add_systems(
                 Update,
                 (
@@ -806,6 +1027,18 @@ impl Plugin for CountryPlugin {
                 // PlayerVictoryMode)ため、明示的な順序制約は不要。
                 detect_player_victory
                     .in_set(DailySimulationSet::UiUpdate)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P22-002: 消滅検知・勝利検知と同じ理由でUiUpdateへ置く。
+                // `.after()`は排他性の根拠として上のdocコメントに明記した理由で
+                // 付与している(Resource競合の回避ではなく、フレーム内で消滅/勝利判定が
+                // 確定した後の状態を読むという順序の明示)。
+                detect_world_conclusion
+                    .in_set(DailySimulationSet::UiUpdate)
+                    .after(detect_player_elimination)
+                    .after(detect_player_victory)
                     .run_if(in_state(GameState::Playing)),
             );
     }
