@@ -16,7 +16,9 @@ use crate::app::game_state::{GameState, PlayingEntryMode};
 use crate::app::time::{GameDate, GameSpeed};
 use crate::building::data::BuildingRegistry;
 use crate::country::country_ai::CountryAiRegistry;
-use crate::country::{CountryRegistry, PlayerCountry};
+use crate::country::{
+    CountryRegistry, PlayerCountry, PlayerEliminationMode, PlayerVictoryMode, WorldConclusionMode,
+};
 use crate::diplomacy::claims::ClaimRegistry;
 use crate::diplomacy::crisis::CrisisRegistry;
 use crate::diplomacy::data::DiplomacyRegistry;
@@ -269,7 +271,10 @@ pub(crate) fn load_failure_notification(
 /// 実行可能にするrun condition(P21-SAVE-003: 起動直後の「続きから」導線)。
 /// `GameState::MainMenu`(起動直後、静的マスターRON読込中)では実行しない。
 pub fn in_playing_or_country_selection(state: Res<State<GameState>>) -> bool {
-    matches!(state.get(), GameState::Playing | GameState::CountrySelection)
+    matches!(
+        state.get(),
+        GameState::Playing | GameState::CountrySelection
+    )
 }
 
 /// `PostUpdate`で実行されるロードシステム(排他的System、`&mut World`を直接受け取る)。
@@ -304,6 +309,30 @@ pub fn in_playing_or_country_selection(state: Res<State<GameState>>) -> bool {
 /// 実行させたことで顕在化した実バグ)。`MessageWriter`側(`CameraResetRequestMessage`/
 /// `GameNotification`)はカーソルを持たないため、こちらは毎回`SystemState::new`しても
 /// 二重発行の問題は起きない。
+/// P22-003: ロード成功後、終局UI用の3つのResource(`PlayerEliminationMode`/
+/// `PlayerVictoryMode`/`WorldConclusionMode`)を初期状態へ戻す。
+///
+/// これらはいずれも`country::CountryRegistry`(セーブ済み)から毎フレーム再導出される
+/// 一時的なランタイムUI状態であり、`SaveGameV1`自体には含まれない(P22-001/P22-002の
+/// 既存設計をそのまま維持)。そのため、ロードで`CountryRegistry`だけが新しい値へ
+/// 置き換わっても、前回セッションで既に`Acknowledged`/`*Pending`になっていたこれら3つの
+/// 値は自動的には初期状態へ戻らず、そのまま残ってしまう:
+/// - 旧`Acknowledged`が残ると、ロードした終局セーブなのに通知が出ない
+/// - 旧`*Pending`(古い勝者国家ID・古い日付を保持したまま)が残ると、通常のロード後の
+///   セーブで誤った通知が出る、または古い国家ID・日付を表示し続ける
+///
+/// ここで明示的に既定値へ戻すことで、ロード成功と同じフレームまたはその直後に実行される
+/// `detect_player_elimination`/`detect_player_victory`/`detect_world_conclusion`
+/// (いずれも`DailySimulationSet::UiUpdate`)が、ロード後の`CountryRegistry`だけを
+/// 唯一の正として最初から再判定する。呼び出し元は`ApplyLoadOutcome::Success`の分岐でのみ
+/// 呼ぶこと――ロード失敗時にこの関数を呼んではならない(現在のゲーム状態・終局UI状態の
+/// どちらも変更しないことがロード失敗時の契約のため)。
+fn reset_terminal_ui_state(world: &mut World) {
+    *world.resource_mut::<PlayerEliminationMode>() = PlayerEliminationMode::default();
+    *world.resource_mut::<PlayerVictoryMode>() = PlayerVictoryMode::default();
+    *world.resource_mut::<WorldConclusionMode>() = WorldConclusionMode::default();
+}
+
 pub fn handle_load_requests(
     world: &mut World,
     reader_state: &mut SystemState<MessageReader<LoadRequestMessage>>,
@@ -341,6 +370,9 @@ pub fn handle_load_requests(
     let outcome = match read_result {
         Ok(validated) => match apply_validated_save(world, validated) {
             ApplyLoadOutcome::Success => {
+                // P22-003: ロード成功が確定した直後に、終局UI用の3Resourceを
+                // 初期状態へ戻す(ロード失敗時はこの分岐に到達しないため一切変更しない)。
+                reset_terminal_ui_state(world);
                 if requested_from_country_selection {
                     // 起動直後の「続きから」: カメラはStartupの既定Transformのままなので
                     // CameraResetRequestMessageは送らない。代わりにPlayingEntryModeを
@@ -481,6 +513,10 @@ mod tests {
             .insert_resource(PlayerCountry(Some(CountryId(1))))
             .insert_resource(WorldCivilizationState::default())
             .insert_resource(CountryRegistry::default())
+            // P22-003: handle_load_requestsが成功時にこの3つをリセットするため必要。
+            .insert_resource(PlayerEliminationMode::default())
+            .insert_resource(PlayerVictoryMode::default())
+            .insert_resource(WorldConclusionMode::default())
             .insert_resource(StateRegistry::default())
             .insert_resource(DiplomacyRegistry::default())
             .insert_resource(WarJustificationRegistry::default())
@@ -1605,7 +1641,7 @@ mod tests {
 
     #[test]
     fn load_from_country_selection_success_sets_loaded_game_entry_mode_and_transitions_to_playing()
-     {
+    {
         let temp_dir = TempTestDir::new("cs_success");
         let mut app = setup_minimal_load_app_at_country_selection();
         let config = temp_dir.save_file_config();

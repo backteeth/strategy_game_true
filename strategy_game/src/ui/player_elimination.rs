@@ -36,7 +36,12 @@ impl Plugin for PlayerEliminationPlugin {
         .add_systems(
             Update,
             (
-                sync_player_elimination_overlay,
+                // P22-003: `country::detect_player_elimination`(`DailySimulationSet::UiUpdate`、
+                // 同じUpdateスケジュール内)との明示的な順序が無いと、同一フレーム内で
+                // Systemの実行順序がどちらが先になるか未規定なため、消滅が確定した
+                // まさにそのフレームでこのSystemが先に走ってしまい、オーバーレイの表示が
+                // 1フレーム遅延する場合があった(ロードSystem経由のテストで発見)。
+                sync_player_elimination_overlay.after(crate::country::detect_player_elimination),
                 handle_continue_spectating_button,
             )
                 .run_if(in_state(crate::app::game_state::GameState::Playing)),

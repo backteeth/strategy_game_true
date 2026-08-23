@@ -16,8 +16,12 @@ pub struct PlayerVictoryOverlayRoot;
 #[derive(Component)]
 struct PlayerVictoryBodyText;
 
+/// `pub`: P22-003の統合テストが実ボタン押下経由でオーバーレイ解除フローを
+/// 外部crateのtests/から駆動するために公開する(`ui::player_elimination::
+/// ContinueSpectatingButton`/`ui::world_conclusion::
+/// ContinueSpectatingAfterConclusionButton`と同じ理由)。
 #[derive(Component)]
-struct ContinuePlayingButton;
+pub struct ContinuePlayingButton;
 
 pub struct PlayerVictoryPlugin;
 
@@ -29,7 +33,15 @@ impl Plugin for PlayerVictoryPlugin {
         )
         .add_systems(
             Update,
-            (sync_player_victory_overlay, handle_continue_playing_button)
+            (
+                // P22-003: `country::detect_player_victory`(`DailySimulationSet::UiUpdate`、
+                // 同じUpdateスケジュール内)との明示的な順序が無いと、同一フレーム内での
+                // 実行順序が未規定なため、勝利が確定したまさにそのフレームでこのSystemが
+                // 先に走ってしまい、オーバーレイの表示が1フレーム遅延する場合があった
+                // (ロードSystem経由のテストで発見)。
+                sync_player_victory_overlay.after(crate::country::detect_player_victory),
+                handle_continue_playing_button,
+            )
                 .run_if(in_state(crate::app::game_state::GameState::Playing)),
         )
         .add_systems(

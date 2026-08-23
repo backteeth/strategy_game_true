@@ -36,7 +36,18 @@ impl Plugin for WorldConclusionPlugin {
         .add_systems(
             Update,
             (
-                sync_world_conclusion_overlay,
+                // P22-003: `country::detect_world_conclusion`/`detect_player_elimination`
+                // (`DailySimulationSet::UiUpdate`、同じUpdateスケジュール内)との明示的な
+                // 順序が無いと、同一フレーム内での実行順序が未規定なため、世界統一が
+                // 確定した、または敗北オーバーレイが閉じられたまさにそのフレームで
+                // このSystemが先に走ってしまい、オーバーレイの表示切替が1フレーム遅延
+                // する場合があった(ロードSystem経由のテストで発見)。このSystemは
+                // `WorldConclusionMode`だけでなく`PlayerEliminationMode`(表示抑制判定、
+                // §敗北オーバーレイとの競合防止)も読むため、両方のdetect Systemの後に
+                // 固定する。
+                sync_world_conclusion_overlay
+                    .after(crate::country::detect_world_conclusion)
+                    .after(crate::country::detect_player_elimination),
                 handle_continue_spectating_after_conclusion_button,
             )
                 .run_if(in_state(crate::app::game_state::GameState::Playing)),
