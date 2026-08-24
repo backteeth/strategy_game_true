@@ -11,7 +11,8 @@
 
 - 開始時HEAD: `5f0054d17e1378df4f1373e755f150921ccfbd75`
   (`feat: apply mobilized manpower to civilian labor`、P23-002完了コミット)
-- 完了時HEAD: 本報告のコミット(§10参照。この報告作成時点ではまだコミット前)
+- 完了時HEAD: `eb825fbfdf2ddf66992d4d86d67ab07fa73cd936`
+  (`feat: show population and manpower statistics`、本タスクのコミット)
 - ユーザーの既存未コミット変更(`saves/savegame_v1.ron`)は本タスク開始前から存在する
   実プレイデータであり、一切参照・変更・ステージしていない。
 
@@ -228,17 +229,11 @@ AIの動員判断変更・新しい軍事補充システム・雇用優先順位
 
 ## 10. 最終`git status --short`
 
+コミット `eb825fbfdf2ddf66992d4d86d67ab07fa73cd936` 作成後の状態:
+
 ```
- M assets/localization/en-US.ron
- M assets/localization/ja-JP.ron
  M saves/savegame_v1.ron
- M src/economy/mod.rs
- M src/population/update.rs
- M src/state/data.rs
- M src/ui/military_panel.rs
- M src/ui/state_panel.rs
-?? tests/p23_003_population_manpower_ui_e2e_test.rs
 ```
 
-(コミット前の状態。`saves/savegame_v1.ron`はユーザーの既存未コミット変更であり、
-本タスクのコミットには含めない。)
+`saves/savegame_v1.ron`はユーザーの既存未コミット変更であり、本タスクのコミット
+(`eb825fb`)には含めていない。それ以外の全変更(§4の8ファイル)はコミット済み。
