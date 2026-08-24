@@ -21,6 +21,17 @@ pub fn calculate_workforce_satisfaction(available_workforce: u64, required_workf
     ((available_workforce as f64) / (required_workforce as f64)).clamp(0.0, 1.0) as f32
 }
 
+/// 雇用率を計算する純粋関数 (0.0〜1.0、P23-003)。動員負担控除後の民間労働力
+/// (`StateData::civilian_workforce()` = `employed_workforce + unemployed_workforce`)を
+/// 分母とする。分母0では0を返す(`calculate_workforce_satisfaction`の「需要0なら
+/// 充足率100%」とは意味が異なる別概念であり、混同しない)。
+pub fn calculate_employment_rate(employed_workforce: u64, civilian_workforce: u64) -> f32 {
+    if civilian_workforce == 0 {
+        return 0.0;
+    }
+    ((employed_workforce as f64) / (civilian_workforce as f64)).clamp(0.0, 1.0) as f32
+}
+
 /// 州の人口と労働力、雇用状況を更新する。
 ///
 /// `mobilized_burden`(P23-002: 国家の`mobilized_manpower`をこの州の人口比で按分した値、
@@ -54,4 +65,53 @@ pub fn update_state_population_and_employment(
 
     state.employed_workforce = employed;
     state.unemployed_workforce = calculate_unemployed_workforce(total_wf, employed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calculate_employment_rate_returns_zero_when_civilian_workforce_is_zero() {
+        assert_eq!(calculate_employment_rate(0, 0), 0.0);
+        assert_eq!(
+            calculate_employment_rate(0, 0),
+            0.0,
+            "must not divide by zero or return NaN"
+        );
+    }
+
+    #[test]
+    fn calculate_employment_rate_computes_the_expected_ratio() {
+        assert_eq!(calculate_employment_rate(50, 100), 0.5);
+        assert_eq!(calculate_employment_rate(100, 100), 1.0);
+        assert_eq!(calculate_employment_rate(0, 100), 0.0);
+    }
+
+    #[test]
+    fn calculate_employment_rate_clamps_when_employed_exceeds_civilian_workforce() {
+        // 通常は起こらない(employed <= civilian_workforceがupdate_state_population_and_
+        // employmentの不変条件)が、防御的に1.0を超えない。
+        assert_eq!(calculate_employment_rate(150, 100), 1.0);
+    }
+
+    #[test]
+    fn civilian_workforce_sums_employed_and_unemployed() {
+        let state = StateData {
+            employed_workforce: 30_000,
+            unemployed_workforce: 5_000,
+            ..StateData::default()
+        };
+        assert_eq!(state.civilian_workforce(), 35_000);
+    }
+
+    #[test]
+    fn civilian_workforce_does_not_overflow_at_the_u64_boundary() {
+        let state = StateData {
+            employed_workforce: u64::MAX,
+            unemployed_workforce: u64::MAX,
+            ..StateData::default()
+        };
+        assert_eq!(state.civilian_workforce(), u64::MAX);
+    }
 }

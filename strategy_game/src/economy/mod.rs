@@ -161,7 +161,11 @@ pub fn handle_monthly_economy(
                 update_state_welfare_and_unrest(state, country.tax_rate, has_food, is_bankrupt);
             }
 
-            let total_wf: u64 = owned_states.iter().map(|s| s.total_workforce()).sum();
+            // P23-003: 動員負担控除後の民間労働力(employed+unemployed、月次雇用計算が
+            // 確定させた実値)を分母にする。total_workforce()(人口とworkforce_ratioから
+            // 動員を考慮せず再導出する潜在労働力)を使うと、動員中でも見かけ上の雇用率が
+            // 下がらず、この値から導出されるeconomic_state表示指標が実態とずれていた。
+            let total_wf: u64 = owned_states.iter().map(|s| s.civilian_workforce()).sum();
             let total_emp: u64 = owned_states.iter().map(|s| s.employed_workforce).sum();
 
             let emp_rate = if total_wf > 0 {

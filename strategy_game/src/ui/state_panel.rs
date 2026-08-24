@@ -1,4 +1,5 @@
 use crate::app::game_state::GameState;
+use crate::app::time::DailySimulationSet;
 use crate::building::construction::{ConstructionQueueItem, ConstructionStatus, REFUND_RATIO};
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::country::{CountryRegistry, PlayerCountry};
@@ -28,10 +29,19 @@ impl Plugin for StatePanelPlugin {
             .add_systems(
                 Update,
                 (
-                    update_state_panel,
                     handle_build_buttons.run_if(crate::country::player_can_issue_commands),
                     handle_cancel_queue_buttons.run_if(crate::country::player_can_issue_commands),
                 )
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P23-003: 州人口・労働力・動員負担の表示は、月次経済処理(Economy Set)が
+                // 確定させた`employed_workforce`/`unemployed_workforce`を読む。明示的なSet
+                // 制約がないと同一フレーム内でEconomyより先に実行され得て、月替わり直後の
+                // 1フレームだけ表示が古い値になる(本タスクで実際に統合テストが検出した)。
+                update_state_panel
+                    .in_set(DailySimulationSet::UiUpdate)
                     .run_if(in_state(GameState::Playing)),
             );
     }
@@ -227,15 +237,45 @@ fn update_state_panel(
         dep_str.push_str(&none_line);
     }
 
-    let total_wf = state.total_workforce();
+    // P23-003: 表示する労働力は動員負担控除後の民間労働力(employed+unemployed、月次
+    // 雇用計算が確定させた実値)を使う。total_workforce()(人口とworkforce_ratioから
+    // 動員を考慮せず再導出する潜在労働力)は使わない——動員中はこの2つが乖離する。
+    let civilian_wf = state.civilian_workforce();
+    let employment_rate =
+        crate::population::update::calculate_employment_rate(state.employed_workforce, civilian_wf);
+
+    // 州の所有国の`mobilized_manpower`を、現在の所有州人口比で按分した結果のうち
+    // この州の分だけを表示する。所有国が見つからない(異常系)場合は0扱い。
+    // P23-002の既存按分関数(`apportion_mobilized_manpower`)をそのまま再利用し、
+    // UI側で最大剰余法を複製しない。
+    let mobilized_burden = country_registry
+        .get(state.owner_country_id)
+        .map(|owner| {
+            let owner_states: Vec<(crate::common::StateId, u64)> = state_registry
+                .states
+                .iter()
+                .filter(|s| s.owner_country_id == state.owner_country_id)
+                .map(|s| (s.id, s.population))
+                .collect();
+            crate::population::mobilization::apportion_mobilized_manpower(
+                owner.mobilized_manpower,
+                &owner_states,
+            )
+            .get(&state.id)
+            .copied()
+            .unwrap_or(0)
+        })
+        .unwrap_or(0);
 
     let args = vec![
         ("name", state.name.clone()),
         ("owner", country_name),
         ("population", format_population(state.population)),
-        ("workforce", format_population(total_wf)),
+        ("workforce", format_population(civilian_wf)),
         ("employed", format_population(state.employed_workforce)),
         ("unemployed", format_population(state.unemployed_workforce)),
+        ("employment_rate", format!("{:.0}", employment_rate * 100.0)),
+        ("mobilized_burden", format_population(mobilized_burden)),
         ("living_standard", format!("{:.1}", state.living_standard)),
         ("unrest", format!("{:.1}", state.unrest)),
         ("logistics_cap", format!("{:.0}", state.logistics_capacity)),
@@ -804,5 +844,177 @@ mod tests {
             "an eliminated country's queue must survive rejection"
         );
         assert_eq!(country_registry.countries[0].treasury, 0.0);
+    }
+
+    // ─── P23-003: 人口・人的資源・動員負担のUI表示 ─────────────────────────────
+
+    fn build_state_panel_display_app(states: Vec<StateData>, countries: Vec<CountryData>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(CurrentLocale::default());
+        app.insert_resource(TranslationCatalog::load().expect("embedded catalogs must parse"));
+        app.add_systems(Update, update_state_panel);
+        let selected = states.first().map(|s| s.id);
+        app.insert_resource(SelectedState(selected));
+        app.insert_resource(CountryRegistry { countries });
+        app.insert_resource(StateRegistry::build(states));
+        app.world_mut().spawn((
+            StatePanelText,
+            Text::new(String::new()),
+            LocalizedText::default(),
+        ));
+        app
+    }
+
+    fn read_panel_args(app: &mut App) -> Vec<(&'static str, String)> {
+        app.world_mut()
+            .query_filtered::<&LocalizedText, With<StatePanelText>>()
+            .single(app.world())
+            .expect("StatePanelText must be spawned")
+            .args
+            .clone()
+    }
+
+    fn panel_arg<'a>(args: &'a [(&'static str, String)], key: &str) -> &'a str {
+        args.iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.as_str())
+            .unwrap_or_else(|| panic!("expected arg '{key}' to be present, got: {args:?}"))
+    }
+
+    fn base_state(id: StateId, owner: CountryId) -> StateData {
+        StateData {
+            id,
+            owner_country_id: owner,
+            population: 100_000,
+            workforce_ratio: 0.5, // total_workforce()なら50,000だが、下記テストは動員込みの実値を使う
+            ..Default::default()
+        }
+    }
+
+    fn base_country(id: CountryId, mobilized_manpower: u64) -> CountryData {
+        CountryData {
+            id,
+            mobilized_manpower,
+            ..CountryData::default()
+        }
+    }
+
+    /// 要求テスト項目1/2: 動員負担控除後の民間労働力(employed+unemployed)を表示し、
+    /// total_workforce()(人口*workforce_ratioの潜在労働力、動員を考慮しない)は表示しない。
+    #[test]
+    fn workforce_display_uses_civilian_workforce_not_total_workforce() {
+        let mut state = base_state(StateId(0), CountryId(0));
+        state.employed_workforce = 20_000;
+        state.unemployed_workforce = 10_000; // civilian_workforce=30,000 != total_workforce()=50,000
+        let mut app =
+            build_state_panel_display_app(vec![state], vec![base_country(CountryId(0), 0)]);
+        app.update();
+
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "workforce"), format_population(30_000));
+    }
+
+    /// 要求テスト項目3: 雇用率は動員控除後の民間労働力を分母にする。
+    #[test]
+    fn employment_rate_uses_employed_over_civilian_workforce() {
+        let mut state = base_state(StateId(0), CountryId(0));
+        state.employed_workforce = 25_000;
+        state.unemployed_workforce = 25_000; // civilian_workforce=50,000 -> rate 50%
+        let mut app =
+            build_state_panel_display_app(vec![state], vec![base_country(CountryId(0), 0)]);
+        app.update();
+
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "employment_rate"), "50");
+    }
+
+    /// 要求テスト項目4: 民間労働力0(人口0州等)でも0除算・NaN・panicが起きない。
+    #[test]
+    fn employment_rate_is_zero_when_civilian_workforce_is_zero() {
+        let mut state = base_state(StateId(0), CountryId(0));
+        state.population = 0;
+        state.employed_workforce = 0;
+        state.unemployed_workforce = 0;
+        let mut app =
+            build_state_panel_display_app(vec![state], vec![base_country(CountryId(0), 0)]);
+        app.update();
+
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "employment_rate"), "0");
+        assert_eq!(panel_arg(&args, "workforce"), format_population(0));
+    }
+
+    /// 要求テスト項目5: 動員負担が既存の按分Domain API(`apportion_mobilized_manpower`)の
+    /// 結果と一致する(UI側で最大剰余法を複製しない契約の確認)。
+    #[test]
+    fn mobilized_burden_matches_the_population_weighted_apportionment() {
+        let state_a = base_state(StateId(0), CountryId(0)); // population 100,000
+        let mut state_b = base_state(StateId(1), CountryId(0));
+        state_b.population = 300_000; // 比率1:3
+        let country = base_country(CountryId(0), 4_000);
+
+        let expected = crate::population::mobilization::apportion_mobilized_manpower(
+            4_000,
+            &[(StateId(0), 100_000), (StateId(1), 300_000)],
+        );
+
+        let mut app = build_state_panel_display_app(vec![state_a, state_b], vec![country]);
+        app.update();
+
+        let args = read_panel_args(&mut app);
+        let expected_burden = expected.get(&StateId(0)).copied().unwrap();
+        assert_eq!(
+            panel_arg(&args, "mobilized_burden"),
+            format_population(expected_burden)
+        );
+        assert_eq!(expected_burden, 1_000);
+    }
+
+    /// 動員済み人的資源0の国では、動員負担表示は常に0。
+    #[test]
+    fn mobilized_burden_is_zero_when_country_has_no_mobilized_manpower() {
+        let state = base_state(StateId(0), CountryId(0));
+        let mut app =
+            build_state_panel_display_app(vec![state], vec![base_country(CountryId(0), 0)]);
+        app.update();
+
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "mobilized_burden"), format_population(0));
+    }
+
+    /// 無所属州(所有国がCountryRegistryに存在しない)でも動員負担表示はpanicせず0になる。
+    #[test]
+    fn mobilized_burden_is_zero_for_a_state_whose_owner_country_is_missing() {
+        let state = base_state(StateId(0), CountryId(99));
+        let mut app = build_state_panel_display_app(vec![state], vec![]);
+        app.update();
+
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "mobilized_burden"), format_population(0));
+    }
+
+    /// 要求テスト項目3(UI統合): 州選択を変更すると表示値が切り替わる。
+    #[test]
+    fn state_panel_display_updates_when_the_selected_state_changes() {
+        let mut state_a = base_state(StateId(0), CountryId(0));
+        state_a.employed_workforce = 10_000;
+        state_a.unemployed_workforce = 0;
+        let mut state_b = base_state(StateId(1), CountryId(0));
+        state_b.employed_workforce = 40_000;
+        state_b.unemployed_workforce = 0;
+
+        let mut app = build_state_panel_display_app(
+            vec![state_a, state_b],
+            vec![base_country(CountryId(0), 0)],
+        );
+        app.update();
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "workforce"), format_population(10_000));
+
+        app.insert_resource(SelectedState(Some(StateId(1))));
+        app.update();
+        let args = read_panel_args(&mut app);
+        assert_eq!(panel_arg(&args, "workforce"), format_population(40_000));
     }
 }

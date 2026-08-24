@@ -188,7 +188,6 @@ impl Plugin for MilitaryPanelPlugin {
                 Update,
                 (
                     toggle_military_panel_key,
-                    update_military_panel_ui,
                     update_recruit_button_ui,
                     handle_recruit_buttons.run_if(crate::country::player_can_issue_commands),
                     update_frontline_command_buttons_ui,
@@ -200,6 +199,16 @@ impl Plugin for MilitaryPanelPlugin {
                     update_stop_movement_ui,
                     handle_stop_movement_button.run_if(crate::country::player_can_issue_commands),
                 )
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P23-003: 国家人口・人的資源上限の表示は、月次人口成長/経済処理
+                // (Economy Set)が確定させた値を読む。明示的なSet制約がないと同一フレーム内で
+                // Economyより先に実行され得て、月替わり直後の1フレームだけ表示が古い値になる
+                // (`state_panel::update_state_panel`と同じ理由、本タスクの統合テストで検出)。
+                update_military_panel_ui
+                    .in_set(crate::app::time::DailySimulationSet::UiUpdate)
                     .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
@@ -1041,10 +1050,27 @@ fn update_military_panel_ui(
 
     let mut lines = Vec::new();
 
+    // P23-003: 国家総人口(現所有州の人口合計)と、それから導出される人的資源の基準上限。
+    // `population::growth`の既存Domain API(P23-001)をそのまま再利用し、UI側で
+    // 人口比按分や合計ロジックを複製しない。
+    let owned_population = crate::population::growth::compute_population_by_owner(&state_registry)
+        .get(&player_cid)
+        .copied()
+        .unwrap_or(0);
+    let manpower_cap = crate::population::growth::compute_manpower_cap(owned_population);
+
+    lines.push(trf(
+        "military_panel.population",
+        vec![(
+            "population",
+            crate::ui::state_panel::format_population(owned_population),
+        )],
+    ));
     lines.push(trf(
         "military_panel.manpower",
         vec![
             ("available", country.available_manpower.to_string()),
+            ("cap", manpower_cap.to_string()),
             ("mobilized", country.mobilized_manpower.to_string()),
         ],
     ));

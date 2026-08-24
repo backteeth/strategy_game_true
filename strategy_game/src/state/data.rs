@@ -164,6 +164,16 @@ impl StateData {
         ((self.population as f64) * (self.workforce_ratio as f64)) as u64
     }
 
+    /// 動員負担控除後の民間労働力を取得する(P23-003)。月次雇用計算
+    /// (`population::update::update_state_population_and_employment`)が確定させた
+    /// `employed_workforce`/`unemployed_workforce`の合計であり、UIはこちらを表示する。
+    /// `total_workforce()`(人口とworkforce_ratioから再導出する潜在労働力で、動員を
+    /// 考慮しない)とは意味が異なる別の値であり、置き換えではない。
+    pub fn civilian_workforce(&self) -> u64 {
+        self.employed_workforce
+            .saturating_add(self.unemployed_workforce)
+    }
+
     /// 建物レベルを取得
     pub fn building_level(&self, b_type: BuildingType) -> u32 {
         *self.buildings.get(&b_type).unwrap_or(&0)
