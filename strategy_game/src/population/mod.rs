@@ -1,4 +1,5 @@
 pub mod growth;
+pub mod mobilization;
 pub mod update;
 
 use crate::app::game_state::GameState;

@@ -21,12 +21,19 @@ pub fn calculate_workforce_satisfaction(available_workforce: u64, required_workf
     ((available_workforce as f64) / (required_workforce as f64)).clamp(0.0, 1.0) as f32
 }
 
-/// 州の人口と労働力、雇用状況を更新する
+/// 州の人口と労働力、雇用状況を更新する。
+///
+/// `mobilized_burden`(P23-002: 国家の`mobilized_manpower`をこの州の人口比で按分した値、
+/// `population::mobilization::apportion_mobilized_manpower`が算出する派生値)を、
+/// 民間労働力から`saturating_sub`で控除してから雇用計算へ渡す。人口(`state.population`)
+/// 自体は変更しない——動員は民間労働力の一時的な圧迫であり、住民が消えるわけではない。
 pub fn update_state_population_and_employment(
     state: &mut StateData,
     building_registry: &BuildingRegistry,
+    mobilized_burden: u64,
 ) {
-    let total_wf = calculate_workforce(state.population, state.workforce_ratio);
+    let total_wf = calculate_workforce(state.population, state.workforce_ratio)
+        .saturating_sub(mobilized_burden);
 
     let mut total_required_wf: u64 = 0;
     for (&b_type, &level) in &state.buildings {

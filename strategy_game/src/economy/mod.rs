@@ -127,8 +127,20 @@ pub fn handle_monthly_economy(
                 continue;
             }
 
+            // P23-002: 現在の所有州人口(既にP23-001の月次成長を反映済み)を基に、
+            // 動員済み人的資源(mobilized_manpower)を州の人口比で按分する。永続化せず、
+            // 毎月このSystem内で再導出する派生値であり、他国の州へは一切漏れない
+            // (owned_statesは現在この国家が所有する州だけ)。
+            let population_pairs: Vec<(crate::common::StateId, u64)> =
+                owned_states.iter().map(|s| (s.id, s.population)).collect();
+            let mobilized_burdens = crate::population::mobilization::apportion_mobilized_manpower(
+                country.mobilized_manpower,
+                &population_pairs,
+            );
+
             for state in owned_states.iter_mut() {
-                update_state_population_and_employment(state, &building_registry);
+                let burden = mobilized_burdens.get(&state.id).copied().unwrap_or(0);
+                update_state_population_and_employment(state, &building_registry, burden);
                 update_state_logistics(state, &building_registry);
             }
 
