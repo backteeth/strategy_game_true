@@ -1,5 +1,6 @@
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::economy::resources::{CountryStockpile, ResourceType};
+use crate::population::update::calculate_economic_workforce_ratio;
 use crate::state::data::StateData;
 use std::collections::HashMap;
 
@@ -42,11 +43,11 @@ pub fn process_country_production(
     // Step 1: 各州の各建物での入力資源要求量を集計する
     let mut total_inputs_needed: HashMap<ResourceType, f64> = HashMap::new();
     for state in states.iter() {
-        let wf_ratio = if state.total_workforce() > 0 {
-            (state.employed_workforce as f32 / state.total_workforce() as f32).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+        // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
+        // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
+        let wf_ratio =
+            calculate_economic_workforce_ratio(state.employed_workforce, state.total_workforce())
+                .clamp(0.0, 1.0);
         let log_ratio = state.logistics_ratio;
 
         for (&b_type, &level) in &state.buildings {
@@ -77,11 +78,11 @@ pub fn process_country_production(
 
     // Step 3: 各州・建物ごとの最終稼働率を決定し、消費および生産を行う
     for state in states.iter_mut() {
-        let wf_ratio = if state.total_workforce() > 0 {
-            (state.employed_workforce as f32 / state.total_workforce() as f32).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+        // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
+        // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
+        let wf_ratio =
+            calculate_economic_workforce_ratio(state.employed_workforce, state.total_workforce())
+                .clamp(0.0, 1.0);
         let log_ratio = state.logistics_ratio;
 
         let mut op_ratios = HashMap::new();

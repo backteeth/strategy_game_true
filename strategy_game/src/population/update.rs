@@ -32,6 +32,31 @@ pub fn calculate_employment_rate(employed_workforce: u64, civilian_workforce: u6
     ((employed_workforce as f64) / (civilian_workforce as f64)).clamp(0.0, 1.0) as f32
 }
 
+/// 経済用労働力比率を計算する純粋関数(P23-004)。`economy::finance`(生活水準・不満度)・
+/// `economy::production`(建物稼働率)が共通で使う、雇用者数(`E`)を人口由来の潜在労働力
+/// (`StateData::total_workforce()`、`P`)で割った比率`E / P`。
+///
+/// 上の`calculate_employment_rate`(UI用、分母は動員控除後の民間労働力`C`)とは
+/// 分母が異なる別の指標であり、混同しない。`C > 0`のとき`E / P = (E / C) × (C / P)`と
+/// 分解できるため、この比率には既に「動員後も民間に残っている労働力の割合(`C / P`)」と
+/// 「残った民間労働力のうち雇用されている割合(`E / C`)」の両方が暗黙に含まれている——
+/// 動員を明示的に二重適用する計算は行わない(`P23-004`の設計判断)。
+///
+/// 分母0では1.0を返す(`finance.rs`/`production.rs`が元々使っていた零除算フォールバック
+/// をそのまま踏襲)。クランプはここでは行わない——`finance.rs`は元々クランプしておらず、
+/// `production.rs`は呼び出し側で`.clamp(0.0, 1.0)`していたため、その違いをこの関数へ
+/// 一方的に押し付けない。`f32`のみで除算する(`f64`を経由しない)のは、双方の呼び出し元が
+/// 元々`as f32`の直接除算だった経路をビット単位で保つため。
+pub fn calculate_economic_workforce_ratio(
+    employed_workforce: u64,
+    potential_workforce: u64,
+) -> f32 {
+    if potential_workforce == 0 {
+        return 1.0;
+    }
+    employed_workforce as f32 / potential_workforce as f32
+}
+
 /// 州の人口と労働力、雇用状況を更新する。
 ///
 /// `mobilized_burden`(P23-002: 国家の`mobilized_manpower`をこの州の人口比で按分した値、
@@ -56,7 +81,6 @@ pub fn update_state_population_and_employment(
         }
     }
 
-    let _satisfaction = calculate_workforce_satisfaction(total_wf, total_required_wf);
     let employed = if total_wf >= total_required_wf {
         total_required_wf
     } else {
@@ -93,6 +117,64 @@ mod tests {
         // 通常は起こらない(employed <= civilian_workforceがupdate_state_population_and_
         // employmentの不変条件)が、防御的に1.0を超えない。
         assert_eq!(calculate_employment_rate(150, 100), 1.0);
+    }
+
+    // ─── P23-004: calculate_economic_workforce_ratio ──────────────────────────
+
+    #[test]
+    fn calculate_economic_workforce_ratio_matches_the_original_finance_and_production_formula() {
+        // 元のfinance.rs/production.rsの`employed as f32 / total_workforce as f32`と
+        // ビット単位で一致することを固定する(f64を経由しない)。
+        let expected = 20_000f32 / 45_000f32;
+        assert_eq!(calculate_economic_workforce_ratio(20_000, 45_000), expected);
+    }
+
+    #[test]
+    fn calculate_economic_workforce_ratio_returns_one_for_zero_potential_workforce() {
+        // finance.rs/production.rsの元の零除算フォールバックを踏襲する。
+        assert_eq!(calculate_economic_workforce_ratio(0, 0), 1.0);
+        assert_eq!(calculate_economic_workforce_ratio(12_345, 0), 1.0);
+    }
+
+    #[test]
+    fn calculate_economic_workforce_ratio_is_zero_when_employed_is_zero_and_potential_is_positive()
+    {
+        assert_eq!(calculate_economic_workforce_ratio(0, 100), 0.0);
+    }
+
+    #[test]
+    fn calculate_economic_workforce_ratio_is_one_when_employed_equals_potential() {
+        assert_eq!(calculate_economic_workforce_ratio(100, 100), 1.0);
+    }
+
+    #[test]
+    fn calculate_economic_workforce_ratio_is_not_clamped_when_employed_exceeds_potential() {
+        // finance.rsの元の計算はクランプしていなかった。この関数自体もクランプしない
+        // (クランプが必要な呼び出し元は自分で`.clamp(0.0, 1.0)`を適用する)。
+        let ratio = calculate_economic_workforce_ratio(150, 100);
+        assert!(
+            ratio > 1.0,
+            "must stay unclamped so finance.rs's original (uncapped) behavior is preserved, got {ratio}"
+        );
+        assert_eq!(ratio, 1.5);
+    }
+
+    #[test]
+    fn calculate_economic_workforce_ratio_does_not_panic_or_overflow_at_the_u64_boundary() {
+        let ratio = calculate_economic_workforce_ratio(u64::MAX, u64::MAX);
+        assert!(ratio.is_finite());
+        let ratio_zero = calculate_economic_workforce_ratio(0, u64::MAX);
+        assert_eq!(ratio_zero, 0.0);
+    }
+
+    #[test]
+    fn calculate_economic_workforce_ratio_is_monotonically_non_increasing_as_employed_falls() {
+        let potential = 100_000;
+        let high = calculate_economic_workforce_ratio(90_000, potential);
+        let mid = calculate_economic_workforce_ratio(60_000, potential);
+        let low = calculate_economic_workforce_ratio(30_000, potential);
+        assert!(high >= mid);
+        assert!(mid >= low);
     }
 
     #[test]

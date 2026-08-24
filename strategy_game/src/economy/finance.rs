@@ -1,5 +1,6 @@
 use crate::building::data::BuildingRegistry;
 use crate::country::CountryData;
+use crate::population::update::calculate_economic_workforce_ratio;
 use crate::state::data::StateData;
 
 pub const TAX_COEFFICIENT: f64 = 0.0001;
@@ -82,12 +83,11 @@ pub fn update_state_welfare_and_unrest(
         unrest_delta += 1.0;
     }
 
-    // 雇用率
-    let emp_rate = if state.total_workforce() > 0 {
-        state.employed_workforce as f32 / state.total_workforce() as f32
-    } else {
-        1.0
-    };
+    // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
+    // へ集約。UI用のcivilian employment rate(P23-003)とは分母が異なる別指標であり、
+    // 混同しない——詳細は同関数のドキュメントコメントを参照)。
+    let emp_rate =
+        calculate_economic_workforce_ratio(state.employed_workforce, state.total_workforce());
     if emp_rate >= 0.9 {
         ls_delta += 0.5;
     } else if emp_rate < 0.7 {
