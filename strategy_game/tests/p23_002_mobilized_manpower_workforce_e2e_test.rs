@@ -374,6 +374,17 @@ fn one_countrys_mobilization_does_not_affect_another_countrys_employment() {
             .expect("the real map must give CountryId(1) at least one state")
     };
     ensure_state_has_labor_demand(&mut app, other_state_id);
+    // P23-009: MilitaryPluginがAI国家の月次自動募兵も実行するようになったため、
+    // このテストの対象外である`other`自身のAI募兵で`mobilized_manpower`が
+    // 独立に増え、このテストが検証したい「プレイヤーの動員の非波及」とは無関係に
+    // employmentが変動し得る。`other`のavailable_manpowerを0にしてAI募兵の
+    // 人的資源予備条件(§5)を必ず満たせないようにし、このテストの対象を
+    // プレイヤーの動員だけに限定する。
+    app.world_mut()
+        .resource_mut::<CountryRegistry>()
+        .get_mut(other)
+        .unwrap()
+        .available_manpower = 0;
 
     advance_one_month(&mut app, 1800, 2);
     let baseline_other_total_wf = {

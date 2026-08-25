@@ -26,10 +26,12 @@ use crate::war::frontline::{
 use bevy::prelude::*;
 
 /// P21-001: 募兵UIが常に対象とする基本部隊定義。
-/// `app/loader.rs`の`spawn_debug_divisions`が初期軍配置に使う`DivisionId(0)`
-/// (`assets/data/divisions.ron`の"Standard Infantry")と同一のIDを再利用する。
+/// `app/loader.rs`の`spawn_debug_divisions`が初期軍配置に使うのと同じ
+/// (P23-009: `military::data::STANDARD_INFANTRY_DEFINITION_ID`、AI月次募兵
+/// [`military::ai`]とも共通)、全ゲームで唯一の正規Infantry Definition IDを再利用する。
 /// 新規IDは発行しない。
-const RECRUIT_DIVISION_ID: DivisionDefinitionId = DivisionDefinitionId(0);
+const RECRUIT_DIVISION_ID: DivisionDefinitionId =
+    crate::military::data::STANDARD_INFANTRY_DEFINITION_ID;
 
 /// 募兵ボタンの背景色(実行可能時)。
 const RECRUIT_READY_COLOR: Color = Color::srgba(0.2, 0.5, 0.2, 1.0);

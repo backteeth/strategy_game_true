@@ -39,6 +39,13 @@ impl DivisionSize {
     }
 }
 
+/// P23-009: 全ゲームで唯一の標準Infantry Division定義ID。New Game初期配置
+/// (`app::loader::spawn_debug_divisions`)・プレイヤーUIの標準Infantry募兵
+/// (`ui::military_panel::RECRUIT_DIVISION_ID`)・AI月次募兵(`military::ai`)が
+/// 共通して参照する、この1箇所だけが正規の値である(別々の文字列・数値として
+/// 重複ハードコードしない)。
+pub const STANDARD_INFANTRY_DEFINITION_ID: DivisionDefinitionId = DivisionDefinitionId(0);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DivisionDefinition {
     pub id: DivisionDefinitionId,

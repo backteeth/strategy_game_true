@@ -19,6 +19,7 @@ mod tests;
 
 use crate::app::game_state::GameState;
 use crate::app::time::{DailySimulationSet, DayChangedMessage};
+use crate::military::ai::handle_monthly_ai_recruitment;
 use crate::military::army::{ArmyRegistry, SelectedArmy};
 use crate::military::battle::BattleRegistry;
 use crate::military::data::MilitaryRegistry;
@@ -40,6 +41,16 @@ impl Plugin for MilitaryPlugin {
                     handle_daily_army_maintenance.after(handle_daily_military),
                 )
                     .in_set(DailySimulationSet::MilitaryAction)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P23-009: 月次AI募兵判断。`DailySimulationSet::CountryAi`は
+                // `Economy`より後・`UiUpdate`より前に位置するため、月次人的資源回復・
+                // 州人口集計が確定した後、UI表示が読む前に実行される
+                // (Set順序自体は`app::time::DailySimulationSet`の宣言順が保証する)。
+                handle_monthly_ai_recruitment
+                    .in_set(DailySimulationSet::CountryAi)
                     .run_if(in_state(GameState::Playing)),
             );
     }

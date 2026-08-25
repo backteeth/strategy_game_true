@@ -359,8 +359,8 @@ pub fn spawn_debug_divisions(
         return;
     }
 
-    // Infantry (DivisionDefinitionId=0) を各国首都に配置
-    let infantry_def_id = crate::common::DivisionDefinitionId(0);
+    // Infantry を各国首都に配置(P23-009: 全経路共通の正規Definition ID)
+    let infantry_def_id = crate::military::data::STANDARD_INFANTRY_DEFINITION_ID;
 
     for country in country_registry.countries.iter_mut() {
         if let Some(def) = military_registry.definitions.get(&infantry_def_id) {
