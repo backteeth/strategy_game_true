@@ -8,6 +8,7 @@ use crate::map::offensive_line_selection::OffensiveLineEditMode;
 use crate::military::army::{Army, ArmyRegistry, SelectedArmy};
 use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::data::{DivisionStatus, MilitaryRegistry};
+use crate::military::demobilization::{DemobilizationError, demobilize_division};
 use crate::military::recruitment::{
     RecruitFeasibility, evaluate_recruit_feasibility, request_recruitment,
 };
@@ -90,6 +91,18 @@ pub struct StopMovementButton;
 /// P21-004A: 移動停止ボタンに付随する実行可否表示のTextマーカー。
 #[derive(Component)]
 pub struct StopMovementInfoText;
+
+/// P23-007: 選択中師団の「復員」(Division Demobilization)ボタン。Army編成の解散
+/// (`ArmyCommand::Disband`、`military_panel.army_disband_button`)とは別の概念であり、
+/// 混同を避けるため専用のコンポーネント型・専用ラベルを持つ。Army解散はDivision実体・
+/// 人的資源に一切触れないのに対し、こちらはDivision実体を削除し生存兵員を
+/// `available_manpower`へ返還する(`military::demobilization::demobilize_division`)。
+#[derive(Component)]
+pub struct DemobilizeDivisionButton;
+
+/// P23-007: 復員ボタンに付随する実行可否・結果表示のTextマーカー。
+#[derive(Component)]
+pub struct DemobilizeDivisionInfoText;
 
 /// P21-004: 編成(Army)ボタンが発行する命令の種類。「対象編成」は`SelectedArmy`
 /// (編成一覧のクリックで明示的に選ばれた編成)。
@@ -198,6 +211,9 @@ impl Plugin for MilitaryPanelPlugin {
                     handle_army_list_row_clicks,
                     update_stop_movement_ui,
                     handle_stop_movement_button.run_if(crate::country::player_can_issue_commands),
+                    update_demobilize_division_ui,
+                    handle_demobilize_division_button
+                        .run_if(crate::country::player_can_issue_commands),
                 )
                     .run_if(in_state(GameState::Playing)),
             )
@@ -561,6 +577,64 @@ fn setup_military_panel(
                                 &catalog,
                                 locale.0,
                                 "military_panel.stop_movement_no_selection",
+                            )),
+                            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                            TextFont {
+                                font_size: FontSize::Px(11.0),
+                                ..default()
+                            },
+                            TextLayout {
+                                linebreak: LineBreak::AnyCharacter,
+                                ..default()
+                            },
+                        ));
+                    });
+
+                // P23-007: 選択中師団の「復員」(生存兵員をavailable_manpowerへ返還し、
+                // Division実体を削除する)。Army編成の解散(下の`army_disband_button`)とは
+                // 別の操作であるため、ラベル・コンポーネントとも明確に分離する。
+                parent
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        let (btn_text, btn_marker) = localized_text(
+                            &catalog,
+                            locale.0,
+                            "military_panel.division_demobilize_button",
+                            vec![],
+                        );
+                        row.spawn((
+                            DemobilizeDivisionButton,
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(FRONTLINE_CMD_DISABLED_COLOR),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                btn_text,
+                                btn_marker,
+                                TextColor(Color::WHITE),
+                                TextFont {
+                                    font_size: FontSize::Px(11.0),
+                                    ..default()
+                                },
+                            ));
+                        });
+
+                        row.spawn((
+                            DemobilizeDivisionInfoText,
+                            Text::new(t(
+                                &catalog,
+                                locale.0,
+                                "military_panel.division_demobilize_no_selection",
                             )),
                             TextColor(Color::srgb(0.8, 0.8, 0.8)),
                             TextFont {
@@ -1877,6 +1951,227 @@ fn handle_stop_movement_button(
             player_cid,
             &country_registry,
         );
+    }
+}
+
+/// P23-007: 選択中師団のうち、自国かつ`DivisionStatus::Idle`かつ非戦闘参照
+/// (`combat_id.is_none()`)のものだけを「復員可能候補」として数える。
+/// これはUIのボタン活性化・件数表示だけに使う軽量な事前フィルタであり、
+/// `military::manpower::compute_manpower_ledger`の計算を複製するものではない
+/// (帳簿の整合性検証自体は`demobilize_division`が実行時に必ず再検証する)。
+fn count_demobilizable_selected_divisions(
+    military_registry: &MilitaryRegistry,
+    selected_division: &SelectedDivision,
+    player_cid: CountryId,
+) -> usize {
+    selected_division
+        .sorted_ids()
+        .iter()
+        .filter(|id| {
+            military_registry
+                .divisions
+                .get(id)
+                .map(|d| {
+                    d.owner == player_cid
+                        && d.manpower > 0
+                        && d.status == DivisionStatus::Idle
+                        && d.combat_id.is_none()
+                })
+                .unwrap_or(false)
+        })
+        .count()
+}
+
+/// P23-007: 復員ボタンの背景色・実行可否テキストを更新する
+/// (`update_stop_movement_ui`と同じ構造)。
+#[allow(clippy::too_many_arguments)]
+fn update_demobilize_division_ui(
+    state: Res<MilitaryPanelState>,
+    player_country: Res<PlayerCountry>,
+    military_registry: Res<MilitaryRegistry>,
+    selected_division: Res<SelectedDivision>,
+    loc: crate::localization::Loc,
+    mut btn_q: Query<&mut BackgroundColor, With<DemobilizeDivisionButton>>,
+    mut info_text_q: Query<&mut Text, With<DemobilizeDivisionInfoText>>,
+) {
+    let locale = &loc.locale;
+    let catalog = &loc.catalog;
+    if !state.open && !locale.is_changed() {
+        return;
+    }
+
+    let Some(player_cid) = player_country.0 else {
+        return;
+    };
+
+    let ready_count =
+        count_demobilizable_selected_divisions(&military_registry, &selected_division, player_cid);
+    let can_demobilize = ready_count > 0;
+
+    if let Ok(mut bg) = btn_q.single_mut() {
+        *bg = BackgroundColor(if can_demobilize {
+            FRONTLINE_CMD_READY_COLOR
+        } else {
+            FRONTLINE_CMD_DISABLED_COLOR
+        });
+    }
+
+    let text = if can_demobilize {
+        tf(
+            catalog,
+            locale.0,
+            "military_panel.division_demobilize_target_line",
+            vec![("count", ready_count.to_string())],
+        )
+    } else {
+        t(
+            catalog,
+            locale.0,
+            "military_panel.division_demobilize_no_selection",
+        )
+    };
+    if let Ok(mut text_component) = info_text_q.single_mut()
+        && text_component.0 != text
+    {
+        text_component.0 = text;
+    }
+}
+
+/// P23-007: 選択中師団のうち自国所有のものへ復員を試みる(`execute_stop_movement`と
+/// 同じく、対象外[他国所有]は静かに無視する)。所有権以外の失敗理由
+/// (戦闘中・移動中・撤退中・帳簿計算不能等)は`demobilize_division`自身が判定し、
+/// 最初に発生した失敗理由だけを呼び出し元(通知表示用)へ返す。
+#[allow(clippy::too_many_arguments)]
+fn execute_division_demobilization(
+    country_registry: &mut CountryRegistry,
+    military_registry: &mut MilitaryRegistry,
+    army_registry: &mut ArmyRegistry,
+    frontline_registry: &mut FrontlineRegistry,
+    war_registry: &WarRegistry,
+    battle_registry: &BattleRegistry,
+    player_cid: CountryId,
+    selected_division_ids: &[DivisionId],
+) -> (u32, u64, Option<DemobilizationError>) {
+    let mut succeeded = 0u32;
+    let mut total_returned: u64 = 0;
+    let mut first_failure = None;
+
+    for &division_id in selected_division_ids {
+        let is_own = military_registry
+            .divisions
+            .get(&division_id)
+            .map(|d| d.owner == player_cid)
+            .unwrap_or(false);
+        if !is_own {
+            continue;
+        }
+        match demobilize_division(
+            country_registry,
+            military_registry,
+            army_registry,
+            frontline_registry,
+            war_registry,
+            battle_registry,
+            player_cid,
+            division_id,
+        ) {
+            Ok(outcome) => {
+                succeeded += 1;
+                total_returned = total_returned.saturating_add(outcome.returned_manpower);
+            }
+            Err(err) => {
+                if first_failure.is_none() {
+                    first_failure = Some(err);
+                }
+            }
+        }
+    }
+
+    (succeeded, total_returned, first_failure)
+}
+
+/// 復員の失敗理由をUI表示用のローカライズキーへ写像する。既存のUI規約
+/// (`military_panel.manpower_unavailable`等)に合わせ、原因ごとに意味の異なる
+/// メッセージが必要なもの(戦闘中/移動中/撤退中/帳簿計算不能)だけ専用キーを持ち、
+/// それ以外は共通の汎用キーへまとめる。
+fn demobilize_failure_key(err: &DemobilizationError) -> &'static str {
+    match err {
+        DemobilizationError::DivisionFighting => "military_panel.division_demobilize_fail_fighting",
+        DemobilizationError::DivisionMoving => "military_panel.division_demobilize_fail_moving",
+        DemobilizationError::DivisionRetreating => {
+            "military_panel.division_demobilize_fail_retreating"
+        }
+        DemobilizationError::LedgerUnavailable(_) | DemobilizationError::LedgerInconsistent => {
+            "military_panel.division_demobilize_fail_ledger"
+        }
+        DemobilizationError::CountryNotFound
+        | DemobilizationError::CountryEliminated
+        | DemobilizationError::DivisionNotFound
+        | DemobilizationError::NotOwner
+        | DemobilizationError::DivisionAlreadyDead
+        | DemobilizationError::DivisionNotIdle
+        | DemobilizationError::DivisionReferencedByOngoingBattle
+        | DemobilizationError::InsufficientBurden
+        | DemobilizationError::AvailableManpowerOverflow => {
+            "military_panel.division_demobilize_fail_other"
+        }
+    }
+}
+
+/// P23-007: 「師団を復員」ボタンのクリックを処理する。
+/// `Changed<Interaction>`+`Pressed`によりクリック1回につき1回だけ命令を発行する。
+#[allow(clippy::too_many_arguments)]
+fn handle_demobilize_division_button(
+    btn_q: Query<&Interaction, (With<DemobilizeDivisionButton>, Changed<Interaction>)>,
+    player_country: Res<PlayerCountry>,
+    mut country_registry: ResMut<CountryRegistry>,
+    mut military_registry: ResMut<MilitaryRegistry>,
+    mut army_registry: ResMut<ArmyRegistry>,
+    mut frontline_registry: ResMut<FrontlineRegistry>,
+    war_registry: Res<WarRegistry>,
+    battle_registry: Res<BattleRegistry>,
+    selected_division: Res<SelectedDivision>,
+    mut notif_writer: MessageWriter<GameNotification>,
+    locale: Res<CurrentLocale>,
+    catalog: Res<TranslationCatalog>,
+) {
+    let Some(player_cid) = player_country.0 else {
+        return;
+    };
+
+    for interaction in btn_q.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let selected_ids = selected_division.sorted_ids();
+        let (succeeded, total_returned, first_failure) = execute_division_demobilization(
+            &mut country_registry,
+            &mut military_registry,
+            &mut army_registry,
+            &mut frontline_registry,
+            &war_registry,
+            &battle_registry,
+            player_cid,
+            &selected_ids,
+        );
+
+        if succeeded > 0 {
+            notif_writer.write(GameNotification {
+                message: tf(
+                    &catalog,
+                    locale.0,
+                    "military_panel.division_demobilize_success",
+                    vec![
+                        ("count", succeeded.to_string()),
+                        ("returned", total_returned.to_string()),
+                    ],
+                ),
+            });
+        } else if let Some(err) = first_failure {
+            notif_writer.write(GameNotification {
+                message: t(&catalog, locale.0, demobilize_failure_key(&err)),
+            });
+        }
     }
 }
 
