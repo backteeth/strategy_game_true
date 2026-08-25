@@ -1066,13 +1066,29 @@ fn update_military_panel_ui(
             crate::ui::state_panel::format_population(owned_population),
         )],
     ));
+
+    // P23-006: `mobilized_manpower`(累積動員負担)は現在生存する軍事人的資源とは
+    // 意味が異なる(P23-005監査で確認)。ここで書き換えは行わず、既存の
+    // `military::manpower::compute_manpower_ledger`(唯一の正規集計)から
+    // 「利用可能/基準上限」「現役/累積動員負担」「恒久軍事損失」の3行へ整理する。
+    let ledger = crate::military::manpower::compute_manpower_ledger(country, &military_registry);
     lines.push(trf(
         "military_panel.manpower",
         vec![
             ("available", country.available_manpower.to_string()),
             ("cap", manpower_cap.to_string()),
-            ("mobilized", country.mobilized_manpower.to_string()),
         ],
+    ));
+    lines.push(trf(
+        "military_panel.manpower_military",
+        vec![
+            ("living", ledger.living_military_manpower.to_string()),
+            ("burden", ledger.workforce_burden.to_string()),
+        ],
+    ));
+    lines.push(trf(
+        "military_panel.manpower_losses",
+        vec![("losses", ledger.permanent_military_losses.to_string())],
     ));
     lines.push(trf(
         "military_panel.upkeep",

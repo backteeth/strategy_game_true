@@ -5,6 +5,7 @@ pub mod combat;
 pub mod combat_calc;
 pub mod data;
 pub mod invasion;
+pub mod manpower;
 pub mod movement;
 pub mod pathfinding;
 pub mod recruitment;

@@ -137,7 +137,17 @@ pub struct CountryData {
     /// 募集可能な人的資源
     #[serde(default = "default_available_manpower")]
     pub available_manpower: u64,
-    /// 動員済みの人的資源（軍隊に所属している合計）
+    /// 累積動員負担(P23-006で意味を正式化)。募兵によって民間労働力から離脱し、
+    /// まだ民間へ返還されていない人的資源の累積量——訓練中(募兵キュー)・現役
+    /// (生存Division)・戦闘等で恒久的に失われた人的資源のいずれも含む。
+    ///
+    /// **「現在生存して軍に所属している人数」ではない**(このフィールド名が示唆する
+    /// 印象に反する、P23-005監査で確認された実際の挙動)。募兵時(`request_recruitment`)
+    /// に加算され、募兵キャンセル(`cancel_recruitment`)でのみ減算される。戦闘損耗・
+    /// 部隊撃破では意図的に減算しない(`military::manpower`モジュールの説明参照)。
+    /// 現在生存する軍事人的資源・恒久軍事損失は`military::manpower::compute_manpower_ledger`
+    /// で本フィールドとDivision/募兵キューの実データから導出する。フィールド名は
+    /// セーブV1互換性のため変更していない。
     #[serde(default)]
     pub mobilized_manpower: u64,
     /// 必要な軍備品の総量
