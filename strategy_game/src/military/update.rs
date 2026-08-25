@@ -32,6 +32,16 @@ pub fn handle_daily_military(
             &mut military_registry,
         );
 
+        // 2. 日次自動補充(P23-008)。その日の戦闘開始・損耗より前に行うことで、
+        // 「その日の戦闘損失を同日中に補充してしまう」ことを避ける
+        // (補充は前日までの損耗のみを対象とする)。
+        crate::military::reinforcement::apply_daily_reinforcement(
+            &mut country_registry,
+            &mut military_registry,
+            &state_registry,
+            &battle_registry,
+        );
+
         // 3. 経路の事前検証（戦争終了等で無効になった移動を停止）
         validate_and_stop_invalid_movements(&mut military_registry, &state_registry, &war_registry);
 
