@@ -170,12 +170,38 @@ fn monthly_economy_employment_uses_the_already_grown_population_in_the_same_mont
 
     advance_one_month(&mut app, 1800, 2);
 
+    let grown_population = grow_state_population(before_population);
+
+    // P23-006-FIX-001: New Gameの初期軍は、所有国の`mobilized_manpower`(累積動員負担)へ
+    // 実際に計上されるようになった。同月の雇用計算は、この動員負担が州別按分された
+    // ぶんだけ潜在労働力(calculate_workforce)より少ない値になる——按分は既存の正規
+    // Domain関数(population::mobilization::apportion_mobilized_manpower)をそのまま
+    // 呼び、独自ロジックを複製しない。
+    let mobilized_manpower = app
+        .world()
+        .resource::<CountryRegistry>()
+        .get(player)
+        .unwrap()
+        .mobilized_manpower;
+    let owned_population_pairs: Vec<(StateId, u64)> = app
+        .world()
+        .resource::<StateRegistry>()
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == player)
+        .map(|s| (s.id, s.population))
+        .collect();
+    let burdens = strategy_game::population::mobilization::apportion_mobilized_manpower(
+        mobilized_manpower,
+        &owned_population_pairs,
+    );
+    let state_burden = burdens.get(&StateId(0)).copied().unwrap_or(0);
+
     let state = app
         .world()
         .resource::<StateRegistry>()
         .get(StateId(0))
         .unwrap();
-    let grown_population = grow_state_population(before_population);
     assert_eq!(
         state.population, grown_population,
         "population must have grown by exactly one month"
@@ -184,12 +210,14 @@ fn monthly_economy_employment_uses_the_already_grown_population_in_the_same_mont
     let expected_total_workforce = strategy_game::population::update::calculate_workforce(
         grown_population,
         state.workforce_ratio,
-    );
+    )
+    .saturating_sub(state_burden);
     let actual_total_workforce = state.employed_workforce + state.unemployed_workforce;
     assert_eq!(
         actual_total_workforce, expected_total_workforce,
         "the same month's employment calculation (economy::handle_monthly_economy) must have \
-         used the already-grown population, not the pre-growth value"
+         used the already-grown population (minus any mobilization burden apportioned to this \
+         state), not the pre-growth value"
     );
 }
 

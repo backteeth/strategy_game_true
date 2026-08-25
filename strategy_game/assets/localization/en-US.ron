@@ -104,6 +104,7 @@
     ("military_panel.manpower", "Manpower: Available {available} / Baseline Cap {cap}"),
     ("military_panel.manpower_military", "Military Manpower: Living {living} / Cumulative Burden {burden}"),
     ("military_panel.manpower_losses", "Permanent Military Losses: {losses}"),
+    ("military_panel.manpower_unavailable", "Unable to Compute"),
     ("military_panel.upkeep", "Military Upkeep: {cost} G/mo"),
     ("military_panel.frontline_visibility", "Frontline Display [F]: {state}"),
     ("military_panel.frontline_orders_header", "── Frontline & Operations ──"),

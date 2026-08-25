@@ -1071,7 +1071,6 @@ fn update_military_panel_ui(
     // 意味が異なる(P23-005監査で確認)。ここで書き換えは行わず、既存の
     // `military::manpower::compute_manpower_ledger`(唯一の正規集計)から
     // 「利用可能/基準上限」「現役/累積動員負担」「恒久軍事損失」の3行へ整理する。
-    let ledger = crate::military::manpower::compute_manpower_ledger(country, &military_registry);
     lines.push(trf(
         "military_panel.manpower",
         vec![
@@ -1079,17 +1078,39 @@ fn update_military_panel_ui(
             ("cap", manpower_cap.to_string()),
         ],
     ));
-    lines.push(trf(
-        "military_panel.manpower_military",
-        vec![
-            ("living", ledger.living_military_manpower.to_string()),
-            ("burden", ledger.workforce_burden.to_string()),
-        ],
-    ));
-    lines.push(trf(
-        "military_panel.manpower_losses",
-        vec![("losses", ledger.permanent_military_losses.to_string())],
-    ));
+    // P23-006-FIX-001: 募兵キューが未解決のDivisionDefinitionを参照している場合、
+    // `compute_manpower_ledger`はErrを返す。この場合、未解決分を0人や恒久損失として
+    // 誤魔化さず、「計算不能」であることをそのまま表示する(IDそのものは
+    // 通常プレイヤー向けUIへ露出しない)。
+    match crate::military::manpower::compute_manpower_ledger(country, &military_registry) {
+        Ok(ledger) => {
+            lines.push(trf(
+                "military_panel.manpower_military",
+                vec![
+                    ("living", ledger.living_military_manpower.to_string()),
+                    ("burden", ledger.workforce_burden.to_string()),
+                ],
+            ));
+            lines.push(trf(
+                "military_panel.manpower_losses",
+                vec![("losses", ledger.permanent_military_losses.to_string())],
+            ));
+        }
+        Err(_) => {
+            let unavailable = tr("military_panel.manpower_unavailable");
+            lines.push(trf(
+                "military_panel.manpower_military",
+                vec![
+                    ("living", unavailable.clone()),
+                    ("burden", unavailable.clone()),
+                ],
+            ));
+            lines.push(trf(
+                "military_panel.manpower_losses",
+                vec![("losses", unavailable)],
+            ));
+        }
+    }
     lines.push(trf(
         "military_panel.upkeep",
         vec![("cost", format!("{:.1}", country.monthly_military_expenses))],

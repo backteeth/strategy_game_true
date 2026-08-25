@@ -103,6 +103,7 @@
     ("military_panel.manpower", "人的資源: 利用可能 {available} / 基準上限 {cap}"),
     ("military_panel.manpower_military", "軍事人的資源: 現役 {living} / 累積動員負担 {burden}"),
     ("military_panel.manpower_losses", "恒久軍事損失: {losses}"),
+    ("military_panel.manpower_unavailable", "計算不能"),
     ("military_panel.upkeep", "軍維持費: {cost} G/月"),
     ("military_panel.frontline_visibility", "前線表示 [F]: {state}"),
     ("military_panel.frontline_orders_header", "── 前線・作戦命令 ──"),

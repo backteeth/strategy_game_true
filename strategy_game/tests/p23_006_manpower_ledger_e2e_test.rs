@@ -257,6 +257,7 @@ fn ledger_for(app: &App, country_id: CountryId) -> ManpowerLedger {
         .unwrap();
     let military_registry = app.world().resource::<MilitaryRegistry>();
     compute_manpower_ledger(country, military_registry)
+        .expect("test fixtures must always resolve to a valid ledger")
 }
 
 fn division_manpower(app: &App, id: DivisionId) -> Option<u64> {
@@ -728,7 +729,7 @@ fn a_stranded_division_destroyed_after_peace_moves_its_manpower_from_living_to_p
     military_registry.divisions.insert(stranded.id, stranded);
 
     let country = test_country(0, 5_000, 0);
-    let before = compute_manpower_ledger(&country, &military_registry);
+    let before = compute_manpower_ledger(&country, &military_registry).unwrap();
     assert_eq!(before.living_military_manpower, 5_000);
     assert_eq!(before.permanent_military_losses, 0);
 
@@ -738,7 +739,7 @@ fn a_stranded_division_destroyed_after_peace_moves_its_manpower_from_living_to_p
     assert_eq!(division.status, DivisionStatus::Destroyed);
     assert_eq!(division.manpower, 0);
 
-    let after = compute_manpower_ledger(&country, &military_registry);
+    let after = compute_manpower_ledger(&country, &military_registry).unwrap();
     assert_eq!(after.living_military_manpower, 0);
     assert_eq!(after.permanent_military_losses, 5_000);
     assert_eq!(
@@ -759,9 +760,9 @@ fn army_disband_does_not_change_the_ledger() {
         .create_army(CountryId(0), &[DivisionId(0)], &military_registry)
         .expect("division must be usable");
 
-    let before = compute_manpower_ledger(&country, &military_registry);
+    let before = compute_manpower_ledger(&country, &military_registry).unwrap();
     army_registry.disband(army_id, CountryId(0)).unwrap();
-    let after = compute_manpower_ledger(&country, &military_registry);
+    let after = compute_manpower_ledger(&country, &military_registry).unwrap();
 
     assert_eq!(
         before, after,

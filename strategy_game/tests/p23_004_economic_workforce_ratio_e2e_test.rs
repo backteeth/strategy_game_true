@@ -248,13 +248,16 @@ fn setup_controlled_state(app: &mut App, player: CountryId, state_id: StateId) {
 /// mobilized_manpowerを最初の月替わり「前」に設定し、1か月だけ進めたAppを返す
 /// (人口成長は動員の有無に関わらず決定的なため、経過月数を1で揃えれば
 /// 動員量だけを変数として比較できる)。
+///
+/// P23-006-FIX-001: New Gameの初期軍は実際に`mobilized_manpower`へ計上されるため、
+/// `mobilized == 0`(「動員なし」の制御された基準点)の場合でも必ず明示的に0へ
+/// 上書きする——`if mobilized > 0`でガードすると、実データの初期軍による付随的な
+/// 負担がそのまま残ってしまう。
 fn app_after_one_month_with_mobilization(label: &str, player: CountryId, mobilized: u64) -> App {
     let temp_dir = TempTestDir::new(label);
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
     setup_controlled_state(&mut app, player, StateId(0));
-    if mobilized > 0 {
-        set_mobilized_manpower(&mut app, player, mobilized);
-    }
+    set_mobilized_manpower(&mut app, player, mobilized);
     advance_one_month(&mut app, 1800, 2);
     app
 }
@@ -375,11 +378,13 @@ fn demobilizing_restores_the_workforce_ratio_and_that_months_production_on_the_n
     let player = CountryId(0);
 
     // 対照App: 2か月とも動員なし。
+    // P23-006-FIX-001: New Gameの初期軍による付随的な負担を明示的にゼロへ上書きする。
     let mut control = setup_app_in_playing(
         player,
         TempTestDir::new("demobilize_control").save_file_config(),
     );
     setup_controlled_state(&mut control, player, StateId(0));
+    set_mobilized_manpower(&mut control, player, 0);
     advance_one_month(&mut control, 1800, 2);
     let control_month2_total = food_stockpile(&control, player);
     advance_one_month(&mut control, 1800, 3);

@@ -336,9 +336,23 @@ pub fn transition_to_country_selection(mut next_state: ResMut<NextState<GameStat
 /// ロード成功による`Playing`進入(`PlayingEntryMode::LoadedGame`)では、セーブ済みの
 /// Division集合をそのまま使う必要があるため、ここで即座にreturnして何も変更しない
 /// (0件のセーブへもデバッグDivisionを追加しない)。
+///
+/// P23-006-FIX-001: 配置した初期Divisionの実際の`manpower`(=`def.required_manpower`、
+/// 別途ハードコードや再計算はしない)を、所有国の`CountryData.mobilized_manpower`
+/// (累積動員負担、P23-006)へ同時に加算する。Division生成に成功した場合のみ加算する
+/// (`military_registry.add_division`が実際にDivisionを追加した後、その戻り値では
+/// なく生成時に確定済みの`manpower`値を使う)ため、一部だけ生成される・失敗時に
+/// 負担だけ増える、といった不整合は起きない。二重spawn・二重加算については、この
+/// Systemは`OnEnter(GameState::Playing)`で状態遷移ごとに正確に1回だけ実行され
+/// (Bevyの`OnEnter`スケジュール自体の性質)、かつ`entry_mode != NewGame`
+/// (`reset_playing_entry_mode`が同一トランジションの最後に`.chain()`で必ず
+/// `NewGame`へ戻す設計、`src/app/game_state.rs`参照)により再実行時の重複を防ぐ、
+/// 既存の仕組みをそのまま用いる——新しい独立フラグは追加しない。
+/// `available_manpower`・州人口は一切変更しない(P23-005が指摘した人的資源上限
+/// 不変条件は本タスクの対象外のため)。
 pub fn spawn_debug_divisions(
     mut military_registry: ResMut<MilitaryRegistry>,
-    country_registry: Res<crate::country::CountryRegistry>,
+    mut country_registry: ResMut<crate::country::CountryRegistry>,
     entry_mode: Res<PlayingEntryMode>,
 ) {
     if *entry_mode != PlayingEntryMode::NewGame {
@@ -348,9 +362,10 @@ pub fn spawn_debug_divisions(
     // Infantry (DivisionDefinitionId=0) を各国首都に配置
     let infantry_def_id = crate::common::DivisionDefinitionId(0);
 
-    for country in country_registry.countries.iter() {
+    for country in country_registry.countries.iter_mut() {
         if let Some(def) = military_registry.definitions.get(&infantry_def_id) {
             let def_id = infantry_def_id;
+            let initial_manpower = def.required_manpower;
             let new_division = Division {
                 id: crate::common::DivisionId(0), // add_division で上書きされる
                 owner: country.id,
@@ -360,8 +375,8 @@ pub fn spawn_debug_divisions(
                 destination: None,
                 current_path: Vec::new(),
                 target_state: None,
-                manpower: def.required_manpower,
-                max_manpower: def.required_manpower,
+                manpower: initial_manpower,
+                max_manpower: initial_manpower,
                 equipment: def.required_equipment,
                 max_equipment: def.required_equipment,
                 organization: def.organization,
@@ -378,6 +393,8 @@ pub fn spawn_debug_divisions(
                 combat_id: None,
             };
             military_registry.add_division(new_division);
+            country.mobilized_manpower =
+                country.mobilized_manpower.saturating_add(initial_manpower);
         }
     }
 

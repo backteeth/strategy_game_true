@@ -20,8 +20,15 @@
 //!
 //! **本モジュールは`mobilized_manpower`を一切書き換えない。** 帳簿の導出のみを行う
 //! 読み取り専用の集計であり、戦闘・募兵・save/loadのいずれのコードにも書き込み経路を
-//! 追加しない(書き込みは引き続き`military::recruitment`のみが行う)。
+//! 追加しない(書き込みは引き続き`military::recruitment`と、New Game初期軍配置分のみ
+//! `app::loader::spawn_debug_divisions`が行う——P23-006-FIX-001)。
+//!
+//! `compute_manpower_ledger`は`Result<ManpowerLedger, ManpowerLedgerError>`を返す
+//! (P23-006-FIX-001)。募兵キューが未解決の`DivisionDefinitionId`を参照している場合、
+//! その分を0人として黙って`Ok`を返さない——未解決分を恒久軍事損失として誤分類する
+//! ことを防ぐため。
 
+use crate::common::DivisionDefinitionId;
 use crate::country::CountryData;
 use crate::military::data::{DivisionStatus, MilitaryRegistry};
 
@@ -40,22 +47,54 @@ pub struct ManpowerLedger {
     pub unaccounted_living_excess: u64,
 }
 
+/// `compute_manpower_ledger`が帳簿を完全に導出できなかったことを表す
+/// (P23-006-FIX-001)。募兵キューが`military_registry.definitions`に存在しない
+/// `DivisionDefinitionId`を参照している場合に発生する。
+///
+/// この状態を`ManpowerLedger`の一部として(例えば該当分を0人として)返すと、
+/// 未解決の予約人数が「恒久軍事損失」として誤って確定してしまう
+/// (`K = B.saturating_sub(L)`の`L`が実際より小さくなるため)。そのため、帳簿全体を
+/// 計算失敗として明示的に表現する。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManpowerLedgerError {
+    /// 未解決の`DivisionDefinitionId`一覧。昇順にソート・重複除去済みであり、
+    /// `recruitment_queue`(`Vec`)内の出現順や`military_registry.definitions`
+    /// (`HashMap`)の走査順のいずれにも依存しない、決定的な結果になる。
+    pub unknown_definitions: Vec<DivisionDefinitionId>,
+}
+
 /// 指定した国家の人的資源帳簿を、`CountryData`と`MilitaryRegistry`の現在値から
 /// 導出する(読み取り専用、副作用なし)。
 ///
-/// 募兵キューの必要人的資源は、対応する`DivisionDefinition`が現在の
-/// `military_registry.definitions`に存在する項目のみ加算する。存在しない
-/// (壊れた)参照は`save::validate`が既にセーブ/ロード時点で拒否する契約
-/// (`unknown_recruitment_division_definition_is_rejected`)であり、ここでは
-/// その不変条件を信頼して0人として扱う(パニックはしない)。
+/// 募兵キューの全項目が参照する`DivisionDefinition`が`military_registry.definitions`に
+/// 存在する場合のみ`Ok`を返す。`save::validate`はセーブ/ロード時点でこの不変条件を
+/// 既に検証する(`unknown_recruitment_division_definition_is_rejected`)ため、
+/// New Gameおよび検証済みV1セーブでは常に`Ok`になるはずだが、この関数自体は
+/// その外部の不変条件を信頼せず、違反時は`Err`を返す(未解決分を0人として
+/// 静かに扱うと、実際には確定していない人数が恒久軍事損失として誤分類されるため)。
 ///
 /// 生存Divisionの判定は既存コードベース全体で使われている規約
 /// (`manpower == 0 || status == DivisionStatus::Destroyed`を「死亡」とみなす)の
-/// 否定を用いる。`HashMap`の走査順には依存しない(合計は可換な加算のみ)。
+/// 否定を用いる。`HashMap`の走査順には依存しない(合計は可換な加算のみ、エラー時の
+/// ID一覧はソート済み)。
 pub fn compute_manpower_ledger(
     country: &CountryData,
     military_registry: &MilitaryRegistry,
-) -> ManpowerLedger {
+) -> Result<ManpowerLedger, ManpowerLedgerError> {
+    let mut unknown_definitions: Vec<DivisionDefinitionId> = country
+        .recruitment_queue
+        .iter()
+        .map(|item| item.division_id)
+        .filter(|id| !military_registry.definitions.contains_key(id))
+        .collect();
+    if !unknown_definitions.is_empty() {
+        unknown_definitions.sort_by_key(|id| id.0);
+        unknown_definitions.dedup();
+        return Err(ManpowerLedgerError {
+            unknown_definitions,
+        });
+    }
+
     let queue_living: u128 = country
         .recruitment_queue
         .iter()
@@ -73,12 +112,12 @@ pub fn compute_manpower_ledger(
     let living_military_manpower = (queue_living + division_living).min(u64::MAX as u128) as u64;
     let workforce_burden = country.mobilized_manpower;
 
-    ManpowerLedger {
+    Ok(ManpowerLedger {
         workforce_burden,
         living_military_manpower,
         permanent_military_losses: workforce_burden.saturating_sub(living_military_manpower),
         unaccounted_living_excess: living_military_manpower.saturating_sub(workforce_burden),
-    }
+    })
 }
 
 /// 生存Divisionかどうかを既存の規約(各所の生存判定の否定)で判定する。
@@ -168,7 +207,7 @@ mod tests {
     fn no_divisions_and_no_queue_yields_zero_living_manpower() {
         let country = test_country(1, 0);
         let registry = MilitaryRegistry::default();
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.living_military_manpower, 0);
         assert_eq!(ledger.permanent_military_losses, 0);
         assert_eq!(ledger.unaccounted_living_excess, 0);
@@ -184,7 +223,7 @@ mod tests {
             total_days: 30,
         });
         let registry = registry_with(vec![test_definition(0, 10_000)], vec![]);
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.living_military_manpower, 10_000);
     }
 
@@ -195,7 +234,7 @@ mod tests {
             vec![],
             vec![test_division(0, 1, 8_000, DivisionStatus::Idle)],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.living_military_manpower, 8_000);
     }
 
@@ -215,7 +254,7 @@ mod tests {
                 test_division(1, 1, 9_000, DivisionStatus::Fighting),
             ],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.living_military_manpower, 10_000 + 6_000 + 9_000);
     }
 
@@ -233,7 +272,7 @@ mod tests {
                 test_division(1, 3, 7_000, DivisionStatus::Idle), // 他国(CountryId(3))
             ],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(
             ledger.living_military_manpower, 0,
             "another country's divisions must not be counted"
@@ -247,7 +286,7 @@ mod tests {
             vec![],
             vec![test_division(0, 1, 0, DivisionStatus::Fighting)],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.living_military_manpower, 0);
     }
 
@@ -261,7 +300,7 @@ mod tests {
             vec![],
             vec![test_division(0, 1, 999, DivisionStatus::Destroyed)],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(
             ledger.living_military_manpower, 0,
             "a Destroyed division must not count as living even if manpower wasn't zeroed"
@@ -275,7 +314,7 @@ mod tests {
             vec![],
             vec![test_division(0, 1, 8_000, DivisionStatus::Idle)],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.permanent_military_losses, 0);
         assert_eq!(ledger.unaccounted_living_excess, 0);
     }
@@ -287,7 +326,7 @@ mod tests {
             vec![],
             vec![test_division(0, 1, 6_000, DivisionStatus::Idle)],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.permanent_military_losses, 4_000);
         assert_eq!(ledger.unaccounted_living_excess, 0);
     }
@@ -301,7 +340,7 @@ mod tests {
             vec![],
             vec![test_division(0, 1, 8_000, DivisionStatus::Idle)],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.permanent_military_losses, 0);
         assert_eq!(ledger.unaccounted_living_excess, 5_000);
     }
@@ -316,7 +355,7 @@ mod tests {
                 test_division(1, 1, u64::MAX, DivisionStatus::Idle),
             ],
         );
-        let ledger = compute_manpower_ledger(&country, &registry);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
         assert_eq!(ledger.living_military_manpower, u64::MAX);
         assert_eq!(ledger.permanent_military_losses, 0);
         assert_eq!(ledger.unaccounted_living_excess, 0);
@@ -342,16 +381,17 @@ mod tests {
             ],
         );
         assert_eq!(
-            compute_manpower_ledger(&country, &forward),
-            compute_manpower_ledger(&country, &reversed)
+            compute_manpower_ledger(&country, &forward).unwrap(),
+            compute_manpower_ledger(&country, &reversed).unwrap()
         );
     }
 
     #[test]
-    fn an_unknown_division_definition_in_the_queue_contributes_zero_without_panicking() {
+    fn an_unknown_division_definition_in_the_queue_returns_an_explicit_error_without_panicking() {
         // save::validateがロード時点でunknown_recruitment_division_definitionを
         // 既に拒否するため、本来この状態は正規のゲーム状態には現れない。それでも
-        // このDomain関数自体は防御的にpanicせず0人として扱うことを固定する。
+        // このDomain関数自体は防御的にpanicせず、未解決分を0人の正常値として
+        // 黙って返さないことを固定する(P23-006-FIX-001)。
         let mut country = test_country(1, 0);
         country.recruitment_queue.push(RecruitmentQueueItem {
             division_id: DivisionDefinitionId(999), // 存在しない定義
@@ -360,7 +400,79 @@ mod tests {
             total_days: 30,
         });
         let registry = MilitaryRegistry::default(); // definitionsは空
-        let ledger = compute_manpower_ledger(&country, &registry);
-        assert_eq!(ledger.living_military_manpower, 0);
+        let result = compute_manpower_ledger(&country, &registry);
+        assert_eq!(
+            result,
+            Err(ManpowerLedgerError {
+                unknown_definitions: vec![DivisionDefinitionId(999)]
+            })
+        );
+    }
+
+    #[test]
+    fn multiple_unknown_definitions_are_reported_sorted_and_deduplicated() {
+        let mut country = test_country(1, 0);
+        for (id, days) in [(999usize, 5u32), (5, 10), (999, 20), (5, 1)] {
+            country.recruitment_queue.push(RecruitmentQueueItem {
+                division_id: DivisionDefinitionId(id),
+                target_state: StateId(0),
+                days_remaining: days,
+                total_days: 30,
+            });
+        }
+        let registry = MilitaryRegistry::default();
+        let result = compute_manpower_ledger(&country, &registry);
+        assert_eq!(
+            result,
+            Err(ManpowerLedgerError {
+                unknown_definitions: vec![DivisionDefinitionId(5), DivisionDefinitionId(999)]
+            }),
+            "the unknown id list must be sorted ascending and deduplicated regardless of \
+             queue insertion order"
+        );
+    }
+
+    #[test]
+    fn a_queue_mixing_known_and_unknown_definitions_still_errors() {
+        let mut country = test_country(1, 10_000);
+        country.recruitment_queue.push(RecruitmentQueueItem {
+            division_id: DivisionDefinitionId(0),
+            target_state: StateId(0),
+            days_remaining: 5,
+            total_days: 30,
+        });
+        country.recruitment_queue.push(RecruitmentQueueItem {
+            division_id: DivisionDefinitionId(42),
+            target_state: StateId(0),
+            days_remaining: 5,
+            total_days: 30,
+        });
+        let registry = registry_with(vec![test_definition(0, 10_000)], vec![]);
+        let result = compute_manpower_ledger(&country, &registry);
+        assert_eq!(
+            result,
+            Err(ManpowerLedgerError {
+                unknown_definitions: vec![DivisionDefinitionId(42)]
+            }),
+            "even one unknown definition must fail the whole ledger, not just skip it"
+        );
+    }
+
+    #[test]
+    fn a_fully_resolved_queue_is_unaffected_by_the_error_path() {
+        // 正常データではP23-006の値を一切変えないことを確認する回帰。
+        let mut country = test_country(1, 10_000);
+        country.recruitment_queue.push(RecruitmentQueueItem {
+            division_id: DivisionDefinitionId(0),
+            target_state: StateId(0),
+            days_remaining: 5,
+            total_days: 30,
+        });
+        let registry = registry_with(vec![test_definition(0, 10_000)], vec![]);
+        let ledger = compute_manpower_ledger(&country, &registry).unwrap();
+        assert_eq!(ledger.living_military_manpower, 10_000);
+        assert_eq!(ledger.workforce_burden, 10_000);
+        assert_eq!(ledger.permanent_military_losses, 0);
+        assert_eq!(ledger.unaccounted_living_excess, 0);
     }
 }

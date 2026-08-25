@@ -165,6 +165,14 @@ fn without_mobilization_employment_reaches_the_full_civilian_workforce() {
     let temp_dir = TempTestDir::new("baseline_no_mobilization");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
     ensure_state_has_labor_demand(&mut app, StateId(0));
+    // P23-006-FIX-001: New Gameの初期軍は実際にmobilized_manpowerへ計上されるため、
+    // このテストが意図する「動員なし」を明示的な前提として作る
+    // (実データの初期軍による付随的な負担に左右されないようにする)。
+    app.world_mut()
+        .resource_mut::<CountryRegistry>()
+        .get_mut(player)
+        .unwrap()
+        .mobilized_manpower = 0;
 
     advance_one_month(&mut app, 1800, 2);
 
@@ -413,6 +421,14 @@ fn ownership_transfer_moves_the_burden_to_the_new_owner_on_the_next_tick() {
         .get_mut(player)
         .unwrap()
         .mobilized_manpower = 100_000;
+    // P23-006-FIX-001: `other`も実データの初期軍によりmobilized_manpowerが既に
+    // 非ゼロになり得るため、「移転後は誰の負担も負わない」ことを検証するこのテストの
+    // 意図どおり、移転先の動員負担も明示的にゼロへ揃える。
+    app.world_mut()
+        .resource_mut::<CountryRegistry>()
+        .get_mut(other)
+        .unwrap()
+        .mobilized_manpower = 0;
     advance_one_month(&mut app, 1800, 2);
 
     // StateId(0)をplayerからotherへ移転する(実際の州所有権移転Domain APIの結果と同じ形)。
