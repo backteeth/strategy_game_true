@@ -173,6 +173,19 @@ pub fn select_ai_offensive_objective(
         frontline.attacker_country_id
     };
 
+    // 経路探索は自国だけでなく自陣営全体(多国間戦争の同盟国)を通過許可国に含める
+    // (プレイヤー報告により発見: 単一命令国家だけを許可すると、増援ルートが同盟国領を
+    // 経由する場合に誤って「経路なし」となり、無関係なDivisionまで動けなくなっていた)。
+    let (own_side, enemy_side) = {
+        let own = war.own_side_of(commanding_country);
+        let enemy = war.opponents_of(commanding_country);
+        if own.is_empty() || enemy.is_empty() {
+            (vec![commanding_country], vec![enemy_id])
+        } else {
+            (own, enemy)
+        }
+    };
+
     let front_regions = if commanding_country == frontline.attacker_country_id {
         &frontline.attacker_front_regions
     } else {
@@ -190,16 +203,9 @@ pub fn select_ai_offensive_objective(
             && !cap_state.is_sea
             && cap_state.controller() == enemy_id
         {
-            let reachable = front_regions.iter().any(|&fr| {
-                find_path(
-                    fr,
-                    cap_id,
-                    state_registry,
-                    &[commanding_country],
-                    &[enemy_id],
-                )
-                .is_some()
-            });
+            let reachable = front_regions
+                .iter()
+                .any(|&fr| find_path(fr, cap_id, state_registry, &own_side, &enemy_side).is_some());
             if reachable {
                 return Some(cap_id);
             }
@@ -221,14 +227,8 @@ pub fn select_ai_offensive_objective(
         let min_dist = front_regions
             .iter()
             .filter_map(|&fr| {
-                find_path(
-                    fr,
-                    enemy_state_id,
-                    state_registry,
-                    &[commanding_country],
-                    &[enemy_id],
-                )
-                .map(|p| p.len())
+                find_path(fr, enemy_state_id, state_registry, &own_side, &enemy_side)
+                    .map(|p| p.len())
             })
             .min();
 
@@ -464,6 +464,15 @@ pub fn assign_unassigned_divisions_to_frontlines(
                 fl.attacker_country_id
             };
 
+            // 経路探索は自陣営全体(多国間戦争の同盟国)を通過許可国に含める
+            // (select_ai_offensive_objectiveと同じ理由)。
+            let (own_side, enemy_side) = war_registry
+                .wars
+                .get(&fl.war_id)
+                .map(|w| (w.own_side_of(country_id), w.opponents_of(country_id)))
+                .filter(|(own, enemy)| !own.is_empty() && !enemy.is_empty())
+                .unwrap_or_else(|| (vec![country_id], vec![enemy_id]));
+
             let front_regions = if country_id == fl.attacker_country_id {
                 &fl.attacker_front_regions
             } else {
@@ -475,8 +484,8 @@ pub fn assign_unassigned_divisions_to_frontlines(
                     division.current_state,
                     fr,
                     state_registry,
-                    &[country_id],
-                    &[enemy_id],
+                    &own_side,
+                    &enemy_side,
                 )
                 .is_some()
             });

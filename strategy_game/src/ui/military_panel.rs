@@ -2800,6 +2800,7 @@ fn update_offensive_line_ui(
     frontline_registry: Res<FrontlineRegistry>,
     state_registry: Res<StateRegistry>,
     military_registry: Res<MilitaryRegistry>,
+    war_registry: Res<WarRegistry>,
     mode: Res<OffensiveLineEditMode>,
     loc: crate::localization::Loc,
     mut btn_q: Query<(&OffensiveLineCommandButton, &mut BackgroundColor)>,
@@ -2892,6 +2893,7 @@ fn update_offensive_line_ui(
                         &military_registry,
                         &army_registry,
                         &frontline_registry,
+                        &war_registry,
                     ))
                 });
                 match progress {

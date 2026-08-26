@@ -146,6 +146,21 @@ impl War {
         }
     }
 
+    /// `country`から見た自陣営(自身を含む、多国間戦争の同盟国も含む)の参加国一覧を
+    /// `CountryId`昇順で返す。`country`がこのWarの参加国でなければ空。
+    ///
+    /// 経路探索(`military::pathfinding::find_path`)の`allowed_countries`へ渡す用途を
+    /// 想定する: 単一の命令国家だけを許可国とすると、多国間戦争で自国領・敵国領の
+    /// どちらでもない同盟国領を経由する経路が誤って「通過不可」になる不具合があった
+    /// (プレイヤー報告により発見)。
+    pub fn own_side_of(&self, country: CountryId) -> Vec<CountryId> {
+        match self.side_of(country) {
+            Some(WarSide::Attacker) => self.sorted_attackers(),
+            Some(WarSide::Defender) => self.sorted_defenders(),
+            None => Vec::new(),
+        }
+    }
+
     /// `country`から見た敵対陣営の参加国一覧を`CountryId`昇順で返す。
     /// `country`がこのWarの参加国でなければ空。
     pub fn opponents_of(&self, country: CountryId) -> Vec<CountryId> {

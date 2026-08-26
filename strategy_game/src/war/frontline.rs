@@ -1009,7 +1009,7 @@ pub fn process_defensive_plan(
     plan: &FrontlinePlan,
     state_registry: &StateRegistry,
     military_registry: &mut MilitaryRegistry,
-    _war_registry: &WarRegistry,
+    war_registry: &WarRegistry,
     frontline_registry: &mut FrontlineRegistry,
     army_registry: &ArmyRegistry,
 ) {
@@ -1019,6 +1019,16 @@ pub fn process_defensive_plan(
     } else {
         frontline.attacker_country_id
     };
+
+    // 経路探索は自国だけでなく自陣営全体(多国間戦争の同盟国)を通過許可国に含める
+    // (プレイヤー報告により発見: 単一命令国家だけを許可すると、増援ルートが同盟国領を
+    // 経由する場合に誤って「経路なし」となり、無関係なDivisionまで動けなくなっていた)。
+    let (own_side, enemy_side) = war_registry
+        .wars
+        .get(&frontline.war_id)
+        .map(|w| (w.own_side_of(country_id), w.opponents_of(country_id)))
+        .filter(|(own, enemy)| !own.is_empty() && !enemy.is_empty())
+        .unwrap_or_else(|| (vec![country_id], vec![enemy_id]));
 
     let front_regions = if country_id == frontline.attacker_country_id {
         &frontline.attacker_front_regions
@@ -1101,8 +1111,8 @@ pub fn process_defensive_plan(
                 division.current_state,
                 region_id,
                 state_registry,
-                &[country_id],
-                &[enemy_id],
+                &own_side,
+                &enemy_side,
             ) {
                 let dist = path.len();
                 candidates.push((region_id, count, dist));
@@ -1123,8 +1133,8 @@ pub fn process_defensive_plan(
                     division.current_state,
                     best_region,
                     state_registry,
-                    &[country_id],
-                    &[enemy_id],
+                    &own_side,
+                    &enemy_side,
                 )
                 && !path.is_empty()
                 && let Some(a_mut) = military_registry.divisions.get_mut(&division_id)
@@ -1159,6 +1169,15 @@ pub fn process_offensive_plan(
         frontline.attacker_country_id
     };
 
+    // 経路探索は自国だけでなく自陣営全体(多国間戦争の同盟国)を通過許可国に含める
+    // (プレイヤー報告により発見: process_defensive_planと同じ理由)。
+    let (own_side, enemy_side) = war_registry
+        .wars
+        .get(&frontline.war_id)
+        .map(|w| (w.own_side_of(country_id), w.opponents_of(country_id)))
+        .filter(|(own, enemy)| !own.is_empty() && !enemy.is_empty())
+        .unwrap_or_else(|| (vec![country_id], vec![enemy_id]));
+
     // P21-008: 攻勢線が設定されている場合は、objective_region_idベースの単一目標処理
     // (自動決定・達成時Defend自動遷移・直接割当Divisionのみの1ホップ隣接攻撃)を
     // 一切実行せず、攻勢線の未確保State集合を目標とする別経路
@@ -1183,7 +1202,8 @@ pub fn process_offensive_plan(
             frontline_registry,
             army_registry,
             country_id,
-            enemy_id,
+            &own_side,
+            &enemy_side,
         );
         return;
     }
@@ -1302,10 +1322,10 @@ pub fn process_offensive_plan(
                 return b_is_obj.cmp(&a_is_obj);
             }
 
-            let a_dist = find_path(a, objective, state_registry, &[country_id], &[enemy_id])
+            let a_dist = find_path(a, objective, state_registry, &own_side, &enemy_side)
                 .map(|p| p.len())
                 .unwrap_or(usize::MAX);
-            let b_dist = find_path(b, objective, state_registry, &[country_id], &[enemy_id])
+            let b_dist = find_path(b, objective, state_registry, &own_side, &enemy_side)
                 .map(|p| p.len())
                 .unwrap_or(usize::MAX);
 
@@ -1375,7 +1395,8 @@ fn process_offensive_line_attack(
     frontline_registry: &mut FrontlineRegistry,
     army_registry: &ArmyRegistry,
     country_id: CountryId,
-    enemy_id: CountryId,
+    own_side: &[CountryId],
+    enemy_side: &[CountryId],
 ) {
     let uncaptured = uncaptured_offensive_line_regions(line, state_registry, country_id);
     if uncaptured.is_empty() {
@@ -1410,8 +1431,8 @@ fn process_offensive_line_attack(
                 division.current_state,
                 target,
                 state_registry,
-                &[country_id],
-                &[enemy_id],
+                own_side,
+                enemy_side,
             ) {
                 let cnt = *daily_target_counts.get(&target).unwrap_or(&0);
                 candidates.push((target, path.len(), cnt));
@@ -1436,8 +1457,8 @@ fn process_offensive_line_attack(
             division.current_state,
             best_target,
             state_registry,
-            &[country_id],
-            &[enemy_id],
+            own_side,
+            enemy_side,
         ) && !path.is_empty()
         {
             *daily_target_counts.entry(best_target).or_default() += 1;
@@ -1474,6 +1495,7 @@ pub enum OffensiveLineProgress {
 
 /// P21-008: `OffensiveLineProgress`を判定する。副作用なし・Worldを変更しない。
 /// UIの表示更新だけでなく、テストからも同じ判定経路を利用できるようにする。
+#[allow(clippy::too_many_arguments)]
 pub fn compute_offensive_line_progress(
     plan: &FrontlinePlan,
     frontline: &Frontline,
@@ -1481,6 +1503,7 @@ pub fn compute_offensive_line_progress(
     military_registry: &MilitaryRegistry,
     army_registry: &ArmyRegistry,
     frontline_registry: &FrontlineRegistry,
+    war_registry: &WarRegistry,
 ) -> OffensiveLineProgress {
     let Some(line) = &plan.offensive_line_region_ids else {
         return OffensiveLineProgress::NotSet;
@@ -1502,6 +1525,15 @@ pub fn compute_offensive_line_progress(
         frontline.attacker_country_id
     };
 
+    // 経路探索は自陣営全体(多国間戦争の同盟国)を通過許可国に含める
+    // (process_defensive_plan/process_offensive_planと同じ理由)。
+    let (own_side, enemy_side) = war_registry
+        .wars
+        .get(&frontline.war_id)
+        .map(|w| (w.own_side_of(country_id), w.opponents_of(country_id)))
+        .filter(|(own, enemy)| !own.is_empty() && !enemy.is_empty())
+        .unwrap_or_else(|| (vec![country_id], vec![enemy_id]));
+
     let division_ids = resolve_effective_division_ids_for_plan(
         plan,
         army_registry,
@@ -1517,8 +1549,8 @@ pub fn compute_offensive_line_progress(
                         division.current_state,
                         target,
                         state_registry,
-                        &[country_id],
-                        &[enemy_id],
+                        &own_side,
+                        &enemy_side,
                     )
                     .is_some()
                 })
@@ -1831,6 +1863,137 @@ mod tests {
             military_registry,
             frontline_registry,
         )
+    }
+
+    /// プレイヤー報告により発見した不具合の回帰テスト: 多国間戦争で、自国の後方拠点から
+    /// 前線地域へ至る唯一の経路が「自国でも直接の対面敵国でもない同盟国(共同交戦国)」の
+    /// 領土を経由する場合、`find_path`へ単一の自国IDしか渡していなかった旧実装では
+    /// その同盟国領を「通過不可」と誤判定し、経路なし(移動命令が一切発行されない)と
+    /// なっていた——結果として、当該Divisionが戦闘に無関係であっても未来永劫動けなく
+    /// なるように見えた。`process_defensive_plan`が`War`の陣営全体
+    /// (`own_side_of`/`opponents_of`)を許可国として渡すようになったことで、
+    /// 同盟国領を経由する経路も正しく発見できることを固定する。
+    #[test]
+    fn defensive_plan_routes_reinforcements_through_allied_territory_in_a_multilateral_war() {
+        // State1(C1、自国後方) -- State2(C3、同盟国領、経由必須) -- State3(C1、前線地域) -- State4(C2、敵国)
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(2)],
+            ..Default::default()
+        };
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: CountryId(3),
+            neighbors: vec![StateId(1), StateId(3)],
+            ..Default::default()
+        };
+        let s3 = StateData {
+            id: StateId(3),
+            owner_country_id: CountryId(1),
+            neighbors: vec![StateId(2), StateId(4)],
+            ..Default::default()
+        };
+        let s4 = StateData {
+            id: StateId(4),
+            owner_country_id: CountryId(2),
+            neighbors: vec![StateId(3)],
+            ..Default::default()
+        };
+        let state_registry = StateRegistry::build(vec![s1, s2, s3, s4]);
+
+        let mut military_registry = MilitaryRegistry::default();
+        let division = Division {
+            id: DivisionId(1),
+            owner: CountryId(1),
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: StateId(1),
+            destination: None,
+            current_path: Vec::new(),
+            target_state: None,
+            manpower: 1000,
+            max_manpower: 1000,
+            equipment: 10.0,
+            max_equipment: 10.0,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 1.0,
+            max_morale: 1.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
+            attack_power: 10,
+            defense_power: 10,
+            combat_id: None,
+        };
+        military_registry.divisions.insert(division.id, division);
+
+        let mut war_registry = WarRegistry::default();
+        war_registry.wars.insert(
+            WarId(0),
+            War {
+                id: WarId(0),
+                name: "Multilateral Test War".to_string(),
+                attackers: [CountryId(1), CountryId(3)].into_iter().collect(),
+                defenders: [CountryId(2)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![],
+                start_date: "1800/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: HashSet::new(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: HashSet::new(),
+            },
+        );
+
+        let frontline = Frontline {
+            frontline_id: FrontlineId(0),
+            war_id: WarId(0),
+            attacker_country_id: CountryId(1),
+            defender_country_id: CountryId(2),
+            attacker_front_regions: vec![StateId(3)],
+            defender_front_regions: vec![StateId(4)],
+            border_region_pairs: vec![(StateId(3), StateId(4))],
+        };
+
+        let mut plan = FrontlinePlan::new(FrontlineId(0), CountryId(1));
+        plan.assigned_division_ids = vec![DivisionId(1)];
+
+        let mut frontline_registry = FrontlineRegistry::default();
+        let army_registry = ArmyRegistry::default();
+
+        process_defensive_plan(
+            &frontline,
+            &plan,
+            &state_registry,
+            &mut military_registry,
+            &war_registry,
+            &mut frontline_registry,
+            &army_registry,
+        );
+
+        let division = military_registry.divisions.get(&DivisionId(1)).unwrap();
+        assert_eq!(
+            division.destination,
+            Some(StateId(3)),
+            "同盟国領(State2)を経由する経路が見つかり、前線地域(State3)への移動命令が \
+             発行されるはず"
+        );
+        assert_eq!(division.status, DivisionStatus::Moving);
     }
 
     #[test]
@@ -4939,7 +5102,8 @@ mod tests {
             &mut frontline_registry,
             &army_registry,
             CountryId(1),
-            CountryId(2),
+            &[CountryId(1)],
+            &[CountryId(2)],
         );
 
         let division = military_registry.divisions.get(&division_id).unwrap();
@@ -4998,7 +5162,8 @@ mod tests {
             &mut frontline_registry,
             &army_registry,
             CountryId(1),
-            CountryId(2),
+            &[CountryId(1)],
+            &[CountryId(2)],
         );
 
         let division = military_registry.divisions.get(&division_id).unwrap();
@@ -5413,6 +5578,7 @@ mod tests {
                     &military_registry,
                     &army_registry,
                     &frontline_registry,
+                    &war_registry,
                 ),
                 OffensiveLineProgress::NotSet
             );
@@ -5439,6 +5605,7 @@ mod tests {
                     &military_registry,
                     &army_registry,
                     &frontline_registry,
+                    &war_registry,
                 ),
                 OffensiveLineProgress::Preparing
             );
@@ -5462,6 +5629,7 @@ mod tests {
                     &military_registry,
                     &army_registry,
                     &frontline_registry,
+                    &war_registry,
                 ),
                 OffensiveLineProgress::InProgress
             );
@@ -5479,6 +5647,7 @@ mod tests {
                     &military_registry,
                     &army_registry,
                     &frontline_registry,
+                    &war_registry,
                 ),
                 OffensiveLineProgress::Reached
             );
@@ -5504,6 +5673,7 @@ mod tests {
                     &military_registry,
                     &army_registry,
                     &frontline_registry,
+                    &war_registry,
                 ),
                 OffensiveLineProgress::NoReachableTargets
             );
