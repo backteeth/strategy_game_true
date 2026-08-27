@@ -128,7 +128,16 @@ pub fn process_country_production(
             } else {
                 for (&res, &base_out) in &def.output_resources {
                     let out_amount = calculate_actual_output(base_out, level, final_op);
-                    stockpile.add(res, out_amount);
+                    if res == ResourceType::MilitaryEquipment {
+                        // P25-002-REV-001: MilitaryEquipmentだけは固定小数点units経由で
+                        // 加算する(生の`f64`加算は2^53付近で精度が崩れるため)。他の
+                        // ResourceTypeの生産経路(このelse節を含む)は無変更。失敗時
+                        // (値域超過等、現実的な到達可能量では発生しない)は備蓄を
+                        // 変更しない——生の`add`へフォールバックしない。
+                        let _ = stockpile.add_military_equipment_produced(out_amount);
+                    } else {
+                        stockpile.add(res, out_amount);
+                    }
                 }
             }
 

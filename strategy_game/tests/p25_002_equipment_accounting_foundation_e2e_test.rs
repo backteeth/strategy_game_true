@@ -174,13 +174,18 @@ fn test_k_zero_amount_operations_are_deterministic_no_ops() {
 }
 
 // ─── Test L: overflow ────────────────────────────────────────────────────
+//
+// P25-002-REV-001: f64の直接加減算はP25-002で使われていたが、正規会計は
+// 固定小数点units経由へ訂正された(`verification_logs/phase-25/p25-002-rev-001/`
+// 参照)。`f64::MAX`のような正規値域(equipment値換算で最大10億)を大幅に超える値は、
+// 演算段階のoverflowではなく、units変換の入口(`QuantityOutOfRange`)で拒否される。
 
 #[test]
 fn test_l_overflow_is_rejected_without_mutation() {
     let mut stockpile = stockpile_with(f64::MAX);
     let mut equipment = f64::MAX;
     let err = try_return_equipment(&mut stockpile, &mut equipment, f64::MAX).unwrap_err();
-    assert_eq!(err, EquipmentAccountingError::ArithmeticOverflow);
+    assert_eq!(err, EquipmentAccountingError::QuantityOutOfRange);
     assert_eq!(stockpile.get(ResourceType::MilitaryEquipment), f64::MAX);
     assert_eq!(equipment, f64::MAX);
 }
