@@ -3,12 +3,25 @@
 //!
 //! P24-001-REV-001以前は、同じ「population * workforce_ratio」という概念に対し
 //! `total_workforce()`が切り捨て、`calculate_workforce()`が四捨五入という異なる
-//! 丸め規則を使っていた(境界例: population=100, workforce_ratio=0.45で
-//! 切り捨て=44、四捨五入=45)。P24-002はこの2つを`state::data::canonical_total_workforce`
+//! 丸め規則を使っていた。P24-002はこの2つを`state::data::canonical_total_workforce`
 //! へ委譲する形で1か所へ集約し、正規規則を切り捨てに統一した。
 //!
-//! 死傷者とpopulationの連動はP24-001-REV-001の決定によりP24-002の対象外であり、
-//! 本テストでも一切扱わない。
+//! P24-002-REV-001: P24-002当初の実装は`(population as f64) * (workforce_ratio as f64)
+//! as u64`という素朴な浮動小数点計算で、`workforce_ratio: f32`の0.45が2進浮動小数点で
+//! 正確な0.45よりわずかに小さい値(`0.449999988...`)として保持されることの影響を
+//! populationの規模に応じて増幅してしまい、`canonical_total_workforce(100, 0.45)`が
+//! 数学的に正しい45ではなく44になっていた。P24-002-REV-001はratioを先に100万分率へ
+//! 量子化(`canonical_workforce_ratio_units`)してから`u128`中間値で乗除算する固定小数点
+//! 方式へ訂正し、`canonical_total_workforce(100, 0.45) == 45`・
+//! `canonical_total_workforce(100_000, 0.45) == 45_000`を正規値とした。本ファイルの
+//! Test B/F/G/H/Iの期待値は、この訂正に伴って44→45・34→35・44,999→45,000へ更新している
+//! (Test Cの population=99・ratio=0.45→44は訂正後も変わらない)。
+//!
+//! `rev001_`で始まるテストはP24-002-REV-001で新規追加した固定小数点方式固有の検証
+//! (ratio量子化・u128 overflow耐性・production/finance連動)である。
+//!
+//! 死傷者とpopulationの連動はP24-001-REV-001の決定によりP24-002/P24-002-REV-001の
+//! 対象外であり、本テストでも一切扱わない。
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
@@ -30,7 +43,9 @@ use strategy_game::save::write::SavePathConfig;
 use strategy_game::save::{LoadGamePlugin, SaveGamePlugin, SaveRequestMessage};
 use strategy_game::state::SelectedState;
 use strategy_game::state::StatePlugin;
-use strategy_game::state::data::{StateData, StateRegistry, canonical_total_workforce};
+use strategy_game::state::data::{
+    StateData, StateRegistry, canonical_total_workforce, canonical_workforce_ratio_units,
+};
 use strategy_game::war::WarPlugin;
 
 // ─── 純粋関数レベル (Test A〜F) ─────────────────────────────────────────────
@@ -54,26 +69,28 @@ fn test_a_minimum_disagreement_example_unifies_to_floor() {
 }
 
 /// Test B: 代表値。population=100, workforce_ratio=0.45。
-/// `workforce_ratio: f32`の0.45は2進浮動小数点で正確に表現できず、実際には
-/// 0.45よりわずかに小さい値として保持される。そのため
-/// `canonical_total_workforce(100, 0.45)`は数学的な100*0.45=45ではなく44になる
-/// (既存の`StateData::total_workforce()`が元々使っていた乗算順序・キャスト方法を
-/// 正規基準として踏襲した結果であり、P24-002のために新たに導入した誤差ではない)。
+/// P24-002-REV-001: ratioを先に100万分率(450,000)へ量子化してから`u128`で
+/// `100 * 450,000 / 1,000,000`を計算するため、数学的に正しい45が得られる
+/// (訂正前は`(100 as f64) * (0.45 as f64) as u64`が44を返していた——0.45f32が
+/// 2進浮動小数点で正確な0.45よりわずかに小さいことの影響がpopulationの規模に
+/// 応じて増幅されていたため)。
 #[test]
-fn test_b_representative_value_matches_the_existing_floor_computation() {
+fn test_b_representative_value_matches_the_fixed_point_computation() {
     let canonical = canonical_total_workforce(100, 0.45);
     assert_eq!(
-        canonical, 44,
-        "0.45f32 is slightly below 0.45 in binary floating point, so floor(100 * 0.45f32) is 44, not the mathematically-naive 45"
+        canonical, 45,
+        "fixed-point computation (quantize ratio to 450,000 units, then floor(100 * 450,000 / 1,000,000)) must yield the mathematically correct 45"
     );
     assert_eq!(total_workforce_of(100, 0.45), canonical);
     assert_eq!(calculate_workforce(100, 0.45), canonical);
 }
 
-/// Test C: 切り捨て境界。population=99, workforce_ratio=0.45も同じ理由で44になる
-/// (Test Bと同じ丸め誤差の帯域に入るため)。
+/// Test C: 切り捨て境界。population=99, workforce_ratio=0.45は
+/// `floor(99 * 450,000 / 1,000,000) = floor(44.55) = 44`となり、固定小数点方式へ
+/// 訂正した後もTest Bとは異なり44のままである(端数0.55が切り捨てられるだけの、
+/// 意図した「人数は切り捨て」仕様どおりの結果)。
 #[test]
-fn test_c_floor_boundary_matches_the_existing_floor_computation() {
+fn test_c_floor_boundary_matches_the_fixed_point_computation() {
     let canonical = canonical_total_workforce(99, 0.45);
     assert_eq!(canonical, 44);
     assert_eq!(total_workforce_of(99, 0.45), canonical);
@@ -169,8 +186,8 @@ fn test_total_workforce_and_calculate_workforce_agree_on_every_boundary_input() 
 
 /// Test F: 月次更新(`update_state_population_and_employment`)が正規計算を使うこと。
 /// population=100, workforce_ratio=0.45, 建物なし(required_workforce=0)では、
-/// employed=0・unemployed=canonical(=44)となり、employed+unemployed==canonicalが
-/// 成立する。
+/// employed=0・unemployed=canonical(=45、P24-002-REV-001の固定小数点訂正後の値)となり、
+/// employed+unemployed==canonicalが成立する。
 #[test]
 fn test_f_monthly_employment_update_uses_the_canonical_computation() {
     use strategy_game::building::data::BuildingRegistry;
@@ -185,7 +202,7 @@ fn test_f_monthly_employment_update_uses_the_canonical_computation() {
     update_state_population_and_employment(&mut state, &building_registry, 0);
 
     let canonical = canonical_total_workforce(100, 0.45);
-    assert_eq!(canonical, 44);
+    assert_eq!(canonical, 45);
     assert_eq!(
         state.employed_workforce + state.unemployed_workforce,
         canonical
@@ -306,8 +323,8 @@ fn advance_one_month(app: &mut App, year: i32, month: u8) {
 }
 
 /// 対象州を「人口100・workforce_ratio=0.45・建物なし(required_workforce=0)」の
-/// 単独制御下に置く(Test B/Cの境界(canonical=44)を実App経路で再現するため)。
-/// 同じ国家の他州の人口を0にし、動員按分が対象州へ集中するようにする
+/// 単独制御下に置く(Test Bの境界(canonical=45、P24-002-REV-001訂正後)を実App経路で
+/// 再現するため)。同じ国家の他州の人口を0にし、動員按分が対象州へ集中するようにする
 /// (`p23_004`の`setup_controlled_state`と同じ理由)。
 fn setup_controlled_boundary_state(app: &mut App, player: CountryId, state_id: StateId) {
     let mut registry = app.world_mut().resource_mut::<StateRegistry>();
@@ -331,9 +348,10 @@ fn civilian_workforce_of(app: &App, state_id: StateId) -> u64 {
 }
 
 /// Test G: 動員0の州で、実際の月次経路(`economy::handle_monthly_economy`)が
-/// 正規の切り捨て計算(canonical=44)を使うこと。四捨五入(45)にはならない。
+/// 正規の固定小数点計算(canonical=45、P24-002-REV-001訂正後)を使うこと。
+/// 訂正前の素朴な浮動小数点計算(44)にはならない。
 #[test]
-fn test_g_zero_mobilization_monthly_update_uses_the_canonical_floor_value() {
+fn test_g_zero_mobilization_monthly_update_uses_the_canonical_fixed_point_value() {
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("test_g");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
@@ -348,8 +366,8 @@ fn test_g_zero_mobilization_monthly_update_uses_the_canonical_floor_value() {
 
     assert_eq!(
         civilian_workforce_of(&app, StateId(0)),
-        44,
-        "monthly employment update must use the canonical floor value (44), not the old rounded value (45)"
+        45,
+        "monthly employment update must use the corrected fixed-point value (45), not the pre-REV-001 naive floating-point value (44)"
     );
 }
 
@@ -386,14 +404,14 @@ fn test_h_mobilized_case_stays_deterministic_on_the_unified_canonical_value() {
         first_run, second_run,
         "the same scenario must produce identical civilian_workforce independent of HashMap iteration order"
     );
-    // canonical(100, 0.45) = 44; mobilized_manpower(10)がこの州単独へ全額按分される
-    // (他州人口0)ため、civilian_workforce = 44 - 10 = 34。
-    assert_eq!(first_run, 34);
+    // canonical(100, 0.45) = 45(P24-002-REV-001訂正後); mobilized_manpower(10)が
+    // この州単独へ全額按分される(他州人口0)ため、civilian_workforce = 45 - 10 = 35。
+    assert_eq!(first_run, 35);
 }
 
-/// Test I: save/load分岐比較。統一後の境界population(canonical=44)について、
-/// 「継続実行」と「save→load→実行」でworkforce・civilian_workforceが一致すること。
-/// Saveスキーマは変更していない。
+/// Test I: save/load分岐比較。統一後の境界population(canonical=45、
+/// P24-002-REV-001訂正後)について、「継続実行」と「save→load→実行」で
+/// workforce・civilian_workforceが一致すること。Saveスキーマは変更していない。
 #[test]
 fn test_i_save_load_branch_comparison_matches_at_the_boundary_population() {
     let player = CountryId(0);
@@ -433,7 +451,7 @@ fn test_i_save_load_branch_comparison_matches_at_the_boundary_population() {
         continuous_wf, branch_wf,
         "continuous run and save->load->continue must produce the same civilian_workforce"
     );
-    assert_eq!(continuous_wf, 44);
+    assert_eq!(continuous_wf, 45);
 
     let continuous_ratio = continuous
         .world()
@@ -452,3 +470,164 @@ fn test_i_save_load_branch_comparison_matches_at_the_boundary_population() {
         "workforce_ratio must round-trip through save/load unchanged (no schema change)"
     );
 }
+
+// ─── P24-002-REV-001: 固定小数点方式固有の検証 ─────────────────────────────
+
+/// REV-001 Test A: ratio量子化(`canonical_workforce_ratio_units`)が要求された表と
+/// 一致すること。
+#[test]
+fn rev001_test_a_ratio_quantization_matches_the_required_table() {
+    assert_eq!(canonical_workforce_ratio_units(0.0), 0);
+    assert_eq!(canonical_workforce_ratio_units(0.1), 100_000);
+    assert_eq!(canonical_workforce_ratio_units(0.45), 450_000);
+    assert_eq!(canonical_workforce_ratio_units(0.5), 500_000);
+    assert_eq!(canonical_workforce_ratio_units(0.333333), 333_333);
+    assert_eq!(canonical_workforce_ratio_units(0.999999), 999_999);
+    assert_eq!(canonical_workforce_ratio_units(1.0), 1_000_000);
+}
+
+/// REV-001 Test B/C: §7の必須数値例表を、独立した`u128`式(本番の
+/// `canonical_total_workforce`を呼ばずに`canonical_workforce_ratio_units`の
+/// リテラル期待値から再計算する)で照合してから、本番関数の結果とも一致することを
+/// 確認する。期待値の計算に本番関数を使った自己証明は行わない。
+#[test]
+fn rev001_test_bc_required_numeric_table_verified_independently() {
+    let cases: [(u64, f32, u64, u64); 12] = [
+        (0, 0.45, 450_000, 0),
+        (1, 0.5, 500_000, 0),
+        (2, 0.5, 500_000, 1),
+        (10, 0.1, 100_000, 1),
+        (99, 0.45, 450_000, 44),
+        (100, 0.45, 450_000, 45),
+        (101, 0.45, 450_000, 45),
+        (100_000, 0.45, 450_000, 45_000),
+        (1_000_000, 0.333333, 333_333, 333_333),
+        (1_000_000, 0.999999, 999_999, 999_999),
+        (u64::MAX, 0.0, 0, 0),
+        (u64::MAX, 1.0, 1_000_000, u64::MAX),
+    ];
+    for (population, ratio, expected_units, expected_workforce) in cases {
+        assert_eq!(
+            canonical_workforce_ratio_units(ratio),
+            expected_units,
+            "ratio units mismatch for ratio={ratio}"
+        );
+        // 独立したu128式(本番のcanonical_total_workforceは呼ばない)で人数を再計算する。
+        let independent = ((population as u128) * (expected_units as u128) / 1_000_000u128) as u64;
+        assert_eq!(
+            independent, expected_workforce,
+            "independent u128 formula mismatch for population={population}, ratio={ratio}"
+        );
+        assert_eq!(
+            canonical_total_workforce(population, ratio),
+            expected_workforce,
+            "canonical_total_workforce mismatch for population={population}, ratio={ratio}"
+        );
+    }
+}
+
+// REV-001 Test E/F: population単調性・ratio単調性・上限は既存のTest D/D2/Eが
+// 固定小数点方式に対しても引き続き有効であることを確認済み(構造は無変更、
+// `canonical_total_workforce`を通して自動的に新方式で再検証される)。
+
+/// REV-001 Test G: `u64::MAX`付近のpopulationでoverflow・panic・wraparoundが
+/// 発生しないこと。
+#[test]
+fn rev001_test_g_overflow_safety_near_u64_max() {
+    assert_eq!(canonical_total_workforce(u64::MAX, 0.0), 0);
+    assert_eq!(canonical_total_workforce(u64::MAX, 1.0), u64::MAX);
+
+    let population = u64::MAX;
+    let ratio_units = canonical_workforce_ratio_units(0.5) as u128;
+    assert_eq!(ratio_units, 500_000);
+    let expected = ((population as u128) * ratio_units / 1_000_000u128) as u64;
+    let actual = canonical_total_workforce(population, 0.5);
+    assert_eq!(actual, expected);
+    assert!(
+        actual <= population,
+        "workforce must never exceed population even near u64::MAX"
+    );
+
+    // u64::MAX - 1 でも同様にoverflowしないこと。
+    assert_eq!(canonical_total_workforce(u64::MAX - 1, 1.0), u64::MAX - 1);
+}
+
+/// REV-001 Test H: save/load分岐比較でworkforceだけでなくproduction(食料生産)も
+/// 一致すること(§9: production・financeへの影響がある場合、その影響が
+/// save/load間で一貫していることを確認する)。Farmを1つ持つ境界population(100,
+/// ratio=0.45、canonical=45)で検証する。
+#[test]
+fn rev001_test_h_save_load_branch_comparison_matches_production() {
+    use strategy_game::building::data::BuildingType;
+    use strategy_game::economy::resources::ResourceType;
+
+    fn setup(app: &mut App, player: CountryId, state_id: StateId) {
+        let mut registry = app.world_mut().resource_mut::<StateRegistry>();
+        for state in registry.states.iter_mut() {
+            if state.owner_country_id == player {
+                state.population = if state.id == state_id { 100 } else { 0 };
+            }
+            if state.id == state_id {
+                state.buildings.clear();
+                state.buildings.insert(BuildingType::Farm, 1);
+                state.workforce_ratio = 0.45;
+            }
+        }
+    }
+
+    let player = CountryId(0);
+
+    let temp_dir_continuous = TempTestDir::new("rev001_h_continuous");
+    let mut continuous = setup_app_in_playing(player, temp_dir_continuous.save_file_config());
+    setup(&mut continuous, player, StateId(0));
+    advance_one_month(&mut continuous, 1800, 2);
+
+    let temp_dir_branch = TempTestDir::new("rev001_h_branch");
+    let mut branch = setup_app_in_playing(player, temp_dir_branch.save_file_config());
+    setup(&mut branch, player, StateId(0));
+    advance_one_month(&mut branch, 1800, 2);
+    send_save_request(&mut branch);
+    branch.update();
+    send_load_request(&mut branch);
+    branch.update();
+    branch.update();
+
+    let continuous_workforce = continuous
+        .world()
+        .resource::<StateRegistry>()
+        .get(StateId(0))
+        .unwrap()
+        .total_workforce();
+    let branch_workforce = branch
+        .world()
+        .resource::<StateRegistry>()
+        .get(StateId(0))
+        .unwrap()
+        .total_workforce();
+    assert_eq!(continuous_workforce, 45);
+    assert_eq!(continuous_workforce, branch_workforce);
+
+    let continuous_food = continuous
+        .world()
+        .resource::<CountryRegistry>()
+        .get(player)
+        .unwrap()
+        .stockpile
+        .get(ResourceType::Food);
+    let branch_food = branch
+        .world()
+        .resource::<CountryRegistry>()
+        .get(player)
+        .unwrap()
+        .stockpile
+        .get(ResourceType::Food);
+    assert_eq!(
+        continuous_food, branch_food,
+        "production output derived from the corrected workforce value must match between the continuous and save/load branches"
+    );
+}
+
+// REV-001 Test I: New Game経路(`setup_app_in_playing`が直接生成する状態)と
+// Loaded Game経路(save→load後の状態)は、同じ州状態であれば固定小数点方式でも
+// 同じ結果になる。既存のTest Iおよび`rev001_test_h_...`が実質的にこれを検証している
+// (継続実行 = New Game経路そのもの、save→load後の実行 = Loaded Game経路)。

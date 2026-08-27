@@ -148,14 +148,43 @@ fn default_ratio() -> f32 {
     1.0
 }
 
-/// 州の潜在総労働力(`population * workforce_ratio`)を計算する正規の純粋関数(P24-002)。
-/// 端数は切り捨てる——人数として確定していない小数部分から労働者を生成しないための
-/// 意図的な設計判断であり、`workforce_ratio <= 1`なら`population`を超えないことを保証する。
+/// `workforce_ratio`を100万分率(小数点以下6桁)へ量子化する際のスケール(P24-002-REV-001)。
+/// ゲームデータ(`assets/data/states.ron`)・デフォルト値・テストが使うratioはいずれも
+/// 小数点以下2〜6桁までしか意味を持たないため、この精度で全ての意図した値を安定して
+/// 復元できる(詳細は`verification_logs/phase-24/p24-002-rev-001/`の報告書§13/§14参照)。
+pub const WORKFORCE_RATIO_SCALE: u64 = 1_000_000;
+
+/// `workforce_ratio`(f32)を100万分率の整数単位へ量子化する。この段階でのみ四捨五入する
+/// (人数を求める段階の切り捨てとは明確に区別する、P24-002-REV-001)。
+///
+/// `f32`の0.45は2進浮動小数点で正確な0.45よりわずかに小さい値(`0.449999988...`)として
+/// 保持されるが、`population`との直接乗算より先にこの整数量子化を経由することで、
+/// その微小な近似誤差が`population`の規模に応じて増幅されるのを防ぐ(P24-002が固定して
+/// しまっていた`canonical_total_workforce(100_000, 0.45) == 44_999`のような誤差の原因)。
+///
+/// 無効値(NaN・負数・1.0超過)はここで黙ってclampして正常値に見せかけない
+/// (validation設計自体は本関数のスコープ外)。`debug_assert!`は開発時の可視化のためであり、
+/// release buildでは`f64::round`と`as u64`の飽和キャスト(NaN/負数→0、超過値→u64::MAX)に
+/// より、無効値が渡ってもpanicはしない。
+pub fn canonical_workforce_ratio_units(workforce_ratio: f32) -> u64 {
+    debug_assert!(
+        workforce_ratio.is_finite() && (0.0..=1.0).contains(&workforce_ratio),
+        "workforce_ratio must be finite and within [0.0, 1.0], got {workforce_ratio}"
+    );
+    ((workforce_ratio as f64) * (WORKFORCE_RATIO_SCALE as f64)).round() as u64
+}
+
+/// 州の潜在総労働力(`population * workforce_ratio`)を計算する正規の純粋関数(P24-002、
+/// P24-002-REV-001で固定小数点計算へ訂正)。`workforce_ratio`を`canonical_workforce_ratio_units`
+/// で先に量子化してから、`population`との乗算・除算を`u128`中間値で行い、最後に整数除算で
+/// 切り捨てる——人数として確定していない小数部分から労働者を生成しないための意図的な
+/// 設計判断であり、`workforce_ratio <= 1`なら`population`を超えないことを保証する。
 /// `StateData::total_workforce()`と`population::update::calculate_workforce()`の両方が
 /// この関数へ委譲し、計算式の真実源をここ1か所に集約する(P24-001-REV-001が指摘した、
 /// 同じ概念に対して切り捨てと四捨五入という2つの丸め規則が併存していた不整合の解消)。
 pub fn canonical_total_workforce(population: u64, workforce_ratio: f32) -> u64 {
-    ((population as f64) * (workforce_ratio as f64)) as u64
+    let ratio_units = canonical_workforce_ratio_units(workforce_ratio) as u128;
+    ((population as u128) * ratio_units / (WORKFORCE_RATIO_SCALE as u128)) as u64
 }
 
 impl StateData {
