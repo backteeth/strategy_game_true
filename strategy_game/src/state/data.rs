@@ -148,6 +148,16 @@ fn default_ratio() -> f32 {
     1.0
 }
 
+/// 州の潜在総労働力(`population * workforce_ratio`)を計算する正規の純粋関数(P24-002)。
+/// 端数は切り捨てる——人数として確定していない小数部分から労働者を生成しないための
+/// 意図的な設計判断であり、`workforce_ratio <= 1`なら`population`を超えないことを保証する。
+/// `StateData::total_workforce()`と`population::update::calculate_workforce()`の両方が
+/// この関数へ委譲し、計算式の真実源をここ1か所に集約する(P24-001-REV-001が指摘した、
+/// 同じ概念に対して切り捨てと四捨五入という2つの丸め規則が併存していた不整合の解消)。
+pub fn canonical_total_workforce(population: u64, workforce_ratio: f32) -> u64 {
+    ((population as f64) * (workforce_ratio as f64)) as u64
+}
+
 impl StateData {
     /// world_position を Vec2 として取得する
     pub fn position(&self) -> Vec2 {
@@ -161,7 +171,7 @@ impl StateData {
 
     /// 労働力人口を取得 (workforce = population * workforce_ratio)
     pub fn total_workforce(&self) -> u64 {
-        ((self.population as f64) * (self.workforce_ratio as f64)) as u64
+        canonical_total_workforce(self.population, self.workforce_ratio)
     }
 
     /// 動員負担控除後の民間労働力を取得する(P23-003)。月次雇用計算

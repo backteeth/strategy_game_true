@@ -24,10 +24,17 @@ mod tests {
     const EPSILON_F32: f32 = 1e-3;
 
     // 1. 労働力計算
+    //
+    // P24-002: `calculate_workforce`は正規計算(`state::data::canonical_total_workforce`、
+    // 切り捨て)へ委譲するよう変更された。`workforce_ratio: f32`の0.45は2進浮動小数点で
+    // 正確な0.45より僅かに小さい値として保持されるため、`100_000 * 0.45f32`は数学的な
+    // 45,000ではなく44,999.998...となり、切り捨てで44,999になる(旧来の四捨五入では
+    // 45,000だった)。P24-002の丸め方式統一による意図した変化であり、他の値の書き換えは
+    // 行っていない。
     #[test]
     fn test_calculate_workforce() {
         let wf = calculate_workforce(100_000, 0.45);
-        assert_eq!(wf, 45_000);
+        assert_eq!(wf, 44_999);
     }
 
     // 2. 失業者計算

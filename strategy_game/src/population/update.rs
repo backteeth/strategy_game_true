@@ -1,11 +1,11 @@
 use crate::building::data::BuildingRegistry;
-use crate::state::data::StateData;
+use crate::state::data::{StateData, canonical_total_workforce};
 
-/// 労働力を計算する純粋関数
+/// 労働力を計算する純粋関数。`StateData::total_workforce()`と同じ正規計算
+/// (`canonical_total_workforce`、P24-002)へ委譲する——両者は同じ「州の潜在総労働力」を
+/// 表す概念であり、丸め規則を統一するため計算式の真実源を1か所に集約する。
 pub fn calculate_workforce(population: u64, workforce_ratio: f32) -> u64 {
-    ((population as f64) * (workforce_ratio as f64))
-        .round()
-        .max(0.0) as u64
+    canonical_total_workforce(population, workforce_ratio)
 }
 
 /// 失業者数を計算する純粋関数
