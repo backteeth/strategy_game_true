@@ -29,7 +29,6 @@ pub enum AiRecruitmentOutcome {
     SkippedTargetMet,
     SkippedQueueNotEmpty,
     SkippedInsufficientManpower,
-    SkippedInsufficientTreasury,
     SkippedNoControlledState,
     SkippedLedgerInvalid,
     SkippedMissingDefinition,
@@ -175,10 +174,6 @@ fn decide_and_recruit_for_country(
     };
     if country.available_manpower < needed {
         return AiRecruitmentOutcome::SkippedInsufficientManpower;
-    }
-
-    if country.treasury < def.required_equipment {
-        return AiRecruitmentOutcome::SkippedInsufficientTreasury;
     }
 
     let capital = country.capital_state_id;
@@ -637,17 +632,22 @@ mod tests {
         );
     }
 
+    /// P25-003: `required_equipment`はもはや`treasury`から差し引かれる通貨ではなく、
+    /// `MilitaryEquipment`備蓄が不足していてもキュー投入(`request_recruitment`経由)
+    /// 自体は成功する——装備充足は`process_recruitment`でのDivision生成時にのみ
+    /// 判定される(§8)。AIもプレイヤーと同じ`request_recruitment`を経由するため、
+    /// 同じ挙動を受ける。
     #[test]
-    fn does_not_recruit_when_treasury_is_insufficient() {
+    fn queues_recruitment_even_when_military_equipment_stockpile_is_insufficient() {
         let mut h = harness(
-            vec![test_country(1, 1_000_000, 0, 99.0)], // required_equipment=100.0
+            vec![test_country(1, 1_000_000, 0, 99.0)], // stockpile[MilitaryEquipment]は既定の0のまま(必要100.0に対して不足)
             vec![],
             vec![owned_state_with_population(1, 1, 200_000)],
             10_000,
         );
         assert_eq!(
             decide(&mut h, CountryId(1)),
-            AiRecruitmentOutcome::SkippedInsufficientTreasury
+            AiRecruitmentOutcome::Recruited
         );
     }
 
@@ -756,8 +756,10 @@ mod tests {
         );
     }
 
+    /// P25-003: `required_equipment`はもはやtreasuryから差し引かれないため、AI経由の
+    /// 募兵成功でもtreasuryは変化しない。
     #[test]
-    fn successful_recruitment_reduces_available_and_treasury_and_increases_burden() {
+    fn successful_recruitment_reduces_available_and_increases_burden_but_not_treasury() {
         let mut h = harness(
             vec![test_country(1, 1_000_000, 5_000, 100_000.0)],
             vec![],
@@ -771,7 +773,7 @@ mod tests {
         let country = h.countries.get(CountryId(1)).unwrap();
         assert_eq!(country.available_manpower, 1_000_000 - 10_000);
         assert_eq!(country.mobilized_manpower, 5_000 + 10_000);
-        assert_eq!(country.treasury, 100_000.0 - 100.0);
+        assert_eq!(country.treasury, 100_000.0);
         assert_eq!(country.recruitment_queue.len(), 1);
     }
 

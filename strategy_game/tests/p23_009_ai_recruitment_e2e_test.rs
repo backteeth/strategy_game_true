@@ -212,6 +212,21 @@ fn ensure_large_available_manpower(app: &mut App, country: CountryId) {
         .available_manpower = 1_000_000;
 }
 
+/// P25-003: `process_recruitment`がDivision生成時に国家備蓄からMilitaryEquipmentを
+/// 支給するようになったため、AI募兵キュー項目を実際に完成させたいテストは、
+/// 十分な備蓄を明示的に用意する必要がある。
+fn ensure_large_military_equipment_stockpile(app: &mut App, country: CountryId) {
+    app.world_mut()
+        .resource_mut::<CountryRegistry>()
+        .get_mut(country)
+        .unwrap()
+        .stockpile
+        .set(
+            strategy_game::economy::resources::ResourceType::MilitaryEquipment,
+            1_000_000.0,
+        );
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // §14.6 月次System実経路
 // ─────────────────────────────────────────────────────────────────────────
@@ -448,6 +463,7 @@ fn a_completed_ai_recruitment_division_has_the_correct_owner_and_does_not_double
     wipe_out_divisions(&mut app, ai);
     ensure_large_treasury(&mut app, ai);
     ensure_large_available_manpower(&mut app, ai);
+    ensure_large_military_equipment_stockpile(&mut app, ai);
 
     send_month_changed(&mut app, 1800, 2);
     assert_eq!(queue_len(&app, ai), 1);
@@ -842,6 +858,7 @@ fn after_completion_a_country_still_below_target_recruits_its_next_division_the_
     wipe_out_divisions(&mut app, ai);
     ensure_large_treasury(&mut app, ai);
     ensure_large_available_manpower(&mut app, ai);
+    ensure_large_military_equipment_stockpile(&mut app, ai);
 
     send_month_changed(&mut app, 1800, 2);
     assert_eq!(queue_len(&app, ai), 1);

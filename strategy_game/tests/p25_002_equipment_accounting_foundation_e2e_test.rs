@@ -3,8 +3,16 @@
 //! `military::equipment`は、P25-001が確定した既存フィールドの再利用設計
 //! (`CountryStockpile[MilitaryEquipment]`・`Division.equipment`/`max_equipment`)を
 //! 正規APIとしてまとめたものである。本ファイルはその公開APIを直接呼び出す
-//! Test A〜Nに加え、この基盤が既存の募兵・補充・戦闘・復員のいずれからも
-//! まだ呼び出されていないこと(Test O)を確認する。
+//! Test A〜Nを検証する。
+//!
+//! Test Oは、P25-002時点では本番経路(募兵・補充・戦闘・復員)のいずれからも
+//! `military::equipment`が呼び出されていないことを確認する意図だった。P25-003で
+//! `military::recruitment::process_recruitment`が`try_issue_equipment`を実際に
+//! 呼び出すよう接続されたため(`tests/p25_003_recruitment_equipment_issue_e2e_test.rs`
+//! 参照)、この前提はもはや成り立たない——Test O自体は`try_issue_equipment`単体の
+//! no-op呼び出しを確認するだけの単純なテストであり、動作としては引き続き有効な
+//! ままなので削除はしないが、コメントの主張は本ファイルの範囲を超えて古くなって
+//! いたため、ここで訂正しておく。
 
 use strategy_game::economy::resources::{CountryStockpile, ResourceType};
 use strategy_game::military::equipment::{
@@ -232,27 +240,24 @@ fn test_n_operation_sequence_conservation() {
     );
 }
 
-// ─── Test O: 既存経路非接続 ──────────────────────────────────────────────
+// ─── Test O: 装備APIの単体no-op回帰(P25-003更新) ─────────────────────
 //
-// military::equipmentはP25-002の時点でどの本番経路からも呼び出されていない。
-// これは以下の既存回帰テストが引き続き無変更のまま合格することによって
-// 間接的に証明される(実行はこのテストファイル自身ではなく、P25-002の検証
-// コマンド一式(§18)としてtest runner側で行う——本テストはその方針をコードとして
-// 明示するための記録)。
+// P25-002時点では、military::equipmentがどの本番経路からも呼び出されていない
+// ことを示す意図のテストだった。P25-003で`military::recruitment::
+// process_recruitment`が`try_issue_equipment`を実際に呼び出すよう接続された
+// ため(`tests/p25_003_recruitment_equipment_issue_e2e_test.rs`参照)、この
+// 前提はもう成り立たない。テスト自体(0量no-opの成功確認)は引き続き有効な
+// 回帰であるため残す。
+//
+// P25-002-REV-001以降、補充(`military::reinforcement`)・復員
+// (`military::demobilization`)・戦闘損失(`military::update`/`combat_calc`)は
+// 依然としてequipmentへ一切触れない(以下の既存回帰テストが無変更のまま合格
+// することで間接的に確認される):
 //
 // - military::reinforcement::tests::reinforcement_never_touches_treasury_equipment_organization_or_experience
-//   (補充がequipmentへ一切触れないことを既に固定済み)
 // - military::demobilization::tests::demobilization_never_touches_treasury_or_equipment_related_fields
-//   (復員がequipmentへ一切触れないことを既に固定済み)
-// - military::recruitment::request_recruitment は引き続きtreasuryのみを参照し、
-//   CountryStockpile[MilitaryEquipment]には一切触れない(grepで再確認済み)。
 #[test]
-fn test_o_equipment_module_is_not_wired_into_any_production_path_yet() {
-    // military::equipmentの型・関数のみを参照する回帰確認(コンパイルが通り、
-    // かつ他モジュールからの呼び出しが存在しないことは `grep -rn
-    // "military::equipment::" src/military/recruitment.rs src/military/reinforcement.rs
-    // src/military/update.rs src/military/combat_calc.rs src/military/demobilization.rs`
-    // が0件であることで担保される(P25-002報告書§26参照)。
+fn test_o_zero_amount_issue_is_a_deterministic_no_op() {
     let mut stockpile = stockpile_with(0.0);
     let mut equipment = 0.0;
     // 0量の操作が成功すること自体が「配線されていなくても単体で正しく動く」ことの証明。

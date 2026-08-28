@@ -21,6 +21,7 @@ use strategy_game::common::{CountryId, DivisionId, StateId};
 use strategy_game::country::{CountryPlugin, CountryRegistry, PlayerCountry};
 use strategy_game::diplomacy::DiplomacyPlugin;
 use strategy_game::economy::EconomyPlugin;
+use strategy_game::economy::resources::ResourceType;
 use strategy_game::military::MilitaryPlugin;
 use strategy_game::military::army::ArmyRegistry;
 use strategy_game::military::battle::{Battle, BattleRegistry, BattleStatus};
@@ -340,11 +341,21 @@ fn full_lifecycle_cycle_preserves_the_manpower_ledger_at_every_stage() {
     assert_eq!(ledger0.permanent_military_losses, 0);
 
     // ステージ1: プレイヤー募兵要求(既存request_recruitment経由)。
+    // P25-003: Division生成時に国家備蓄からMilitaryEquipmentを支給するようになった
+    // ため、完成(ステージ2)まで進めたいこのテストでは必要量以上を明示的に用意する。
     {
         let mut state: SystemState<(ResMut<CountryRegistry>, Res<MilitaryRegistry>)> =
             SystemState::new(app.world_mut());
         let (mut cr, mr) = state.get_mut(app.world_mut()).unwrap();
+        let required_equipment = mr
+            .definitions
+            .get(&STANDARD_INFANTRY_DEFINITION_ID)
+            .unwrap()
+            .required_equipment;
         let country = cr.get_mut(player).unwrap();
+        country
+            .stockpile
+            .set(ResourceType::MilitaryEquipment, required_equipment);
         request_recruitment(country, &mr, STANDARD_INFANTRY_DEFINITION_ID, capital).unwrap();
         state.apply(app.world_mut());
     }
@@ -862,6 +873,11 @@ fn a_save_and_reload_partway_through_matches_an_uninterrupted_run() {
             let c = cr.get_mut(ai).unwrap();
             c.treasury = 1_000_000.0;
             c.available_manpower = 1_000_000;
+            // P25-003: AI募兵が装備不足で待機し、そのタイミング差が(戦争・外交等を
+            // 経由して)player treasuryへ波及するのを避けるため、比較対象外の
+            // AI国家には十分なMilitaryEquipment備蓄を与えておく。
+            c.stockpile
+                .set(ResourceType::MilitaryEquipment, 1_000_000.0);
         }
     }
     for m in 1..=6u8 {
@@ -877,6 +893,8 @@ fn a_save_and_reload_partway_through_matches_an_uninterrupted_run() {
             let c = cr.get_mut(ai).unwrap();
             c.treasury = 1_000_000.0;
             c.available_manpower = 1_000_000;
+            c.stockpile
+                .set(ResourceType::MilitaryEquipment, 1_000_000.0);
         }
     }
     for m in 1..=3u8 {
@@ -1024,19 +1042,34 @@ fn an_unresolved_recruitment_queue_definition_is_reported_as_an_explicit_error_n
     // 到達可能になった場合に備え、「タイマーが尽きると黙って消える」という
     // 挙動自体は変えていないことをここで固定しておく(§18 Low/Medium該当、
     // 詳細は監査報告書を参照)。
+    //
+    // P25-003: このAI国家のtreasuryは本テストで意図的に底上げしていない。旧実装
+    // ではrequired_equipmentがtreasuryから差し引かれていたため、AIは数回の募兵で
+    // treasury不足に陥り自然に募兵を停止していた(結果としてqueueが空のまま
+    // 3か月間安定していた)。P25-003でtreasury消費自体が廃止されたため、この
+    // AIはmanpowerが許す限り毎月継続的に募兵し続けるようになった——これは
+    // 意図した挙動変化であり(§5参照)、3か月経過時点で新しい正当な募兵項目が
+    // キューに存在していても不具合ではない。したがって本テストの主張は
+    // 「queueが完全に空になる」ではなく「不正なdivision_id(999_999)を参照する
+    // 元の項目がもう存在しない」ことへ訂正する。
     for m in 1..=3u8 {
         advance_one_simulated_month(&mut app, 1800, m, 30); // must not panic
     }
-    assert_eq!(
-        app.world()
-            .resource::<CountryRegistry>()
-            .get(ai)
-            .unwrap()
-            .recruitment_queue
-            .len(),
-        0,
-        "the unresolved queue item is silently drained once its timer expires (pre-existing \
-         process_recruitment behavior, unreachable via request_recruitment in real play)"
+    let final_queue = app
+        .world()
+        .resource::<CountryRegistry>()
+        .get(ai)
+        .unwrap()
+        .recruitment_queue
+        .clone();
+    assert!(
+        final_queue
+            .iter()
+            .all(|item| item.division_id != strategy_game::common::DivisionDefinitionId(999_999)),
+        "the unresolved queue item must be drained once its timer expires (pre-existing \
+         process_recruitment behavior, unreachable via request_recruitment in real play); \
+         any remaining items must be legitimately-queued new recruitment, not the original \
+         unresolvable one: {final_queue:?}"
     );
     assert!(
         ledger_for(&app, ai).is_ok(),

@@ -1,6 +1,7 @@
 use crate::app::game_state::GameState;
 use crate::common::{ArmyId, CountryId, DivisionDefinitionId, DivisionId, FrontlineId, StateId};
 use crate::country::{CountryRegistry, PlayerCountry};
+use crate::economy::resources::ResourceType;
 use crate::localization::{CurrentLocale, TranslationCatalog, localized_text, t, tf};
 use crate::map::division_selection::SelectedDivision;
 use crate::map::frontline_selection::{FrontlineAssignmentAttempted, FrontlineSelectMode};
@@ -989,9 +990,13 @@ fn update_recruit_button_ui(
         RecruitFeasibility::InsufficientManpower => {
             "military_panel.recruit_status_insufficient_manpower"
         }
-        RecruitFeasibility::InsufficientFunds => "military_panel.recruit_status_insufficient_funds",
     };
     if let Some(def) = military_registry.definitions.get(&RECRUIT_DIVISION_ID) {
+        // P25-003: required_equipmentは通貨ではなく物理MilitaryEquipment必要量
+        // であるため、旧来の「Funds/資金」表示(treasury基準)を装備備蓄基準へ
+        // 訂正する。装備充足はキュー投入時の条件ではなく(evaluate_recruit_
+        // feasibilityは判定しない)、Division生成時に決まるため、ここでは
+        // 現在値の参考表示のみを行う。
         let recruit_line = tf(
             catalog,
             locale.0,
@@ -999,8 +1004,14 @@ fn update_recruit_button_ui(
             vec![
                 ("avail_manpower", country.available_manpower.to_string()),
                 ("req_manpower", def.required_manpower.to_string()),
-                ("avail_treasury", format!("{:.0}", country.treasury)),
-                ("req_treasury", format!("{:.0}", def.required_equipment)),
+                (
+                    "avail_equipment",
+                    format!(
+                        "{:.0}",
+                        country.stockpile.get(ResourceType::MilitaryEquipment)
+                    ),
+                ),
+                ("req_equipment", format!("{:.0}", def.required_equipment)),
                 ("status", t(catalog, locale.0, recruit_status_key)),
             ],
         );
@@ -3131,8 +3142,10 @@ mod tests {
             .expect("player country must exist")
     }
 
+    /// P25-003: `required_equipment`はもはやtreasuryから差し引かれる通貨ではないため、
+    /// 募兵キュー投入(このSystem経由)は成功してもtreasuryを変化させない。
     #[test]
-    fn handle_recruit_buttons_success_queues_recruitment_and_deducts_cost() {
+    fn handle_recruit_buttons_success_queues_recruitment_without_touching_treasury() {
         let mut app = build_test_app();
         app.add_systems(Update, handle_recruit_buttons);
         press_recruit_button(&mut app, DivisionDefinitionId(1));
@@ -3142,18 +3155,25 @@ mod tests {
         let country = player_country_data(&app);
         assert_eq!(country.recruitment_queue.len(), 1);
         assert_eq!(country.available_manpower, 10_000);
-        assert_eq!(country.treasury, 400.0);
+        assert_eq!(country.treasury, 500.0);
         assert_eq!(country.mobilized_manpower, 10_000);
     }
 
+    /// P25-003: MilitaryEquipment備蓄はキュー投入時の条件ではないため(§8)、
+    /// treasuryやstockpileの多寡では投入を拒否しなくなった。キュー投入時点で
+    /// 依然として拒否され得るのは、`DivisionDefinition.required_equipment`自体が
+    /// 不正(NaN・無限大・負値・正規値域超過)な場合だけである。
     #[test]
-    fn handle_recruit_buttons_insufficient_funds_does_not_mutate_state() {
+    fn handle_recruit_buttons_invalid_required_equipment_does_not_mutate_state() {
         let mut app = build_test_app();
-        app.world_mut()
-            .resource_mut::<CountryRegistry>()
-            .get_mut(crate::common::CountryId(1))
-            .unwrap()
-            .treasury = 1.0;
+        {
+            let mut military_registry = app.world_mut().resource_mut::<MilitaryRegistry>();
+            military_registry
+                .definitions
+                .get_mut(&DivisionDefinitionId(1))
+                .unwrap()
+                .required_equipment = f64::NAN;
+        }
         app.add_systems(Update, handle_recruit_buttons);
         press_recruit_button(&mut app, DivisionDefinitionId(1));
 
@@ -3162,7 +3182,7 @@ mod tests {
         let country = player_country_data(&app);
         assert_eq!(country.recruitment_queue.len(), 0);
         assert_eq!(country.available_manpower, 20_000);
-        assert_eq!(country.treasury, 1.0);
+        assert_eq!(country.treasury, 500.0);
     }
 
     #[test]

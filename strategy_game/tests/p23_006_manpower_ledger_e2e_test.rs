@@ -33,6 +33,7 @@ use strategy_game::common::{
 use strategy_game::country::{CountryData, CountryPlugin, CountryRegistry, PlayerCountry};
 use strategy_game::diplomacy::DiplomacyPlugin;
 use strategy_game::economy::EconomyPlugin;
+use strategy_game::economy::resources::ResourceType;
 use strategy_game::localization::{CurrentLocale, Locale, MISSING_KEY_MARKER_PREFIX};
 use strategy_game::military::MilitaryPlugin;
 use strategy_game::military::army::ArmyRegistry;
@@ -389,17 +390,23 @@ fn division_completion_moves_living_from_queue_to_division_without_changing_the_
         BattleRegistry::default(),
         WarRegistry::default(),
     );
-    app.world_mut()
-        .resource_mut::<CountryRegistry>()
-        .get_mut(CountryId(0))
-        .unwrap()
-        .recruitment_queue
-        .push(RecruitmentQueueItem {
+    {
+        let mut country_registry = app.world_mut().resource_mut::<CountryRegistry>();
+        let country = country_registry.get_mut(CountryId(0)).unwrap();
+        // P25-003: process_recruitmentがDivision生成時に国家備蓄からMilitaryEquipment
+        // を支給するようになったため、test_definitionのrequired_equipment(100.0)を
+        // 完全装備できるだけの備蓄を用意する(このテストの主眼はmanpower会計であり、
+        // 装備は完了を妨げないよう十分に用意する)。
+        country
+            .stockpile
+            .set(ResourceType::MilitaryEquipment, 100.0);
+        country.recruitment_queue.push(RecruitmentQueueItem {
             division_id: DivisionDefinitionId(0),
             target_state: StateId(0),
             days_remaining: 1,
             total_days: 1,
         });
+    }
 
     let before = ledger_for(&app, CountryId(0));
     assert_eq!(before.living_military_manpower, 10_000);

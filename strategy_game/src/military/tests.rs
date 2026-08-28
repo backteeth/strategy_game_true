@@ -3,6 +3,7 @@
 
 use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use crate::country::{CountryData, CountryRegistry, CountryStatus};
+use crate::economy::resources::ResourceType;
 use crate::military::data::{
     Division, DivisionDefinition, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry,
 };
@@ -90,16 +91,63 @@ fn test_recruitment_manpower_shortage() {
     assert_eq!(country.recruitment_queue.len(), 0);
 }
 
+/// P25-003: `required_equipment`はもはやtreasuryから差し引かれる通貨ではないため、
+/// `MilitaryEquipment`備蓄が不足していても`request_recruitment`(キュー投入)自体は
+/// 成功する——装備充足が判定されるのは`process_recruitment`でのDivision生成時
+/// のみである(§8)。備蓄が揃うまでキュー項目は`days_remaining=0`のまま待機し続け、
+/// 揃った時点で初めてDivisionが生成される。
 #[test]
-fn test_recruitment_equipment_shortage() {
-    let registry = setup_registry();
-    let mut country = CountryData::default();
-    country.available_manpower = 20_000;
-    country.treasury = 50.0; // Not enough
+fn test_recruitment_equipment_shortage_delays_division_spawn_until_stockpile_is_sufficient() {
+    let mut military_registry = setup_registry();
+    let mut country_registry = CountryRegistry::default();
 
-    let result = request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1));
-    assert!(result.is_err());
-    assert_eq!(country.recruitment_queue.len(), 0);
+    let mut country = CountryData::default();
+    country.id = CountryId(1);
+    country.available_manpower = 20_000;
+    // country.stockpile[MilitaryEquipment]は既定の0のまま(必要100.0に対して不足)。
+
+    request_recruitment(
+        &mut country,
+        &military_registry,
+        DivisionDefinitionId(1),
+        StateId(1),
+    )
+    .unwrap();
+    assert_eq!(
+        country.recruitment_queue.len(),
+        1,
+        "queueing must succeed even though the equipment stockpile is empty"
+    );
+    country_registry.countries.push(country);
+
+    // recruitment_days(30日)を超えて進めても、装備不足のためDivisionは生成されない。
+    for _ in 0..35 {
+        process_recruitment(&mut country_registry, &mut military_registry);
+    }
+    assert_eq!(military_registry.divisions.len(), 0);
+    assert_eq!(
+        country_registry.countries[0].recruitment_queue.len(),
+        1,
+        "the queue item must remain, waiting for equipment"
+    );
+    assert_eq!(
+        country_registry.countries[0].recruitment_queue[0].days_remaining,
+        0
+    );
+
+    // 装備が揃うと、次の日次処理で1回だけ生成される。
+    country_registry.countries[0]
+        .stockpile
+        .set(ResourceType::MilitaryEquipment, 100.0);
+    process_recruitment(&mut country_registry, &mut military_registry);
+    assert_eq!(military_registry.divisions.len(), 1);
+    assert_eq!(country_registry.countries[0].recruitment_queue.len(), 0);
+    assert_eq!(
+        country_registry.countries[0]
+            .stockpile
+            .get(ResourceType::MilitaryEquipment),
+        0.0
+    );
 }
 
 #[test]
@@ -111,6 +159,11 @@ fn test_recruitment_progress_and_completion() {
     country.id = CountryId(1);
     country.available_manpower = 20_000;
     country.treasury = 500.0;
+    // P25-003: required_equipment(100.0)を完全装備できるだけの備蓄を用意する
+    // (既存の成功シナリオを、装備接続後も成功させ続けるための必須fixture)。
+    country
+        .stockpile
+        .set(ResourceType::MilitaryEquipment, 100.0);
 
     request_recruitment(
         &mut country,
@@ -136,6 +189,17 @@ fn test_recruitment_progress_and_completion() {
 
     assert_eq!(country_registry.countries[0].recruitment_queue.len(), 0);
     assert_eq!(military_registry.divisions.len(), 1);
+    let division = military_registry.divisions.values().next().unwrap();
+    assert_eq!(division.equipment, 100.0);
+    assert_eq!(division.max_equipment, 100.0);
+    assert_eq!(
+        country_registry.countries[0]
+            .stockpile
+            .get(ResourceType::MilitaryEquipment),
+        0.0
+    );
+    // P25-003: required_equipmentはもはや通貨ではないため、treasuryは変化しない。
+    assert_eq!(country_registry.countries[0].treasury, 500.0);
 }
 
 #[test]
@@ -148,7 +212,8 @@ fn test_recruitment_cancellation() {
     request_recruitment(&mut country, &registry, DivisionDefinitionId(1), StateId(1)).unwrap();
 
     assert_eq!(country.available_manpower, 10_000);
-    assert_eq!(country.treasury, 400.0);
+    // P25-003: required_equipmentはもはやtreasuryから差し引かれない。
+    assert_eq!(country.treasury, 500.0);
 
     let cancel_result = cancel_recruitment(&mut country, &registry, 0);
     assert!(cancel_result.is_ok());
@@ -309,13 +374,16 @@ fn evaluate_recruit_feasibility_insufficient_manpower() {
     assert_eq!(feasibility, RecruitFeasibility::InsufficientManpower);
 }
 
+/// P25-003: 装備(`MilitaryEquipment`備蓄)はキュー投入時の判定条件ではないため
+/// (§8)、備蓄が空(既定の0)でも`evaluate_recruit_feasibility`は`Ready`を返す。
+/// 実際の支給可否はDivision生成時(`process_recruitment`)まで確定しない。
 #[test]
-fn evaluate_recruit_feasibility_insufficient_funds() {
+fn evaluate_recruit_feasibility_is_ready_even_without_equipment_stockpile() {
     let registry = setup_registry();
     let mut country = CountryData::default();
     country.id = CountryId(1);
     country.available_manpower = 20_000;
-    country.treasury = 1.0; // 不足 (必要100.0)
+    // country.stockpile[MilitaryEquipment]は既定の0のまま(必要100.0に対して不足)。
     let state_registry = StateRegistry::build(vec![owned_state(5, CountryId(1))]);
 
     let feasibility = evaluate_recruit_feasibility(
@@ -326,7 +394,7 @@ fn evaluate_recruit_feasibility_insufficient_funds() {
         &registry,
         DivisionDefinitionId(1),
     );
-    assert_eq!(feasibility, RecruitFeasibility::InsufficientFunds);
+    assert_eq!(feasibility, RecruitFeasibility::Ready);
 }
 
 #[test]
