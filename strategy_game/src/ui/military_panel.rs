@@ -2125,7 +2125,8 @@ fn demobilize_failure_key(err: &DemobilizationError) -> &'static str {
         | DemobilizationError::DivisionNotIdle
         | DemobilizationError::DivisionReferencedByOngoingBattle
         | DemobilizationError::InsufficientBurden
-        | DemobilizationError::AvailableManpowerOverflow => {
+        | DemobilizationError::AvailableManpowerOverflow
+        | DemobilizationError::EquipmentReturnFailed(_) => {
             "military_panel.division_demobilize_fail_other"
         }
     }

@@ -19,6 +19,7 @@ use crate::country::CountryRegistry;
 use crate::military::army::ArmyRegistry;
 use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::data::{DivisionStatus, MilitaryRegistry};
+use crate::military::equipment::{EquipmentAccountingError, try_return_equipment};
 use crate::military::manpower::{ManpowerLedgerError, compute_manpower_ledger};
 use crate::war::data::WarRegistry;
 use crate::war::frontline::FrontlineRegistry;
@@ -26,7 +27,7 @@ use crate::war::frontline::FrontlineRegistry;
 /// `demobilize_division`が失敗し得る理由。呼び出し元(UI・テスト)が理由ごとに
 /// 安全に分岐できるよう、UI上で意味のある区別(戦闘中/移動中/撤退中など)は
 /// 個別のバリアントとして表現する。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DemobilizationError {
     /// 指定した国家が`CountryRegistry`に存在しない。
     CountryNotFound,
@@ -60,11 +61,15 @@ pub enum DemobilizationError {
     InsufficientBurden,
     /// `available_manpower + R`が`u64`の範囲を超える。
     AvailableManpowerOverflow,
+    /// 生存装備(`division.equipment`)の国家備蓄への返却が失敗した(P25-006)。
+    /// `try_return_equipment`が返す理由をそのまま透過する(通常のゲーム経路では
+    /// 発生しないはずの異常状態: 国家備蓄が正規最大unitsを超える等)。
+    EquipmentReturnFailed(EquipmentAccountingError),
 }
 
 /// 復員成功時の結果。UI・テストが復員による人的資源帳簿の遷移を確認できるよう、
 /// 前後の`workforce_burden`(=`mobilized_manpower`)を含める。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DemobilizationOutcome {
     pub country_id: CountryId,
     pub division_id: DivisionId,
@@ -72,15 +77,23 @@ pub struct DemobilizationOutcome {
     pub returned_manpower: u64,
     pub workforce_burden_before: u64,
     pub workforce_burden_after: u64,
+    /// 国家備蓄へ返却した生存装備量(P25-006)。`division.equipment`(現在装備)の
+    /// 復員実行時点の値そのものであり、`max_equipment`ではない。
+    pub returned_equipment: f64,
 }
 
 /// 指定したDivisionを復員する。
 ///
 /// 検証にすべて成功した場合のみ状態を変更する(部分成功を許さない)。いずれかの
-/// 検証に失敗した場合、`available_manpower`・`mobilized_manpower`・`MilitaryRegistry`・
-/// `ArmyRegistry`・`FrontlineRegistry`のいずれも変更しない。
+/// 検証に失敗した場合、`available_manpower`・`mobilized_manpower`・
+/// `CountryStockpile[MilitaryEquipment]`・`MilitaryRegistry`・`ArmyRegistry`・
+/// `FrontlineRegistry`のいずれも変更しない。
 ///
-/// 装備・資金・経験値・Organizationは一切返還しない(P23-007の対象外)。
+/// P25-006: 生存装備(`division.equipment`、`max_equipment`ではない)を所属国の
+/// `CountryStockpile[MilitaryEquipment]`へ`try_return_equipment`経由で返却する。
+/// 人的資源返却・装備返却・Division削除は1つの復員ライフサイクルとして原子的に
+/// 扱う(いずれか1つでも失敗すれば全てロールバックする)。資金・経験値・
+/// Organizationは引き続き一切返還しない(P23-007の対象外のまま)。
 #[allow(clippy::too_many_arguments)]
 pub fn demobilize_division(
     country_registry: &mut CountryRegistry,
@@ -129,6 +142,7 @@ pub fn demobilize_division(
     }
 
     let returned_manpower = division.manpower;
+    let division_equipment = division.equipment;
 
     let ledger = compute_manpower_ledger(country, military_registry)
         .map_err(DemobilizationError::LedgerUnavailable)?;
@@ -148,12 +162,26 @@ pub fn demobilize_division(
         .checked_sub(returned_manpower)
         .ok_or(DemobilizationError::InsufficientBurden)?;
 
+    // P25-006: 装備返却をcloneした一時値へ適用してから検証する(§10.1)。
+    // ここで失敗した場合、上でチェック済みのmanpower会計値もまだ一切
+    // commitされていないため、国家備蓄・Division・manpowerのいずれも不変のまま
+    // 安全に失敗できる。
+    let mut stockpile_after = country.stockpile.clone();
+    let mut equipment_after_local = division_equipment;
+    try_return_equipment(
+        &mut stockpile_after,
+        &mut equipment_after_local,
+        division_equipment,
+    )
+    .map_err(DemobilizationError::EquipmentReturnFailed)?;
+
     // ここまでの検証が全て成功したので、以降は失敗し得ない操作のみ実行する。
     let country = country_registry
         .get_mut(country_id)
         .expect("country existence already verified above");
     country.available_manpower = available_after;
     country.mobilized_manpower = workforce_burden_after;
+    country.stockpile = stockpile_after;
 
     military_registry.remove_division(division_id);
     army_registry.sanitize_references(military_registry);
@@ -165,6 +193,7 @@ pub fn demobilize_division(
         returned_manpower,
         workforce_burden_before,
         workforce_burden_after,
+        returned_equipment: division_equipment,
     })
 }
 
@@ -367,7 +396,11 @@ mod tests {
     }
 
     #[test]
-    fn demobilization_never_touches_treasury_or_equipment_related_fields() {
+    fn demobilization_never_touches_treasury() {
+        // P25-006より前は装備も一切変化しなかったためテスト名に含まれていたが、
+        // P25-006で生存装備は正規に国家備蓄へ返却されるようになった
+        // (装備返却の数値検証はtests/p25_006_demobilization_equipment_return_e2e_test.rs
+        // 側で網羅する)。ここではtreasuryが依然一切無関係であることだけを守る。
         let mut h = harness(
             vec![CountryData {
                 treasury: 555.0,
