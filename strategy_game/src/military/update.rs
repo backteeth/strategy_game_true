@@ -7,6 +7,7 @@ use crate::military::combat_calc::{
     resolve_combat_day_multi,
 };
 use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
+use crate::military::equipment::{calculate_proportional_equipment_loss, try_destroy_equipment};
 use crate::military::invasion::{find_retreat_destination, occupy_state};
 use crate::military::movement::{process_movement, validate_and_stop_invalid_movements};
 use crate::state::data::StateRegistry;
@@ -167,16 +168,10 @@ fn process_daily_battles(
             resolve_combat_day_multi(&attacker_refs, &defender_refs, terrain_bonus);
 
         for (division_id, (manpower_loss, org_loss)) in atk_results {
-            if let Some(division) = military_registry.divisions.get_mut(&division_id) {
-                division.manpower = division.manpower.saturating_sub(manpower_loss);
-                division.organization = (division.organization - org_loss).max(0.0);
-            }
+            apply_combat_casualty(military_registry, division_id, manpower_loss, org_loss);
         }
         for (division_id, (manpower_loss, org_loss)) in def_results {
-            if let Some(division) = military_registry.divisions.get_mut(&division_id) {
-                division.manpower = division.manpower.saturating_sub(manpower_loss);
-                division.organization = (division.organization - org_loss).max(0.0);
-            }
+            apply_combat_casualty(military_registry, division_id, manpower_loss, org_loss);
         }
 
         // 経過日数更新
@@ -184,6 +179,57 @@ fn process_daily_battles(
             b.elapsed_days += 1;
         }
     }
+}
+
+/// 1体のDivisionへ、戦闘計算が要求したmanpower/organization損失を原子的に適用する
+/// (P25-004)。`saturating_sub`によって実際に減少したmanpower量(actual casualty、
+/// 予定damageが現在manpowerを超えても現在manpowerでclampされた後の値)に比例して、
+/// damage適用直前の現在装備量(`max_equipment`ではない)を基準に装備を破壊する。
+///
+/// manpower・equipment・organizationは同一の成功処理として扱う: 装備損失の計算
+/// または`try_destroy_equipment`が失敗した場合(現在の正常ゲーム経路では発生しない
+/// はずの異常状態)、この師団のmanpower/organizationも一切更新せず、次の日次
+/// イベントへ持ち越す。国家のmilitary equipment備蓄には一切触れない
+/// (破壊された装備は備蓄へ戻らない、§12)。
+fn apply_combat_casualty(
+    military_registry: &mut MilitaryRegistry,
+    division_id: DivisionId,
+    manpower_loss: u64,
+    org_loss: f32,
+) {
+    let Some(division) = military_registry.divisions.get_mut(&division_id) else {
+        return;
+    };
+
+    let manpower_before = division.manpower;
+    let manpower_after = manpower_before.saturating_sub(manpower_loss);
+    let actual_casualty = manpower_before - manpower_after;
+
+    let loss = match calculate_proportional_equipment_loss(
+        division.equipment,
+        manpower_before,
+        actual_casualty,
+    ) {
+        Ok(loss) => loss,
+        Err(err) => {
+            error!(
+                "[Battle] equipment loss calculation failed for {:?} (equipment={}, manpower_before={}, actual_casualty={}): {:?}; casualty not applied this tick",
+                division_id, division.equipment, manpower_before, actual_casualty, err
+            );
+            return;
+        }
+    };
+
+    if let Err(err) = try_destroy_equipment(&mut division.equipment, loss.destroyed) {
+        error!(
+            "[Battle] try_destroy_equipment failed for {:?} (destroyed={}): {:?}; casualty not applied this tick",
+            division_id, loss.destroyed, err
+        );
+        return;
+    }
+
+    division.manpower = manpower_after;
+    division.organization = (division.organization - org_loss).max(0.0);
 }
 
 /// 戦闘終了条件を判定し、後処理を行う
@@ -456,6 +502,74 @@ mod tests {
         }
     }
 
+    /// P25-004: `make_division`より細かく状態を制御できる版(manpower/equipment/
+    /// max_equipmentを個別に指定できる)。既存の`make_division`はP21-siegeの
+    /// テストが直接依存しているため、シグネチャを変えずこちらを新設する。
+    #[allow(clippy::too_many_arguments)]
+    fn make_division_ex(
+        id: usize,
+        owner: CountryId,
+        state: StateId,
+        manpower: u64,
+        max_manpower: u64,
+        equipment: f64,
+        max_equipment: f64,
+        atk: i32,
+        def: i32,
+    ) -> Division {
+        Division {
+            id: DivisionId(id),
+            owner,
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: state,
+            destination: None,
+            current_path: vec![],
+            target_state: None,
+            manpower,
+            max_manpower,
+            equipment,
+            max_equipment,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 100.0,
+            max_morale: 100.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: DivisionStatus::Fighting,
+            def_id: DivisionDefinitionId(0),
+            attack_power: atk,
+            defense_power: def,
+            combat_id: Some(BattleId(0)),
+        }
+    }
+
+    /// P25-004: 単一州での1つの戦闘を組み立てる(`BattleRegistry::start_battle`が
+    /// 実際のIDを採番するため、`id`フィールドの値自体は使われない)。
+    fn make_battle(
+        attacker_country: CountryId,
+        defender_country: CountryId,
+        state: StateId,
+        attacker_ids: Vec<DivisionId>,
+        defender_ids: Vec<DivisionId>,
+    ) -> Battle {
+        let attacker_origins = attacker_ids.iter().map(|id| (*id, state)).collect();
+        Battle {
+            id: BattleId(0),
+            war_id: WarId(0),
+            state_id: state,
+            attacker_country,
+            defender_country,
+            attacker_division_ids: attacker_ids,
+            defender_division_ids: defender_ids,
+            attacker_origins,
+            start_date: "1800/01/01".to_string(),
+            elapsed_days: 0,
+            status: BattleStatus::Ongoing,
+        }
+    }
+
     fn setup_war(attacker: CountryId, defender: CountryId) -> WarRegistry {
         let mut reg = WarRegistry::default();
         let war = War {
@@ -717,5 +831,663 @@ mod tests {
             DivisionStatus::Idle
         );
         assert_eq!(mil.divisions[&weak_attacker.id].current_state, origin);
+    }
+
+    // ─── P25-004: 戦闘損耗による軍事装備損失 ─────────────────────────────
+    // process_daily_battles/resolve_finished_battlesは`military::update`の
+    // 稼働中の戦闘経路そのもの(privateのため、この内部テストモジュールからのみ
+    // 直接呼び出せる)。
+
+    use crate::economy::resources::military_equipment_units_to_value;
+
+    /// Test I: 予定damageがmanpowerを超えても、実際に減少した量(manpower_before)
+    /// だけを装備損失の基準に使い、Division全滅時は現在装備を全損させる。
+    #[test]
+    fn test_i_overkill_damage_uses_the_manpower_clamped_actual_casualty() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        // 攻撃力を極端に大きくし、1日で守備側のmanpower(50)を大幅に上回る
+        // 予定damageを発生させる(defenderの実効戦力はほぼ0)。
+        let attacker = make_division_ex(
+            0,
+            attacker_country,
+            target,
+            10_000,
+            10_000,
+            100.0,
+            100.0,
+            100_000,
+            10,
+        );
+        let defender =
+            make_division_ex(1, defender_country, target, 50, 10_000, 20.0, 100.0, 10, 10);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        let defender_after = mil.divisions.get(&defender.id).unwrap();
+        assert_eq!(
+            defender_after.manpower, 0,
+            "予定damageがmanpowerを大幅に超えるため、1日でmanpowerは0になるはず"
+        );
+        assert_eq!(
+            defender_after.equipment, 0.0,
+            "actual casualty(=manpower_before)が現在装備を全損させるはず"
+        );
+
+        let mut state_reg = state_reg;
+        resolve_finished_battles(&mut mil, &mut state_reg, &mut battle_reg, &war_reg);
+        assert!(
+            !mil.divisions.contains_key(&defender.id),
+            "manpower=0のDivisionはresolve_finished_battlesで除去されるはず"
+        );
+    }
+
+    /// Test J: 装備損失は`max_equipment`を変更しない(この関数はそもそも
+    /// `max_equipment`を引数に取らない)。
+    #[test]
+    fn test_j_max_equipment_is_never_changed_by_combat_losses() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let defender = make_division(1, defender_country, target, 10, 10);
+        let max_equipment_before = defender.max_equipment;
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        let defender_after = mil.divisions.get(&defender.id).unwrap();
+        assert_eq!(defender_after.max_equipment, max_equipment_before);
+        assert!(
+            defender_after.equipment < defender.equipment,
+            "同条件の戦闘なので現在装備は実際に減っているはず"
+        );
+    }
+
+    /// Test K: 戦闘で破壊された装備は国家備蓄(`CountryStockpile[MilitaryEquipment]`)
+    /// へ一切戻らない。`process_daily_battles`/`resolve_finished_battles`は
+    /// そもそも`CountryStockpile`を引数に取らないため、構造的に不変であることを
+    /// ここで明示的に確認する。
+    #[test]
+    fn test_k_national_equipment_stockpile_is_never_touched_by_combat() {
+        use crate::economy::resources::{CountryStockpile, ResourceType};
+
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let defender = make_division(1, defender_country, target, 10, 15);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitaryEquipment, 500.0);
+        let stockpile_bits_before = stockpile.get(ResourceType::MilitaryEquipment).to_bits();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        assert_eq!(
+            stockpile.get(ResourceType::MilitaryEquipment).to_bits(),
+            stockpile_bits_before,
+            "国家備蓄は戦闘関数へ一切渡されないため、ビット単位で不変のはず"
+        );
+    }
+
+    /// Test L: L/K整合。破壊された装備量とは無関係に、Kの増分・Lの減分は
+    /// actual casualtyと厳密に一致する(装備がKへ混入しない)。
+    #[test]
+    fn test_l_manpower_ledger_k_and_l_move_by_exactly_the_actual_casualty() {
+        use crate::country::CountryData;
+        use crate::military::manpower::compute_manpower_ledger;
+
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let defender = make_division(1, defender_country, target, 10, 15);
+
+        let defender_country_data = CountryData {
+            id: defender_country,
+            mobilized_manpower: defender.manpower,
+            ..CountryData::default()
+        };
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let ledger_before = compute_manpower_ledger(&defender_country_data, &mil).unwrap();
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        let actual_casualty = defender.manpower - mil.divisions[&defender.id].manpower;
+        assert!(actual_casualty > 0, "この対戦条件では守備側も損耗するはず");
+
+        let ledger_after = compute_manpower_ledger(&defender_country_data, &mil).unwrap();
+        assert_eq!(
+            ledger_before.living_military_manpower - ledger_after.living_military_manpower,
+            actual_casualty,
+            "Lの減少量はactual casualtyと厳密に一致するはず"
+        );
+        assert_eq!(
+            ledger_after.permanent_military_losses - ledger_before.permanent_military_losses,
+            actual_casualty,
+            "Kの増加量はactual casualtyと厳密に一致するはず(装備量が混入しない)"
+        );
+    }
+
+    /// Test M: 装備状態が不正(NaN)な場合、装備・manpower・organizationのいずれも
+    /// mutateされず、この師団に対する当日のcasualty適用全体がスキップされる。
+    #[test]
+    fn test_m_corrupted_equipment_state_blocks_the_entire_casualty_application_atomically() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let mut defender = make_division(1, defender_country, target, 10, 15);
+        defender.equipment = f64::NAN; // 現在の正常経路では発生しないはずの破損状態
+
+        let manpower_before = defender.manpower;
+        let organization_before = defender.organization;
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        let defender_after = mil.divisions.get(&defender.id).unwrap();
+        assert_eq!(
+            defender_after.manpower, manpower_before,
+            "装備会計が失敗した場合、manpowerも変化してはいけない"
+        );
+        assert_eq!(
+            defender_after.organization, organization_before,
+            "装備会計が失敗した場合、organizationも変化してはいけない"
+        );
+        assert!(
+            defender_after.equipment.is_nan(),
+            "元の(不正な)装備状態がそのまま残るはず(黙ってclampされない)"
+        );
+    }
+
+    /// Test O: 複数師団はそれぞれ自身の現在装備量を基準に独立して損失を計算する
+    /// (プールされた/共有された値を使わない)。
+    #[test]
+    fn test_o_multiple_divisions_use_their_own_current_equipment_independently() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker_a = make_division_ex(
+            0,
+            attacker_country,
+            target,
+            10_000,
+            10_000,
+            100.0,
+            100.0,
+            10,
+            10,
+        );
+        let attacker_b = make_division_ex(
+            3,
+            attacker_country,
+            target,
+            10_000,
+            10_000,
+            50.0,
+            50.0,
+            10,
+            10,
+        );
+        let defender = make_division_ex(
+            1,
+            defender_country,
+            target,
+            10_000,
+            10_000,
+            100.0,
+            100.0,
+            10,
+            10,
+        );
+
+        let mut mil = MilitaryRegistry::default();
+        for d in [&attacker_a, &attacker_b, &defender] {
+            mil.divisions.insert(d.id, d.clone());
+        }
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker_a.id, attacker_b.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        for before in [&attacker_a, &attacker_b] {
+            let after = mil.divisions.get(&before.id).unwrap();
+            let actual_casualty = before.manpower - after.manpower;
+            let expected = calculate_proportional_equipment_loss(
+                before.equipment,
+                before.manpower,
+                actual_casualty,
+            )
+            .unwrap();
+            assert_eq!(
+                after.equipment,
+                military_equipment_units_to_value(expected.equipment_units_after),
+                "division {:?} must use its own current equipment, not a shared/pooled value",
+                before.id
+            );
+        }
+        assert_ne!(
+            mil.divisions[&attacker_a.id].equipment,
+            mil.divisions[&attacker_b.id].equipment,
+            "開始時の現在装備が異なれば、結果も異なるはず(プールされていないことの証明)"
+        );
+    }
+
+    /// Test P: 戦闘に参加していない別国家のDivisionは、装備・manpowerとも一切
+    /// 変化しない。
+    #[test]
+    fn test_p_uninvolved_countrys_division_is_never_touched() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let bystander_country = CountryId(3);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let elsewhere = StateId(99);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let defender = make_division(1, defender_country, target, 10, 15);
+        let bystander =
+            make_division_ex(5, bystander_country, elsewhere, 10_000, 10_000, 77.0, 77.0, 10, 10);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+        mil.divisions.insert(bystander.id, bystander.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        let bystander_after = mil.divisions.get(&bystander.id).unwrap();
+        assert_eq!(bystander_after.manpower, bystander.manpower);
+        assert_eq!(bystander_after.equipment, bystander.equipment);
+    }
+
+    /// Test Q: attacker/defenderは同一の式で装備損失を計算する(特別扱いがない)。
+    #[test]
+    fn test_q_attacker_and_defender_use_the_identical_loss_formula() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        // combat_calc.rsのtest_combat_is_deterministicと同じ非対称なstatsを使い、
+        // 両陣営が異なるcasualtyを受けることを保証する。
+        let attacker =
+            make_division_ex(0, attacker_country, target, 8_000, 10_000, 90.0, 100.0, 12, 8);
+        let defender =
+            make_division_ex(1, defender_country, target, 6_000, 10_000, 60.0, 100.0, 9, 14);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        for before in [&attacker, &defender] {
+            let after = mil.divisions.get(&before.id).unwrap();
+            let actual_casualty = before.manpower - after.manpower;
+            assert!(actual_casualty > 0, "両陣営とも損耗するはずの非対称statsのはず");
+            let expected = calculate_proportional_equipment_loss(
+                before.equipment,
+                before.manpower,
+                actual_casualty,
+            )
+            .unwrap();
+            assert_eq!(
+                after.equipment,
+                military_equipment_units_to_value(expected.equipment_units_after),
+                "division {:?} must follow the same canonical formula regardless of attacker/defender role",
+                before.id
+            );
+        }
+    }
+
+    /// Test R: 同一の初期条件・同一日数なら、独立した2回の実行結果は完全に一致する
+    /// (追加のRNGを消費しない決定的な計算であることの確認)。
+    #[test]
+    fn test_r_repeated_runs_from_identical_inputs_are_bit_for_bit_deterministic() {
+        fn run_scenario() -> (u64, f64, u64, f64) {
+            let attacker_country = CountryId(1);
+            let defender_country = CountryId(2);
+            let war_reg = setup_war(attacker_country, defender_country);
+            let target = StateId(2);
+            let mut state_reg = StateRegistry::build(vec![]);
+
+            let attacker = make_division_ex(
+                0,
+                attacker_country,
+                target,
+                10_000,
+                10_000,
+                83.3,
+                100.0,
+                11,
+                9,
+            );
+            let defender = make_division_ex(
+                1,
+                defender_country,
+                target,
+                9_500,
+                10_000,
+                61.7,
+                100.0,
+                9,
+                11,
+            );
+
+            let mut mil = MilitaryRegistry::default();
+            mil.divisions.insert(attacker.id, attacker.clone());
+            mil.divisions.insert(defender.id, defender.clone());
+
+            let mut battle_reg = BattleRegistry::default();
+            battle_reg
+                .start_battle(make_battle(
+                    attacker_country,
+                    defender_country,
+                    target,
+                    vec![attacker.id],
+                    vec![defender.id],
+                ))
+                .unwrap();
+
+            for _ in 0..5 {
+                run_one_day(&mut mil, &mut state_reg, &mut battle_reg, &war_reg);
+                if !battle_reg.battles.contains_key(&BattleId(0))
+                    || battle_reg.battles[&BattleId(0)].status != BattleStatus::Ongoing
+                {
+                    break;
+                }
+            }
+
+            let a = mil.divisions.get(&attacker.id);
+            let d = mil.divisions.get(&defender.id);
+            (
+                a.map(|d| d.manpower).unwrap_or(0),
+                a.map(|d| d.equipment).unwrap_or(0.0),
+                d.map(|x| x.manpower).unwrap_or(0),
+                d.map(|x| x.equipment).unwrap_or(0.0),
+            )
+        }
+
+        let run1 = run_scenario();
+        let run2 = run_scenario();
+        assert_eq!(run1, run2);
+    }
+
+    /// Test S: 現在装備の有無・多寡は、manpower/organization casualtyの結果に
+    /// 一切影響しない(装備損失計算が追加のRNGを消費せず、既存の戦闘計算へ
+    /// フィードバックしないことの確認)。
+    #[test]
+    fn test_s_equipment_amount_does_not_affect_manpower_or_organization_casualties() {
+        fn run_scenario(attacker_equipment: f64, defender_equipment: f64) -> (u64, f32, u64, f32) {
+            let attacker_country = CountryId(1);
+            let defender_country = CountryId(2);
+            let war_reg = setup_war(attacker_country, defender_country);
+            let target = StateId(2);
+            let state_reg = StateRegistry::build(vec![]);
+
+            let attacker = make_division_ex(
+                0,
+                attacker_country,
+                target,
+                10_000,
+                10_000,
+                attacker_equipment,
+                100.0,
+                10,
+                10,
+            );
+            let defender = make_division_ex(
+                1,
+                defender_country,
+                target,
+                10_000,
+                10_000,
+                defender_equipment,
+                100.0,
+                10,
+                15,
+            );
+
+            let mut mil = MilitaryRegistry::default();
+            mil.divisions.insert(attacker.id, attacker.clone());
+            mil.divisions.insert(defender.id, defender.clone());
+
+            let mut battle_reg = BattleRegistry::default();
+            battle_reg
+                .start_battle(make_battle(
+                    attacker_country,
+                    defender_country,
+                    target,
+                    vec![attacker.id],
+                    vec![defender.id],
+                ))
+                .unwrap();
+
+            process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+            let a = &mil.divisions[&attacker.id];
+            let d = &mil.divisions[&defender.id];
+            (a.manpower, a.organization, d.manpower, d.organization)
+        }
+
+        let with_equipment = run_scenario(100.0, 100.0);
+        let without_equipment = run_scenario(0.0, 0.0);
+        assert_eq!(
+            with_equipment, without_equipment,
+            "装備量の違いがmanpower/organization casualtyへ漏れ出してはいけない"
+        );
+    }
+
+    /// Test U: `war::combat::process_combat`(P25-001監査で死んだ経路と確認済み)は、
+    /// P25-004で一切変更・接続されていない。新しい固定小数点API経由なら
+    /// `QuantityOutOfRange`として拒否されるはずの規模の値でも、この関数は依然として
+    /// 素朴な`f64`減算のまま処理を完了する(=別経路のままであることの確認)。
+    #[test]
+    fn test_u_dead_war_combat_process_combat_path_remains_unconnected() {
+        use crate::economy::resources::military_equipment_value_to_units;
+        use crate::military::data::DivisionDefinition;
+        use crate::war::combat::process_combat;
+
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+
+        // MILITARY_EQUIPMENT_MAX_UNITS/SCALE(=1e9)を超える規模。新しいfixed-point
+        // APIならQuantityOutOfRangeとして即座に拒否されるはずの値であることを確認する。
+        let out_of_range_equipment = 2_000_000_000.0;
+        assert!(
+            military_equipment_value_to_units(out_of_range_equipment).is_err(),
+            "この値は新しいfixed-point APIの正規値域を超えているはず(前提条件の確認)"
+        );
+
+        let a = make_division_ex(
+            0,
+            attacker_country,
+            target,
+            10_000,
+            10_000,
+            out_of_range_equipment,
+            out_of_range_equipment,
+            10,
+            10,
+        );
+        let b = make_division_ex(
+            1,
+            defender_country,
+            target,
+            10_000,
+            10_000,
+            out_of_range_equipment,
+            out_of_range_equipment,
+            10,
+            10,
+        );
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(a.id, a.clone());
+        mil.divisions.insert(b.id, b.clone());
+        mil.definitions.insert(
+            DivisionDefinitionId(0),
+            DivisionDefinition {
+                id: DivisionDefinitionId(0),
+                name: "Test".to_string(),
+                division_type: DivisionType::Infantry,
+                size: DivisionSize::Standard,
+                required_manpower: 10_000,
+                required_equipment: 0.0,
+                recruitment_days: 30,
+                movement_speed: 4.0,
+                attack: 100.0,
+                defense: 100.0,
+                breakthrough: 5.0,
+                organization: 100.0,
+                morale: 100.0,
+                supply_usage: 1.0,
+                maintenance_cost: 1.0,
+            },
+        );
+
+        // 新しいfixed-point APIを一切経由せず、panicもエラーも起こさず完了する。
+        process_combat(&mut mil, &war_reg);
+
+        let a_after = mil.divisions.get(&a.id).unwrap();
+        let b_after = mil.divisions.get(&b.id).unwrap();
+        // 旧来の生のf64減算がそのまま動いていること(=新APIの値域検証を経由せず、
+        // 正規値域外の値でも普通にmutateされること)を確認する。
+        assert_eq!(a_after.manpower, 9_990);
+        assert_eq!(b_after.manpower, 9_990);
+        assert_eq!(a_after.equipment, out_of_range_equipment - 1.0);
+        assert_eq!(b_after.equipment, out_of_range_equipment - 1.0);
+        assert_eq!(a_after.organization, 95.0);
+        assert_eq!(b_after.organization, 95.0);
     }
 }

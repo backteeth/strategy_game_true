@@ -27,13 +27,19 @@
 //! 計算式を複製しない。`economy`が`military`へ依存する向きの新しい循環依存を
 //! 作らないための配置でもある)。
 //!
-//! 本モジュールは、依然として募兵(`military::recruitment`)・日次補充
+//! P25-002-REV-001時点では、依然として募兵(`military::recruitment`)・日次補充
 //! (`military::reinforcement`)・戦闘損失(`military::update`/`combat_calc`)・
-//! 復員(`military::demobilization`)のいずれからも呼び出されない
-//! (`DivisionDefinition.required_equipment`は依然として`recruitment.rs`側で
-//! 財務コストとして使われたままであり、この意味の重複はP25-003で解消する)。
-//! P25-002-REV-001で唯一新たに本番接続したのは、`economy::production`の
-//! `MilitaryFactory`生産加算のみである(§12参照)。
+//! 復員(`military::demobilization`)のいずれからも呼び出されなかった
+//! (`DivisionDefinition.required_equipment`は当時`recruitment.rs`側で
+//! 財務コストとして使われたままだった)。
+//!
+//! - P25-003: `try_issue_equipment`を`military::recruitment`へ接続し、
+//!   `required_equipment`を物理的な装備要求量へ切り替えた(財務コストは廃止)。
+//! - P25-004: `calculate_proportional_equipment_loss`(本モジュール)と
+//!   `try_destroy_equipment`を`military::update::process_daily_battles`
+//!   (稼働中の戦闘経路)へ接続し、実際のmanpower casualtyに比例した装備損失を
+//!   適用するようにした。日次補充(装備の回復)・復員時返却は依然未接続
+//!   (P25-005以降)。
 
 use crate::economy::resources::{
     CountryStockpile, MilitaryEquipmentUnitsError, ResourceType, military_equipment_units_to_value,
@@ -68,6 +74,9 @@ pub enum EquipmentAccountingError {
     QuantityOutOfRange,
     /// `units → f64 → units`の往復変換が一致しなかった。
     FixedPointRoundTripFailed,
+    /// 実際のcasualtyがmanpower_beforeを超える、またはmanpower_before=0なのに
+    /// casualty>0という、呼び出し側の構築上あり得ないはずの不正な入力(P25-004)。
+    InvalidCasualtyInput,
 }
 
 impl From<MilitaryEquipmentUnitsError> for EquipmentAccountingError {
@@ -295,6 +304,89 @@ pub fn try_destroy_equipment(
         destroyed: to_value(destroyed_units),
         equipment_before: equipment_value_before,
         equipment_after: equipment_value_after,
+    })
+}
+
+/// 実際の戦闘manpower casualtyから比例的に生じる装備損失の計画(P25-004)。
+/// `calculate_proportional_equipment_loss`は値をmutateせず、この計画を返すだけ——
+/// 実際の破壊は呼び出し側が別途`try_destroy_equipment`を呼んで行う
+/// (損失式を戦闘コード側へ複製させないため、§9)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EquipmentLoss {
+    pub equipment_units_before: u64,
+    pub actual_casualty: u64,
+    pub destroyed_units: u64,
+    pub equipment_units_after: u64,
+    pub destroyed: f64,
+}
+
+/// 実際の戦闘manpower casualtyから、比例的な装備損失を正規units上で計算する
+/// 純粋関数(P25-004)。`max_equipment`ではなく、damage適用直前の現在装備量
+/// (`current_equipment`)を基準にする(§7)。
+///
+/// 端数は決定的なhalf-up(四捨五入)で整数化する:
+///
+/// ```text
+/// D = floor((E × C + floor(M / 2)) / M)
+/// ```
+///
+/// `actual_casualty == manpower_before`(Division全滅)の場合、この式は
+/// 追加の特別扱いなしに数学的に必ず`destroyed_units == equipment_units_before`
+/// (現在装備を全損)になる: `D = floor((E×M + floor(M/2))/M) = E +
+/// floor(floor(M/2)/M) = E`(`floor(M/2) < M`が`M >= 1`で常に成り立つため)。
+///
+/// `actual_casualty > manpower_before`、または`manpower_before == 0`なのに
+/// `actual_casualty > 0`という、呼び出し側の構築上あり得ないはずの入力は
+/// `InvalidCasualtyInput`として明示的に拒否する(黙ってclampしない、§11)。
+pub fn calculate_proportional_equipment_loss(
+    current_equipment: f64,
+    manpower_before: u64,
+    actual_casualty: u64,
+) -> Result<EquipmentLoss, EquipmentAccountingError> {
+    if actual_casualty > manpower_before {
+        return Err(EquipmentAccountingError::InvalidCasualtyInput);
+    }
+
+    let equipment_units_before = to_units(current_equipment)?;
+
+    // actual_casualty == 0 (manpower_before == 0 を含む)、または現在装備が
+    // 既に0の場合は、装備側は一切触れない(§6)。
+    if actual_casualty == 0 || equipment_units_before == 0 {
+        return Ok(EquipmentLoss {
+            equipment_units_before,
+            actual_casualty,
+            destroyed_units: 0,
+            equipment_units_after: equipment_units_before,
+            destroyed: 0.0,
+        });
+    }
+
+    // ここに到達した時点で actual_casualty > 0 かつ actual_casualty <= manpower_before
+    // が保証されているため、manpower_before > 0 であり0除算は起こらない。
+    let numerator = u128::from(equipment_units_before)
+        .checked_mul(u128::from(actual_casualty))
+        .ok_or(EquipmentAccountingError::ArithmeticOverflow)?;
+    let rounding_term = u128::from(manpower_before / 2);
+    let rounded = numerator
+        .checked_add(rounding_term)
+        .ok_or(EquipmentAccountingError::ArithmeticOverflow)?;
+    let destroyed_units_128 = rounded / u128::from(manpower_before);
+    let destroyed_units: u64 = destroyed_units_128
+        .try_into()
+        .map_err(|_| EquipmentAccountingError::ArithmeticOverflow)?;
+
+    // 数学的にD<=Eが常に成り立つはずだが(上記doc comment参照)、
+    // 黙ってclampせずcheckedで検証する(defense-in-depth)。
+    let equipment_units_after = equipment_units_before
+        .checked_sub(destroyed_units)
+        .ok_or(EquipmentAccountingError::ArithmeticOverflow)?;
+
+    Ok(EquipmentLoss {
+        equipment_units_before,
+        actual_casualty,
+        destroyed_units,
+        equipment_units_after,
+        destroyed: to_value(destroyed_units),
     })
 }
 
@@ -637,6 +729,130 @@ mod tests {
             stockpile_b.get(ResourceType::MilitaryEquipment),
             100.0,
             "country B's stockpile must be untouched by an operation on country A's stockpile"
+        );
+    }
+
+    // ─── calculate_proportional_equipment_loss(P25-004) ─────────────────────
+    // タスク仕様§19の数値例A〜Fを、実装した式に対してそのまま検証する。
+
+    #[test]
+    fn loss_test_a_ten_percent_casualty_destroys_ten_percent_of_current_equipment() {
+        let loss = calculate_proportional_equipment_loss(100.0, 1_000, 100).unwrap();
+        assert_eq!(loss.destroyed, 10.0);
+        assert_eq!(loss.equipment_units_after, 90_000_000);
+        assert_eq!(to_value(loss.equipment_units_after), 90.0);
+    }
+
+    #[test]
+    fn loss_test_b_uses_current_equipment_not_max_equipment_as_the_basis() {
+        // max_equipment=100.0だが、current equipment=40.0を基準に計算する
+        // (この関数はmax_equipmentを引数にすら取らない)。
+        let loss = calculate_proportional_equipment_loss(40.0, 1_000, 100).unwrap();
+        assert_eq!(loss.destroyed, 4.0);
+        assert_eq!(to_value(loss.equipment_units_after), 36.0);
+    }
+
+    #[test]
+    fn loss_test_c_fractional_equipment_is_exact_in_fixed_point_units() {
+        let loss = calculate_proportional_equipment_loss(3.7, 100, 10).unwrap();
+        assert_eq!(loss.equipment_units_before, 3_700_000);
+        assert_eq!(loss.destroyed_units, 370_000);
+        assert_eq!(loss.equipment_units_after, 3_330_000);
+    }
+
+    #[test]
+    fn loss_test_d_half_up_boundary_rounds_up_at_exactly_point_five() {
+        // equipment_units_before=1, manpower_before=2, casualty=1 → 1×1/2 = 0.5 → 切り上げて1。
+        let loss = calculate_proportional_equipment_loss(to_value(1), 2, 1).unwrap();
+        assert_eq!(loss.destroyed_units, 1);
+    }
+
+    #[test]
+    fn loss_test_e_below_half_rounds_down_to_zero() {
+        // equipment_units_before=1, manpower_before=4, casualty=1 → 1×1/4 = 0.25 → 切り捨てて0。
+        let loss = calculate_proportional_equipment_loss(to_value(1), 4, 1).unwrap();
+        assert_eq!(loss.destroyed_units, 0);
+    }
+
+    #[test]
+    fn loss_test_f_zero_casualty_leaves_equipment_untouched() {
+        let loss = calculate_proportional_equipment_loss(55.5, 1_000, 0).unwrap();
+        assert_eq!(loss.destroyed, 0.0);
+        assert_eq!(to_value(loss.equipment_units_after), 55.5);
+    }
+
+    #[test]
+    fn loss_test_g_zero_current_equipment_destroys_nothing() {
+        let loss = calculate_proportional_equipment_loss(0.0, 1_000, 250).unwrap();
+        assert_eq!(loss.destroyed, 0.0);
+        assert_eq!(loss.equipment_units_after, 0);
+    }
+
+    #[test]
+    fn loss_test_h_full_annihilation_destroys_the_entire_current_equipment() {
+        // casualty == manpower_beforeのとき、丸めに関わらず必ずD=Eになる。
+        let loss = calculate_proportional_equipment_loss(37.25, 123, 123).unwrap();
+        assert_eq!(loss.destroyed, 37.25);
+        assert_eq!(loss.equipment_units_after, 0);
+    }
+
+    #[test]
+    fn loss_manpower_before_zero_with_zero_casualty_is_a_safe_no_op() {
+        let loss = calculate_proportional_equipment_loss(10.0, 0, 0).unwrap();
+        assert_eq!(loss.destroyed, 0.0);
+        assert_eq!(to_value(loss.equipment_units_after), 10.0);
+    }
+
+    #[test]
+    fn loss_rejects_casualty_exceeding_manpower_before_instead_of_silently_clamping() {
+        let err = calculate_proportional_equipment_loss(10.0, 100, 101).unwrap_err();
+        assert_eq!(err, EquipmentAccountingError::InvalidCasualtyInput);
+    }
+
+    #[test]
+    fn loss_rejects_nonzero_casualty_with_zero_manpower_before_instead_of_dividing_by_zero() {
+        let err = calculate_proportional_equipment_loss(10.0, 0, 1).unwrap_err();
+        assert_eq!(err, EquipmentAccountingError::InvalidCasualtyInput);
+    }
+
+    #[test]
+    fn loss_propagates_invalid_equipment_input_errors() {
+        assert_eq!(
+            calculate_proportional_equipment_loss(f64::NAN, 100, 10).unwrap_err(),
+            EquipmentAccountingError::NonFiniteQuantity
+        );
+        assert_eq!(
+            calculate_proportional_equipment_loss(-1.0, 100, 10).unwrap_err(),
+            EquipmentAccountingError::NegativeQuantity
+        );
+    }
+
+    // ─── Test N: u128境界(正規最大unitsに近い規模でoverflowしない) ──────────
+
+    #[test]
+    fn loss_test_n_near_maximum_scale_does_not_overflow_and_computes_exactly() {
+        // MILITARY_EQUIPMENT_MAX_UNITS / SCALE = 1_000_000_000.0(正規最大値)。
+        let near_max_equipment = 1_000_000_000.0;
+        let manpower_before = 100_000_000u64;
+
+        // 全滅(casualty == manpower_before): D = E が数学的に保証される。
+        let full_loss =
+            calculate_proportional_equipment_loss(near_max_equipment, manpower_before, manpower_before)
+                .unwrap();
+        assert_eq!(full_loss.equipment_units_after, 0);
+        assert_eq!(full_loss.destroyed_units, full_loss.equipment_units_before);
+
+        // 部分損失でも、u128中間演算でoverflowせず正確に計算できる。
+        let partial_loss = calculate_proportional_equipment_loss(
+            near_max_equipment,
+            manpower_before,
+            manpower_before / 4,
+        )
+        .unwrap();
+        assert!(partial_loss.destroyed_units <= partial_loss.equipment_units_before);
+        assert_eq!(
+            partial_loss.equipment_units_after,
+            partial_loss.equipment_units_before - partial_loss.destroyed_units
         );
     }
 }
