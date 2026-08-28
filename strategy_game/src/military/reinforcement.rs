@@ -91,18 +91,20 @@ pub fn apportion_reinforcements(
     allocations
 }
 
-/// 対象Divisionが補充可能かどうかを判定する(副作用なし)。
+/// 所有・存続(manpower>0)・戦闘状態・支配地域という、manpower補充とequipment補充
+/// (P25-005)の両方に共通する適格条件(manpowerの過不足判定は含まない——それは
+/// 呼び出し元ごとの資源固有の判定)。
 ///
 /// `status`だけでなく、`combat_id`と`BattleRegistry`の進行中戦闘参加者一覧の両方を
 /// 確認する(`military::demobilization::demobilize_division`と同じく、statusだけを
 /// 信用しない防御的な検証——本来Idle/Occupyingであれば`combat_id`はNoneのはずだが、
 /// 何らかの不整合があってもstatusだけを見て補充を許可しない)。
-fn is_eligible_for_reinforcement(
+pub(crate) fn is_eligible_for_daily_reinforcement_by_position(
     division: &Division,
     state_registry: &StateRegistry,
     battle_registry: &BattleRegistry,
 ) -> bool {
-    if division.manpower == 0 || division.manpower >= division.max_manpower {
+    if division.manpower == 0 {
         return false;
     }
     match division.status {
@@ -126,6 +128,18 @@ fn is_eligible_for_reinforcement(
         .get(division.current_state)
         .map(|s| s.controller() == division.owner)
         .unwrap_or(false)
+}
+
+/// 対象Divisionがmanpower補充可能かどうかを判定する(副作用なし)。
+fn is_eligible_for_reinforcement(
+    division: &Division,
+    state_registry: &StateRegistry,
+    battle_registry: &BattleRegistry,
+) -> bool {
+    if division.manpower >= division.max_manpower {
+        return false;
+    }
+    is_eligible_for_daily_reinforcement_by_position(division, state_registry, battle_registry)
 }
 
 /// 全ての活動国家へ日次自動補充を適用する(`military::update::handle_daily_military`の

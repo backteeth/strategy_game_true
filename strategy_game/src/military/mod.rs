@@ -6,6 +6,7 @@ pub mod combat_calc;
 pub mod data;
 pub mod demobilization;
 pub mod equipment;
+pub mod equipment_reinforcement;
 pub mod invasion;
 pub mod manpower;
 pub mod movement;

@@ -1,10 +1,11 @@
 use crate::common::{CountryId, DivisionDefinitionId, StateId};
 use crate::country::CountryRegistry;
 use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
-use crate::military::equipment::try_issue_equipment;
+use crate::military::equipment::{EquipmentAccountingError, try_issue_equipment};
 use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecruitmentQueueItem {
@@ -73,11 +74,20 @@ fn try_spawn_division(
 /// 自動的に再判定される(既存の日次呼び出し構造がそのまま「毎日再試行」を実現する)。
 /// DivisionDefinition自体が解決できない場合は、既存の(P23-009で確認済みの)
 /// 挙動どおり項目を静かに完了させて破棄する(本タスクの対象外、§16)。
+///
+/// P25-005: ある国の完了済みキュー項目が純粋な`EquipmentAccountingError::
+/// InsufficientStockpile`(=備蓄不足そのもの。不正なdefinitionや不正数量による
+/// 他のエラー種別は含まない、§6.2)によって生成失敗した場合、そのCountryIdを
+/// 戻り値へ含める。呼び出し元(`handle_daily_military`)はこれを使って、当日の
+/// 既存Division向け装備補充予算をその国だけ0にし、翌日以降に備蓄を持ち越して
+/// 待機中のキューが必要量へ到達できるようにする(新しい永続予約フィールドは
+/// 追加しない、当日の処理結果から都度決定する一時的な判定)。
 pub fn process_recruitment(
     country_registry: &mut CountryRegistry,
     military_registry: &mut MilitaryRegistry,
-) {
+) -> HashSet<CountryId> {
     let mut new_divisions = Vec::new();
+    let mut blocked_by_equipment_shortage: HashSet<CountryId> = HashSet::new();
 
     for country in country_registry.countries.iter_mut() {
         let mut completed_indices = Vec::new();
@@ -99,11 +109,17 @@ pub fn process_recruitment(
                         completed_indices.push(i);
                         new_divisions.push(division);
                     }
+                    Err(EquipmentAccountingError::InsufficientStockpile) => {
+                        // 純粋な備蓄不足。項目を完了させずキューに残し、当日の
+                        // 既存Division向け装備補充を止めて備蓄を保護する(§6)。
+                        blocked_by_equipment_shortage.insert(country.id);
+                    }
                     Err(_) => {
-                        // 装備不足(または理論上の量子化エラー)。項目を完了させず
-                        // キューに残す。manpower・stockpileはtry_issue_equipmentが
-                        // 失敗時に一切変更しないため、ここでの追加のロールバックは
-                        // 不要。
+                        // 不正なdefinition・不正数量等(現在の正常経路では発生
+                        // しないはずの理論上のエラー)。備蓄保護の対象とはせず
+                        // (§6.2)、項目を完了させずキューに残すだけに留める。
+                        // manpower・stockpileはtry_issue_equipmentが失敗時に
+                        // 一切変更しないため、ここでの追加のロールバックは不要。
                     }
                 }
             }
@@ -117,6 +133,8 @@ pub fn process_recruitment(
     for division in new_divisions {
         military_registry.add_division(division);
     }
+
+    blocked_by_equipment_shortage
 }
 
 /// キューへ投入する(P25-003)。`required_equipment`は物理的なMilitaryEquipment

@@ -28,7 +28,7 @@ pub fn handle_daily_military(
         let current_date = format!("{:04}/{:02}/{:02}", event.year, event.month, event.day);
 
         // 1. 募集処理
-        crate::military::recruitment::process_recruitment(
+        let blocked_by_equipment_shortage = crate::military::recruitment::process_recruitment(
             &mut country_registry,
             &mut military_registry,
         );
@@ -41,6 +41,18 @@ pub fn handle_daily_military(
             &mut military_registry,
             &state_registry,
             &battle_registry,
+        );
+
+        // 2.5. 日次装備補充(P25-005)。manpower補充の直後・戦闘処理より前に行う
+        // ことで、その日の戦闘装備損失(P25-004)を同日中に補填してしまわないよう
+        // にする。完了済み募兵キューが装備不足で待機した国家は、当日の既存
+        // Division向け補充予算を0にして備蓄を保護する(§6)。
+        crate::military::equipment_reinforcement::apply_daily_equipment_reinforcement(
+            &mut country_registry,
+            &mut military_registry,
+            &state_registry,
+            &battle_registry,
+            &blocked_by_equipment_shortage,
         );
 
         // 3. 経路の事前検証（戦争終了等で無効になった移動を停止）
