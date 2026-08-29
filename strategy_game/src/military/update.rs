@@ -373,6 +373,27 @@ fn resolve_participant_outcome(
     };
 
     if division.manpower == 0 {
+        // P25-006-REV-001: 本番のDivision削除直前は必ずequipment==0でなければ
+        // ならない(§5共通不変条件)。通常戦闘経路(P25-004の`apply_combat_casualty`)
+        // は既にこれを保証しているため、ここでの`remaining_equipment > 0.0`は
+        // 通常到達しないはずの防御的分岐だが、将来の経路変更やロード直後の
+        // 不整合データに備え、削除前に必ず全損させてから削除する
+        // (返却・回収は行わない)。
+        let Some(d) = military_registry.divisions.get_mut(&division_id) else {
+            return false;
+        };
+        // 常にtry_destroy_equipmentを呼ぶ(destroyed=0.0は既存どおり安全なno-op)。
+        // `equipment > 0.0`だけをガードにすると、NaNは`NaN > 0.0`が常にfalseと
+        // なるため誤って検証をスキップしてしまう(不正状態が未検証のまま
+        // 削除されてしまうバグの温床)。
+        let remaining_equipment = d.equipment;
+        if let Err(err) = try_destroy_equipment(&mut d.equipment, remaining_equipment) {
+            error!(
+                "[Battle] failed to destroy remaining equipment for annihilated division {:?}: {:?}; removal deferred this tick",
+                division_id, err
+            );
+            return true;
+        }
         military_registry.remove_division(division_id);
         info!("[Battle] Division {:?} destroyed", division_id);
         return false;
@@ -384,21 +405,52 @@ fn resolve_participant_outcome(
 
     // 組織率0 → 撤退を試みる。撤退時にも追加のmanpower損失を与え、
     // 同じ師団が「撤退→組織率回復→再戦」を無限に繰り返せないようにする
+    let manpower_before = division.manpower;
     let retreat_loss = (division.max_manpower as f32 * RETREAT_MANPOWER_LOSS_RATIO) as u64;
-    let remaining_manpower = division.manpower.saturating_sub(retreat_loss);
+    let remaining_manpower = manpower_before.saturating_sub(retreat_loss);
+    // P25-006-REV-001: 予定retreat_lossではなく、実際に減少した量(既存の
+    // saturating_subによるclamp後の値)をactual casualtyとして装備損失へ使う
+    // (P25-004のapply_combat_casualtyと同じ「実際の減少量を使う」原則)。
+    let actual_casualty = manpower_before - remaining_manpower;
 
     match retreat_destination {
         Some(dest) if remaining_manpower > 0 => {
-            if let Some(d) = military_registry.divisions.get_mut(&division_id) {
-                d.manpower = remaining_manpower;
-                d.current_state = dest;
-                d.status = DivisionStatus::Idle;
-                d.combat_id = None;
-                d.target_state = None;
-                d.destination = None;
-                d.current_path.clear();
-                d.movement_progress = 0.0;
+            // 撤退成功: 撤退追加casualtyに比例する装備だけをP25-004と同じ式
+            // (calculate_proportional_equipment_loss)で破壊する。通常戦闘損失
+            // (このDivisionが同日既に受けたcombat casualty)には一切触れない
+            // (既にprocess_daily_battles側で独立して処理済み、二重計上しない)。
+            let loss_plan = match calculate_proportional_equipment_loss(
+                division.equipment,
+                manpower_before,
+                actual_casualty,
+            ) {
+                Ok(plan) => plan,
+                Err(err) => {
+                    error!(
+                        "[Battle] retreat equipment loss calculation failed for {:?}: {:?}; retreat not applied this tick",
+                        division_id, err
+                    );
+                    return true;
+                }
+            };
+            let Some(d) = military_registry.divisions.get_mut(&division_id) else {
+                return false;
+            };
+            if let Err(err) = try_destroy_equipment(&mut d.equipment, loss_plan.destroyed) {
+                error!(
+                    "[Battle] try_destroy_equipment failed during retreat for {:?}: {:?}; retreat not applied this tick",
+                    division_id, err
+                );
+                return true;
             }
+            d.manpower = remaining_manpower;
+            d.current_state = dest;
+            d.status = DivisionStatus::Idle;
+            d.combat_id = None;
+            d.target_state = None;
+            d.destination = None;
+            d.current_path.clear();
+            d.movement_progress = 0.0;
             info!(
                 "[Battle] Division {:?} retreated to {:?} (manpower: {})",
                 division_id, dest, remaining_manpower
@@ -406,6 +458,23 @@ fn resolve_participant_outcome(
             false
         }
         _ => {
+            // 強制削除(撤退先なし、または撤退追加casualtyでmanpowerが0になった)。
+            // §5の共通不変条件どおり、削除前に現在装備を全損させる
+            // (返却・回収は行わない。国家備蓄には一切触れない)。
+            let Some(d) = military_registry.divisions.get_mut(&division_id) else {
+                return false;
+            };
+            // 常にtry_destroy_equipmentを呼ぶ(destroyed=0.0は既存どおり安全な
+            // no-op)。`equipment > 0.0`だけをガードにすると、NaNは`NaN > 0.0`が
+            // 常にfalseとなるため誤って検証をスキップしてしまう。
+            let remaining_equipment = d.equipment;
+            if let Err(err) = try_destroy_equipment(&mut d.equipment, remaining_equipment) {
+                error!(
+                    "[Battle] failed to destroy remaining equipment for {:?} during forced removal: {:?}; removal deferred this tick",
+                    division_id, err
+                );
+                return true;
+            }
             military_registry.remove_division(division_id);
             info!(
                 "[Battle] Division {:?} destroyed during retreat/encirclement",
@@ -1501,5 +1570,360 @@ mod tests {
         assert_eq!(b_after.equipment, out_of_range_equipment - 1.0);
         assert_eq!(a_after.organization, 95.0);
         assert_eq!(b_after.organization, 95.0);
+    }
+
+    // ─── P25-006-REV-001: 撤退時追加manpower損失への装備連動 ────────────────
+    // `resolve_participant_outcome`は本モジュールのprivate関数のため、ここでも
+    // P25-004と同じく直接呼び出して数式的正確性・原子性・二重計上防止を検証する。
+
+    fn retreat_ready_division(
+        id: usize,
+        owner: CountryId,
+        state: StateId,
+        manpower: u64,
+        max_manpower: u64,
+        equipment: f64,
+    ) -> Division {
+        let mut d = make_division_ex(id, owner, state, manpower, max_manpower, equipment, 999.0, 10, 10);
+        d.organization = 0.0; // 撤退分岐(組織率<=0)へ入る
+        d
+    }
+
+    /// Test(§16.1相当): 撤退部分損失。M=100(max_manpower=100→retreat_loss=10)、E=40
+    /// → D=4, M_after=90, E_after=36, Divisionは生存。
+    #[test]
+    fn retreat_test_16_1_partial_loss_matches_the_p25_004_formula() {
+        let owner = CountryId(1);
+        let origin = StateId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 100, 100, 40.0),
+        );
+
+        let survived = resolve_participant_outcome(division_id, Some(origin), &mut mil);
+        assert!(!survived, "戻り値は常にfalse(戦闘ロスターからは外れる、撃破ではなく撤退)");
+
+        let after = &mil.divisions[&division_id];
+        assert_eq!(after.manpower, 90);
+        assert_eq!(after.equipment, 36.0);
+        assert_eq!(after.current_state, origin);
+        assert_eq!(after.status, DivisionStatus::Idle);
+    }
+
+    /// Test(§16.2相当): 小数装備3.7の正確な按分。
+    #[test]
+    fn retreat_test_16_2_fractional_equipment_is_exact_in_fixed_point_units() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 100, 100, 3.7),
+        );
+
+        resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+
+        let after = &mil.divisions[&division_id];
+        assert_eq!(after.equipment, 3.33);
+    }
+
+    /// Test(§16.3相当): half-up境界。manpower=2, max_manpower=10(retreat_loss=1)、
+    /// E_units=1 → 1×1/2=0.5 → 切り上げてD_units=1。
+    #[test]
+    fn retreat_test_16_3_half_up_boundary_rounds_up() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        let equipment_one_unit = military_equipment_units_to_value(1);
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 2, 10, equipment_one_unit),
+        );
+
+        resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+
+        let after = &mil.divisions[&division_id];
+        assert_eq!(after.manpower, 1, "retreat_loss=1のみ減少するはず");
+        assert_eq!(after.equipment, 0.0, "1 unitの装備がhalf-upで全損するはず");
+    }
+
+    /// Test(§16.4相当): 撤退casualtyそのものでmanpowerが0になる場合、丸めに
+    /// 関わらず必ず現在装備が全損する(P25-004のD=E恒等式と同じ)。
+    #[test]
+    fn retreat_test_16_4_full_annihilation_by_retreat_casualty_destroys_all_equipment() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        // max_manpower=100→retreat_loss=10 > manpower(1) → remaining=0(saturating_sub)。
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 1, 100, 3.7),
+        );
+
+        resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+
+        assert!(
+            !mil.divisions.contains_key(&division_id),
+            "manpower=0になったDivisionは削除されるはず"
+        );
+    }
+
+    /// Test(§16.5相当、本実装の設計判断): 撤退追加casualty自体は一部生存させる
+    /// 量でも、撤退先が存在しない(包囲)ため強制解散される場合は、残存装備を
+    /// 含め現在装備を全損させる(比例分だけでなく全量)。
+    #[test]
+    fn retreat_test_16_5_forced_removal_without_a_destination_destroys_all_remaining_equipment() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 100, 100, 40.0),
+        );
+
+        // 撤退先なし(包囲)。retreat_loss(10)自体はmanpowerを0にはしないが、
+        // 撤退先が無いため強制解散される。
+        resolve_participant_outcome(division_id, None, &mut mil);
+
+        assert!(
+            !mil.divisions.contains_key(&division_id),
+            "撤退先が無いため強制解散されるはず"
+        );
+    }
+
+    /// Test: casualty=0(retreat_lossがmax_manpowerに対して0になる)なら装備は不変。
+    #[test]
+    fn retreat_test_casualty_zero_leaves_equipment_untouched() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        // max_manpower=5 → retreat_loss=(5*0.1) as u64 = 0。
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 5, 5, 40.0),
+        );
+
+        resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+
+        let after = &mil.divisions[&division_id];
+        assert_eq!(after.manpower, 5);
+        assert_eq!(after.equipment, 40.0);
+    }
+
+    /// Test: equipment=0でも撤退manpower処理は既存どおり適用される。
+    #[test]
+    fn retreat_test_zero_equipment_does_not_block_manpower_processing() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        mil.divisions.insert(
+            division_id,
+            retreat_ready_division(0, owner, target, 100, 100, 0.0),
+        );
+
+        resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+
+        let after = &mil.divisions[&division_id];
+        assert_eq!(after.manpower, 90, "装備0でもmanpower撤退損失は既存どおり適用されるはず");
+        assert_eq!(after.equipment, 0.0);
+    }
+
+    /// Test: 撤退(生存)時、装備会計が失敗した場合はmanpower・状態遷移とも
+    /// 一切適用されない(原子性)。
+    #[test]
+    fn retreat_test_atomicity_survives_branch_rolls_back_manpower_on_equipment_failure() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        let mut division = retreat_ready_division(0, owner, target, 100, 100, 40.0);
+        division.equipment = f64::NAN;
+        mil.divisions.insert(division_id, division);
+
+        let result = resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+        assert!(result, "会計失敗時はtrue(現状維持、まだ戦闘継続扱い)を返すはず");
+
+        let after = &mil.divisions[&division_id];
+        assert_eq!(after.manpower, 100, "装備会計が失敗した場合、manpowerも変化してはいけない");
+        assert!(after.equipment.is_nan());
+        assert_eq!(
+            after.status,
+            DivisionStatus::Fighting,
+            "make_division_exの初期状態(Fighting)のまま(status変更もロールバック)"
+        );
+    }
+
+    /// Test: 強制削除分岐でも、装備会計が失敗した場合はDivisionを削除しない。
+    #[test]
+    fn retreat_test_atomicity_forced_removal_branch_does_not_remove_on_equipment_failure() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        let mut division = retreat_ready_division(0, owner, target, 100, 100, 40.0);
+        division.equipment = f64::NAN;
+        mil.divisions.insert(division_id, division);
+
+        let result = resolve_participant_outcome(division_id, None, &mut mil);
+        assert!(result);
+
+        assert!(
+            mil.divisions.contains_key(&division_id),
+            "装備破壊に失敗した場合、Divisionを削除してはいけない"
+        );
+        assert!(mil.divisions[&division_id].equipment.is_nan());
+    }
+
+    /// Test: manpower=0の防御的分岐(通常は既にequipment=0のはずだが、念のため
+    /// 破損データを想定して確認する)でも、削除前に装備が全損する。
+    #[test]
+    fn retreat_test_manpower_zero_defensive_branch_destroys_stale_nonzero_equipment() {
+        let owner = CountryId(1);
+        let target = StateId(2);
+        let mut mil = MilitaryRegistry::default();
+        let division_id = DivisionId(0);
+        // 現在の正常経路では発生しないはずの状態(manpower=0なのにequipment>0)を
+        // 意図的に構築する。
+        let mut division = make_division_ex(0, owner, target, 0, 100, 40.0, 100.0, 10, 10);
+        division.organization = 50.0; // manpower==0チェックはorganizationより先に評価される
+        mil.divisions.insert(division_id, division);
+
+        let survived = resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+        assert!(!survived);
+        assert!(!mil.divisions.contains_key(&division_id));
+    }
+
+    /// Test: 通常戦闘損失と撤退追加損失が同日に発生しても、それぞれ1回だけ
+    /// 適用され、二重計上されない(process_daily_battlesとresolve_finished_battlesを
+    /// 分けて呼び、中間状態を自己検証する)。
+    #[test]
+    fn retreat_test_no_double_counting_with_same_day_normal_combat_loss() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let mut state_reg = StateRegistry::build(vec![]);
+
+        // 攻撃側は最初からorganization=0(既に前日消耗済みの想定)。防御側からの
+        // 通常戦闘casualtyは受けるが、org=0のため自身は防御側へダメージを与えない。
+        let mut attacker = make_division_ex(
+            0,
+            attacker_country,
+            target,
+            10_000,
+            10_000,
+            100.0,
+            999.0,
+            10,
+            10,
+        );
+        attacker.organization = 0.0;
+        let defender = make_division_ex(
+            1,
+            defender_country,
+            target,
+            10_000,
+            10_000,
+            100.0,
+            999.0,
+            10,
+            15,
+        );
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        // 1. 通常戦闘のみ適用(まだ撤退は処理していない)。
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+        let after_combat = mil.divisions.get(&attacker.id).cloned();
+        let Some(after_combat) = after_combat else {
+            panic!("攻撃側は通常戦闘だけでは全滅しないはずの設定");
+        };
+        assert!(
+            after_combat.manpower < attacker.manpower,
+            "org=0でも防御側からの通常戦闘casualtyは受けるはず"
+        );
+        let combat_casualty = attacker.manpower - after_combat.manpower;
+        let expected_combat_loss = calculate_proportional_equipment_loss(
+            attacker.equipment,
+            attacker.manpower,
+            combat_casualty,
+        )
+        .unwrap();
+        assert_eq!(
+            after_combat.equipment,
+            military_equipment_units_to_value(expected_combat_loss.equipment_units_after),
+            "通常戦闘段階の装備損失はP25-004の式と一致するはず"
+        );
+
+        // 2. 撤退追加損失を適用(通常戦闘後のmanpower/equipmentを基準にするはず)。
+        resolve_finished_battles(&mut mil, &mut state_reg, &mut battle_reg, &war_reg);
+        let after_retreat = mil.divisions.get(&attacker.id);
+
+        if let Some(after_retreat) = after_retreat {
+            let retreat_casualty = after_combat.manpower - after_retreat.manpower;
+            let expected_retreat_loss = calculate_proportional_equipment_loss(
+                after_combat.equipment,
+                after_combat.manpower,
+                retreat_casualty,
+            )
+            .unwrap();
+            assert_eq!(
+                after_retreat.equipment,
+                military_equipment_units_to_value(expected_retreat_loss.equipment_units_after),
+                "撤退段階の装備損失は、通常戦闘後の値を基準にした比例損失と一致するはず \
+                 (元のM/Eから再計算していない=二重計上していない)"
+            );
+        } else {
+            // 撤退追加casualtyで全滅した場合も、装備は既にprocess_daily_battles段階の
+            // 値からさらに全損しているはずであり、二重計上はしていない
+            // (このassert自体は「削除された」という事実のみを確認する)。
+        }
+    }
+
+    /// Test: 装備量の違いが撤退のmanpower/organization/勝敗結果へ一切影響しない
+    /// (P25-004のTest Sと同じ原則、撤退経路版)。
+    #[test]
+    fn retreat_test_equipment_amount_does_not_affect_manpower_or_status_outcome() {
+        fn run_scenario(equipment: f64) -> (u64, DivisionStatus, Option<StateId>) {
+            let owner = CountryId(1);
+            let target = StateId(2);
+            let mut mil = MilitaryRegistry::default();
+            let division_id = DivisionId(0);
+            mil.divisions.insert(
+                division_id,
+                retreat_ready_division(0, owner, target, 100, 100, equipment),
+            );
+            resolve_participant_outcome(division_id, Some(StateId(1)), &mut mil);
+            match mil.divisions.get(&division_id) {
+                Some(d) => (d.manpower, d.status, Some(d.current_state)),
+                None => (0, DivisionStatus::Destroyed, None),
+            }
+        }
+
+        let with_equipment = run_scenario(100.0);
+        let without_equipment = run_scenario(0.0);
+        assert_eq!(with_equipment, without_equipment);
     }
 }

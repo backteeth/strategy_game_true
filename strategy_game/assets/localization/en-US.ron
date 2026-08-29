@@ -681,6 +681,7 @@
     // ── country_error.elimination.* (P21-021: country::elimination) ─
     ("country_error.elimination.already_eliminated", "That country has already been eliminated"),
     ("country_error.elimination.annexer_not_active", "The annexing country no longer exists"),
+    ("country_error.elimination.invalid_division_equipment", "A division's equipment record is corrupted and could not be safely eliminated"),
 
     // ── war_error.peace.auto_settlement_failed (P21-020: daily auto-capitulation) ─
     ("war_error.peace.auto_settlement_failed", "This war's automatic surrender settlement failed: {reason}"),

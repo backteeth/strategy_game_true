@@ -4,15 +4,21 @@
 //! 装備返却計算・原子性を固定しているのに対し、本テストは実際のsave/load・
 //! New Game/Loaded Game・複数国家分離・国家消滅の各経路を通して装備保存則を検証する。
 //!
-//! **既知の未解決事項(§14参照)**: 実装前監査で、既存の国家消滅処理
-//! (`country::elimination::apply_country_elimination`、P21-021、Phase 25より前に
-//! 実装済み)が消滅国家の全DivisionをMilitaryRegistryから物理削除しており、
-//! P25-001が決定した「装備会計は凍結して残存」という設計と矛盾することが判明した。
-//! ユーザーの判断により、本タスクでは`country::elimination`を一切変更せず、
-//! この矛盾は報告書へHigh findingとして記録するに留める。本ファイル末尾の
-//! `country_elimination_gap`セクションは、この既知のギャップを隠さず実際の
-//! 挙動として記録するためのテストである(「装備が凍結される」という誤った
-//! 成功を主張しない)。
+//! **P25-006-REV-001で訂正・置換された事項**: 本タスク(P25-006)の実装前監査で、
+//! 既存の国家消滅処理(`country::elimination::apply_country_elimination`、
+//! P21-021、Phase 25より前に実装済み)が消滅国家の全DivisionをMilitaryRegistryから
+//! 装備会計APIを一切経由せず物理削除しており、P25-001が決定した「装備会計は凍結して
+//! 残存」という設計と矛盾することが判明した。P25-006時点ではユーザーの判断により
+//! `country::elimination`を変更せず、High findingとして報告書へ記録するに
+//! 留めていた。P25-006-REV-001で、P25-001の「凍結」前提そのものを「消滅国家の
+//! Division現在装備は`try_destroy_equipment`で全損させたうえで、既存どおり
+//! 物理削除する(返却・移転はしない)」という設計へ正式に訂正し、
+//! `country::elimination::apply_country_elimination`へ原子的な実装を追加した
+//! (詳細は`tests/p25_006_rev_001_forced_division_removal_equipment_accounting_e2e_test.rs`
+//! および`verification_logs/phase-25/p25-006-rev-001/`参照)。本ファイル末尾の
+//! `country_elimination_gap`セクションは、この訂正後も引き続き成立する観測結果
+//! (世界装備総量は消滅時に実際に減少する。ただし今はその減少が正規の会計API経由で
+//! 行われる)を検証するテストとして名称・コメントを更新のうえ残している。
 #![allow(clippy::type_complexity)] // SystemStateのタプル型はテスト内での使い捨て構成であり、型エイリアス化の利益がない
 
 use bevy::app::ScheduleRunnerPlugin;
@@ -556,12 +562,20 @@ fn test_31_retreat_additional_loss_path_is_not_connected_to_equipment_and_remain
     );
 }
 
-// ─── §16.7: 国家消滅時の既知のギャップ(country_elimination_gap) ─────────
+// ─── §16.7: 国家消滅時の装備会計(P25-006-REV-001で訂正済み) ─────────────
 //
-// §14の実装前監査で発見した、既存のcountry::elimination実装がP25-001の
-// 「凍結して残存」設計と矛盾する既知の問題を、隠さず実際の挙動として記録する
-// (ユーザー判断: elimination.rsは変更せず、この矛盾は報告書へHigh findingとして
-// 記録する)。
+// P25-006時点では、既存のcountry::elimination実装がP25-001の「凍結して残存」
+// 設計と矛盾し、消滅国家のDivisionが保持する装備が会計APIを経由せず消失する
+// High findingとして記録されていた(このセクションの関数名に`_gap`という接頭辞が
+// 残っているのはその名残)。P25-006-REV-001で、P25-001の「凍結」という前提自体を
+// 「消滅国家のDivision現在装備は`try_destroy_equipment`で正規に全損させたうえで、
+// 既存どおり物理削除する(国家備蓄へは返却せず、併合国へも移転しない)」という
+// 設計へ訂正し、`country::elimination::apply_country_elimination`へ実装した。
+// このセクションはP25-006が確認した観測(世界装備総量は消滅時に実際に減少する)を
+// そのまま検証しており、訂正の前後で数値は変化しない——変わったのは、その減少が
+// 会計APIを経由する正規の操作になったという点だけである
+// (詳細な数値検証は`tests/p25_006_rev_001_forced_division_removal_equipment_accounting_e2e_test.rs`
+// 側で行う)。
 
 fn setup_elimination_registries() -> (
     StateRegistry,
@@ -659,7 +673,8 @@ fn country_elimination_gap_stockpile_is_frozen_but_division_equipment_is_lost_no
 
     assert_eq!(outcome.divisions_disbanded, 1);
 
-    // 確認1(仕様どおり): CountryStockpileは凍結され、一切変化しない。
+    // 確認1(P25-001設計どおり、訂正の前後で不変): CountryStockpileは凍結され、
+    // 一切変化しない。
     let eliminated = country_registry.get(CountryId(1)).unwrap();
     assert_eq!(
         eliminated.stockpile.get(ResourceType::MilitaryEquipment),
@@ -667,7 +682,7 @@ fn country_elimination_gap_stockpile_is_frozen_but_division_equipment_is_lost_no
         "国家備蓄自体は正しく凍結されている(この部分はP25-001設計どおり)"
     );
 
-    // 確認2(仕様どおり): 併合国の備蓄は増えない。
+    // 確認2(P25-001設計どおり、訂正の前後で不変): 併合国の備蓄は増えない。
     let annexer = country_registry.get(CountryId(2)).unwrap();
     assert_eq!(
         annexer.stockpile.get(ResourceType::MilitaryEquipment),
@@ -675,15 +690,12 @@ fn country_elimination_gap_stockpile_is_frozen_but_division_equipment_is_lost_no
         "併合国の備蓄が増えてはいけない(この部分もP25-001設計どおり)"
     );
 
-    // 確認3(既知のギャップ、報告書§14 High finding): 消滅国家のDivisionは
-    // 「凍結」ではなく物理削除される。したがって、そのDivisionが保持していた
-    // 現在装備40.0は、備蓄にもDivisionにもどこにも残らず、会計上消失する。
-    // これはP25-006が原因ではなく、既存のP21-021実装がP25-001の「凍結して残存」
-    // 設計を満たしていなかったことの発覚であり、本タスクの意図的な対象外
-    // (country::eliminationは無変更)である。
+    // 確認3(P25-006-REV-001で正規化): 消滅国家のDivisionは既存どおり物理削除
+    // されるが、削除される直前に`try_destroy_equipment`で現在装備40.0が正規に
+    // 全損している(P25-006時点では会計APIを経由せず消失していた)。
     assert!(
         !military_registry.divisions.contains_key(&DivisionId(0)),
-        "既知のギャップ: 消滅国家のDivisionは凍結されず物理削除される"
+        "消滅国家のDivisionは既存どおり物理削除される(凍結はしない、P25-006-REV-001の訂正後設計)"
     );
     let world_equipment_after: f64 = country_registry
         .countries
@@ -697,8 +709,8 @@ fn country_elimination_gap_stockpile_is_frozen_but_division_equipment_is_lost_no
             .sum::<f64>();
     assert_eq!(
         world_equipment_after, 150.0,
-        "既知のギャップ: 消滅前の世界装備総量(50+100+40=190)から、削除された \
-         Divisionの40.0が失われ、150.0になってしまう(会計上の消失、保存則違反)"
+        "消滅前の世界装備総量(50+100+40=190)から、正規に全損させられた \
+         Divisionの40.0が減り、150.0になる(意図した設計どおりの減少)"
     );
 }
 

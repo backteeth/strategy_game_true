@@ -21,7 +21,7 @@
 //! `DefenderEliminated`、白紙講和ではない)、支持国としてのみ参加していれば
 //! 陣営集合から除去するだけ)。
 
-use crate::common::{ClaimId, CountryId, DiplomaticCrisisId, StateId, WarId};
+use crate::common::{ClaimId, CountryId, DiplomaticCrisisId, DivisionId, StateId, WarId};
 use crate::country::power::CountryPowerRegistry;
 use crate::country::{CountryRegistry, CountryStatus};
 use crate::diplomacy::claims::{ClaimRegistry, ClaimStatus};
@@ -30,6 +30,7 @@ use crate::diplomacy::data::DiplomacyRegistry;
 use crate::military::army::ArmyRegistry;
 use crate::military::battle::BattleRegistry;
 use crate::military::data::MilitaryRegistry;
+use crate::military::equipment::{try_destroy_equipment, validate_equipment_state};
 use crate::state::data::StateRegistry;
 use crate::state::ownership::{self, OwnershipTransferError};
 use crate::war::data::{WarRegistry, WarStatus};
@@ -39,7 +40,7 @@ use crate::war::justification::WarJustificationRegistry;
 /// 国家消滅の失敗理由。州移転自体の失敗は`state::ownership`のエラーをそのまま
 /// 包む(重複した変種を持たない――`OwnershipTransferError::localization_key()`を
 /// そのまま委譲する)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CountryEliminationError {
     StateTransfer(OwnershipTransferError),
     /// 対象国家が既に`Eliminated`(重複消滅は許可しない)。
@@ -54,6 +55,11 @@ pub enum CountryEliminationError {
     /// (全か無かの原子性)。内包する`&'static str`は`war_error.peace.*`系の
     /// 翻訳キー(`resolve_crisis_war_lineage`が返すものをそのまま透過する)。
     OtherWarSettlementPreflight(&'static str),
+    /// P25-006-REV-001(§6.3): 消滅国家が所有するDivisionのいずれかが、装備会計上
+    /// 不正な状態(NaN/負値/値域超過)にある。実際にDivisionを削除・装備を破壊する
+    /// 前の全か無かのpreflightで検出するため、この時点ではどのRegistryも
+    /// まだ変更されていない。
+    InvalidDivisionEquipment(DivisionId, crate::military::equipment::EquipmentAccountingError),
 }
 
 impl CountryEliminationError {
@@ -65,6 +71,9 @@ impl CountryEliminationError {
             Self::AlreadyEliminated => "country_error.elimination.already_eliminated",
             Self::AnnexerNotActive => "country_error.elimination.annexer_not_active",
             Self::OtherWarSettlementPreflight(key) => key,
+            Self::InvalidDivisionEquipment(_, _) => {
+                "country_error.elimination.invalid_division_equipment"
+            }
         }
     }
 }
@@ -308,8 +317,32 @@ pub fn apply_country_elimination(
         }
     }
 
+    // 0.5 (P25-006-REV-001、§6.3): 消滅国家が所有する全Divisionの装備状態を、
+    // 実際に破壊する前にDivisionId昇順で検証する。1件でも不正(NaN/負値/
+    // `equipment > max_equipment`等)なら、ここでErrを返しどのRegistryも
+    // 変更しない(全か無かの原子性)。決定的順序を保証するためHashMapの走査順
+    // ではなくソート済みIDリストを使う。
+    let mut eliminated_division_ids: Vec<DivisionId> = military_registry
+        .divisions
+        .values()
+        .filter(|d| d.owner == eliminated_country)
+        .map(|d| d.id)
+        .collect();
+    eliminated_division_ids.sort_by_key(|id| id.0);
+    for &division_id in &eliminated_division_ids {
+        let division = military_registry
+            .divisions
+            .get(&division_id)
+            .expect("division_id was just collected from this same registry");
+        validate_equipment_state(division.equipment, division.max_equipment)
+            .map_err(|e| CountryEliminationError::InvalidDivisionEquipment(division_id, e))?;
+    }
+
     // ここまでは一切のRegistryを変更していない。以降の全ステップは、
-    // 事前検証済みの入力だけを使う失敗し得ない操作のみで構成される。
+    // 事前検証済みの入力だけを使う失敗し得ない操作のみで構成される
+    // (装備破壊は、直前に全件検証済みの`eliminated_division_ids`に対して
+    // `try_destroy_equipment`を呼ぶだけであり、`equipment == returned`という
+    // 構成上、round-trip検証以外で失敗し得ない)。
 
     // 1. 最後の所有陸州を移転する。
     let transfer_outcome = ownership::apply_final_state_transfer_for_elimination(
@@ -365,6 +398,22 @@ pub fn apply_country_elimination(
     division_ids_to_remove.sort_by_key(|id| id.0);
     let divisions_disbanded = division_ids_to_remove.len();
     for division_id in division_ids_to_remove {
+        // P25-006-REV-001: 削除前に現在装備を全損させる(国家備蓄へは一切返さない、
+        // 併合国へも移転しない)。§0.5で全件のequipment状態を検証済みのため、
+        // ここでの`try_destroy_equipment`は`destroyed == equipment_before`という
+        // 構成上、実質的に失敗し得ない(この段階まで来て失敗する経路は§0.5の
+        // 検証と数学的に矛盾する到達不能ケースであり、万一発生してもDivision
+        // そのものの削除だけは継続する——装備が失われる代わりにDivisionを永久に
+        // 残留させるという、より悪い状態を避けるため)。
+        if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+            // 常にtry_destroy_equipmentを呼ぶ(destroyed=0.0は既存どおり安全な
+            // no-op)。`equipment > 0.0`だけをガードにすると、NaNは`NaN > 0.0`が
+            // 常にfalseとなるため誤って検証をスキップしてしまう
+            // (§0.5のpreflightで既に排除済みのはずだが、念のため同じ安全な
+            // 呼び出し方を統一する)。
+            let remaining_equipment = division.equipment;
+            let _ = try_destroy_equipment(&mut division.equipment, remaining_equipment);
+        }
         military_registry.remove_division(division_id);
     }
     army_registry.sanitize_references(military_registry);
@@ -513,6 +562,7 @@ mod tests {
     use crate::diplomacy::claims::{ClaimSource, TerritorialClaim};
     use crate::diplomacy::crisis::{DiplomaticCrisis, ThirdCountryReaction, WarGoal, WarGoalType};
     use crate::diplomacy::data::{ActiveTreaty, DiplomaticPairKey, DiplomaticRelation, TreatyType};
+    use crate::economy::resources::ResourceType;
     use crate::military::battle::{Battle, BattleStatus};
     use crate::military::data::{Division, DivisionSize, DivisionStatus, DivisionType};
     use crate::state::data::{StateData, StateRegistry};
@@ -856,6 +906,227 @@ mod tests {
             army.armies.is_empty(),
             "the eliminated country's army must be auto-disbanded once empty"
         );
+    }
+
+    // ─── P25-006-REV-001: 国家消滅時の装備会計 ────────────────────────────
+
+    #[test]
+    fn apply_destroys_all_equipment_of_disbanded_divisions_and_leaves_stockpiles_untouched() {
+        let (mut states, mut countries) = last_state_env(1, 2, 1);
+        countries
+            .get_mut(CountryId(1))
+            .unwrap()
+            .stockpile
+            .set(ResourceType::MilitaryEquipment, 50.0);
+        countries
+            .get_mut(CountryId(2))
+            .unwrap()
+            .stockpile
+            .set(ResourceType::MilitaryEquipment, 100.0);
+
+        let plan = preflight_country_elimination(
+            StateId(1),
+            CountryId(1),
+            CountryId(2),
+            "1800/06/01",
+            &states,
+            &countries,
+        )
+        .unwrap();
+
+        let mut military = MilitaryRegistry::default();
+        let mut d1 = division(0, 1, 1);
+        d1.equipment = 40.0;
+        let mut d2 = division(1, 1, 1);
+        d2.equipment = 3.7;
+        military.add_division(d1);
+        military.add_division(d2);
+        military.add_division(division(2, 2, 101)); // annexer's own division, untouched
+
+        let outcome = apply_country_elimination(
+            plan,
+            None,
+            None,
+            "1800/06/01",
+            &mut states,
+            &mut countries,
+            &mut military,
+            &mut ArmyRegistry::default(),
+            &mut FrontlineRegistry::default(),
+            &mut WarRegistry::default(),
+            &mut BattleRegistry::default(),
+            &mut DiplomacyRegistry::default(),
+            &mut CrisisRegistry::default(),
+            &mut ClaimRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut CountryPowerRegistry::default(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.divisions_disbanded, 2);
+        assert!(
+            !military.divisions.values().any(|d| d.owner == CountryId(1)),
+            "no division owned by the eliminated country may remain"
+        );
+
+        // 消滅国家のstockpileは凍結され、変化しない。
+        let eliminated = countries.get(CountryId(1)).unwrap();
+        assert_eq!(
+            eliminated.stockpile.get(ResourceType::MilitaryEquipment),
+            50.0
+        );
+        // 併合国のstockpileも増えない。
+        let annexer = countries.get(CountryId(2)).unwrap();
+        assert_eq!(
+            annexer.stockpile.get(ResourceType::MilitaryEquipment),
+            100.0
+        );
+        // 併合国自身のDivisionは無変化。
+        assert_eq!(
+            military.divisions[&crate::common::DivisionId(2)].equipment,
+            100.0
+        );
+
+        // 世界装備総量は、破壊された40.0+3.7=43.7だけ正確に減少する
+        // (fixed-point unitsで完全一致)。
+        let world_after: f64 = countries
+            .countries
+            .iter()
+            .map(|c| c.stockpile.get(ResourceType::MilitaryEquipment))
+            .sum::<f64>()
+            + military.divisions.values().map(|d| d.equipment).sum::<f64>();
+        assert_eq!(
+            world_after, 150.0 + 100.0,
+            "50(消滅国) + 100(併合国) + 40+3.7(消滅Division) + 100(併合国Division) = \
+             293.7が消滅により43.7減って250.0になるはず"
+        );
+    }
+
+    #[test]
+    fn apply_rejects_atomically_when_a_disbanded_divisions_equipment_is_invalid() {
+        let (mut states, mut countries) = last_state_env(1, 2, 1);
+        let plan = preflight_country_elimination(
+            StateId(1),
+            CountryId(1),
+            CountryId(2),
+            "1800/06/01",
+            &states,
+            &countries,
+        )
+        .unwrap();
+
+        let mut military = MilitaryRegistry::default();
+        let mut invalid_division = division(0, 1, 1);
+        invalid_division.equipment = f64::NAN;
+        let invalid_division_id = invalid_division.id;
+        military.add_division(invalid_division);
+        military.add_division(division(1, 1, 1)); // 正常な装備を持つ2件目
+
+        let division_count_before = military.divisions.len();
+        let country_count_before = countries.countries.len();
+
+        let result = apply_country_elimination(
+            plan,
+            None,
+            None,
+            "1800/06/01",
+            &mut states,
+            &mut countries,
+            &mut military,
+            &mut ArmyRegistry::default(),
+            &mut FrontlineRegistry::default(),
+            &mut WarRegistry::default(),
+            &mut BattleRegistry::default(),
+            &mut DiplomacyRegistry::default(),
+            &mut CrisisRegistry::default(),
+            &mut ClaimRegistry::default(),
+            &mut WarJustificationRegistry::default(),
+            &mut CountryPowerRegistry::default(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(CountryEliminationError::InvalidDivisionEquipment(id, _)) if id == invalid_division_id
+        ));
+
+        // preflightで即座に拒否されるため、いかなるRegistryも変更されていない。
+        assert_eq!(military.divisions.len(), division_count_before);
+        assert!(military.divisions.contains_key(&invalid_division_id));
+        assert!(
+            military.divisions[&invalid_division_id].equipment.is_nan(),
+            "不正な装備状態はそのまま残る(黙って0クランプされない)"
+        );
+        assert_eq!(countries.countries.len(), country_count_before);
+        assert!(
+            !countries.get(CountryId(1)).unwrap().is_eliminated(),
+            "preflight失敗時は国家消滅そのものが一切適用されない"
+        );
+        assert_eq!(
+            states.get(StateId(1)).unwrap().owner_country_id,
+            CountryId(1),
+            "州所有権も一切移転されない"
+        );
+    }
+
+    #[test]
+    fn apply_processes_multiple_divisions_in_deterministic_division_id_order_regardless_of_insertion_order()
+     {
+        fn run_scenario(insertion_order: [usize; 3]) -> f64 {
+            let (mut states, mut countries) = last_state_env(1, 2, 1);
+            let plan = preflight_country_elimination(
+                StateId(1),
+                CountryId(1),
+                CountryId(2),
+                "1800/06/01",
+                &states,
+                &countries,
+            )
+            .unwrap();
+
+            let mut military = MilitaryRegistry::default();
+            let equipments = [40.0, 3.7, 61.3];
+            let divisions: Vec<Division> = (0..3)
+                .map(|i| {
+                    let mut d = division(i, 1, 1);
+                    d.equipment = equipments[i];
+                    d
+                })
+                .collect();
+            for &i in &insertion_order {
+                military
+                    .divisions
+                    .insert(divisions[i].id, divisions[i].clone());
+            }
+
+            apply_country_elimination(
+                plan,
+                None,
+                None,
+                "1800/06/01",
+                &mut states,
+                &mut countries,
+                &mut military,
+                &mut ArmyRegistry::default(),
+                &mut FrontlineRegistry::default(),
+                &mut WarRegistry::default(),
+                &mut BattleRegistry::default(),
+                &mut DiplomacyRegistry::default(),
+                &mut CrisisRegistry::default(),
+                &mut ClaimRegistry::default(),
+                &mut WarJustificationRegistry::default(),
+                &mut CountryPowerRegistry::default(),
+            )
+            .unwrap();
+
+            countries.get(CountryId(1)).unwrap().stockpile.get(ResourceType::MilitaryEquipment)
+                + military.divisions.values().map(|d| d.equipment).sum::<f64>()
+        }
+
+        let result_a = run_scenario([0, 1, 2]);
+        let result_b = run_scenario([2, 1, 0]);
+        let result_c = run_scenario([1, 2, 0]);
+        assert_eq!(result_a, result_b);
+        assert_eq!(result_a, result_c);
     }
 
     #[test]

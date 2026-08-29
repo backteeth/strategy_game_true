@@ -680,6 +680,7 @@
     // ── country_error.elimination.* (P21-021: country::elimination) ─
     ("country_error.elimination.already_eliminated", "その国家は既に消滅しています"),
     ("country_error.elimination.annexer_not_active", "併合先の国家は既に存在しません"),
+    ("country_error.elimination.invalid_division_equipment", "師団の装備記録が不正なため、安全に消滅処理を行えません"),
 
     // ── war_error.peace.auto_settlement_failed (P21-020: daily auto-capitulation) ─
     ("war_error.peace.auto_settlement_failed", "この戦争の自動降伏講和に失敗しました: {reason}"),
