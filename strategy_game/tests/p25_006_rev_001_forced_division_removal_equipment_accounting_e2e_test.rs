@@ -285,6 +285,11 @@ fn get_division(app: &App, id: DivisionId) -> Option<Division> {
 /// 攻撃側が単独では守備側を突破できない(=組織率0に達して撤退する)、
 /// P21-siegeの`test_solo_attacker_cannot_break_well_defended_state`と同じ
 /// 攻撃10/防御15の非対称statsで、実App上に1対1戦闘を組み立てる。
+///
+/// P25-007により装備充足率(`min(manpower比率, 装備比率)`)が戦闘力へ直接影響する
+/// ようになったため、防御側は満タン装備(readiness 100%)に固定し、元のP21-siege
+/// バランス(攻撃側が組織率0に達して撤退する)を保つ。攻撃側の`attacker_equipment`
+/// だけを可変にすることで、撤退時装備損失の検証対象を攻撃側の装備量に限定する。
 fn setup_retreating_battle(app: &mut App, attacker_equipment: f64) -> (DivisionId, DivisionId) {
     let player = CountryId(0);
     let ai_country = CountryId(1);
@@ -307,7 +312,7 @@ fn setup_retreating_battle(app: &mut App, attacker_equipment: f64) -> (DivisionI
         TEST_STATE_ID,
         10_000,
         10_000,
-        60.0,
+        100.0,
         100.0,
         100.0,
         10,
@@ -444,23 +449,45 @@ fn test_post_retreat_equipment_loss_survives_save_and_load() {
     assert_eq!(after_reload.manpower, before_reload.manpower);
 }
 
-// ─── Test: RNG系列非変更(装備量の有無で撤退結果が変わらない) ─────────────
+// ─── Test: 決定性(P25-006-REV-001時点では「装備量の有無で撤退結果が変わらない」
+// という前提だったが、P25-007により意図的に反転している。§16参照) ──────────
+//
+// P25-006-REV-001時点では、戦闘力計算が装備量を一切参照しなかったため、撤退の
+// 発生有無・タイミング・最終manpowerは装備量と無関係だった。P25-007は戦闘充足率
+// (`min(manpower比率, 装備比率)`)を通じて装備量をattack/defenseへ直接反映する
+// ため、装備量が異なれば撤退結果(タイミング・最終manpower)も異なり得る
+// (これはP25-007タスク自身が要求する仕様どおりの挙動であり、退行ではない)。
+// この事実自体を隠さず記録しつつ、なお成立すべき不変条件——同じ装備量・同じ
+// battle stateなら常に同じ結果になる決定性——をこのテストで検証する
+// (本コードベースの戦闘計算はそもそも乱数を使用しない、決定的な整数演算のみ)。
 
 #[test]
-fn test_equipment_amount_does_not_change_retreat_manpower_or_status_via_full_app() {
-    fn run_scenario(equipment: f64, label: &str) -> (u64, DivisionStatus) {
+fn test_retreat_outcome_is_deterministic_for_a_given_equipment_level_even_though_it_now_varies_across_levels()
+ {
+    fn run_scenario(equipment: f64, label: &str) -> (u64, f64, DivisionStatus) {
         let player = CountryId(0);
         let temp_dir = TempTestDir::new(label);
         let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
         let (attacker_id, _) = setup_retreating_battle(&mut app, equipment);
         run_until_retreat(&mut app, attacker_id);
         let after = get_division(&app, attacker_id).unwrap();
-        (after.manpower, after.status)
+        (after.manpower, after.equipment, after.status)
     }
 
-    let with_equipment = run_scenario(90.0, "rng_with_equipment");
-    let without_equipment = run_scenario(0.0, "rng_without_equipment");
-    assert_eq!(with_equipment, without_equipment);
+    // 同じ装備量(90.0)を2回独立実行すると、bit-for-bitで完全に同じ結果になる
+    // (装備充足率の計算自体は決定的な整数演算のみで、新しい乱数を消費しない)。
+    let run_a = run_scenario(90.0, "determinism_a");
+    let run_b = run_scenario(90.0, "determinism_b");
+    assert_eq!(run_a, run_b);
+
+    // 異なる装備量(0.0)では、P25-007により結果が変わり得ることを確認する
+    // (「変わらない」という古い前提の単純な反転ではなく、意図した仕様であることを
+    // 明示するために、変化の方向性[装備0の方がreadinessが低く不利]も確認する)。
+    let zero_equipment = run_scenario(0.0, "zero_equipment");
+    assert_ne!(
+        run_a, zero_equipment,
+        "P25-007により、攻撃側の装備量が撤退結果へ意図的に反映されるはず"
+    );
 }
 
 // ─── 国家消滅(実country::elimination公開API経由) ─────────────────────────

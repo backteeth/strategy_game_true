@@ -3,8 +3,8 @@ use crate::common::{BattleId, DivisionId, StateId};
 use crate::country::CountryRegistry;
 use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::combat_calc::{
-    ORG_RECOVERY_PER_DAY, RETREAT_MANPOWER_LOSS_RATIO, calculate_terrain_defense_bonus,
-    resolve_combat_day_multi,
+    ORG_RECOVERY_PER_DAY, RETREAT_MANPOWER_LOSS_RATIO, calculate_combat_readiness,
+    calculate_terrain_defense_bonus, resolve_combat_day_multi,
 };
 use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
 use crate::military::equipment::{calculate_proportional_equipment_loss, try_destroy_equipment};
@@ -173,6 +173,30 @@ fn process_daily_battles(
             .iter()
             .filter_map(|id| military_registry.divisions.get(id).cloned())
             .collect();
+
+        // P25-007(§15): 戦闘充足率(manpower/装備状態)の妥当性を、この戦闘の
+        // 当日解決(manpower/equipment/organization/battle statisticsの更新、
+        // elapsed_days加算)を一切行う前に全参加Divisionについて検証する。
+        // 1件でも不正(NaN装備・manpower>max_manpower等)なら、このBattleの
+        // 当日解決を丸ごとskipし(他のBattle・他国家には影響しない)、次のBattleへ
+        // 進む。乱数はこのコードベースの戦闘計算がそもそも使用しないため、
+        // 「RNGを消費しない」は構造的に自明に満たされる。
+        let readiness_invalid = attacker_divisions
+            .iter()
+            .chain(defender_divisions.iter())
+            .any(|d| {
+                calculate_combat_readiness(d.manpower, d.max_manpower, d.equipment, d.max_equipment)
+                    .is_err()
+            });
+        if readiness_invalid {
+            error!(
+                "[Battle] battle {:?} has a participant with invalid combat readiness state \
+                 (manpower/equipment out of the canonical range); skipping resolution this tick",
+                battle_id
+            );
+            continue;
+        }
+
         let attacker_refs: Vec<&Division> = attacker_divisions.iter().collect();
         let defender_refs: Vec<&Division> = defender_divisions.iter().collect();
 
@@ -1422,11 +1446,18 @@ mod tests {
         assert_eq!(run1, run2);
     }
 
-    /// Test S: 現在装備の有無・多寡は、manpower/organization casualtyの結果に
-    /// 一切影響しない(装備損失計算が追加のRNGを消費せず、既存の戦闘計算へ
-    /// フィードバックしないことの確認)。
+    /// Test S(P25-007で意図的に反転): P25-004時点では、現在装備の有無・多寡は
+    /// manpower/organization casualtyの結果に一切影響しなかった(装備損失の
+    /// 計算[事後会計]が戦闘力計算[事前]へフィードバックしないことの確認だった)。
+    /// P25-007は、この非接続を意図的に解消し、戦闘充足率(`min(manpower比率,
+    /// 装備比率)`)を通じてDivisionのattack/defenseへ装備状態を反映するため、
+    /// 現在ではequipment量がmanpower/organization casualtyへ直接影響する
+    /// (これはP25-007タスク自身が要求する仕様どおりの挙動であり、退行ではない)。
+    /// 新しい期待値: 双方装備0(readiness=0)なら戦闘力0となりcasualty自体が
+    /// 発生しない(膠着)。双方装備満タン(readiness=100%)ならP25-004時点と
+    /// 同じ通常の被害が生じる。
     #[test]
-    fn test_s_equipment_amount_does_not_affect_manpower_or_organization_casualties() {
+    fn test_s_equipment_amount_now_intentionally_affects_manpower_and_organization_casualties() {
         fn run_scenario(attacker_equipment: f64, defender_equipment: f64) -> (u64, f32, u64, f32) {
             let attacker_country = CountryId(1);
             let defender_country = CountryId(2);
@@ -1481,9 +1512,20 @@ mod tests {
 
         let with_equipment = run_scenario(100.0, 100.0);
         let without_equipment = run_scenario(0.0, 0.0);
+
         assert_eq!(
+            without_equipment,
+            (10_000, 100.0, 10_000, 100.0),
+            "双方の戦闘充足率が0(装備0)なら、attack/defenseとも0になり\
+             casualty自体が発生しない(膠着、P25-007で追加した新しい仕様)"
+        );
+        assert!(
+            with_equipment.0 < 10_000,
+            "装備満タン(readiness 100%)なら、P25-004時点と同じ通常のcasualtyが生じるはず"
+        );
+        assert_ne!(
             with_equipment, without_equipment,
-            "装備量の違いがmanpower/organization casualtyへ漏れ出してはいけない"
+            "P25-007により、装備量の違いはmanpower/organization casualtyへ意図的に反映されるはず"
         );
     }
 
@@ -1815,6 +1857,10 @@ mod tests {
 
         // 攻撃側は最初からorganization=0(既に前日消耗済みの想定)。防御側からの
         // 通常戦闘casualtyは受けるが、org=0のため自身は防御側へダメージを与えない。
+        // このテストは撤退損失の逐次適用(二重計上防止)を検証するものであり、
+        // P25-007の戦闘充足率の影響を受けないよう、equipment=max_equipment
+        // (readiness 100%)にする(999.0のような`max_equipment`にすると、
+        // P25-007の`min(m,e)`によって意図せず戦力が減少してしまう)。
         let mut attacker = make_division_ex(
             0,
             attacker_country,
@@ -1822,7 +1868,7 @@ mod tests {
             10_000,
             10_000,
             100.0,
-            999.0,
+            100.0,
             10,
             10,
         );
@@ -1834,7 +1880,7 @@ mod tests {
             10_000,
             10_000,
             100.0,
-            999.0,
+            100.0,
             10,
             15,
         );
@@ -1925,5 +1971,162 @@ mod tests {
         let with_equipment = run_scenario(100.0);
         let without_equipment = run_scenario(0.0);
         assert_eq!(with_equipment, without_equipment);
+    }
+
+    // ─── P25-007: process_daily_battlesの戦闘前preflight(§15) ─────────────
+
+    /// Test(§15): 参加Divisionの1件でも戦闘充足率が計算不能(不正状態)なら、
+    /// そのBattleの当日解決を丸ごとskipし、manpower・equipment・organization・
+    /// elapsed_daysのいずれも変更しない(原子性)。
+    #[test]
+    fn test_preflight_skips_battle_resolution_atomically_when_a_participant_has_invalid_equipment() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let mut defender = make_division(1, defender_country, target, 10, 15);
+        defender.equipment = f64::NAN; // 現在の正常経路では発生しないはずの破損状態
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        let attacker_after = &mil.divisions[&attacker.id];
+        let defender_after = &mil.divisions[&defender.id];
+        assert_eq!(attacker_after.manpower, attacker.manpower, "攻撃側もmanpowerを変更してはいけない");
+        assert_eq!(attacker_after.equipment, attacker.equipment);
+        assert_eq!(attacker_after.organization, attacker.organization);
+        assert_eq!(defender_after.manpower, defender.manpower);
+        assert!(defender_after.equipment.is_nan(), "不正な装備状態はそのまま残る(黙って0クランプされない)");
+        assert_eq!(defender_after.organization, defender.organization);
+        assert_eq!(
+            battle_reg.battles[&BattleId(0)].elapsed_days, 0,
+            "battle statistics(elapsed_days)も更新してはいけない"
+        );
+        assert_eq!(battle_reg.battles[&BattleId(0)].status, BattleStatus::Ongoing);
+    }
+
+    /// Test(§15): manpower > max_manpowerという不正状態(黙ってclampされるべき
+    /// ではない)でも、同様にそのBattleの当日解決全体をskipする。
+    #[test]
+    fn test_preflight_skips_battle_resolution_when_a_participant_has_manpower_exceeding_max() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let mut attacker = make_division(0, attacker_country, target, 10, 10);
+        attacker.manpower = attacker.max_manpower + 1; // 不正状態
+        let defender = make_division(1, defender_country, target, 10, 15);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(
+                attacker_country,
+                defender_country,
+                target,
+                vec![attacker.id],
+                vec![defender.id],
+            ))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        assert_eq!(mil.divisions[&attacker.id].manpower, attacker.manpower);
+        assert_eq!(mil.divisions[&defender.id].manpower, defender.manpower);
+    }
+
+    /// Test: 1つのBattleが不正状態でskipされても、他のBattle(別の国家ペア)は
+    /// 通常どおり解決される(他Battle・他国家まで停止させない)。
+    #[test]
+    fn test_preflight_failure_in_one_battle_does_not_block_another_battle() {
+        let country_a = CountryId(1);
+        let country_b = CountryId(2);
+        let country_c = CountryId(3);
+        let country_d = CountryId(4);
+        let mut war_reg = setup_war(country_a, country_b);
+        // country_c/dの戦争も同じWarRegistryへ追加する。
+        war_reg.wars.insert(
+            WarId(1),
+            War {
+                id: WarId(1),
+                name: "Second War".to_string(),
+                attackers: [country_c].into_iter().collect(),
+                defenders: [country_d].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![],
+                start_date: "1800/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: HashSet::new(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: HashSet::new(),
+            },
+        );
+
+        let target_ab = StateId(2);
+        let target_cd = StateId(3);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker_a = make_division(0, country_a, target_ab, 10, 10);
+        let mut defender_b = make_division(1, country_b, target_ab, 10, 15);
+        defender_b.equipment = f64::NAN; // Battle 1(a vs b)は不正状態
+
+        let attacker_c = make_division_ex(2, country_c, target_cd, 10_000, 10_000, 100.0, 100.0, 10, 10);
+        let defender_d = make_division_ex(3, country_d, target_cd, 10_000, 10_000, 100.0, 100.0, 10, 15);
+
+        let mut mil = MilitaryRegistry::default();
+        for d in [&attacker_a, &defender_b, &attacker_c, &defender_d] {
+            mil.divisions.insert(d.id, d.clone());
+        }
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(country_a, country_b, target_ab, vec![attacker_a.id], vec![defender_b.id]))
+            .unwrap();
+        battle_reg
+            .start_battle(make_battle(country_c, country_d, target_cd, vec![attacker_c.id], vec![defender_d.id]))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        // Battle 1(不正状態)は変更されない。
+        assert_eq!(mil.divisions[&attacker_a.id].manpower, attacker_a.manpower);
+        // Battle 2(正常)は通常どおり解決される。
+        assert!(
+            mil.divisions[&defender_d.id].manpower < defender_d.manpower,
+            "不正状態のBattleとは無関係な別Battleは通常どおり解決されるはず"
+        );
     }
 }

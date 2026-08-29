@@ -1,6 +1,7 @@
 /// 陸上戦闘の計算ロジックモジュール
 /// 乱数を使わず、整数演算で決定的な戦闘計算を行う
 use crate::common::DivisionId;
+use crate::economy::resources::{MilitaryEquipmentUnitsError, military_equipment_value_to_units};
 use crate::military::data::Division;
 use crate::state::data::StateData;
 use std::collections::HashMap;
@@ -54,11 +55,142 @@ pub fn calculate_terrain_defense_bonus(_state: &StateData) -> i32 {
     TERRAIN_BONUS_PLAIN
 }
 
+// ─── 戦闘充足率(P25-007) ──────────────────────────────────────────────────
+
+/// 戦闘充足率専用の固定小数点scale。装備数量のscale
+/// (`economy::resources::MILITARY_EQUIPMENT_SCALE`)とたまたま同じ1,000,000だが、
+/// 意味の異なる別概念(manpower/equipmentのうち小さい方が戦闘力を制限する度合い)
+/// であるため、独立した定数として持つ(値を複製しているわけではない)。
+pub const COMBAT_READINESS_SCALE: u64 = 1_000_000;
+
+/// `calculate_combat_readiness`が失敗し得る理由。呼び出し元
+/// (`military::update::process_daily_battles`)が、戦闘のRNG消費・状態更新前に
+/// 全参加Divisionをこの関数で検証し、1件でも`Err`ならそのBattleの当日解決を
+/// 丸ごとskipする(原子性、§15)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CombatReadinessError {
+    /// 装備量が非有限(NaN/Infinity)。
+    NonFiniteEquipment,
+    /// 装備量が負。
+    NegativeEquipment,
+    /// 装備量が正規最大unitsを超える、または固定小数点往復変換に失敗。
+    EquipmentOutOfRange,
+    /// `equipment > max_equipment`(不正状態、黙ってclampしない)。
+    EquipmentExceedsMax,
+    /// `manpower > max_manpower`(不正状態、黙ってclampしない)。
+    ManpowerExceedsMax,
+    /// units演算がoverflowした(正規最大値の範囲内では到達しないはず)。
+    ArithmeticOverflow,
+}
+
+impl From<MilitaryEquipmentUnitsError> for CombatReadinessError {
+    fn from(err: MilitaryEquipmentUnitsError) -> Self {
+        match err {
+            MilitaryEquipmentUnitsError::NonFinite => CombatReadinessError::NonFiniteEquipment,
+            MilitaryEquipmentUnitsError::Negative => CombatReadinessError::NegativeEquipment,
+            MilitaryEquipmentUnitsError::OutOfRange | MilitaryEquipmentUnitsError::RoundTripFailed => {
+                CombatReadinessError::EquipmentOutOfRange
+            }
+        }
+    }
+}
+
+/// manpower充足率・装備充足率・戦闘充足率(両者のうち小さい方)を
+/// `COMBAT_READINESS_SCALE`単位のper-million固定小数点で保持する(P25-007)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CombatReadiness {
+    pub manpower_readiness_units: u64,
+    pub equipment_readiness_units: u64,
+    pub combat_readiness_units: u64,
+}
+
+impl CombatReadiness {
+    /// `combat_readiness_units`を`0.0`〜`1.0`の`f64`係数へ変換する
+    /// (§7: 「最終的にattack／defenseへ適用するときだけ」既存の戦闘数値型へ変換する)。
+    pub fn factor(self) -> f64 {
+        self.combat_readiness_units as f64 / COMBAT_READINESS_SCALE as f64
+    }
+}
+
+/// manpower充足率(`m = M/Mmax`)と装備充足率(`e = E/Emax`)のうち小さい方
+/// (`r = min(m, e)`)を、正規units上でchecked `u128`演算により算出する(P25-007)。
+///
+/// `m`と`e`をそれぞれ独立に計算してから`min`を取ることで、同じ損失を
+/// manpowerと装備の2経路で二重評価しない(`min(50%,50%)=50%`、`50%×50%=25%`には
+/// しない、§5)。
+///
+/// # 特別扱い
+/// * `max_equipment == 0`(装備を必要としないDivision)は`equipment_readiness_units
+///   = COMBAT_READINESS_SCALE`(100%)として扱う(§8.2)。
+/// * `max_manpower == 0`は`manpower_readiness_units = 0`として扱う(§8.4、
+///   ゼロ除算はしない)。
+/// * `manpower > max_manpower`または`equipment > max_equipment`は、黙って
+///   100%へclampせず`Err`として明示的に拒否する(§8.5)。
+pub fn calculate_combat_readiness(
+    manpower: u64,
+    max_manpower: u64,
+    equipment: f64,
+    max_equipment: f64,
+) -> Result<CombatReadiness, CombatReadinessError> {
+    if manpower > max_manpower {
+        return Err(CombatReadinessError::ManpowerExceedsMax);
+    }
+    let manpower_readiness_units = if max_manpower == 0 {
+        0
+    } else {
+        let numerator = u128::from(manpower)
+            .checked_mul(u128::from(COMBAT_READINESS_SCALE))
+            .ok_or(CombatReadinessError::ArithmeticOverflow)?;
+        (numerator / u128::from(max_manpower)) as u64
+    };
+
+    let equipment_units = military_equipment_value_to_units(equipment)?;
+    let max_equipment_units = military_equipment_value_to_units(max_equipment)?;
+    if equipment_units > max_equipment_units {
+        return Err(CombatReadinessError::EquipmentExceedsMax);
+    }
+    let equipment_readiness_units = if max_equipment_units == 0 {
+        COMBAT_READINESS_SCALE
+    } else {
+        let numerator = u128::from(equipment_units)
+            .checked_mul(u128::from(COMBAT_READINESS_SCALE))
+            .ok_or(CombatReadinessError::ArithmeticOverflow)?;
+        (numerator / u128::from(max_equipment_units)) as u64
+    };
+
+    let combat_readiness_units = manpower_readiness_units.min(equipment_readiness_units);
+
+    Ok(CombatReadiness {
+        manpower_readiness_units,
+        equipment_readiness_units,
+        combat_readiness_units,
+    })
+}
+
+/// `calculate_combat_readiness`の結果を、既存の戦闘式が使う固定小数点scale(×1000)
+/// へ変換した`i64`として返す純粋・infallibleなヘルパー。呼び出し元
+/// (`resolve_combat_day`/`effective_power_1000`)は、Battleの当日解決前に
+/// `process_daily_battles`が既に全参加者を`calculate_combat_readiness`で
+/// 検証済みであることを前提とするため、万一失敗した場合(到達不能のはず)は
+/// 安全に0を返す(装備0扱いとして戦闘力を持たせない、panicしない)。
+///
+/// `COMBAT_READINESS_SCALE(1,000,000)`から既存scale(1,000)への変換は、
+/// `floor(floor(a×1,000,000/b)/1,000) = floor(a×1,000/b)`という整数除算の
+/// 合成則により、直接scale1,000で計算した場合と完全に一致する(精度劣化なし)。
+fn combat_readiness_1000(manpower: u64, max_manpower: u64, equipment: f64, max_equipment: f64) -> i64 {
+    calculate_combat_readiness(manpower, max_manpower, equipment, max_equipment)
+        .map(|r| (r.combat_readiness_units / 1000) as i64)
+        .unwrap_or(0)
+}
+
 /// 1日分の戦闘計算を行う（乱数なし・決定的）
 ///
 /// # 計算式
-/// 実効攻撃力 = attack_power * (現在manpower / max_manpower) * (現在organization / max_organization)
+/// 実効攻撃力 = attack_power * combat_readiness * (現在organization / max_organization)
 /// ※ 固定小数点（整数×1000）で計算して最後に1000で割る
+/// combat_readiness = min(現在manpower/max_manpower, 現在equipment/max_equipment)
+/// (P25-007: 単純なmanpower比率ではなく、manpower/装備充足率のうち小さい方を使う。
+/// `calculate_combat_readiness`参照)
 ///
 /// 防御側が受けるmanpowerダメージ = attacker_effective * DAMAGE_SCALE / max(defender_effective + terrain_bonus, 1)
 /// 攻撃側が受けるmanpowerダメージ = (defender_effective + terrain_bonus) * DAMAGE_SCALE / max(attacker_effective, 1)
@@ -87,16 +219,28 @@ pub fn resolve_combat_day(
     }
 
     // 実効攻撃力を固定小数点（×1000）で計算
-    // attack_effective = attack_power * manpower_ratio * org_ratio（0〜attack_power*1000）
-    let atk_manpower_ratio_1000 = (attacker.manpower as i64 * 1000) / attacker.max_manpower as i64;
+    // attack_effective = attack_power * combat_readiness * org_ratio（0〜attack_power*1000）
+    // P25-007: manpower ratio単独ではなく、manpower/装備充足率のうち小さい方
+    // (戦闘充足率、combat_readiness_1000)を使う。
+    let atk_readiness_1000 = combat_readiness_1000(
+        attacker.manpower,
+        attacker.max_manpower,
+        attacker.equipment,
+        attacker.max_equipment,
+    );
     let atk_org_ratio_1000 = (attacker.organization * 1000.0 / attacker.max_organization) as i64;
     let atk_effective_1000 =
-        (attacker.attack_power as i64 * atk_manpower_ratio_1000 * atk_org_ratio_1000) / 1_000_000;
+        (attacker.attack_power as i64 * atk_readiness_1000 * atk_org_ratio_1000) / 1_000_000;
 
-    let def_manpower_ratio_1000 = (defender.manpower as i64 * 1000) / defender.max_manpower as i64;
+    let def_readiness_1000 = combat_readiness_1000(
+        defender.manpower,
+        defender.max_manpower,
+        defender.equipment,
+        defender.max_equipment,
+    );
     let def_org_ratio_1000 = (defender.organization * 1000.0 / defender.max_organization) as i64;
     let def_effective_1000 =
-        (defender.defense_power as i64 * def_manpower_ratio_1000 * def_org_ratio_1000) / 1_000_000;
+        (defender.defense_power as i64 * def_readiness_1000 * def_org_ratio_1000) / 1_000_000;
 
     // 地形補正を防御側の実効値に加算（固定小数点×1000）
     let def_effective_with_terrain = def_effective_1000 + terrain_defense_bonus as i64;
@@ -129,21 +273,26 @@ pub fn resolve_combat_day(
     )
 }
 
-/// 実効戦力(atk_power×manpower比率×組織率比率、固定小数点×1000)を算出する。
+/// 実効戦力(atk_power×戦闘充足率×組織率比率、固定小数点×1000)を算出する。
 /// `resolve_combat_day`内のインライン計算と同一の式を共有部品として切り出したもの。
+/// P25-007: manpower比率単独ではなく`combat_readiness_1000`(manpower/装備充足率の
+/// うち小さい方)を使う。
+#[allow(clippy::too_many_arguments)]
 fn effective_power_1000(
     power: i32,
     manpower: u64,
     max_manpower: u64,
+    equipment: f64,
+    max_equipment: f64,
     organization: f32,
     max_organization: f32,
 ) -> i64 {
     if max_manpower == 0 || max_organization <= 0.0 {
         return 0;
     }
-    let manpower_ratio_1000 = (manpower as i64 * 1000) / max_manpower as i64;
+    let readiness_1000 = combat_readiness_1000(manpower, max_manpower, equipment, max_equipment);
     let org_ratio_1000 = (organization * 1000.0 / max_organization) as i64;
-    (power as i64 * manpower_ratio_1000 * org_ratio_1000) / 1_000_000
+    (power as i64 * readiness_1000 * org_ratio_1000) / 1_000_000
 }
 
 /// 複数師団が参加する戦闘の1日分を計算する(P21-siege: 複数師団の共同参戦対応)。
@@ -181,6 +330,8 @@ pub fn resolve_combat_day_multi(
                     a.attack_power,
                     a.manpower,
                     a.max_manpower,
+                    a.equipment,
+                    a.max_equipment,
                     a.organization,
                     a.max_organization,
                 ),
@@ -196,6 +347,8 @@ pub fn resolve_combat_day_multi(
                     d.defense_power,
                     d.manpower,
                     d.max_manpower,
+                    d.equipment,
+                    d.max_equipment,
                     d.organization,
                     d.max_organization,
                 ),
@@ -455,5 +608,149 @@ mod tests {
 
         assert_eq!(def_result[&defeated_defender.id].0, 0);
         assert!(def_result[&alive_defender.id].0 > 0);
+    }
+
+    // ─── P25-007: calculate_combat_readiness(§18の数値例) ─────────────────
+
+    #[test]
+    fn readiness_18_1_full_readiness_is_exactly_one_million() {
+        let r = calculate_combat_readiness(100, 100, 100.0, 100.0).unwrap();
+        assert_eq!(r.manpower_readiness_units, 1_000_000);
+        assert_eq!(r.equipment_readiness_units, 1_000_000);
+        assert_eq!(r.combat_readiness_units, 1_000_000);
+        assert_eq!(r.factor(), 1.0);
+    }
+
+    #[test]
+    fn readiness_18_2_equipment_shortage_limits_readiness_to_fifty_percent() {
+        let r = calculate_combat_readiness(100, 100, 50.0, 100.0).unwrap();
+        assert_eq!(r.manpower_readiness_units, 1_000_000);
+        assert_eq!(r.equipment_readiness_units, 500_000);
+        assert_eq!(r.combat_readiness_units, 500_000);
+    }
+
+    #[test]
+    fn readiness_18_3_manpower_shortage_limits_readiness_to_fifty_percent() {
+        let r = calculate_combat_readiness(50, 100, 100.0, 100.0).unwrap();
+        assert_eq!(r.manpower_readiness_units, 500_000);
+        assert_eq!(r.equipment_readiness_units, 1_000_000);
+        assert_eq!(r.combat_readiness_units, 500_000);
+    }
+
+    #[test]
+    fn readiness_18_4_equal_shortage_on_both_axes_stays_fifty_percent_not_twenty_five() {
+        let r = calculate_combat_readiness(50, 100, 50.0, 100.0).unwrap();
+        assert_eq!(r.combat_readiness_units, 500_000, "min(50%,50%)=50%であり、50%×50%=25%にしてはいけない");
+    }
+
+    #[test]
+    fn readiness_18_5_equipment_is_the_limiting_factor() {
+        // manpower比率80%、装備比率50% → 50%が制限要因
+        let r = calculate_combat_readiness(80, 100, 50.0, 100.0).unwrap();
+        assert_eq!(r.manpower_readiness_units, 800_000);
+        assert_eq!(r.equipment_readiness_units, 500_000);
+        assert_eq!(r.combat_readiness_units, 500_000);
+    }
+
+    #[test]
+    fn readiness_18_6_manpower_is_the_limiting_factor() {
+        // manpower比率50%、装備比率80% → 50%が制限要因
+        let r = calculate_combat_readiness(50, 100, 80.0, 100.0).unwrap();
+        assert_eq!(r.manpower_readiness_units, 500_000);
+        assert_eq!(r.equipment_readiness_units, 800_000);
+        assert_eq!(r.combat_readiness_units, 500_000);
+    }
+
+    #[test]
+    fn readiness_18_7_fractional_equipment_three_point_seven_over_five() {
+        let r = calculate_combat_readiness(100, 100, 3.7, 5.0).unwrap();
+        assert_eq!(r.equipment_readiness_units, 740_000);
+        assert_eq!(r.combat_readiness_units, 740_000);
+        assert_eq!(r.factor(), 0.74);
+    }
+
+    #[test]
+    fn readiness_18_8_zero_max_equipment_division_is_full_equipment_readiness() {
+        let r = calculate_combat_readiness(100, 100, 0.0, 0.0).unwrap();
+        assert_eq!(
+            r.equipment_readiness_units, 1_000_000,
+            "max_equipment=0(装備不要Division)は装備充足率100%として扱う"
+        );
+        assert_eq!(r.combat_readiness_units, 1_000_000);
+    }
+
+    #[test]
+    fn readiness_18_9_zero_equipment_with_nonzero_max_is_zero_readiness() {
+        let r = calculate_combat_readiness(100, 100, 0.0, 100.0).unwrap();
+        assert_eq!(r.equipment_readiness_units, 0);
+        assert_eq!(r.combat_readiness_units, 0);
+    }
+
+    // ─── 境界条件(§8) ─────────────────────────────────────────────────────
+
+    #[test]
+    fn readiness_rejects_equipment_exceeding_max_equipment_instead_of_clamping() {
+        let err = calculate_combat_readiness(100, 100, 101.0, 100.0).unwrap_err();
+        assert_eq!(err, CombatReadinessError::EquipmentExceedsMax);
+    }
+
+    #[test]
+    fn readiness_rejects_max_equipment_zero_with_nonzero_equipment() {
+        let err = calculate_combat_readiness(100, 100, 1.0, 0.0).unwrap_err();
+        assert_eq!(err, CombatReadinessError::EquipmentExceedsMax);
+    }
+
+    #[test]
+    fn readiness_rejects_manpower_exceeding_max_manpower_instead_of_clamping() {
+        let err = calculate_combat_readiness(101, 100, 100.0, 100.0).unwrap_err();
+        assert_eq!(err, CombatReadinessError::ManpowerExceedsMax);
+    }
+
+    #[test]
+    fn readiness_rejects_max_manpower_zero_with_nonzero_manpower() {
+        let err = calculate_combat_readiness(1, 0, 100.0, 100.0).unwrap_err();
+        assert_eq!(err, CombatReadinessError::ManpowerExceedsMax);
+    }
+
+    #[test]
+    fn readiness_max_manpower_zero_with_zero_manpower_is_zero_readiness_not_an_error() {
+        let r = calculate_combat_readiness(0, 0, 100.0, 100.0).unwrap();
+        assert_eq!(r.manpower_readiness_units, 0);
+        assert_eq!(r.combat_readiness_units, 0);
+    }
+
+    #[test]
+    fn readiness_rejects_non_finite_or_negative_equipment() {
+        assert_eq!(
+            calculate_combat_readiness(100, 100, f64::NAN, 100.0).unwrap_err(),
+            CombatReadinessError::NonFiniteEquipment
+        );
+        assert_eq!(
+            calculate_combat_readiness(100, 100, f64::INFINITY, 100.0).unwrap_err(),
+            CombatReadinessError::NonFiniteEquipment
+        );
+        assert_eq!(
+            calculate_combat_readiness(100, 100, -1.0, 100.0).unwrap_err(),
+            CombatReadinessError::NegativeEquipment
+        );
+    }
+
+    #[test]
+    fn readiness_checked_u128_boundary_near_maximum_scale_does_not_overflow() {
+        // 正規最大装備量(MILITARY_EQUIPMENT_MAX_UNITS/SCALE = 1e9)とu64::MAXに近い
+        // manpowerでもoverflowせず正確に計算できる。
+        let r = calculate_combat_readiness(u64::MAX, u64::MAX, 1_000_000_000.0, 1_000_000_000.0)
+            .unwrap();
+        assert_eq!(r.combat_readiness_units, 1_000_000);
+    }
+
+    #[test]
+    fn readiness_is_the_same_function_used_regardless_of_attack_or_defense_role() {
+        // §9: 同じDivisionが攻撃側・防御側のどちらでも同じ戦闘充足率関数を使う。
+        // calculate_combat_readinessはattacker/defenderの区別を引数に取らない
+        // ため、構造的に同一である(この呼び出しが両方の役割で使われることの確認)。
+        let a = calculate_combat_readiness(50, 100, 80.0, 100.0).unwrap();
+        let b = calculate_combat_readiness(50, 100, 80.0, 100.0).unwrap();
+        assert_eq!(a, b);
     }
 }
