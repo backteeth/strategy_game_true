@@ -14,10 +14,16 @@ pub enum ResourceType {
     MilitaryEquipment,
     /// 未精製のマジッククリスタル原石(P21-009: クリスタル採掘施設が産出し、精製施設が消費する)
     RawMagicCrystal,
+    /// P26-002: 弾薬・燃料・軍用食料・医療整備物資等を抽象化した単一の消費補給物資。
+    /// `MilitaryEquipment`(耐久装備、casualty比例でのみ破壊される)とは意味・型の両面で
+    /// 完全に分離した別資源であり、両者を混同・統合しない
+    /// (`verification_logs/phase-26/p26-001/`§12参照)。P26-002時点では本番の生産・
+    /// 消費Systemへは一切接続されない(会計基盤のみ)。
+    MilitarySupplies,
 }
 
 impl ResourceType {
-    pub const ALL: [ResourceType; 8] = [
+    pub const ALL: [ResourceType; 9] = [
         ResourceType::Food,
         ResourceType::Wood,
         ResourceType::Iron,
@@ -26,6 +32,7 @@ impl ResourceType {
         ResourceType::IndustrialGoods,
         ResourceType::MilitaryEquipment,
         ResourceType::RawMagicCrystal,
+        ResourceType::MilitarySupplies,
     ];
 
     /// 表示用の翻訳キー(P20-009)。UI側で`localization::t()`により言語ごとの表示名へ解決する。
@@ -39,6 +46,7 @@ impl ResourceType {
             ResourceType::IndustrialGoods => "resource.industrial_goods",
             ResourceType::MilitaryEquipment => "resource.military_equipment",
             ResourceType::RawMagicCrystal => "resource.raw_magic_crystal",
+            ResourceType::MilitarySupplies => "resource.military_supplies",
         }
     }
 }
@@ -108,6 +116,71 @@ impl CountryStockpile {
         }
 
         self.set(ResourceType::MilitaryEquipment, new_value);
+        Ok(())
+    }
+
+    /// `ResourceType::MilitarySupplies`の生産加算を、固定小数点units経由で原子的に行う
+    /// (P26-002)。`add_military_equipment_produced`と全く同じ手順(read→validate→
+    /// units変換→checked_add→上限検証→f64へ正規変換→1回だけcommit)を踏むが、
+    /// `MilitaryEquipment`とは意味的に別資源であるため、定数・エラー型・変換関数は
+    /// 独立した`military_supplies_*`名前空間として並存させる(共通化しない、
+    /// `verification_logs/phase-26/p26-001/`§43参照)。他の`ResourceType`には一切
+    /// 影響しない。`produced = 0.0`は成功する意味的no-opとして扱う。失敗時
+    /// (非有限値・負数・値域超過・overflow・往復変換失敗)は備蓄を完全に不変のまま
+    /// `Err`を返す。P26-002時点では、このAPIをどの本番生産Systemからも呼び出さない
+    /// (P26-003の範囲、`verification_logs/phase-26/p26-001/`§43)。
+    pub fn add_military_supplies_produced(
+        &mut self,
+        produced: f64,
+    ) -> Result<(), MilitarySuppliesUnitsError> {
+        let current = self.get(ResourceType::MilitarySupplies);
+        let current_units = military_supplies_value_to_units(current)?;
+        let produced_units = military_supplies_value_to_units(produced)?;
+
+        // checked_add自体のu64 wraparound(現実的な値域では到達不能な防御的分岐)と、
+        // ドメイン上限`MILITARY_SUPPLIES_MAX_UNITS`超過(通常の運用上あり得る分岐)を
+        // 意味的に区別する(spec §9「overflowと上限超過を必要に応じて区別」)。
+        let new_units = current_units
+            .checked_add(produced_units)
+            .ok_or(MilitarySuppliesUnitsError::ArithmeticOverflow)?;
+        if new_units > MILITARY_SUPPLIES_MAX_UNITS {
+            return Err(MilitarySuppliesUnitsError::OutOfRange);
+        }
+
+        let new_value = military_supplies_units_to_value(new_units);
+        if military_supplies_value_to_units(new_value)? != new_units {
+            return Err(MilitarySuppliesUnitsError::RoundTripFailed);
+        }
+
+        self.set(ResourceType::MilitarySupplies, new_value);
+        Ok(())
+    }
+
+    /// `ResourceType::MilitarySupplies`の消費を、固定小数点units経由で原子的に行う
+    /// (P26-002)。備蓄が要求量に満たない場合は`Err(InsufficientStockpile)`として
+    /// 失敗し、部分消費はしない(P26-004の日次配分側が事前に
+    /// `T = min(stockpile, total_demand)`を計算してから本APIを呼ぶ設計のため、本API
+    /// 自身は「可能な分だけ部分消費する」挙動を持たない、
+    /// `verification_logs/phase-26/p26-001/`§11参照)。`amount = 0.0`は成功する
+    /// 意味的no-opとして扱う。失敗時は備蓄を完全に不変のまま`Err`を返す。
+    pub fn try_consume_military_supplies(
+        &mut self,
+        amount: f64,
+    ) -> Result<(), MilitarySuppliesUnitsError> {
+        let current = self.get(ResourceType::MilitarySupplies);
+        let current_units = military_supplies_value_to_units(current)?;
+        let requested_units = military_supplies_value_to_units(amount)?;
+
+        let new_units = current_units
+            .checked_sub(requested_units)
+            .ok_or(MilitarySuppliesUnitsError::InsufficientStockpile)?;
+
+        let new_value = military_supplies_units_to_value(new_units);
+        if military_supplies_value_to_units(new_value)? != new_units {
+            return Err(MilitarySuppliesUnitsError::RoundTripFailed);
+        }
+
+        self.set(ResourceType::MilitarySupplies, new_value);
         Ok(())
     }
 }
@@ -187,6 +260,106 @@ pub fn military_equipment_value_to_units(value: f64) -> Result<u64, MilitaryEqui
 /// 正規units(`u64`)をMilitaryEquipmentの`f64`数量へ変換する。
 pub fn military_equipment_units_to_value(units: u64) -> f64 {
     (units as f64) / (MILITARY_EQUIPMENT_SCALE as f64)
+}
+
+// ─── P26-002: MilitarySupplies固定小数点会計基盤 ─────────────────────────
+//
+// `MilitaryEquipment`(耐久装備、上記)の固定小数点実装(P25-002-REV-001)と全く
+// 同じ設計方針・手順を複製する(`verification_logs/phase-26/p26-001/`§21・§43)。
+// ただし`MilitarySupplies`(消費補給物資)は意味的に別資源であり、Phase 25が確立
+// した装備会計の保存則・全テストに一切触れないよう、定数・エラー型・変換関数を
+// 独立した`military_supplies_*`名前空間として並存させ、共通化リファクタは行わない。
+
+/// `ResourceType::MilitarySupplies`専用の固定小数点scale(P26-002)。
+/// `MilitaryEquipment`と同じ`1,000,000`(小数点以下6桁)を採用する。根拠
+/// (`verification_logs/phase-26/p26-002/`報告書§7〜8参照): 既存資源生産は`f64`で
+/// 小数第1〜2桁程度の精度しか使わず、`DivisionDefinition.supply_usage`
+/// (Infantry=1.0/Artillery=3.0/Mage=2.0)も同程度の精度である。P25-002-REV-001が
+/// 確立した`SCALE=1,000,000`は既にこの精度を大幅に上回り、Save V1のf64往復・
+/// P26-004で想定される日次配分(需要比例配分)の丸め誤差蓄積を防ぐのに十分な
+/// 余裕を持つ。反証がないため、P25-002-REV-001との一貫性を優先してそのまま採用する。
+pub const MILITARY_SUPPLIES_SCALE: u64 = 1_000_000;
+
+/// 正規化可能な最大units(`units → f64 → units`の往復変換が保証される上限、P26-002)。
+///
+/// 根拠(`verification_logs/phase-26/p26-002/`報告書§9〜11参照): P26-002時点では
+/// `MilitarySupplies`を生産する建物Systemが未設計のため、正確な理論最大生産量を
+/// 算出できる実データが存在しない(存在しない生産式を捏造しない、P26-001設計監査
+/// §21の指示どおり)。したがって`MilitaryEquipment`と同じ`MILITARY_EQUIPMENT_MAX_UNITS
+/// = 10^15`(equipment値換算で10億)をそのままドメイン上限として採用する: これは
+/// `MilitaryEquipment`が実データ監査(現行州28、150年間理論最大備蓄の約99倍の余裕、
+/// `verification_logs/phase-25/p25-002-rev-001/`§9〜11参照)で確認済みの安全マージン
+/// を流用するものであり、`MilitarySupplies`の値スケール(師団あたり日次需要が高々
+/// 数units、150年間の理論最大備蓄が10^8〜10^9オーダーと見込まれる、
+/// `verification_logs/phase-26/p26-001/`§21)に対しても同水準以上の余裕を持つ。
+/// `military_equipment_value_to_units`と同じ実測往復変換サンプリング(0からこの値
+/// までの代表点・境界値)を`MilitarySupplies`側の量子化式に対しても新たに実行し、
+/// 失敗が0件であることを確認済み(下記`military_supplies_value_to_units`のテスト
+/// 参照)。P26-003で実際の生産式が確定した時点で、この暫定採用値を正式な理論最大値
+/// 監査と照合し直すことを推奨する。
+pub const MILITARY_SUPPLIES_MAX_UNITS: u64 = 1_000_000_000_000_000;
+
+/// `military_supplies_value_to_units`/`CountryStockpile`のMilitarySupplies会計操作
+/// が失敗し得る理由(P26-002)。`MilitaryEquipmentUnitsError`と意味的に類似する
+/// バリアントを含むが、意図的に別のenumとして定義する(将来`MilitarySupplies`と
+/// `MilitaryEquipment`の操作可能範囲が分岐した場合に備え、安易に共通化しない、
+/// `verification_logs/phase-26/p26-001/`§43)。`MilitaryEquipmentUnitsError`にはない
+/// `InsufficientStockpile`/`ArithmeticOverflow`を追加で持つ——`MilitarySupplies`には
+/// `MilitaryEquipment`のような「Division側の支給・返却」を仲介する上位モジュール
+/// (`military::equipment`)が存在せず、消費(`try_consume_military_supplies`)の
+/// 不足判定をこの1つのenumで直接表現する必要があるため。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MilitarySuppliesUnitsError {
+    /// 値がNaNまたは無限大。
+    NonFinite,
+    /// 値が負。
+    Negative,
+    /// 量子化後のunitsが`MILITARY_SUPPLIES_MAX_UNITS`を超える、またはscale乗算が
+    /// 非有限になった。
+    OutOfRange,
+    /// `units → f64 → units`の往復変換が元のunitsと一致しなかった。
+    RoundTripFailed,
+    /// 国家備蓄が消費要求量に対して不足している(部分消費はしない、全量拒否)。
+    InsufficientStockpile,
+    /// units上のchecked演算(u64の真のwraparound)が失敗した。現実的な値域
+    /// (`MILITARY_SUPPLIES_MAX_UNITS`以下同士の加算)では理論上到達不能な防御的
+    /// 分岐であり、`OutOfRange`(ドメイン上限超過)とは意味的に区別する。
+    ArithmeticOverflow,
+}
+
+/// `f64`のMilitarySupplies数量を、正規の整数units(`1 / MILITARY_SUPPLIES_SCALE`
+/// 単位)へ量子化する。`military_equipment_value_to_units`と全く同じ規律
+/// (量子化段階でのみ`round()`、finite・非負・値域内・往復可能であることを検証)。
+pub fn military_supplies_value_to_units(value: f64) -> Result<u64, MilitarySuppliesUnitsError> {
+    if !value.is_finite() {
+        return Err(MilitarySuppliesUnitsError::NonFinite);
+    }
+    if value < 0.0 {
+        return Err(MilitarySuppliesUnitsError::Negative);
+    }
+    let scaled = value * (MILITARY_SUPPLIES_SCALE as f64);
+    if !scaled.is_finite() {
+        return Err(MilitarySuppliesUnitsError::OutOfRange);
+    }
+    let rounded = scaled.round();
+    if rounded > MILITARY_SUPPLIES_MAX_UNITS as f64 {
+        return Err(MilitarySuppliesUnitsError::OutOfRange);
+    }
+    let units = rounded as u64;
+
+    // 往復不変条件の確認: units → f64 → units が元のunitsと一致すること。
+    let round_trip_value = military_supplies_units_to_value(units);
+    let round_trip_scaled = round_trip_value * (MILITARY_SUPPLIES_SCALE as f64);
+    if !round_trip_scaled.is_finite() || round_trip_scaled.round() as u64 != units {
+        return Err(MilitarySuppliesUnitsError::RoundTripFailed);
+    }
+
+    Ok(units)
+}
+
+/// 正規units(`u64`)をMilitarySuppliesの`f64`数量へ変換する。
+pub fn military_supplies_units_to_value(units: u64) -> f64 {
+    (units as f64) / (MILITARY_SUPPLIES_SCALE as f64)
 }
 
 /// 州の資源鉱床
@@ -410,5 +583,252 @@ mod tests {
         stockpile.set(ResourceType::Iron, 500.0);
         stockpile.add_military_equipment_produced(20.0).unwrap();
         assert_eq!(stockpile.get(ResourceType::Iron), 500.0);
+    }
+
+    // ─── P26-002: MilitarySupplies固定小数点会計基盤 ─────────────────────
+
+    #[test]
+    fn military_supplies_round_trip_for_representative_units() {
+        for units in [
+            0u64,
+            1,
+            MILITARY_SUPPLIES_SCALE - 1,
+            MILITARY_SUPPLIES_SCALE,
+            MILITARY_SUPPLIES_SCALE + 1,
+            1_000_000_000, // 10億units = 1,000供給値、代表的な大規模値
+            MILITARY_SUPPLIES_MAX_UNITS,
+        ] {
+            let value = military_supplies_units_to_value(units);
+            let round_trip = military_supplies_value_to_units(value).unwrap();
+            assert_eq!(round_trip, units, "round trip failed for units={units}");
+        }
+    }
+
+    #[test]
+    fn military_supplies_converts_fractional_values() {
+        assert_eq!(military_supplies_value_to_units(0.0).unwrap(), 0);
+        assert_eq!(military_supplies_value_to_units(1.0).unwrap(), 1_000_000);
+        assert_eq!(military_supplies_value_to_units(3.7).unwrap(), 3_700_000);
+        assert_eq!(military_supplies_value_to_units(0.000001).unwrap(), 1);
+        assert_eq!(military_supplies_value_to_units(0.1).unwrap(), 100_000);
+        assert_eq!(military_supplies_value_to_units(0.45).unwrap(), 450_000);
+        assert_eq!(
+            military_supplies_value_to_units(0.333333).unwrap(),
+            333_333
+        );
+        assert_eq!(
+            military_supplies_value_to_units(1.000001).unwrap(),
+            1_000_001
+        );
+    }
+
+    #[test]
+    fn military_supplies_negative_zero_is_treated_as_zero() {
+        // -0.0は`< 0.0`比較上0.0と等価(IEEE754)なので、Negativeとしては拒否されず
+        // units=0として扱われることを明示する(spec §8「-0.0の扱いを明示」)。
+        assert_eq!(military_supplies_value_to_units(-0.0).unwrap(), 0);
+    }
+
+    #[test]
+    fn military_supplies_rejects_non_finite_and_negative_values() {
+        assert_eq!(
+            military_supplies_value_to_units(f64::NAN),
+            Err(MilitarySuppliesUnitsError::NonFinite)
+        );
+        assert_eq!(
+            military_supplies_value_to_units(f64::INFINITY),
+            Err(MilitarySuppliesUnitsError::NonFinite)
+        );
+        assert_eq!(
+            military_supplies_value_to_units(f64::NEG_INFINITY),
+            Err(MilitarySuppliesUnitsError::NonFinite)
+        );
+        assert_eq!(
+            military_supplies_value_to_units(-1.0),
+            Err(MilitarySuppliesUnitsError::Negative)
+        );
+        assert_eq!(
+            military_supplies_value_to_units(-0.000001),
+            Err(MilitarySuppliesUnitsError::Negative)
+        );
+    }
+
+    #[test]
+    fn military_supplies_rejects_values_beyond_max_units_and_f64_max() {
+        assert_eq!(
+            military_supplies_value_to_units(f64::MAX),
+            Err(MilitarySuppliesUnitsError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn military_supplies_max_units_round_trips_but_one_unit_beyond_is_rejected() {
+        assert!(
+            military_supplies_value_to_units(military_supplies_units_to_value(
+                MILITARY_SUPPLIES_MAX_UNITS
+            ))
+            .is_ok()
+        );
+
+        let just_over = military_supplies_units_to_value(MILITARY_SUPPLIES_MAX_UNITS)
+            + (2.0 / MILITARY_SUPPLIES_SCALE as f64);
+        assert_eq!(
+            military_supplies_value_to_units(just_over),
+            Err(MilitarySuppliesUnitsError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn military_supplies_two_pow_53_is_rejected_as_ambiguous() {
+        // P25-002-REV-001が発見した2^53近傍の曖昧な巨大値問題を再導入しないことを
+        // 確認する(正規値域`MILITARY_SUPPLIES_MAX_UNITS`/`SCALE`=10億を大幅に
+        // 超えるため、値域外として明確に拒否される)。
+        let two_pow_53 = 2f64.powi(53);
+        assert_eq!(
+            military_supplies_value_to_units(two_pow_53),
+            Err(MilitarySuppliesUnitsError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn add_military_supplies_produced_accumulates_in_units() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.add_military_supplies_produced(14.6).unwrap();
+        stockpile.add_military_supplies_produced(5.4).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 20.0);
+    }
+
+    #[test]
+    fn add_military_supplies_produced_zero_is_a_no_op() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        stockpile.add_military_supplies_produced(0.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    #[test]
+    fn add_military_supplies_produced_does_not_affect_other_resources() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::Iron, 500.0);
+        stockpile.set(ResourceType::MilitaryEquipment, 77.0);
+        stockpile.add_military_supplies_produced(20.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::Iron), 500.0);
+        assert_eq!(stockpile.get(ResourceType::MilitaryEquipment), 77.0);
+    }
+
+    #[test]
+    fn add_military_supplies_produced_rejects_overflow_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(
+            ResourceType::MilitarySupplies,
+            military_supplies_units_to_value(MILITARY_SUPPLIES_MAX_UNITS),
+        );
+        let err = stockpile
+            .add_military_supplies_produced(military_supplies_units_to_value(
+                MILITARY_SUPPLIES_MAX_UNITS,
+            ))
+            .unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::OutOfRange);
+        assert_eq!(
+            stockpile.get(ResourceType::MilitarySupplies),
+            military_supplies_units_to_value(MILITARY_SUPPLIES_MAX_UNITS)
+        );
+    }
+
+    #[test]
+    fn add_military_supplies_produced_rejects_invalid_current_stockpile_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        // `CountryStockpile::set()`自体が`max(0.0)`でNaNを0.0へ正規化してしまうため、
+        // 不正な現在備蓄(NaN)を検証するには`amounts`へ直接注入する。
+        stockpile
+            .amounts
+            .insert(ResourceType::MilitarySupplies, f64::NAN);
+        let err = stockpile.add_military_supplies_produced(5.0).unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::NonFinite);
+        assert!(stockpile.get(ResourceType::MilitarySupplies).is_nan());
+    }
+
+    #[test]
+    fn add_military_supplies_produced_rejects_invalid_produced_amount_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        let err = stockpile
+            .add_military_supplies_produced(-5.0)
+            .unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::Negative);
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    #[test]
+    fn try_consume_military_supplies_zero_is_a_no_op() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        stockpile.try_consume_military_supplies(0.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    #[test]
+    fn try_consume_military_supplies_partial_and_full() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 100.0);
+        stockpile.try_consume_military_supplies(30.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 70.0);
+        stockpile.try_consume_military_supplies(70.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 0.0);
+    }
+
+    #[test]
+    fn try_consume_military_supplies_fractional_amount() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        stockpile.try_consume_military_supplies(3.25).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 6.75);
+    }
+
+    #[test]
+    fn try_consume_military_supplies_insufficient_stockpile_is_atomic() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 29.0);
+        let err = stockpile
+            .try_consume_military_supplies(30.0)
+            .unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::InsufficientStockpile);
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 29.0);
+    }
+
+    #[test]
+    fn try_consume_military_supplies_rejects_invalid_current_stockpile_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        // `CountryStockpile::set()`自体が`max(0.0)`でclampするため、負の内部状態を
+        // 検証するには`amounts`へ直接注入する(不正な現在備蓄を模す意図的な迂回)。
+        stockpile
+            .amounts
+            .insert(ResourceType::MilitarySupplies, -1.0);
+        let err = stockpile.try_consume_military_supplies(1.0).unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::Negative);
+    }
+
+    #[test]
+    fn try_consume_military_supplies_rejects_invalid_requested_amount_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        let err = stockpile
+            .try_consume_military_supplies(f64::NAN)
+            .unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::NonFinite);
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    #[test]
+    fn military_supplies_and_military_equipment_stockpiles_are_independent() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.add_military_equipment_produced(50.0).unwrap();
+        stockpile.add_military_supplies_produced(30.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitaryEquipment), 50.0);
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 30.0);
+
+        stockpile.try_consume_military_supplies(10.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitaryEquipment), 50.0);
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 20.0);
     }
 }
