@@ -465,6 +465,7 @@
     ("resource.industrial_goods", "Industrial Goods"),
     ("resource.military_equipment", "Military Equipment"),
     ("resource.raw_magic_crystal", "Raw Magic Crystal"),
+    ("resource.military_supplies", "Military Supplies"),
 
     // ── economic_state.* (EconomicState) ────────────────────
     ("economic_state.depression", "Depression"),

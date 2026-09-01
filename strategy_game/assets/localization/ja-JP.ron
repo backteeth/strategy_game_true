@@ -464,6 +464,7 @@
     ("resource.industrial_goods", "工業製品"),
     ("resource.military_equipment", "軍需物資"),
     ("resource.raw_magic_crystal", "魔晶石原石"),
+    ("resource.military_supplies", "軍用補給物資"),
 
     // ── economic_state.* (EconomicState) ────────────────────
     ("economic_state.depression", "大恐慌"),
