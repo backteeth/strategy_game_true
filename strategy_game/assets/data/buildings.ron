@@ -69,7 +69,12 @@
         required_workforce: 25000.0,
         logistics_cost: 20.0,
         input_resources: { Iron: 30.0, IndustrialGoods: 15.0 },
-        output_resources: { MilitaryEquipment: 20.0 },
+        // P26-003: MilitarySupplies(消費補給物資)をMilitaryEquipmentと同じ
+        // MilitaryFactoryが併産する(`verification_logs/phase-26/p26-003/`参照)。
+        // 新規建物を追加せず既存工場の出力に1エントリ追加するだけなので、Save V1の
+        // 構文・意味の両方が無条件に維持され、New Game/旧Save/AIとも即座に(0からの
+        // 建設待ちなしで)生産が始まる。
+        output_resources: { MilitaryEquipment: 20.0, MilitarySupplies: 100.0 },
         maintenance_cost: 40.0,
         max_level: 10,
         science_output: 0.0,

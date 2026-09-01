@@ -282,21 +282,21 @@ pub const MILITARY_SUPPLIES_SCALE: u64 = 1_000_000;
 
 /// 正規化可能な最大units(`units → f64 → units`の往復変換が保証される上限、P26-002)。
 ///
-/// 根拠(`verification_logs/phase-26/p26-002/`報告書§9〜11参照): P26-002時点では
-/// `MilitarySupplies`を生産する建物Systemが未設計のため、正確な理論最大生産量を
-/// 算出できる実データが存在しない(存在しない生産式を捏造しない、P26-001設計監査
-/// §21の指示どおり)。したがって`MilitaryEquipment`と同じ`MILITARY_EQUIPMENT_MAX_UNITS
-/// = 10^15`(equipment値換算で10億)をそのままドメイン上限として採用する: これは
-/// `MilitaryEquipment`が実データ監査(現行州28、150年間理論最大備蓄の約99倍の余裕、
-/// `verification_logs/phase-25/p25-002-rev-001/`§9〜11参照)で確認済みの安全マージン
-/// を流用するものであり、`MilitarySupplies`の値スケール(師団あたり日次需要が高々
-/// 数units、150年間の理論最大備蓄が10^8〜10^9オーダーと見込まれる、
-/// `verification_logs/phase-26/p26-001/`§21)に対しても同水準以上の余裕を持つ。
-/// `military_equipment_value_to_units`と同じ実測往復変換サンプリング(0からこの値
-/// までの代表点・境界値)を`MilitarySupplies`側の量子化式に対しても新たに実行し、
-/// 失敗が0件であることを確認済み(下記`military_supplies_value_to_units`のテスト
-/// 参照)。P26-003で実際の生産式が確定した時点で、この暫定採用値を正式な理論最大値
-/// 監査と照合し直すことを推奨する。
+/// P26-003再監査(`verification_logs/phase-26/p26-003/`報告書§30〜32参照): 実際の
+/// 生産式(MilitaryFactoryがMilitarySuppliesを併産、基礎生産100.0/レベル/月、最大
+/// レベル10、`verification_logs/phase-26/p26-003/`参照)が確定したため、P26-002時点の
+/// 暫定採用値(`MilitaryEquipment`と同じ値をそのまま流用)を実データで再検証した。
+/// 現行州28・全州MilitaryFactory最大レベル・稼働率100%・150年間無消費という
+/// 非現実的な最悪ケースでの理論最大備蓄は約5,040万(value換算)であり、この値
+/// (equipment値換算で10億)の約19.8倍の余裕を持つ。仮に州数が現行の10倍(280)へ
+/// 拡張しても理論最大は約5.04億に留まり、この値を下回る(約1.98倍の余裕を維持)。
+/// さらにMilitarySuppliesはP26-004以降、装備と異なり毎日恒常的に消費される設計の
+/// ため、実プレイでこの無消費理論値へ近づくことはない。`military_equipment_value_to_units`
+/// と同じ実測往復変換サンプリング(0からこの値までの代表点・境界値)を
+/// `MilitarySupplies`側の量子化式に対しても実行し、失敗が0件であることを確認済み
+/// (下記`military_supplies_value_to_units`のテスト参照)。以上によりP26-002の
+/// Low finding(暫定値の再監査)は`RESOLVED`と判定する。到達時は`OutOfRange`を
+/// 明示的に返しclamp・wraparoundはしない(変更なし)。
 pub const MILITARY_SUPPLIES_MAX_UNITS: u64 = 1_000_000_000_000_000;
 
 /// `military_supplies_value_to_units`/`CountryStockpile`のMilitarySupplies会計操作

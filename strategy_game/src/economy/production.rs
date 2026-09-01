@@ -2,6 +2,7 @@ use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::economy::resources::{CountryStockpile, ResourceType};
 use crate::population::update::calculate_economic_workforce_ratio;
 use crate::state::data::StateData;
+use bevy::log::warn;
 use std::collections::HashMap;
 
 /// 建物稼働率を求める純粋関数 (0.0〜1.0)
@@ -77,6 +78,13 @@ pub fn process_country_production(
     }
 
     // Step 3: 各州・建物ごとの最終稼働率を決定し、消費および生産を行う
+    //
+    // P26-003: MilitarySuppliesは(MilitaryEquipmentのような即時per-building commitと
+    // 異なり)この国家の月次合計へ一時集計するだけに留め、全州処理完了後に1回だけ
+    // `add_military_supplies_produced`を呼ぶ(spec §12「国家単位で原子的」)。1国家が
+    // 複数州に複数のMilitaryFactoryを持つ場合でも、真に1回のcommitで確定させるため。
+    let mut military_supplies_total_value: f64 = 0.0;
+
     for state in states.iter_mut() {
         // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
         // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
@@ -135,6 +143,12 @@ pub fn process_country_production(
                         // (値域超過等、現実的な到達可能量では発生しない)は備蓄を
                         // 変更しない——生の`add`へフォールバックしない。
                         let _ = stockpile.add_military_equipment_produced(out_amount);
+                    } else if res == ResourceType::MilitarySupplies {
+                        // P26-003: MilitaryEquipmentと同じ理由でfixed-point units経由の
+                        // 正規APIを使うが、即時commitはせず国家合計へ一時集計する
+                        // (Step 3コメント参照)。ここでは`CountryStockpile`を一切
+                        // 変更しない。
+                        military_supplies_total_value += out_amount;
                     } else {
                         stockpile.add(res, out_amount);
                     }
@@ -151,6 +165,19 @@ pub fn process_country_production(
         }
 
         state.building_operation_ratios = op_ratios;
+    }
+
+    // P26-003: 全州の集計が終わった後、この国家についてただ1回だけ正規APIへ commit
+    // する(spec §12「国家単位で原子的」)。失敗時(値域超過等、現実的な到達可能量では
+    // 発生しない)は備蓄を変更せず警告のみ記録する——生の`add`へのフォールバックは
+    // しない(MilitaryEquipmentと同じ方針、spec §12「Resultを無視」の禁止に従い、
+    // ここでは明示的に処理する)。
+    if let Err(err) = stockpile.add_military_supplies_produced(military_supplies_total_value) {
+        warn!(
+            "MilitarySupplies production commit failed for this country this month \
+             (stockpile left unchanged, other resources unaffected): {:?}",
+            err
+        );
     }
 
     (science_total, magic_total)
