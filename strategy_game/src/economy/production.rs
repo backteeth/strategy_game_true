@@ -1,9 +1,58 @@
 use crate::building::data::{BuildingRegistry, BuildingType};
-use crate::economy::resources::{CountryStockpile, ResourceType};
+use crate::economy::resources::{
+    CountryStockpile, ResourceType, military_supplies_units_to_value,
+    military_supplies_value_to_units,
+};
 use crate::population::update::calculate_economic_workforce_ratio;
 use crate::state::data::StateData;
 use bevy::log::warn;
 use std::collections::HashMap;
+
+/// P26-003-REV-002: 国家単位のMilitarySupplies生産集計状態。
+///
+/// 個別の生産エントリ(1州×1建物のMilitarySupplies出力)ごとに
+/// `military_supplies_value_to_units`で正規units化(quantize-then-sum、方式A)して
+/// から`u128`のchecked_addで合算する。P26-003(REV-001で指摘された旧実装)の
+/// 「国家合計の生f64を集計してから最後に1回だけ量子化する」(sum-then-quantize、
+/// 方式B)は使わない——`MilitaryEquipment`の既存quantize-then-sum規律と揃える。
+///
+/// 一度でも失敗する(個別出力が量子化不能、または整数合計がoverflowする)と
+/// `Failed`へ遷移し、以降どれだけ正常なエントリが続いても回復しない
+/// (spec §8「失敗状態を維持」)。
+enum SuppliesUnitsAccumulation {
+    Accumulating(u128),
+    Failed,
+}
+
+impl SuppliesUnitsAccumulation {
+    fn accumulate(self, out_amount: f64) -> Self {
+        let total = match self {
+            SuppliesUnitsAccumulation::Failed => return SuppliesUnitsAccumulation::Failed,
+            SuppliesUnitsAccumulation::Accumulating(total) => total,
+        };
+        match military_supplies_value_to_units(out_amount) {
+            Ok(units) => match total.checked_add(units as u128) {
+                Some(new_total) => SuppliesUnitsAccumulation::Accumulating(new_total),
+                None => SuppliesUnitsAccumulation::Failed,
+            },
+            Err(_) => SuppliesUnitsAccumulation::Failed,
+        }
+    }
+}
+
+/// 国家内で集計した整数units合計(`u128`)を、`add_military_supplies_produced`
+/// (f64引数)へ渡すための正規`f64`値へ変換する(spec §9)。`u64`域を超える場合、
+/// または`units→value→units`の往復が元のunitsと一致しない場合は`None`を返す
+/// (`military_supplies_units_to_value`自体は無検査関数のため、呼び出し側でここの
+/// 往復検証を行う)。
+fn verified_military_supplies_value(total_units: u128) -> Option<f64> {
+    let units_u64 = u64::try_from(total_units).ok()?;
+    let value = military_supplies_units_to_value(units_u64);
+    match military_supplies_value_to_units(value) {
+        Ok(round_trip_units) if round_trip_units == units_u64 => Some(value),
+        _ => None,
+    }
+}
 
 /// 建物稼働率を求める純粋関数 (0.0〜1.0)
 pub fn calculate_operation_ratio(
@@ -79,11 +128,13 @@ pub fn process_country_production(
 
     // Step 3: 各州・建物ごとの最終稼働率を決定し、消費および生産を行う
     //
-    // P26-003: MilitarySuppliesは(MilitaryEquipmentのような即時per-building commitと
-    // 異なり)この国家の月次合計へ一時集計するだけに留め、全州処理完了後に1回だけ
-    // `add_military_supplies_produced`を呼ぶ(spec §12「国家単位で原子的」)。1国家が
-    // 複数州に複数のMilitaryFactoryを持つ場合でも、真に1回のcommitで確定させるため。
-    let mut military_supplies_total_value: f64 = 0.0;
+    // P26-003-REV-002: MilitarySuppliesは、個別の生産エントリ(1州×1建物出力)ごとに
+    // 正規unitsへ量子化してから整数のまま国家合計へchecked_addで集計する
+    // (quantize-then-sum、方式A、`SuppliesUnitsAccumulation`参照)。全州処理完了後に
+    // 1回だけ`add_military_supplies_produced`を呼ぶ点(spec §12「国家単位で原子的」)は
+    // P26-003から維持する——1国家が複数州に複数のMilitaryFactoryを持つ場合でも、
+    // 真に1回のcommitで確定させるため。
+    let mut military_supplies_units = SuppliesUnitsAccumulation::Accumulating(0);
 
     for state in states.iter_mut() {
         // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
@@ -144,11 +195,13 @@ pub fn process_country_production(
                         // 変更しない——生の`add`へフォールバックしない。
                         let _ = stockpile.add_military_equipment_produced(out_amount);
                     } else if res == ResourceType::MilitarySupplies {
-                        // P26-003: MilitaryEquipmentと同じ理由でfixed-point units経由の
-                        // 正規APIを使うが、即時commitはせず国家合計へ一時集計する
-                        // (Step 3コメント参照)。ここでは`CountryStockpile`を一切
-                        // 変更しない。
-                        military_supplies_total_value += out_amount;
+                        // P26-003-REV-002: この個別エントリ(1州×1建物出力)を直ちに
+                        // 正規unitsへ量子化し、整数のまま国家合計へchecked_addで集計する
+                        // (Step 3コメント参照)。生f64の合算(旧P26-003の
+                        // `military_supplies_total_value += out_amount`)は行わない。
+                        // ここでは`CountryStockpile`を一切変更しない(即時commitはせず、
+                        // 全州処理完了後に1回だけcommitする)。
+                        military_supplies_units = military_supplies_units.accumulate(out_amount);
                     } else {
                         stockpile.add(res, out_amount);
                     }
@@ -167,17 +220,46 @@ pub fn process_country_production(
         state.building_operation_ratios = op_ratios;
     }
 
-    // P26-003: 全州の集計が終わった後、この国家についてただ1回だけ正規APIへ commit
-    // する(spec §12「国家単位で原子的」)。失敗時(値域超過等、現実的な到達可能量では
-    // 発生しない)は備蓄を変更せず警告のみ記録する——生の`add`へのフォールバックは
-    // しない(MilitaryEquipmentと同じ方針、spec §12「Resultを無視」の禁止に従い、
-    // ここでは明示的に処理する)。
-    if let Err(err) = stockpile.add_military_supplies_produced(military_supplies_total_value) {
-        warn!(
-            "MilitarySupplies production commit failed for this country this month \
-             (stockpile left unchanged, other resources unaffected): {:?}",
-            err
-        );
+    // P26-003-REV-002: 全州の集計が終わった後、この国家についてただ1回だけ正規APIへ
+    // commitする(spec §12「国家単位で原子的」、P26-003から維持)。整数units集計が
+    // 失敗状態(`Failed`)のままだった場合、または合計から正規f64値への変換・往復検証
+    // (`verified_military_supplies_value`)が失敗した場合は、備蓄を変更せず警告のみ
+    // 記録する——生の`add`へのフォールバックはしない(`Result`を無視しない、明示的に
+    // 処理する)。合計0の場合は、意図的に`CountryStockpile`を一切変更しない(spec §9
+    // 「合計0の場合は備蓄を更新しない処理を推奨」)。
+    match military_supplies_units {
+        SuppliesUnitsAccumulation::Failed => {
+            warn!(
+                "MilitarySupplies production commit failed for this country this month \
+                 (an individual production entry could not be quantized to units, or the \
+                 running integer total overflowed; stockpile left unchanged, other resources \
+                 unaffected)"
+            );
+        }
+        SuppliesUnitsAccumulation::Accumulating(total_units) => {
+            if total_units > 0 {
+                match verified_military_supplies_value(total_units) {
+                    Some(value) => {
+                        if let Err(err) = stockpile.add_military_supplies_produced(value) {
+                            warn!(
+                                "MilitarySupplies production commit failed for this country \
+                                 this month (stockpile left unchanged, other resources \
+                                 unaffected): {:?}",
+                                err
+                            );
+                        }
+                    }
+                    None => {
+                        warn!(
+                            "MilitarySupplies production commit failed for this country this \
+                             month (accumulated integer units total could not be converted \
+                             back to a valid value; stockpile left unchanged, other resources \
+                             unaffected)"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     (science_total, magic_total)
