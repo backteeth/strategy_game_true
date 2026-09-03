@@ -137,18 +137,76 @@ fn compute_tier_counts(n: usize) -> (usize, usize) {
     (great, regional)
 }
 
+/// 建物種類ごとの「潜在生産能力」評価点(明示的な定数)。
+///
+/// P26-003-REV-003: MilitaryFactoryへMilitarySuppliesが併産追加された際(P26-003)、
+/// `compute_state_aggregates`が建物の経済力寄与を`def.output_resources.values().sum()`
+/// (出力資源の物量の生合計)から算出していたため、単に出力資源の「種類数」が
+/// 1つ増えただけで経済力評価が変化してしまった(P26-003-REV-001 §15で実測:
+/// MilitaryFactory 1レベルあたりの寄与が20.0→120.0(6倍)に変化し、実データの
+/// 6か国マップでElfin Republic/Dwarf FederationのGreatPower/RegionalPower判定が
+/// 入れ替わった)。本関数は、この「資源の表示単位・併産品の数」への意図しない
+/// 依存を断ち切るため、各`BuildingType`の経済力への基礎寄与を、実際の
+/// `output_resources`を一切参照しない明示的な定数として固定する。
+///
+/// これは「実際の月次生産量・市場価格・GDP・現在の資源備蓄・軍隊への補給充足率」
+/// とは異なる、あくまで「その建物種別が持つ潜在的な生産能力の評価点」である
+/// (原材料不足で実際には生産が止まっていても、この評価点は変わらない — これは
+/// 訂正前の`compute_state_aggregates`の性質を維持したものであり、今回新たに
+/// 導入した性質ではない)。
+///
+/// 校正基準: MilitarySuppliesが追加される直前のコミット
+/// `973445c30d920c80908635f22acc45ffb5655dac`時点の`assets/data/buildings.ron`に
+/// おける各建物の`output_resources.values().sum()`(=訂正前の経済力寄与)を
+/// そのまま採用している。したがって、既存建物(Farm/LoggingCamp/Factory/
+/// MilitaryFactory/CrystalMine/CrystalRefinery)の経済力評価は本訂正の前後で
+/// 一切変わらない(校正であり、国別の順位を狙った補正ではない)。`Mine`/Railway/
+/// University/MagicAcademyは訂正前から経済力寄与0だった建物であり、本訂正でも
+/// 0のまま(不当な加点をしない)。
+///
+/// `Mine`はここでは呼び出されない: 建物定義自体の`output_resources`は訂正前から
+/// 空であり、実際の産出は州の鉱床データに依存するため、呼び出し元
+/// (`compute_state_aggregates`)が専用分岐で別途計算する。ここでの戻り値0.0は、
+/// 万一その専用分岐を経由せず呼ばれた場合の安全なデフォルトに過ぎない。
+///
+/// 網羅的な`match`(ワイルドカードなし)を使うことで、将来`BuildingType`へ新しい
+/// variantが追加された際、この関数の実装がコンパイルエラーで評価点の定義漏れを
+/// 検出する。
+fn base_economic_capacity_points(building_type: BuildingType) -> f64 {
+    match building_type {
+        BuildingType::Farm => 100.0,
+        BuildingType::LoggingCamp => 80.0,
+        // 実際の値は`compute_state_aggregates`の鉱床ベース専用分岐で計算される
+        // (ここは呼び出されない安全なデフォルト)。
+        BuildingType::Mine => 0.0,
+        BuildingType::Factory => 30.0,
+        // 校正基準: 973445c時点のMilitaryEquipment単独の寄与(P26-003以前)。
+        BuildingType::MilitaryFactory => 20.0,
+        // 物流ボーナスのみで経済生産物ではない(訂正前から寄与0)。
+        BuildingType::Railway => 0.0,
+        // 研究力のみで経済生産物ではない(訂正前から寄与0)。
+        BuildingType::University => 0.0,
+        // 魔法力のみで経済生産物ではない(訂正前から寄与0)。
+        BuildingType::MagicAcademy => 0.0,
+        BuildingType::CrystalMine => 20.0,
+        BuildingType::CrystalRefinery => 10.0,
+    }
+}
+
 /// 州レジストリを1パスだけ走査し、所有国(owner、controllerではない)ごとの
 /// 人口合計・経済力生値合計を同時に集計する(`countries × states`の総当たりを避ける)。
 ///
-/// 経済力は「安定した生産能力」(建物レベル×建物定義の基礎産出量。現在の稼働率・
-/// 国庫残高・備蓄量には一切依存しない)。優先順位:
-/// - 建物定義`output_resources`が非空 (Farm/LoggingCamp/Factory/MilitaryFactory/
-///   CrystalMine/CrystalRefinery): 出力資源ごとの基礎産出量合計 × レベル
+/// 経済力は「潜在生産能力の評価点」(建物レベル×`base_economic_capacity_points`。
+/// 現在の稼働率・国庫残高・備蓄量には一切依存しない)。優先順位:
 /// - `Mine`(建物定義自体は`output_resources`を持たず、実際の産出は州の鉱床データに
 ///   依存する): `economy::production::process_country_production`と同じ規約で、
 ///   discovered済みかつMagicCrystal以外の鉱床の`base_output`合計 × レベル
-/// - 上記いずれにも該当しない建物(Railway/University/MagicAcademy: 出力は
-///   物流ボーナス・研究力/魔法力であり、経済生産物ではない)は0(除外)
+/// - それ以外の建物種別で、`BuildingRegistry`に定義が存在するもの
+///   (Farm/LoggingCamp/Factory/MilitaryFactory/CrystalMine/CrystalRefinery/
+///   Railway/University/MagicAcademy): `base_economic_capacity_points`が返す
+///   明示的な評価点(建物定義の`output_resources`の物量合計は一切参照しない
+///   — P26-003-REV-003、単位・併産品数からの独立性) × レベル
+/// - `BuildingRegistry`に定義自体が存在しない建物種別は0(除外、既存の防御的挙動を維持)
 fn compute_state_aggregates(
     state_registry: &StateRegistry,
     building_registry: &BuildingRegistry,
@@ -171,11 +229,8 @@ fn compute_state_aggregates(
                         state_economic += deposit.base_output * level as f64;
                     }
                 }
-            } else if let Some(def) = building_registry.get(b_type)
-                && !def.output_resources.is_empty()
-            {
-                let per_level: f64 = def.output_resources.values().sum();
-                state_economic += per_level * level as f64;
+            } else if building_registry.get(b_type).is_some() {
+                state_economic += base_economic_capacity_points(b_type) * level as f64;
             }
         }
         *economic_by_country.entry(owner).or_insert(0.0) += state_economic;

@@ -385,6 +385,62 @@ mod real_map_e2e {
         assert_eq!((great, regional, minor), (2, 2, 2));
     }
 
+    /// P26-003-REV-003(強化テスト、既存assertは変更せず追加): 上のテストが検証する
+    /// Tier「個数」分布(2,2,2)だけでは、どの国がどのTierかを検証できず、
+    /// P26-003(MilitaryFactoryへのMilitarySupplies併産追加)がElfin
+    /// Republic(CountryId(1))とDwarf Federation(CountryId(2))のGreatPower/
+    /// RegionalPower判定を入れ替えるという回帰(`verification_logs/phase-26/
+    /// p26-003-rev-001/`§15で実測)を検出できなかった。この構造的な検証範囲の
+    /// 欠落自体がP26-003-REV-001の指摘であり、P26-003-REV-003で
+    /// `src/country/power.rs::compute_state_aggregates`の経済力算出式を
+    /// (`output_resources`の物量合計ベースから、建物種類ごとの明示的な基礎能力点
+    /// ベースへ)訂正した後の状態を、国別に固定する
+    /// (詳細な国別スコア回帰は`tests/p26_003_rev_003_economic_power_capacity_e2e_test.rs`
+    /// が担う。ここでは「どの国がどのTierか」という、このテストファイルの既存の
+    /// 検証範囲の欠落を最小限埋める)。
+    #[test]
+    fn real_map_tier_assignment_is_identified_per_country_not_just_counted() {
+        let app = setup_app_in_playing(CountryId(0));
+        let power_registry = app.world().resource::<CountryPowerRegistry>();
+
+        let tier_of = |id: usize| power_registry.get(CountryId(id)).unwrap().power_tier;
+        let rank_of = |id: usize| power_registry.get(CountryId(id)).unwrap().world_rank;
+
+        // Kingdom of Arcadia(0): 常にGreatPower(世界順位1位)。
+        assert_eq!(tier_of(0), PowerTier::GreatPower);
+        assert_eq!(rank_of(0), 1);
+
+        // Elfin Republic(1): P26-003のバグではRegionalPowerへ誤って格下げされていたが、
+        // 訂正後はGreatPower(世界順位2位)へ戻る。
+        assert_eq!(
+            tier_of(1),
+            PowerTier::GreatPower,
+            "Elfin Republic must be GreatPower (the P26-003 co-product bug incorrectly \
+             demoted it to RegionalPower; P26-003-REV-003 corrects this)"
+        );
+        assert_eq!(rank_of(1), 2);
+
+        // Dwarf Federation(2): P26-003のバグではGreatPowerへ誤って格上げされていたが、
+        // 訂正後はRegionalPower(世界順位3位)へ戻る。
+        assert_eq!(
+            tier_of(2),
+            PowerTier::RegionalPower,
+            "Dwarf Federation must be RegionalPower (the P26-003 co-product bug incorrectly \
+             promoted it to GreatPower; P26-003-REV-003 corrects this)"
+        );
+        assert_eq!(rank_of(2), 3);
+
+        // Oceanic Magic Empire(3): 常にRegionalPower(世界順位4位)。
+        assert_eq!(tier_of(3), PowerTier::RegionalPower);
+        assert_eq!(rank_of(3), 4);
+
+        // Passguard March(4)・Ferrowyn League(5): 常にMinorPower(世界順位5位・6位)。
+        assert_eq!(tier_of(4), PowerTier::MinorPower);
+        assert_eq!(rank_of(4), 5);
+        assert_eq!(tier_of(5), PowerTier::MinorPower);
+        assert_eq!(rank_of(5), 6);
+    }
+
     /// 要求テスト59: 実データで順位が決定論的(2回評価しても同じ順位)。
     /// 要求テスト60: save→load後に同じ評価・順位を再構築する。
     #[test]
