@@ -2,7 +2,7 @@ use crate::app::time::DayChangedMessage;
 use crate::building::construction::{ConstructionQueueItem, ConstructionStatus};
 use crate::building::data::BuildingType;
 use crate::common::{CountryId, StateId, WarId};
-use crate::country::{CountryRegistry, PlayerCountry};
+use crate::country::{CountryData, CountryRegistry, PlayerCountry};
 use crate::diplomacy::crisis::CrisisRegistry;
 use crate::diplomacy::crisis_response;
 use crate::diplomacy::data::DiplomacyRegistry;
@@ -22,6 +22,7 @@ use crate::war::military_ai::{MilitaryAiRegistry, evaluate_division_power};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// AI発の宣戦布告のうち、まだ通知(GameNotification)を発行していないもののキュー。
 /// `process_war_declaration_ai`は純粋関数として保つため、直接通知を書かず
@@ -272,7 +273,216 @@ fn land_states_for(states_by_controller: &[Vec<StateId>], country_id: CountryId)
         .unwrap_or(&[])
 }
 
+/// Mine建設候補州の探索結果 (P26-004-PRE-002)。
+enum ConstructOutcome {
+    /// 建設キューへ1件追加し国庫を減算した。
+    Built,
+    /// 建設可能な候補州が存在しない(資金は足りているが、対象が見つからない)。
+    NoCandidate,
+    /// 国庫が建設費に満たない。
+    InsufficientFunds,
+}
+
+/// `target_building` の建設候補州を1件探す (StateId昇順で最初に条件を満たす州)。
+/// Mineの場合、P26-004-PRE-002でクリスタル専用州の除外に加え、実際に採掘可能な
+/// 鉱床(discoveredかつ非MagicCrystal、`process_country_production`のMine分岐
+/// [`src/economy/production.rs`]と同一条件)が存在することを新たに要求する。
+/// これにより、鉱床が一切ない州・国家へMineが選ばれることを防ぐ。
+fn find_candidate_state(
+    country: &CountryData,
+    state_registry: &StateRegistry,
+    owned_states: &[StateId],
+    target_building: BuildingType,
+    max_level: u32,
+) -> Option<StateId> {
+    owned_states.iter().copied().find(|&sid| {
+        let in_queue = country
+            .construction_queue
+            .iter()
+            .any(|item| item.state_id == sid && item.building_type == target_building);
+        if in_queue {
+            return false;
+        }
+        let Some(state_data) = state_registry.get(sid) else {
+            return false;
+        };
+        if target_building == BuildingType::Mine {
+            // P21-009-FIX-001: クリスタル専用州には通常Mineの対象鉱床が存在しないため、
+            // AIも新規建設候補から除外する(CrystalMineはAIの建設判断対象外のまま)。
+            if crate::economy::resources::is_crystal_only_state(&state_data.resource_deposits) {
+                return false;
+            }
+            // P26-004-PRE-002: 実際に採掘可能な鉱床(discoveredかつ非MagicCrystal)が
+            // 一切ない州は、鉱床皆無国家(Elfin/Oceanic等)がMineへ国庫を浪費しないよう
+            // 候補から除外する。
+            let has_usable_deposit = state_data
+                .resource_deposits
+                .iter()
+                .any(|d| d.discovered && d.resource_type != ResourceType::MagicCrystal);
+            if !has_usable_deposit {
+                return false;
+            }
+        }
+        state_data.building_level(target_building) < max_level
+    })
+}
+
+/// `target_building` の建設を1件だけ試みる。資金不足・候補州なしのいずれの場合も
+/// 国庫・建設キューを一切変更しない(原子性、P26-004-PRE-002 spec §6)。
+fn try_construct(
+    country: &mut CountryData,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+    target_building: BuildingType,
+) -> ConstructOutcome {
+    let Some(def) = building_registry.get(target_building) else {
+        return ConstructOutcome::NoCandidate;
+    };
+    if country.treasury < def.construction_cost {
+        return ConstructOutcome::InsufficientFunds;
+    }
+    match find_candidate_state(country, state_registry, owned_states, target_building, def.max_level) {
+        Some(state_id) => {
+            let current_level = state_registry
+                .get(state_id)
+                .map(|s| s.building_level(target_building))
+                .unwrap_or(0);
+            country.treasury -= def.construction_cost;
+            country.construction_queue.push(ConstructionQueueItem {
+                state_id,
+                building_type: target_building,
+                target_level: current_level + 1,
+                progress: 0.0,
+                required_progress: def.required_progress,
+                paid_cost: def.construction_cost,
+                status: ConstructionStatus::InQueue,
+            });
+            ConstructOutcome::Built
+        }
+        None => ConstructOutcome::NoCandidate,
+    }
+}
+
+/// 国家が現在保有する生産建物(level>0)が入力資源として要求する`ResourceType`集合を
+/// 求める(`BuildingDefinition.input_resources`を汎用的に参照し、特定資源名を
+/// 列挙しない、P26-004-PRE-002 spec §5.3)。HashMap/HashSetの反復順には最終結果が
+/// 依存しない(呼び出し側が`ResourceType::ALL`の宣言順で走査するため)。
+fn resource_types_required_by_owned_buildings(
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+) -> HashSet<ResourceType> {
+    let mut needed = HashSet::new();
+    for &sid in owned_states {
+        let Some(state_data) = state_registry.get(sid) else {
+            continue;
+        };
+        for (&b_type, &level) in state_data.buildings.iter() {
+            if level == 0 {
+                continue;
+            }
+            if let Some(def) = building_registry.get(b_type) {
+                needed.extend(def.input_resources.keys().copied());
+            }
+        }
+    }
+    needed
+}
+
+/// 領内のいずれかの州で、指定`resource`のdiscovered鉱床とMineレベル>0が同居して
+/// いるか(=その資源について既に稼働中の採掘経路を持つか)を判定する。
+/// 既に稼働中なら、Dwarfのような既存供給網を持つ国家に事前開発規則を
+/// 不必要に発火させない(P26-004-PRE-002 spec §5.3・Test E)。
+fn has_active_mine_for_resource(
+    state_registry: &StateRegistry,
+    owned_states: &[StateId],
+    resource: ResourceType,
+) -> bool {
+    owned_states.iter().any(|&sid| {
+        state_registry.get(sid).is_some_and(|s| {
+            s.building_level(BuildingType::Mine) > 0
+                && s
+                    .resource_deposits
+                    .iter()
+                    .any(|d| d.discovered && d.resource_type == resource)
+        })
+    })
+}
+
+/// 事前開発対象の未活用鉱床州を、指定`resource`について1件探す
+/// (`find_candidate_state`のMine条件と同じ実採掘可能性・増設余地・重複キュー除外を
+/// 満たす州のうち、StateId最小のもの)。
+fn find_undeveloped_deposit_state(
+    country: &CountryData,
+    state_registry: &StateRegistry,
+    owned_states: &[StateId],
+    mine_max_level: u32,
+    resource: ResourceType,
+) -> Option<StateId> {
+    owned_states.iter().copied().find(|&sid| {
+        let in_queue = country.construction_queue.iter().any(|item| {
+            item.state_id == sid && item.building_type == BuildingType::Mine
+        });
+        if in_queue {
+            return false;
+        }
+        let Some(state_data) = state_registry.get(sid) else {
+            return false;
+        };
+        if crate::economy::resources::is_crystal_only_state(&state_data.resource_deposits) {
+            return false;
+        }
+        let has_resource_deposit = state_data
+            .resource_deposits
+            .iter()
+            .any(|d| d.discovered && d.resource_type == resource);
+        has_resource_deposit && state_data.building_level(BuildingType::Mine) < mine_max_level
+    })
+}
+
+/// P26-004-PRE-002: 保有する生産建物の入力資源のうち、稼働中Mineがまだ存在しない
+/// 資源について、対応する未活用/増設可能な領内鉱床を持つ州を1件だけ決定的に選ぶ。
+/// 複数の資源が該当する場合は`ResourceType::ALL`の宣言順(Food,Wood,Iron,Coal,...)を
+/// tie-breakとして用い、同一資源内ではStateId昇順を用いる(spec §5.5)。
+/// MagicCrystalは通常Mineの対象外(CrystalRefinery系統の管轄)のため候補にしない。
+fn find_proactive_mine_state(
+    country: &CountryData,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+    mine_max_level: u32,
+) -> Option<StateId> {
+    let needed = resource_types_required_by_owned_buildings(state_registry, building_registry, owned_states);
+    if needed.is_empty() {
+        return None;
+    }
+    for &resource in ResourceType::ALL.iter() {
+        if resource == ResourceType::MagicCrystal || !needed.contains(&resource) {
+            continue;
+        }
+        if has_active_mine_for_resource(state_registry, owned_states, resource) {
+            continue;
+        }
+        if let Some(sid) =
+            find_undeveloped_deposit_state(country, state_registry, owned_states, mine_max_level, resource)
+        {
+            return Some(sid);
+        }
+    }
+    None
+}
+
 /// 1. 建設AI (月次評価: game_day % 30 == country_id % 30 または dirty)
+///
+/// 優先順位(P26-004-PRE-002で(2)を新設、`verification_logs/phase-26/p26-004-pre-001/`
+/// §20の次タスク定義を踏襲):
+/// (1) 食料緊急(Farm) — 既存仕様のまま最優先。
+/// (2) 保有する生産建物を支える、未活用の領内鉱床の事前開発(Mine) — 資源備蓄が
+///     既存の不足閾値(30)を下回る前に、財政破綻前の開発を狙う(Arcadia)。
+/// (3) 既存の通常判断(原材料不足なら鉱山、それ以外は工場)。この段でMineが
+///     選ばれたが領内に採掘可能な鉱床が一切ない場合(Elfin/Oceanic等)、Mineへの
+///     浪費を防ぐため同じ月のうちに工場建設へ安全にフォールバックする。
 pub fn process_construction_ai(
     country_id: CountryId,
     country_registry: &mut CountryRegistry,
@@ -304,11 +514,50 @@ pub fn process_construction_ai(
         return;
     }
 
-    // 優先度判定: 食料(農場) -> 原材料(鉱山) -> 工場
-    let target_building = if country.stockpile.get(ResourceType::Food) < 50.0 {
+    // 優先度1: 食料緊急(既存仕様のまま変更しない)
+    if country.stockpile.get(ResourceType::Food) < 50.0 {
         ai_state.decision_reason = CountryAiDecisionReason::FoodShortageFarmPriority;
-        BuildingType::Farm
-    } else if country.stockpile.get(ResourceType::Wood) < 30.0
+        try_construct(country, state_registry, building_registry, &owned_states, BuildingType::Farm);
+        return;
+    }
+
+    // 優先度2 (P26-004-PRE-002): 未活用鉱床の事前開発。既存の資源不足トリガー
+    // (Wood/Iron/Coal<30)より先に評価する。建設費を支払えない場合はこの規則を
+    // 発火させず(spec §5.3の前提条件)、優先度3へフォールスルーする。
+    if let Some(mine_def) = building_registry.get(BuildingType::Mine)
+        && country.treasury >= mine_def.construction_cost
+    {
+        let mine_max_level = mine_def.max_level;
+        let mine_construction_cost = mine_def.construction_cost;
+        let mine_required_progress = mine_def.required_progress;
+        if let Some(state_id) = find_proactive_mine_state(
+            country,
+            state_registry,
+            building_registry,
+            &owned_states,
+            mine_max_level,
+        ) {
+            ai_state.decision_reason = CountryAiDecisionReason::RawMaterialMinePriority;
+            let current_level = state_registry
+                .get(state_id)
+                .map(|s| s.building_level(BuildingType::Mine))
+                .unwrap_or(0);
+            country.treasury -= mine_construction_cost;
+            country.construction_queue.push(ConstructionQueueItem {
+                state_id,
+                building_type: BuildingType::Mine,
+                target_level: current_level + 1,
+                progress: 0.0,
+                required_progress: mine_required_progress,
+                paid_cost: mine_construction_cost,
+                status: ConstructionStatus::InQueue,
+            });
+            return;
+        }
+    }
+
+    // 優先度3: 既存の通常判断(原材料不足 -> Mine、それ以外 -> Factory)
+    let target_building = if country.stockpile.get(ResourceType::Wood) < 30.0
         || country.stockpile.get(ResourceType::Iron) < 30.0
         || country.stockpile.get(ResourceType::Coal) < 30.0
     {
@@ -319,56 +568,28 @@ pub fn process_construction_ai(
         BuildingType::Factory
     };
 
-    let def = match building_registry.get(target_building) {
-        Some(d) => d,
-        None => return,
-    };
-
-    if country.treasury < def.construction_cost {
-        ai_state.decision_reason = CountryAiDecisionReason::FundsShortage;
-        return;
-    }
-
-    // 候補地域を選択 (同種建物が少なく StateId 最小)
-    let selected_state = owned_states.into_iter().find(|&sid| {
-        let in_queue = country
-            .construction_queue
-            .iter()
-            .any(|item| item.state_id == sid && item.building_type == target_building);
-        if in_queue {
-            return false;
+    match try_construct(country, state_registry, building_registry, &owned_states, target_building) {
+        ConstructOutcome::Built => {}
+        ConstructOutcome::InsufficientFunds => {
+            ai_state.decision_reason = CountryAiDecisionReason::FundsShortage;
         }
-        if let Some(state_data) = state_registry.get(sid) {
-            // P21-009-FIX-001: クリスタル専用州には通常Mineの対象鉱床が存在しないため、
-            // AIも新規建設候補から除外する(CrystalMineはAIの建設判断対象外のまま)。
-            if target_building == BuildingType::Mine
-                && crate::economy::resources::is_crystal_only_state(&state_data.resource_deposits)
-            {
-                return false;
+        ConstructOutcome::NoCandidate => {
+            if target_building == BuildingType::Mine {
+                // P26-004-PRE-002 spec §5.2: 鉱床皆無国家ではMine候補が存在しない。
+                // 同じ月の建設判断を無駄にしないよう、次候補(Factory)へフォールバック
+                // する(架空の採掘能力は作らず、既存Factory建設ルールをそのまま再利用)。
+                ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
+                if let ConstructOutcome::InsufficientFunds = try_construct(
+                    country,
+                    state_registry,
+                    building_registry,
+                    &owned_states,
+                    BuildingType::Factory,
+                ) {
+                    ai_state.decision_reason = CountryAiDecisionReason::FundsShortage;
+                }
             }
-            let current_level = state_data.building_level(target_building);
-            current_level < def.max_level
-        } else {
-            false
         }
-    });
-
-    if let Some(state_id) = selected_state {
-        let current_level = state_registry
-            .get(state_id)
-            .map(|s| s.building_level(target_building))
-            .unwrap_or(0);
-
-        country.treasury -= def.construction_cost;
-        country.construction_queue.push(ConstructionQueueItem {
-            state_id,
-            building_type: target_building,
-            target_level: current_level + 1,
-            progress: 0.0,
-            required_progress: def.required_progress,
-            paid_cost: def.construction_cost,
-            status: ConstructionStatus::InQueue,
-        });
     }
 }
 
@@ -1173,6 +1394,671 @@ mod tests {
             c2.construction_queue[0].state_id,
             StateId(3),
             "AI must pick the non-crystal state, skipping the crystal-only StateId(2)"
+        );
+    }
+
+    // ── P26-004-PRE-002: 鉱床を考慮したMine建設AI ─────────────────────────────
+    // `verification_logs/phase-26/p26-004-pre-002/` タスクの必須検証シナリオ(spec §7
+    // Test A〜I相当)を単体テストとして固定する。実App・実データによるArcadia/Elfin/
+    // Oceanic検証(Test J・K)は`tests/p26_004_pre_002_deposit_aware_mine_construction_ai_e2e_test.rs`
+    // 側で行う。
+
+    use crate::economy::resources::{ResourceType as Res, StateResourceDeposit};
+
+    fn mine_def() -> crate::building::data::BuildingDefinition {
+        crate::building::data::BuildingDefinition {
+            building_type: BuildingType::Mine,
+            name: "Mine".to_string(),
+            construction_cost: 500.0,
+            required_progress: 60.0,
+            required_workforce: 10_000.0,
+            logistics_cost: 10.0,
+            input_resources: HashMap::new(),
+            output_resources: HashMap::new(),
+            maintenance_cost: 15.0,
+            max_level: 10,
+            science_output: 0.0,
+            magic_output: 0.0,
+            railway_capacity_bonus: 0.0,
+        }
+    }
+
+    fn factory_def() -> crate::building::data::BuildingDefinition {
+        crate::building::data::BuildingDefinition {
+            building_type: BuildingType::Factory,
+            name: "Civilian Factory".to_string(),
+            construction_cost: 1000.0,
+            required_progress: 90.0,
+            required_workforce: 20_000.0,
+            logistics_cost: 15.0,
+            input_resources: HashMap::from([(Res::Iron, 20.0), (Res::Coal, 20.0)]),
+            output_resources: HashMap::from([(Res::IndustrialGoods, 30.0)]),
+            maintenance_cost: 30.0,
+            max_level: 10,
+            science_output: 0.0,
+            magic_output: 0.0,
+            railway_capacity_bonus: 0.0,
+        }
+    }
+
+    fn military_factory_def() -> crate::building::data::BuildingDefinition {
+        crate::building::data::BuildingDefinition {
+            building_type: BuildingType::MilitaryFactory,
+            name: "Military Factory".to_string(),
+            construction_cost: 1200.0,
+            required_progress: 90.0,
+            required_workforce: 25_000.0,
+            logistics_cost: 20.0,
+            input_resources: HashMap::from([(Res::Iron, 30.0), (Res::IndustrialGoods, 15.0)]),
+            output_resources: HashMap::from([
+                (Res::MilitaryEquipment, 20.0),
+                (Res::MilitarySupplies, 100.0),
+            ]),
+            maintenance_cost: 40.0,
+            max_level: 10,
+            science_output: 0.0,
+            magic_output: 0.0,
+            railway_capacity_bonus: 0.0,
+        }
+    }
+
+    fn no_deposit_state(id: StateId, owner: CountryId) -> StateData {
+        StateData {
+            id,
+            name: format!("State {}", id.0),
+            owner_country_id: owner,
+            world_position: [id.0 as f32 * 100.0, 0.0],
+            size: [100.0, 100.0],
+            ..default()
+        }
+    }
+
+    fn iron_coal_deposit_state(id: StateId, owner: CountryId) -> StateData {
+        StateData {
+            id,
+            name: format!("State {}", id.0),
+            owner_country_id: owner,
+            resource_deposits: vec![
+                StateResourceDeposit {
+                    resource_type: Res::Iron,
+                    base_output: 50.0,
+                    discovered: true,
+                    development_level: 0,
+                },
+                StateResourceDeposit {
+                    resource_type: Res::Coal,
+                    base_output: 40.0,
+                    discovered: true,
+                    development_level: 0,
+                },
+            ],
+            world_position: [id.0 as f32 * 100.0, 0.0],
+            size: [100.0, 100.0],
+            ..default()
+        }
+    }
+
+    fn healthy_stockpile(country: &mut CountryData) {
+        country.stockpile.set(Res::Food, 100.0);
+        country.stockpile.set(Res::Wood, 100.0);
+        country.stockpile.set(Res::Iron, 100.0);
+        country.stockpile.set(Res::Coal, 100.0);
+    }
+
+    /// Test A: 領土内に鉱床が一切ない国家は、資源が不足していてもMineを建設せず、
+    /// 既存の次候補(Factory)へ安全にフォールバックする。国庫はFactory分の正規費用
+    /// だけ減り、他国家・panicへの影響はない。
+    #[test]
+    fn zero_deposit_country_never_builds_mine_and_falls_back_to_factory() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "Elfin-like".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        c1.stockpile.set(Res::Food, 100.0);
+        c1.stockpile.set(Res::Wood, 0.0);
+        c1.stockpile.set(Res::Iron, 0.0);
+        c1.stockpile.set(Res::Coal, 0.0);
+        let initial_treasury = c1.treasury;
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+
+        let s1 = no_deposit_state(StateId(1), CountryId(1));
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::Factory, factory_def());
+
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 1);
+        assert_eq!(
+            c1.construction_queue[0].building_type,
+            BuildingType::Factory,
+            "no usable deposit anywhere: Mine must never be chosen"
+        );
+        assert_eq!(
+            c1.treasury,
+            initial_treasury - factory_def().construction_cost,
+            "treasury must decrease by exactly the Factory's own cost, never a Mine cost"
+        );
+    }
+
+    /// Test A続き: FactoryもMineも建てられない(建物レジストリにMineしかない)場合、
+    /// 鉱床皆無国家はMineレベル不変・国庫不変のまま何も建設しない(panicなし)。
+    #[test]
+    fn zero_deposit_country_with_no_fallback_building_builds_nothing() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "Elfin-like".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        c1.stockpile.set(Res::Food, 100.0);
+        c1.stockpile.set(Res::Wood, 0.0);
+        c1.stockpile.set(Res::Iron, 0.0);
+        c1.stockpile.set(Res::Coal, 0.0);
+        let initial_treasury = c1.treasury;
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+
+        let s1 = no_deposit_state(StateId(1), CountryId(1));
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 0);
+        assert_eq!(c1.treasury, initial_treasury);
+        assert_eq!(state_registry.get(StateId(1)).unwrap().building_level(BuildingType::Mine), 0);
+    }
+
+    /// Test B: 同一国家内に「鉱床なし州」と「鉱床あり州」がある場合、Mineは必ず
+    /// 鉱床のある州に建設される。
+    #[test]
+    fn mine_is_built_on_the_state_with_a_deposit_not_the_empty_one() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "C1".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        c1.stockpile.set(Res::Food, 100.0);
+        c1.stockpile.set(Res::Wood, 0.0);
+        c1.stockpile.set(Res::Iron, 0.0);
+        c1.stockpile.set(Res::Coal, 0.0);
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+
+        // StateId(1)は鉱床なし、StateId(2)はIron/Coal鉱床あり。
+        // StateId昇順(1→2)の走査でも、鉱床のないState 1が誤って選ばれないことを確認。
+        let s1 = no_deposit_state(StateId(1), CountryId(1));
+        let s2 = iron_coal_deposit_state(StateId(2), CountryId(1));
+        let state_registry = StateRegistry::build(vec![s1, s2]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 1);
+        assert_eq!(c1.construction_queue[0].building_type, BuildingType::Mine);
+        assert_eq!(c1.construction_queue[0].state_id, StateId(2));
+    }
+
+    /// Test C: MilitaryFactoryの入力資源(Iron)を必要とする生産建物を保有し、
+    /// 現時点の備蓄は既存の不足閾値(30)以上、対応する稼働中Mineはなく、対応する
+    /// 未活用鉱床を領内に持ち、建設費を支払える国家では、通常のFactory拡張より先に
+    /// Mineが選ばれる(Arcadia型シナリオの単体再現、事前開発トリガー)。
+    #[test]
+    fn proactive_mine_development_fires_before_the_reactive_stockpile_threshold() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "Arcadia-like".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        // 資源備蓄は既存閾値(30)を上回っている: 事前開発規則がなければ Factory が
+        // 選ばれてしまう状態。
+        healthy_stockpile(&mut c1);
+        let mut s1 = iron_coal_deposit_state(StateId(1), CountryId(1));
+        // 既にMilitaryFactory(lv1)を保有: Ironを入力として要求するが、稼働中Mineはまだない。
+        s1.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::Factory, factory_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::MilitaryFactory, military_factory_def());
+
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 1);
+        assert_eq!(
+            c1.construction_queue[0].building_type,
+            BuildingType::Mine,
+            "an unmet Iron input for an owned MilitaryFactory must trigger proactive Mine \
+             development ahead of the normal Factory choice, even though stockpiles are healthy"
+        );
+        assert_eq!(c1.construction_queue[0].state_id, StateId(1));
+        assert_eq!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::RawMaterialMinePriority
+        );
+    }
+
+    /// Test D: 生産建物が必要とする資源と一致しない鉱床(MagicCrystalのみ)しかない
+    /// 場合、事前開発規則はその鉱床を選ばない(通常のクリスタル専用州除外と合わせて、
+    /// 結果的にMineは一切建設されない)。
+    #[test]
+    fn proactive_rule_ignores_a_deposit_that_does_not_match_the_needed_resource() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "C1".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        healthy_stockpile(&mut c1);
+        let mut s1 = StateData {
+            id: StateId(1),
+            name: "Crystal Only".to_string(),
+            owner_country_id: CountryId(1),
+            resource_deposits: vec![StateResourceDeposit {
+                resource_type: Res::MagicCrystal,
+                base_output: 30.0,
+                discovered: true,
+                development_level: 1,
+            }],
+            world_position: [0.0, 0.0],
+            size: [100.0, 100.0],
+            ..default()
+        };
+        // MilitaryFactory(lv1)はIron/IndustrialGoodsを要求するが、この州の鉱床は
+        // MagicCrystalのみで一致しない。
+        s1.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::Factory, factory_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::MilitaryFactory, military_factory_def());
+
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 1);
+        assert_eq!(
+            c1.construction_queue[0].building_type,
+            BuildingType::Factory,
+            "an unrelated MagicCrystal-only deposit must not be treated as satisfying the \
+             Iron/IndustrialGoods need, and must not itself be built on (crystal-only exclusion)"
+        );
+    }
+
+    /// Test E: 必要資源(Iron/Coal)について既に稼働中のMine(Dwarf型)がある国家では、
+    /// 事前開発規則が不必要な追加Mineを強制しない(既存供給網を壊さない)。
+    #[test]
+    fn proactive_rule_does_not_force_an_extra_mine_when_supply_is_already_active() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "Dwarf-like".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        healthy_stockpile(&mut c1);
+        let mut s1 = iron_coal_deposit_state(StateId(1), CountryId(1));
+        // 鉱床と同居する稼働中Mine(lv5)。
+        s1.buildings.insert(BuildingType::Mine, 5);
+        s1.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::Factory, factory_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::MilitaryFactory, military_factory_def());
+
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 1);
+        assert_eq!(
+            c1.construction_queue[0].building_type,
+            BuildingType::Factory,
+            "Iron/Coal are already actively mined at State 1, so the proactive rule must not \
+             fire; the normal healthy-stockpile path (Factory) applies instead"
+        );
+    }
+
+    /// Test F: 適切な鉱床があっても既存の建設費を支払えない場合、Mineを建設しない・
+    /// 国庫を変更しない・他建物を部分更新しない。
+    #[test]
+    fn insufficient_funds_blocks_proactive_mine_without_any_partial_update() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "PoorArcadia-like".to_string(),
+            capital_state_id: StateId(1),
+            // Mine建設費(500.0)未満。
+            treasury: 100.0,
+            ..default()
+        };
+        healthy_stockpile(&mut c1);
+        let initial_treasury = c1.treasury;
+        let mut s1 = iron_coal_deposit_state(StateId(1), CountryId(1));
+        s1.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::Factory, factory_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::MilitaryFactory, military_factory_def());
+
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 0);
+        assert_eq!(c1.treasury, initial_treasury);
+    }
+
+    /// Test G: 鉱床州のMineが既に上限(max_level)なら、事前開発・通常経路いずれの
+    /// 候補からも除外される。
+    #[test]
+    fn mine_at_max_level_is_excluded_from_every_candidate_path() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "C1".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        c1.stockpile.set(Res::Food, 100.0);
+        c1.stockpile.set(Res::Wood, 0.0);
+        c1.stockpile.set(Res::Iron, 0.0);
+        c1.stockpile.set(Res::Coal, 0.0);
+        let mut s1 = iron_coal_deposit_state(StateId(1), CountryId(1));
+        s1.buildings.insert(BuildingType::Mine, 10); // max_level=10
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1],
+        };
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(
+            c1.construction_queue.len(),
+            0,
+            "a Mine already at max_level must not be selected again by any path"
+        );
+    }
+
+    /// Test H: 同じ論理状態を異なる州挿入順で構築しても、同じ資源・同じStateId・
+    /// 同じ建物が選ばれる(HashMap/Vec挿入順に依存しない決定性)。
+    #[test]
+    fn candidate_selection_is_deterministic_regardless_of_state_insertion_order() {
+        fn run_with_order(states: Vec<StateData>) -> Option<StateId> {
+            let mut c1 = CountryData {
+                id: CountryId(1),
+                name: "C1".to_string(),
+                capital_state_id: StateId(1),
+                treasury: 5000.0,
+                ..default()
+            };
+            healthy_stockpile(&mut c1);
+            let state_registry = StateRegistry::build(states);
+
+            let mut building_registry = crate::building::data::BuildingRegistry::default();
+            building_registry
+                .definitions
+                .insert(BuildingType::Mine, mine_def());
+            building_registry
+                .definitions
+                .insert(BuildingType::Factory, factory_def());
+            building_registry
+                .definitions
+                .insert(BuildingType::MilitaryFactory, military_factory_def());
+
+            let mut country_registry = CountryRegistry {
+                countries: vec![c1],
+            };
+            let mut country_ai_registry = CountryAiRegistry::default();
+            let ai_state = country_ai_registry.get_or_create_mut(CountryId(1));
+
+            process_construction_ai(
+                CountryId(1),
+                &mut country_registry,
+                &state_registry,
+                &building_registry,
+                ai_state,
+            );
+
+            let c1 = country_registry.get(CountryId(1)).unwrap();
+            assert_eq!(c1.construction_queue.len(), 1);
+            assert_eq!(c1.construction_queue[0].building_type, BuildingType::Mine);
+            Some(c1.construction_queue[0].state_id)
+        }
+
+        let mut low = iron_coal_deposit_state(StateId(1), CountryId(1));
+        low.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let high = iron_coal_deposit_state(StateId(5), CountryId(1));
+
+        let order_a = run_with_order(vec![low.clone(), high.clone()]);
+        let order_b = run_with_order(vec![high, low]);
+
+        assert_eq!(order_a, order_b);
+        assert_eq!(order_a, Some(StateId(1)), "StateId ascending must win the tie-break");
+    }
+
+    /// Test I: 複数国家を同時に処理しても、一国の鉱床・資金・建設失敗が他国へ影響しない。
+    #[test]
+    fn construction_decisions_are_isolated_across_countries() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            name: "ZeroDeposit".to_string(),
+            capital_state_id: StateId(1),
+            treasury: 5000.0,
+            ..default()
+        };
+        c1.stockpile.set(Res::Food, 100.0);
+        c1.stockpile.set(Res::Wood, 0.0);
+        c1.stockpile.set(Res::Iron, 0.0);
+        c1.stockpile.set(Res::Coal, 0.0);
+
+        let mut c2 = CountryData {
+            id: CountryId(2),
+            name: "HasDeposit".to_string(),
+            capital_state_id: StateId(2),
+            treasury: 5000.0,
+            ..default()
+        };
+        healthy_stockpile(&mut c2);
+        let c2_initial_treasury = c2.treasury;
+
+        let mut country_registry = CountryRegistry {
+            countries: vec![c1, c2],
+        };
+
+        let s1 = no_deposit_state(StateId(1), CountryId(1));
+        let mut s2 = iron_coal_deposit_state(StateId(2), CountryId(2));
+        s2.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let state_registry = StateRegistry::build(vec![s1, s2]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry
+            .definitions
+            .insert(BuildingType::Mine, mine_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::Factory, factory_def());
+        building_registry
+            .definitions
+            .insert(BuildingType::MilitaryFactory, military_factory_def());
+
+        let mut country_ai_registry = CountryAiRegistry::default();
+        let ai_state_1 = country_ai_registry.get_or_create_mut(CountryId(1));
+        process_construction_ai(
+            CountryId(1),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state_1,
+        );
+        let ai_state_2 = country_ai_registry.get_or_create_mut(CountryId(2));
+        process_construction_ai(
+            CountryId(2),
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            ai_state_2,
+        );
+
+        let c1 = country_registry.get(CountryId(1)).unwrap();
+        let c2 = country_registry.get(CountryId(2)).unwrap();
+        assert_eq!(c1.construction_queue.len(), 1);
+        assert_eq!(c1.construction_queue[0].building_type, BuildingType::Factory);
+        assert_eq!(c2.construction_queue.len(), 1);
+        assert_eq!(c2.construction_queue[0].building_type, BuildingType::Mine);
+        assert_eq!(c2.construction_queue[0].state_id, StateId(2));
+        assert_eq!(
+            c2.treasury,
+            c2_initial_treasury - mine_def().construction_cost
         );
     }
 
