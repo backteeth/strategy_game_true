@@ -100,7 +100,14 @@ pub fn process_country_production(
                 .clamp(0.0, 1.0);
         let log_ratio = state.logistics_ratio;
 
-        for (&b_type, &level) in &state.buildings {
+        // P26-DET-001: `state.buildings`(`HashMap<BuildingType, u32>`)の反復順は
+        // Rust既定のRandomState(プロセスごとにランダムなSipHashシード)に依存し、
+        // プロセス起動ごとに変わりうる。ここではその生反復順を使わず、
+        // `BuildingType::ALL`の宣言順(永続的・国家非依存の全順序、
+        // `country_ai.rs::find_proactive_mine_state`が`ResourceType::ALL`で
+        // 既に用いているのと同じ方針)で固定する。
+        for b_type in BuildingType::ALL {
+            let level = state.buildings.get(&b_type).copied().unwrap_or(0);
             if level == 0 {
                 continue;
             }
@@ -146,7 +153,23 @@ pub fn process_country_production(
 
         let mut op_ratios = HashMap::new();
 
-        for (&b_type, &level) in &state.buildings {
+        // P26-DET-001: 根本原因はここ(Step 3)。同じ州内で、ある建物の生産(`add`)と
+        // 別の建物の消費(`consume`)が同じ`ResourceType`を扱う場合(例: Factoryが
+        // 産出するIndustrialGoodsをMilitaryFactoryが消費する)、`consume`は現在庫との
+        // 厳格な全額判定(`CountryStockpile::consume`、部分消費なし)であるため、
+        // 生反復順によって「消費側が先に評価され、まだ産出が備蓄へ加算されていない
+        // ため`consume`が失敗する」か「産出側が先に加算され、その後の`consume`が
+        // 成功する」かが変わってしまう(単なる浮動小数点丸め差ではなく、実際の
+        // 消費成否そのものが変わる実質的な非決定性)。`BuildingType::ALL`の宣言順
+        // (Farmが真っ先、Factoryのような一次生産者がMilitaryFactoryのような二次
+        // 消費者より先)で固定することで、この処理順をプロセスのHashMapシードから
+        // 切り離す。この州が保有しない建物種別は元コード同様に一切触れない
+        // (avg_op計算[`economy/mod.rs`]が参照する`building_operation_ratios`へ
+        // 余計な0.0エントリを増やさない)。
+        for b_type in BuildingType::ALL {
+            let Some(&level) = state.buildings.get(&b_type) else {
+                continue;
+            };
             if level == 0 {
                 op_ratios.insert(b_type, 0.0);
                 continue;
