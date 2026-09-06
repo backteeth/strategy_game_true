@@ -630,13 +630,28 @@ mod real_map {
     /// 校正基準の期待値(reportに実測値として記載、`P26-003-REV-001`§15の概算値
     /// (90.03等)をそのまま転記せず、本タスクで独立に再実測した正確な値を使用)。
     /// (country_id, name_substr, economic_raw, military_raw, population_raw, total_score, rank, tier)
+    ///
+    /// 【P26-004-PRE-004により更新】: 本タスクがElfin(StateId 16)・Ferrowyn(StateId 21)・
+    /// Oceanic(StateId 8)へ鉱床・MilitaryFactoryを追加した結果、day 0時点で
+    /// `economic_raw`が Elfin 1200.0→1290.0(既存Mine lv1 × 追加鉱床)・
+    /// Ferrowyn 150.0→330.0(既存Mine lv2 × 追加鉱床)・
+    /// Oceanic 600.0→620.0(新規MilitaryFactory lv1固定点)へ変化した
+    /// (Passguardは鉱床のみでMine未建設のためday 0では400.0のまま不変、
+    /// Arcadia/Dwarfは本タスクでデータ変更していないため1130.0/1230.0のまま不変)。
+    /// `total_score`は6か国間の正規化(最大値相対)で決まるため、直接変更していない
+    /// Arcadia/Dwarf/Passguardの`total_score`も連動して変化する
+    /// (`verification_logs/phase-26/p26-004-pre-004/`§26参照、本タスクで実App実測し
+    /// 再校正した値)。Tier構成(GreatPower×2/RegionalPower×2/MinorPower×2)自体は
+    /// 変化しないが、Passguard(4)とFerrowyn(5)のworld_rankが入れ替わる
+    /// (Ferrowynの人口590,000がPassguardの245,000を上回るため、economic_raw自体は
+    /// Passguardの方が高くても総合スコアはFerrowynが上回る)。
     const EXPECTED: [(usize, f64, f64, f64, f32, usize, PowerTier); 6] = [
-        (0, 1130.0, 10000.0, 2_860_000.0, 92.4957, 1, PowerTier::GreatPower),
-        (1, 1200.0, 10000.0, 2_060_000.0, 90.0255, 2, PowerTier::GreatPower),
-        (2, 1230.0, 10000.0, 1_890_000.0, 89.8695, 3, PowerTier::RegionalPower),
-        (3, 600.0, 10000.0, 3_830_000.0, 84.6341, 4, PowerTier::RegionalPower),
-        (4, 400.0, 10000.0, 245_000.0, 61.0355, 5, PowerTier::MinorPower),
-        (5, 150.0, 10000.0, 590_000.0, 56.7395, 6, PowerTier::MinorPower),
+        (0, 1130.0, 10000.0, 2_860_000.0, 91.2138, 1, PowerTier::GreatPower),
+        (1, 1290.0, 10000.0, 2_060_000.0, 90.75718, 2, PowerTier::GreatPower),
+        (2, 1230.0, 10000.0, 1_890_000.0, 88.474106, 3, PowerTier::RegionalPower),
+        (3, 620.0, 10000.0, 3_830_000.0, 84.4186, 4, PowerTier::RegionalPower),
+        (4, 400.0, 10000.0, 245_000.0, 60.5817, 6, PowerTier::MinorPower),
+        (5, 330.0, 10000.0, 590_000.0, 60.75536, 5, PowerTier::MinorPower),
     ];
 
     /// 要求D: 実データ6か国について、経済力・軍事力・人口の生値・正規化前提の総合力・

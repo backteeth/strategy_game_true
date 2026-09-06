@@ -15,4 +15,30 @@
     (7): [
         (resource_type: MagicCrystal, base_output: 60.0, discovered: true, development_level: 2),
     ],
+    // P26-004-PRE-004: 最小MilitarySupplies生産網(Elfin/Ferrowyn/Passguard/Oceanic)。
+    // New Gameはここから直接読み込まれる。旧Save側は
+    // `src/building/supply_chain_migration.rs`が同じ値を意味的migrationとして適用する
+    // (旧Saveの`StateData.resource_deposits`はここを再読込しないため、単独では効果がない)。
+    (8): [
+        // Oceanic Magic Empire, State 8 "Imperial Capital"
+        (resource_type: Iron, base_output: 50.0, discovered: true, development_level: 1),
+        (resource_type: Coal, base_output: 40.0, discovered: true, development_level: 1),
+    ],
+    (13): [
+        // Passguard March, State 13 "Mountain Watch"
+        // 意図的にIron/Coal両方を同一州へ配置(country_ai.rsのMine候補州選定が
+        // 不足資源ごとに区別しないための回避、p26-004-pre-003報告書§15参照)。
+        (resource_type: Iron, base_output: 50.0, discovered: true, development_level: 1),
+        (resource_type: Coal, base_output: 40.0, discovered: true, development_level: 1),
+    ],
+    (16): [
+        // Elfin Republic, State 16 "Highland"(既存Mine level 1)
+        (resource_type: Iron, base_output: 50.0, discovered: true, development_level: 1),
+        (resource_type: Coal, base_output: 40.0, discovered: true, development_level: 1),
+    ],
+    (21): [
+        // Ferrowyn League, State 21 "Ironvein Camp"(既存Mine level 2)
+        (resource_type: Iron, base_output: 50.0, discovered: true, development_level: 1),
+        (resource_type: Coal, base_output: 40.0, discovered: true, development_level: 1),
+    ],
 }

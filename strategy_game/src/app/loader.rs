@@ -236,6 +236,35 @@ pub fn load_game_data(
         );
     }
 
+    // P26-004-PRE-004: Elfin/Ferrowyn/Passguard/Oceanicの最小MilitarySupplies生産網
+    // (Iron/Coal鉱床 + OceanicのMilitaryFactory)を意味的migrationとして適用する。
+    // New Gameでは`resources.ron`/`states.ron`自体に既に対象データが含まれているため
+    // 冪等条件により実質何も追加しない(このタイミングでの呼び出しは、旧Save側
+    // [`src/save/apply.rs`]と同一の関数を通すことで、両経路の論理的な構造一致を
+    // コード上で保証するため)。対象StateId(8/13/16/21)は`states.ron`に常に存在する
+    // 前提であり、欠落は本番データの破損としてpanicで即座に検出する。
+    let supply_chain_migration_report =
+        crate::building::supply_chain_migration::apply_minimum_supply_chain_migration(
+            &mut states,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "[DataLoader] P26-004-PRE-004 supply chain migration failed: target StateId {:?} \
+                 is missing from assets/data/states.ron",
+                e.0
+            )
+        });
+    if !supply_chain_migration_report.is_empty() {
+        info!(
+            "[DataLoader] Minimum supply chain migration: {} deposit(s) added ({:?}), {} \
+             building level(s) raised ({:?})",
+            supply_chain_migration_report.added_deposits.len(),
+            supply_chain_migration_report.added_deposits,
+            supply_chain_migration_report.raised_buildings.len(),
+            supply_chain_migration_report.raised_buildings,
+        );
+    }
+
     validate_data(
         &countries,
         &states,

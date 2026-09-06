@@ -318,19 +318,27 @@ fn test_j2_arcadia_mine_completes_and_iron_production_improves_over_36_months() 
 
 // ─────────────────────────────────────────────────────────────────────────
 // Category K: Elfin/Oceanic実データ — 鉱床皆無国家がMineへ浪費しない
+//
+// 【P26-004-PRE-004により更新】: このカテゴリのTest K-1/K-2は元々、Elfin/Oceanicが
+// 「領内に登録鉱床が一切ない」ことを根拠に、事前開発規則がMineへ浪費しないことを
+// 検証していた。P26-004-PRE-004(`verification_logs/phase-26/p26-004-pre-004/`)は
+// Elfin(StateId 16)・Oceanic(StateId 8)へ実際にIron/Coal鉱床を追加したため、この
+// 前提自体が実データ上は成立しなくなった——これは本タスクが意図して生み出した結果
+// である(供給網が皆無だった国に生産経路を与えることが目的だったため)。したがって
+// 「鉱床がない前提での無浪費」ではなく、「鉱床が実在するようになった結果、事前開発
+// 規則が正しくそこへ投資し、実際に持続的な生産へ到達する」ことを検証する形に更新
+// する。事前開発規則そのもの(鉱床のない州へは浪費しない)の検証は、他の国・他州の
+// 組み合わせを使う既存のCategory J等のテストが引き続き担っており、本タスクはその
+// メカニズム自体には手を入れていない。
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Test K-1: Elfin Republic(領内に登録鉱床が一切ない、`assets/data/resources.ron`
-/// にはStateId 0,2,5,7しか鉱床が登録されておらず、いずれもElfinの所有州ではない)は、
-/// 36か月間AI操作させてもMine総レベルが一切増加しない(P26-004-PRE-001実測の
-/// 「月30時点でMine総lv10=上限」という浪費からの回帰)。
-///
-/// 注: Elfinは実データ上、既にStateId(16)へ`Mine: 1`が初期配置されている
-/// (`assets/data/states.ron`、鉱床の有無とは無関係な既存マップ上の初期建物であり、
-/// P26-004-PRE-002が作った状態でも、本タスクが除去すべき対象でもない)。したがって
-/// 「一切浪費しない」の検証は「初期値(1)からの増加が一切ない」という形で行う。
+/// Test K-1(更新): Elfin Republicは、P26-004-PRE-004でStateId(16、既存Mine lv1が
+/// 配置されていた州)へIron50/Coal40鉱床を得た。事前開発規則がこの新しい鉱床を検出し、
+/// 既存Mineのレベルを実際に伸ばして、36か月以内に正のMilitarySupplies生産へ到達する
+/// ことを確認する(`verification_logs/phase-26/p26-004-pre-004/`実測: 月36で
+/// 1846.952)。
 #[test]
-fn test_k1_elfin_never_wastes_treasury_on_a_mine_over_36_months() {
+fn test_k1_elfin_mine_now_grows_from_its_new_deposit_and_reaches_positive_production() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("k1");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
@@ -339,87 +347,97 @@ fn test_k1_elfin_never_wastes_treasury_on_a_mine_over_36_months() {
     assert_eq!(
         initial_mine_level, 1,
         "precondition: Elfin's real initial data has exactly one pre-placed Mine level \
-         (StateId 16) unrelated to any deposit"
+         (StateId 16), now co-located with the P26-004-PRE-004 deposit"
     );
 
     advance_months(&mut app, 36);
 
-    assert_eq!(
-        total_mine_level_owned_by(&app, ELFIN),
-        initial_mine_level,
-        "Elfin has no usable deposit anywhere in its territory; its total Mine level must never \
-         grow beyond the pre-existing initial value across 36 months (P26-004-PRE-001 measured \
-         it wastefully reaching total level 10 under the old AI)"
+    assert!(
+        total_mine_level_owned_by(&app, ELFIN) > initial_mine_level,
+        "Elfin's State 16 now has a real Iron/Coal deposit (P26-004-PRE-004); the proactive \
+         construction rule must grow the pre-existing Mine there over 36 months, not leave it \
+         frozen at the initial level"
     );
-    assert_eq!(
-        stockpile_of(&app, ELFIN, ResourceType::MilitarySupplies),
-        0.0,
-        "with no deposit, no active mining route, and no MilitaryFactory input chain, \
-         MilitarySupplies must remain 0 (this fix does not and cannot resolve Elfin's \
-         underlying supply problem)"
+    let supplies = stockpile_of(&app, ELFIN, ResourceType::MilitarySupplies);
+    assert!(
+        supplies > 0.0,
+        "with a real deposit now in place, Elfin must reach positive MilitarySupplies \
+         production within 36 months (measured: {supplies})"
     );
 }
 
-/// Test K-2: Oceanic Magic Empire(同じく領内に登録鉱床が一切ない)も、36か月間で
-/// Mine総レベルが一切増加しない(P26-004-PRE-001実測の「月36時点でMine総lv32」から
-/// の回帰)。
+/// Test K-2(更新): Oceanic Magic Empireは、P26-004-PRE-004でStateId(8、帝都)へ
+/// Iron50/Coal40鉱床とMilitaryFactory level 1を得た。事前開発規則がこの鉱床を検出して
+/// Mineを新規建設し、36か月以内に正のMilitarySupplies生産へ到達することを確認する
+/// (`verification_logs/phase-26/p26-004-pre-004/`実測: 月36で565.705)。
 #[test]
-fn test_k2_oceanic_never_wastes_treasury_on_a_mine_over_36_months() {
+fn test_k2_oceanic_mine_is_now_built_on_its_new_deposit_and_reaches_positive_production() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("k2");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
     advance_months(&mut app, 36);
 
-    assert_eq!(
-        total_mine_level_owned_by(&app, OCEANIC),
-        0,
-        "Oceanic has no usable deposit anywhere in its territory; its total Mine level must \
-         remain exactly 0 across 36 months (P26-004-PRE-001 measured it wastefully reaching \
-         total level 32 under the old AI)"
+    assert!(
+        total_mine_level_owned_by(&app, OCEANIC) > 0,
+        "Oceanic's State 8 now has a real Iron/Coal deposit (P26-004-PRE-004); the proactive \
+         construction rule must build a Mine there over 36 months, not leave the total Mine \
+         level at the old permanent 0"
     );
-    assert_eq!(stockpile_of(&app, OCEANIC, ResourceType::MilitarySupplies), 0.0);
+    let supplies = stockpile_of(&app, OCEANIC, ResourceType::MilitarySupplies);
+    assert!(
+        supplies > 0.0,
+        "with a real deposit and a MilitaryFactory now in place, Oceanic must reach positive \
+         MilitarySupplies production within 36 months (measured: {supplies})"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Category L: Passguard/Ferrowyn実データ — 未解決のまま残ることを確認(対象外)
+// Category L: Passguard/Ferrowyn実データ
+//
+// 【P26-004-PRE-004により更新】: 同じ理由でPassguard/Ferrowynも実データ上「鉱床が
+// 一切ない」という前提が成立しなくなった。Test L-1/L-2は、供給網が実際に解決される
+// ことを検証する形に更新する。
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Test L-1: Passguard Marchは領内に鉱床がなく、かつIndustrialGoods生産経路が
-/// 皆無であるため、本タスクはこの国のMilitarySupplies供給問題を解決しない。
-/// 36か月経過後もMilitarySupplies=0のままであることを確認し、誤って
-/// 「供給可能」と判定していないことを明示する。
+/// Test L-1(更新): Passguard Marchは、P26-004-PRE-004でStateId(13、既存
+/// MilitaryFactory lv1・Railway lv1が配置されていた州)へIron50/Coal40の**両方**の
+/// 鉱床を得た(同一州に集約した設計理由は`verification_logs/phase-26/p26-004-pre-004/`
+/// §6・P26-004-PRE-003報告書§15を参照: Mine候補州選定が不足資源ごとに区別しない
+/// 落とし穴の回避)。事前開発規則がMineを新規建設し、続いて通常判断がIndustrialGoods
+/// 用のFactoryを建設して全鎖が接続し、36か月以内に正のMilitarySupplies生産へ到達する
+/// ことを確認する(実測: 月36で3659.576)。
 #[test]
-fn test_l1_passguard_remains_unresolved_by_this_task() {
+fn test_l1_passguard_supply_chain_is_now_resolved_by_p26_004_pre_004() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("l1");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
     advance_months(&mut app, 36);
 
-    assert_eq!(
-        total_mine_level_owned_by(&app, PASSGUARD),
-        0,
-        "Passguard has no usable deposit either; no waste, but also no fix for its \
-         IndustrialGoods chain gap"
+    assert!(
+        total_mine_level_owned_by(&app, PASSGUARD) > 0,
+        "Passguard's State 13 now has real Iron/Coal deposits (P26-004-PRE-004); a Mine must \
+         be built there over 36 months"
     );
-    assert_eq!(
-        stockpile_of(&app, PASSGUARD, ResourceType::MilitarySupplies),
-        0.0,
-        "Passguard's IndustrialGoods supply chain gap is explicitly out of scope for this task \
-         and must remain unresolved"
+    let supplies = stockpile_of(&app, PASSGUARD, ResourceType::MilitarySupplies);
+    assert!(
+        supplies > 0.0,
+        "Passguard's IndustrialGoods supply chain gap is now closed by P26-004-PRE-004's \
+         deliberate co-location of both deposits on State 13; MilitarySupplies must be positive \
+         by month 36 (measured: {supplies})"
     );
 }
 
-/// Test L-2: Ferrowyn Leagueも領内に鉱床がなく、この修正だけでは自給に到達しない。
-///
-/// 注: Ferrowynは実データ上、既にStateId(19)へ`Mine: 1`・StateId(21)へ`Mine: 2`
-/// (合計3)が初期配置されている(`assets/data/states.ron`、`verification_logs/
-/// phase-26/p26-004-pre-001/`§21も「州21、既存Mine lv2が既にある州」と言及済み)。
-/// これらは鉱床の有無と無関係な既存マップ上の初期建物であり、本タスクが除去・追加
-/// すべき対象ではない。検証は「初期値(3)からの増加が一切ない」という形で行う。
+/// Test L-2(更新): Ferrowyn Leagueは、P26-004-PRE-004でStateId(21、既存Mine lv2が
+/// 配置されていた、Ferrowynの2か所のMineのうちレベルの高い方の州)へIron50/Coal40
+/// 鉱床を得た。既存のFactory(州22)がそのままIndustrialGoods経路を担うため、鉱床が
+/// 接続した瞬間から追加建設なしで供給網が機能し始める(P26-004-PRE-003報告書§14参照)。
+/// 36か月以内に、旧来の恒久停止値(初期備蓄消費だけによる320.84付近での固定化)を
+/// 明確に超える、継続的なMilitarySupplies生産へ到達することを確認する(実測: 月36で
+/// 1089.859)。
 #[test]
-fn test_l2_ferrowyn_remains_unresolved_by_this_task() {
+fn test_l2_ferrowyn_supply_chain_is_now_resolved_by_p26_004_pre_004() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("l2");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
@@ -428,26 +446,22 @@ fn test_l2_ferrowyn_remains_unresolved_by_this_task() {
     assert_eq!(
         initial_mine_level, 3,
         "precondition: Ferrowyn's real initial data has Mine levels 1 (StateId 19) + 2 \
-         (StateId 21) = 3, unrelated to any deposit"
+         (StateId 21) = 3; StateId 21 is now co-located with the P26-004-PRE-004 deposit"
     );
 
     advance_months(&mut app, 36);
 
-    assert_eq!(
-        total_mine_level_owned_by(&app, FERROWYN),
-        initial_mine_level,
-        "Ferrowyn has no usable deposit anywhere in its territory; its total Mine level must \
-         never grow beyond the pre-existing initial value"
+    assert!(
+        total_mine_level_owned_by(&app, FERROWYN) >= initial_mine_level,
+        "Ferrowyn's pre-existing Mine levels must never be lowered; State 21's Mine may grow \
+         further now that it has a real deposit"
     );
-    // P26-004-PRE-001実測: FerrowynはIron/Coalの初期備蓄だけで一時的にMilitarySupplies
-    // を産出し(月9〜15頃で320.84付近に固定化)、鉱床がないため以後は増加しない。
-    // この一時的な非ゼロ値自体は初期備蓄の消費によるものであり、本タスクが解決した
-    // 継続的な供給網ではない(out of scope、鉱床追加なしにこれ以上は改善しない)。
     let supplies = stockpile_of(&app, FERROWYN, ResourceType::MilitarySupplies);
     assert!(
-        (0.0..=400.0).contains(&supplies),
-        "Ferrowyn's supply remains bounded by its one-time initial Iron/Coal stockpile, not a \
-         continuous supply chain (measured: {supplies})"
+        supplies > 400.0,
+        "Ferrowyn's supply must now clearly exceed the old permanent plateau (320.84, bounded \
+         by a one-time initial stockpile only) now that State 21's deposit feeds its existing \
+         Factory on a continuous basis (measured: {supplies})"
     );
 }
 
@@ -620,6 +634,11 @@ fn test_g2_save_load_after_construction_starts_preserves_state_exactly() {
 /// 実測値であり、比較対象は同報告書に記録済みの改修前実測値である
 /// (改修前を同一テスト内で再実行して比較したものではない)。
 #[test]
+// 【P26-004-PRE-004により更新】: 以下のTest M-1は元々、Elfin/Oceanic/Passguard/
+// Ferrowynが「鉱床皆無のため恒久的にMilitarySupplies=0(またはFerrowynのみ初期備蓄
+// 消費分の一時的な非ゼロ)」のままであることを検証していた。P26-004-PRE-004は
+// この4か国全てに実際の供給網を与えたため、この期待値表を「4か国とも解決される」
+// 形に更新する(`verification_logs/phase-26/p26-004-pre-004/`実測値と整合)。
 fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("m1");
@@ -662,36 +681,53 @@ fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes
                      plateau of 373.96"
                 );
             }
-            "Elfin" | "Oceanic" => {
-                assert_eq!(
-                    mine_total, initial_mine_total,
-                    "{name} has no usable deposit; Mine total level must never grow beyond its \
-                     pre-existing initial value ({initial_mine_total})"
+            "Elfin" => {
+                assert!(
+                    mine_total > initial_mine_total,
+                    "Elfin's State 16 now has a real deposit (P26-004-PRE-004); its Mine must \
+                     grow beyond the pre-existing initial value ({initial_mine_total})"
                 );
-                assert_eq!(supplies, 0.0, "{name}'s supply problem remains unresolved (out of scope)");
+                assert!(
+                    supplies > 0.0,
+                    "Elfin's supply problem is now resolved by P26-004-PRE-004 (measured: {supplies})"
+                );
+            }
+            "Oceanic" => {
+                assert!(
+                    mine_total > initial_mine_total,
+                    "Oceanic's State 8 now has a real deposit (P26-004-PRE-004); a Mine must be \
+                     built there, growing beyond the pre-existing initial value \
+                     ({initial_mine_total})"
+                );
+                assert!(
+                    supplies > 0.0,
+                    "Oceanic's supply problem is now resolved by P26-004-PRE-004 (measured: {supplies})"
+                );
             }
             "Ferrowyn" => {
-                assert_eq!(
-                    mine_total, initial_mine_total,
-                    "Ferrowyn has no usable deposit; Mine total level must never grow beyond its \
-                     pre-existing initial value ({initial_mine_total})"
-                );
-                // P26-004-PRE-001実測: 初期Iron/Coal備蓄だけの一時的な非ゼロ値
-                // (320.84付近で固定化)であり、継続的な供給網ではない(out of scope)。
                 assert!(
-                    (0.0..=400.0).contains(&supplies),
-                    "Ferrowyn's supply remains bounded by its one-time initial stockpile only \
+                    mine_total >= initial_mine_total,
+                    "Ferrowyn's pre-existing Mine levels must never be lowered ({initial_mine_total})"
+                );
+                // P26-004-PRE-004実測(`verification_logs/phase-26/p26-004-pre-004/`): 州21の
+                // 新規鉱床が既存Factoryへ継続供給し、旧来の恒久停止値(320.84)を明確に超える。
+                assert!(
+                    supplies > 400.0,
+                    "Ferrowyn's supply must now clearly exceed the old permanent plateau (320.84) \
+                     now that State 21's deposit feeds its existing Factory continuously \
                      (measured: {supplies})"
                 );
             }
             "Passguard" => {
-                assert_eq!(
-                    mine_total, initial_mine_total,
-                    "Passguard has no usable deposit; Mine total level must never grow"
+                assert!(
+                    mine_total > initial_mine_total,
+                    "Passguard's State 13 now has real deposits (P26-004-PRE-004); a Mine must \
+                     be built there ({initial_mine_total} -> {mine_total})"
                 );
-                assert_eq!(
-                    supplies, 0.0,
-                    "Passguard's IndustrialGoods chain gap remains unresolved (out of scope)"
+                assert!(
+                    supplies > 0.0,
+                    "Passguard's IndustrialGoods chain gap is now closed by P26-004-PRE-004 \
+                     (measured: {supplies})"
                 );
             }
             "Dwarf" => {

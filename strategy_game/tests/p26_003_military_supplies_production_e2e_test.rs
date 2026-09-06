@@ -941,25 +941,44 @@ fn test_h2_ai_country_produces_through_the_same_path_and_is_not_permanently_zero
     );
 }
 
-/// CountryId(3)(Oceanic Magic Empire)はNew Gameの時点でMilitaryFactoryを1つも
-/// 所有していない(既存マップデータの事実、P26-003が作った状態ではない)。この国家は
-/// MilitaryEquipmentも同じ理由でPhase 25から既に生産できておらず、MilitarySuppliesの
-/// 生産0はその既存の非対称性をそのまま継承しただけであって、本タスクが新規に作り
-/// 出した「全AI国家の恒久的なMilitarySupplies=0」ではないことを明示的に確認する
-/// (spec §18「全AI国家が恒久的にMilitarySupplies=0となる設計ではない」の否定条件は、
-/// 少なくとも1国でも正なら満たされる——Test H2がその反例を示す)。
+/// 【P26-004-PRE-004により更新】: このテストは元々、CountryId(3)(Oceanic Magic
+/// Empire)がNew Gameの時点でMilitaryFactoryを1つも所有していない(当時の既存マップ
+/// データの事実、P26-003が作った状態ではない)ことを根拠に、その
+/// MilitarySupplies=0・MilitaryEquipment=0が「本タスクが新規に作り出した恒久的な0」
+/// ではなく、既存のMilitaryEquipmentギャップをそのまま継承しただけであることを
+/// 確認していた。
+///
+/// P26-004-PRE-004(`verification_logs/phase-26/p26-004-pre-004/`)は、Oceanicが
+/// MilitarySuppliesを一切生産できない問題を解決するデータ変更の一部として、
+/// StateId(8、帝都)へ`MilitaryFactory: 1`を意図的に追加した。したがって
+/// 「CountryId(3)はMilitaryFactoryを1つも持たない」という本テストの前提そのものが
+/// 実データ上は既に成立しなくなっている。この事実の変化そのものが本タスクの
+/// 意図した成果であるため、テストを削除するのではなく、新しい実データの下での
+/// 正しい挙動(MilitaryFactoryを持つようになった結果、正のMilitarySupplies生産に
+/// 到達する)を検証する形に更新する。「MilitaryFactoryが1つもない国家は生産0のまま」
+/// という元々の不変条件そのものは、実データに依存しない合成フィクスチャで
+/// `test_a6_no_military_factory_produces_zero`が既に(本タスクの影響を受けず)
+/// 検証し続けている。
 #[test]
-fn test_h3_country_without_any_military_factory_mirrors_the_pre_existing_equipment_gap() {
+fn test_h3_oceanic_now_has_a_military_factory_after_p26_004_pre_004_and_produces_positive_supplies() {
     let player = CountryId(0);
-    let country_without_factory = CountryId(3);
+    let oceanic = CountryId(3);
     let temp_dir = TempTestDir::new("h3");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
     advance_months(&mut app, 6);
 
-    let sup = supplies_of(&app, country_without_factory);
-    let eq = equipment_of(&app, country_without_factory);
-    assert_eq!(sup, 0.0, "no MilitaryFactory means no MilitarySupplies, exactly mirroring the pre-existing equipment gap");
-    assert_eq!(eq, 0.0, "confirms this is the same pre-existing MilitaryEquipment gap, not a new one");
+    let sup = supplies_of(&app, oceanic);
+    let eq = equipment_of(&app, oceanic);
+    assert!(
+        sup > 0.0,
+        "P26-004-PRE-004 gave Oceanic (StateId 8) a MilitaryFactory plus Iron/Coal deposits; \
+         it must now reach positive MilitarySupplies production within 6 months (measured: {sup})"
+    );
+    assert!(
+        eq > 0.0,
+        "the same new MilitaryFactory must also close Oceanic's pre-existing MilitaryEquipment \
+         gap (measured: {eq})"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────

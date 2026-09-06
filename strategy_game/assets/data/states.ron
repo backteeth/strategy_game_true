@@ -173,6 +173,9 @@
         base_logistics_capacity: 100.0,
         buildings: {
             Farm: 1, // 大人口に対して建物が極めて少ない（高失業率州）
+            // P26-004-PRE-004: 鉱床追加だけではMilitarySupplies生産手段が存在しないため
+            // 初期建物として追加(建設AIはMilitaryFactoryを対象にしないため必須)。
+            MilitaryFactory: 1,
         },
         world_position: (500.0, 50.0),
         size: (160.0, 150.0),

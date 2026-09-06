@@ -1,6 +1,7 @@
 pub mod construction;
 pub mod data;
 pub mod mine_migration;
+pub mod supply_chain_migration;
 
 use bevy::prelude::*;
 use data::BuildingRegistry;

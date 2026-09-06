@@ -434,11 +434,29 @@ mod real_map_e2e {
         assert_eq!(tier_of(3), PowerTier::RegionalPower);
         assert_eq!(rank_of(3), 4);
 
-        // Passguard March(4)・Ferrowyn League(5): 常にMinorPower(世界順位5位・6位)。
+        // Passguard March(4)・Ferrowyn League(5): 両国ともMinorPower。
+        //
+        // 【P26-004-PRE-004により更新】: 順位は5位・6位のままだが、どちらがどちらかが
+        // 入れ替わった。P26-004-PRE-004(`verification_logs/phase-26/p26-004-pre-004/`)が
+        // Ferrowyn(StateId 21、既存Mine lv2)へIron/Coal鉱床を追加した結果、Ferrowynの
+        // economic_rawが150.0→330.0へ上昇し、Passguardの人口(245,000)を大きく上回る
+        // Ferrowynの人口(590,000)との相乗効果で総合スコアがPassguardを上回るようになった
+        // (Passguardのeconomic_rawは400.0のまま不変——鉱床のみでMineが未建設のため
+        // day 0時点では無寄与、P26-004-PRE-003報告書§29参照)。
         assert_eq!(tier_of(4), PowerTier::MinorPower);
-        assert_eq!(rank_of(4), 5);
+        assert_eq!(
+            rank_of(4),
+            6,
+            "Passguard March now ranks 6th (P26-004-PRE-004 raised Ferrowyn's economic_raw \
+             above it while Passguard's own data is unchanged)"
+        );
         assert_eq!(tier_of(5), PowerTier::MinorPower);
-        assert_eq!(rank_of(5), 6);
+        assert_eq!(
+            rank_of(5),
+            5,
+            "Ferrowyn League now ranks 5th (P26-004-PRE-004 gave it a real Iron/Coal deposit \
+             on its existing level-2 Mine, State 21)"
+        );
     }
 
     /// 要求テスト59: 実データで順位が決定論的(2回評価しても同じ順位)。

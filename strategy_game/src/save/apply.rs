@@ -310,6 +310,28 @@ pub(crate) fn prepare_load(
         &building_registry.definitions,
     );
 
+    // P26-004-PRE-004: 旧SaveのState 8/13/16/21には、鉱床データ変更前に作成された
+    // 場合、Iron/Coal鉱床(・Oceanicの場合MilitaryFactory)が存在しない
+    // (`StateData.resource_deposits`は`assets/data/resources.ron`と一切再マージされず
+    // Saveへ直接シリアライズされるため、資産ファイル側の変更だけでは旧Saveに反映
+    // されない)。同じ構造的migration関数(`src/app/loader.rs`のNew Game経路と同一)を
+    // 適用し、意味的な論理状態をNew Gameと一致させる。対象StateIdは、本関数より前の
+    // ランタイム互換性チェック(上記`state ID sets do not match`)により、現在の地図
+    // (=`assets/data/states.ron`)と`save.states`のID集合が完全一致することが既に
+    // 保証されているため、ここでのMissingTargetStateは構造的に到達不能なはずだが、
+    // 防御的に`ApplyLoadError`として拒否し、部分適用のままWorldへ反映しない。
+    crate::building::supply_chain_migration::apply_minimum_supply_chain_migration(
+        &mut save.states,
+    )
+    .map_err(|e| ApplyLoadError::StaticDataMismatch {
+        detail: format!(
+            "P26-004-PRE-004 supply chain migration target StateId {:?} is missing from the \
+             save (should be structurally unreachable here: the state ID set check above \
+             already guarantees the save's states match the current map)",
+            e.0
+        ),
+    })?;
+
     let country_ai_registry = CountryAiRegistry {
         ai_states: save
             .country_ai
