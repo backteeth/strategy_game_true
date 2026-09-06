@@ -643,10 +643,17 @@ mod real_app {
     }
 
     /// Arcadiaの正規36か月値(報告書§17・§18、5回の独立プロセスで確認済み)。
+    ///
+    /// P26-DET-001-REV-001(`verification_logs/phase-26/p26-det-001-rev-001/`)が
+    /// 国家全体の生産順を`BuildingType::ALL(外側) → StateId昇順(内側)`へ変更した
+    /// ことで、月24以降の値がこのファイル作成時点(州内順序のみ修正、州をまたぐ
+    /// 順序は当時の`states`スライス順のまま)の値から変化した(月12・18は不変)。
+    /// これは意図した修正の結果であり退行ではない(REV-001報告書§16・§19で
+    /// 独立プロセス5回一致を確認済み)。
     const ARCADIA_CANONICAL_M12: f64 = 421.2265230000;
     const ARCADIA_CANONICAL_M18: f64 = 592.5978000000;
-    const ARCADIA_CANONICAL_M24: f64 = 667.3241700000;
-    const ARCADIA_CANONICAL_M36: f64 = 823.1722540000;
+    const ARCADIA_CANONICAL_M24: f64 = 667.8538710000;
+    const ARCADIA_CANONICAL_M36: f64 = 822.4577790000;
 
     // Test E: Arcadia単独36か月の正規値。
     #[test]

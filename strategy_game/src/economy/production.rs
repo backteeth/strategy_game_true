@@ -90,9 +90,30 @@ pub fn process_country_production(
     let mut science_total = 0.0;
     let mut magic_total = 0.0;
 
+    // P26-DET-001-REV-001: `states`スライス自体の要素順は、呼び出し元
+    // (`economy::mod::handle_monthly_economy`)が`state_registry.states`
+    // (`assets/data/states.ron`のファイル記載順——国家ごとの物語的グルーピングで
+    // "additional states"セクションが後方に離れて出現するため、StateId昇順では
+    // ない)からフィルタして構築した`Vec`の順序をそのまま引き継いだ、実質的に
+    // 恣意的な順序である。P26-DET-001が州内で修正したのと全く同じ原因
+    // (`CountryStockpile::consume`が現在庫との厳格な全額判定・部分消費なしで
+    // あり、生産と消費が同じ`ResourceType`を扱う)が、州をまたいでも成立する
+    // ——State A(Factory)がState B(MilitaryFactory)より先に処理されれば
+    // Bの消費はAの同月産出を利用できるが、逆順ならできない、という実質的な
+    // 消費成否の分岐が生じる(実測で確認済み、
+    // `tests/p26_det_001_rev_001_cross_state_production_order_e2e_test.rs`)。
+    //
+    // ここでは、`states`内の位置(index)を永続的な`StateId`(`state.id.0`)昇順で
+    // 並べ替えた添字列`order`を1度だけ構築し、Step 1・Step 3の両方でこの順序を
+    // 使う。Bevy Entity ID、メモリアドレス、HashMap内部順、生成順のいずれにも
+    // 依存しない。
+    let mut order: Vec<usize> = (0..states.len()).collect();
+    order.sort_by_key(|&i| states[i].id.0);
+
     // Step 1: 各州の各建物での入力資源要求量を集計する
     let mut total_inputs_needed: HashMap<ResourceType, f64> = HashMap::new();
-    for state in states.iter() {
+    for &i in &order {
+        let state = &*states[i];
         // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
         // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
         let wf_ratio =
@@ -143,35 +164,47 @@ pub fn process_country_production(
     // 真に1回のcommitで確定させるため。
     let mut military_supplies_units = SuppliesUnitsAccumulation::Accumulating(0);
 
-    for state in states.iter_mut() {
-        // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
-        // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
-        let wf_ratio =
-            calculate_economic_workforce_ratio(state.employed_workforce, state.total_workforce())
-                .clamp(0.0, 1.0);
-        let log_ratio = state.logistics_ratio;
+    // P26-DET-001-REV-001: 各州ごとの`building_operation_ratios`は、下の全州分
+    // 処理が終わってから1回だけ書き戻す(ループ構造をBuildingType外側/State内側へ
+    // 反転させたため、州ごとに閉じたループの最後で書き戻すことができない)。
+    let mut op_ratios_per_state: Vec<HashMap<BuildingType, f32>> =
+        (0..states.len()).map(|_| HashMap::new()).collect();
 
-        let mut op_ratios = HashMap::new();
+    // P26-DET-001-REV-001: 根本原因はP26-DET-001と全く同じ形で州をまたいで再現する
+    // (`tests/p26_det_001_rev_001_cross_state_production_order_e2e_test.rs`
+    // Test A/Bで実測確認済み)。ある州の建物の生産(`add`)と、別の州の建物の消費
+    // (`consume`、現在庫との厳格な全額判定・部分消費なし)が同じ`ResourceType`を
+    // 扱う場合、州の処理順序(=呼び出し元が渡した`states`スライスの要素順、実体は
+    // `assets/data/states.ron`のファイル記載順という恣意的な順序)によって消費の
+    // 成否そのものが変わってしまう。
+    //
+    // ここでは、ループ構造を「State外側→BuildingType内側」から
+    // 「BuildingType外側(`BuildingType::ALL`宣言順)→State内側(`StateId`昇順、
+    // 上で構築した`order`)」へ反転させる。これにより、依存関係上先に処理される
+    // べきBuildingType(例: Mine→Factory→MilitaryFactory)は、どの州にあるかに
+    // 関わらず全州分先に処理されてから、後続のBuildingTypeが全州分処理される
+    // ——生産依存順がStateIdより常に優先される。同じBuildingType内では
+    // `order`(StateId昇順)がtie-breakとなる。この州が保有しない建物種別は
+    // 元コード同様に一切触れない(avg_op計算[`economy/mod.rs`]が参照する
+    // `building_operation_ratios`へ余計な0.0エントリを増やさない)。
+    for b_type in BuildingType::ALL {
+        for &i in &order {
+            let state = &mut *states[i];
 
-        // P26-DET-001: 根本原因はここ(Step 3)。同じ州内で、ある建物の生産(`add`)と
-        // 別の建物の消費(`consume`)が同じ`ResourceType`を扱う場合(例: Factoryが
-        // 産出するIndustrialGoodsをMilitaryFactoryが消費する)、`consume`は現在庫との
-        // 厳格な全額判定(`CountryStockpile::consume`、部分消費なし)であるため、
-        // 生反復順によって「消費側が先に評価され、まだ産出が備蓄へ加算されていない
-        // ため`consume`が失敗する」か「産出側が先に加算され、その後の`consume`が
-        // 成功する」かが変わってしまう(単なる浮動小数点丸め差ではなく、実際の
-        // 消費成否そのものが変わる実質的な非決定性)。`BuildingType::ALL`の宣言順
-        // (Farmが真っ先、Factoryのような一次生産者がMilitaryFactoryのような二次
-        // 消費者より先)で固定することで、この処理順をプロセスのHashMapシードから
-        // 切り離す。この州が保有しない建物種別は元コード同様に一切触れない
-        // (avg_op計算[`economy/mod.rs`]が参照する`building_operation_ratios`へ
-        // 余計な0.0エントリを増やさない)。
-        for b_type in BuildingType::ALL {
+            // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
+            // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
+            let wf_ratio = calculate_economic_workforce_ratio(
+                state.employed_workforce,
+                state.total_workforce(),
+            )
+            .clamp(0.0, 1.0);
+            let log_ratio = state.logistics_ratio;
+
             let Some(&level) = state.buildings.get(&b_type) else {
                 continue;
             };
             if level == 0 {
-                op_ratios.insert(b_type, 0.0);
+                op_ratios_per_state[i].insert(b_type, 0.0);
                 continue;
             }
             let def = match building_registry.get(b_type) {
@@ -188,7 +221,7 @@ pub fn process_country_production(
             }
 
             let final_op = calculate_operation_ratio(wf_ratio, log_ratio, min_res_sat, is_bankrupt);
-            op_ratios.insert(b_type, final_op);
+            op_ratios_per_state[i].insert(b_type, final_op);
 
             // 消費実行
             for (&res, &base_in) in &def.input_resources {
@@ -239,8 +272,10 @@ pub fn process_country_production(
                 magic_total += calculate_actual_output(def.magic_output, level, final_op);
             }
         }
+    }
 
-        state.building_operation_ratios = op_ratios;
+    for (i, state) in states.iter_mut().enumerate() {
+        state.building_operation_ratios = std::mem::take(&mut op_ratios_per_state[i]);
     }
 
     // P26-003-REV-002: 全州の集計が終わった後、この国家についてただ1回だけ正規APIへ
