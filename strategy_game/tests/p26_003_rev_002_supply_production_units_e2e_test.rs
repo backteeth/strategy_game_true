@@ -1157,7 +1157,14 @@ fn test_f4_ratio_of_supplies_to_equipment_stays_within_tolerance_real_path() {
     let sup = supplies_of(&app, player);
     let eq = equipment_of(&app, player);
     assert!(sup > 0.0 && eq > 0.0);
-    assert!((sup / eq - 5.0).abs() < 0.05, "sup={sup} eq={eq}");
+    // P26-004-PRE-005: New Gameは生産と無関係な外生的初期グラント(31.0固定)を
+    // 一度限り含むため、比率を取る前にこの定数オフセットを除く
+    // (`p26_003_military_supplies_production_e2e_test.rs::test_f3`と同じ理由)。
+    let sup_production_only = sup - 31.0;
+    assert!(
+        (sup_production_only / eq - 5.0).abs() < 0.05,
+        "sup={sup} sup_production_only={sup_production_only} eq={eq}"
+    );
 }
 
 #[test]
@@ -1262,13 +1269,17 @@ fn test_i5_old_v1_shaped_load_without_key_still_produces_normally_afterward() {
     let temp_dir = TempTestDir::new("i5");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
+    // P26-004-PRE-005: New Game自体が既にブリッジ備蓄(31.0)・grantマーカー(true)を
+    // 持つため、このsave/loadは「マーカーtrueなら再付与しない」不変条件の確認を兼ねる。
+    let before_reload = supplies_of(&app, player);
+    assert_eq!(before_reload, 31.0);
     send_save_request(&mut app);
     app.update();
     send_load_request(&mut app);
     app.update();
     app.update();
-    assert_eq!(supplies_of(&app, player), 0.0);
+    assert_eq!(supplies_of(&app, player), before_reload, "must not be re-granted on load");
 
     advance_months(&mut app, 4);
-    assert!(supplies_of(&app, player) > 0.0);
+    assert!(supplies_of(&app, player) > before_reload);
 }

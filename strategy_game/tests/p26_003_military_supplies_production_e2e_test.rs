@@ -755,13 +755,19 @@ fn advance_months(app: &mut App, months: u8) {
 
 #[test]
 fn test_f1_day_ticks_alone_do_not_produce() {
+    // P26-004-PRE-005: New Gameは初回月次生産までのブリッジ備蓄(現行データで31.0)を
+    // 一度限り付与するため、New Game直後の値は0.0ではなく31.0になる。本テストの
+    // 主旨(月境界を跨がない日次ティックだけでは"生産"が発生しない)自体は不変であり、
+    // 「New Game直後の値から変化しないこと」として検証する。
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("f1");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
+    let after_new_game = supplies_of(&app, player);
+    assert_eq!(after_new_game, 31.0);
     for day in 2..=28u8 {
         tick_day(&mut app, 1800, 1, day);
     }
-    assert_eq!(supplies_of(&app, player), 0.0);
+    assert_eq!(supplies_of(&app, player), after_new_game);
 }
 
 #[test]
@@ -790,9 +796,16 @@ fn test_f3_supplies_and_equipment_grow_in_the_fixed_ratio_across_real_ticks() {
     let eq = equipment_of(&app, player);
     assert!(sup > 0.0 && eq > 0.0);
     // 実データ(buildings.ron)ではMilitaryFactoryがMilitaryEquipment:20.0/
-    // MilitarySupplies:100.0を併産するため、同じfinal_opの積算である以上、比率は
-    // 常に100.0/20.0=5.0(丸め誤差の範囲内)。
-    assert!((sup / eq - 5.0).abs() < 0.05, "sup={sup} eq={eq}");
+    // MilitarySupplies:100.0を併産するため、同じfinal_opの積算である以上、"生産分"の
+    // 比率は常に100.0/20.0=5.0(丸め誤差の範囲内)。P26-004-PRE-005導入後、supplyは
+    // 生産と無関係な外生的初期グラント(31.0固定、equipmentには存在しない)を含むため、
+    // 比較の前にこの定数オフセットを除いてから比率を取る(等式のratioそのものではなく
+    // "production-only"の差分にratioの不変条件を適用する)。
+    let sup_production_only = sup - 31.0;
+    assert!(
+        (sup_production_only / eq - 5.0).abs() < 0.05,
+        "sup={sup} sup_production_only={sup_production_only} eq={eq}"
+    );
 }
 
 #[test]
@@ -883,17 +896,21 @@ fn test_g4_old_v1_shaped_load_without_military_supplies_key_still_produces_norma
     let temp_dir = TempTestDir::new("g4");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
-    // 旧V1相当を模すため、MilitarySuppliesキーへ触れずに保存する。
+    // 旧V1相当を模すため、MilitarySuppliesキーへ触れずに保存する。New Game自体は
+    // 既にP26-004-PRE-005のブリッジ備蓄(31.0)・grantマーカー(true)を持つため、
+    // このsave/loadは「マーカーtrueなら再付与しない」不変条件の確認を兼ねる。
+    let before_reload = supplies_of(&app, player);
+    assert_eq!(before_reload, 31.0);
     send_save_request(&mut app);
     app.update();
     send_load_request(&mut app);
     app.update();
     app.update();
-    assert_eq!(supplies_of(&app, player), 0.0);
+    assert_eq!(supplies_of(&app, player), before_reload, "must not be re-granted on load");
 
     // ロード後も実生産Systemが正常に稼働し、MilitarySuppliesが増加する。
     advance_months(&mut app, 4);
-    assert!(supplies_of(&app, player) > 0.0);
+    assert!(supplies_of(&app, player) > before_reload);
 }
 
 // ─────────────────────────────────────────────────────────────────────────

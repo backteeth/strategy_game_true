@@ -820,10 +820,17 @@ mod real_app {
     // 値そのものはP26-DET-001の正規値と一致する——ただし、これはコード変更の
     // 結果として「たまたま一致する」のであり、無条件の転記ではなく本タスクの
     // 修正後コードを実際に実行して確認した値である)。
+    //
+    // P26-004-PRE-005: New Gameは各国家へ初回月次生産までのブリッジ備蓄(現行データで
+    // 一律31.0)を一度限り付与するようになった。この定数値は月次生産の順序決定性とは
+    // 無関係な外生的grantであるため、比較前に実測した初期grant量を差し引いて
+    // "生産分のみ"を正規値と突き合わせる(既存の決定性テストの正規値定数自体は
+    // 変更しない)。
     #[test]
     fn test_h_arcadia_36_months_matches_canonical_values() {
         let dir = TempTestDir::new("test_h");
         let mut app = setup_app_in_playing(DWARF, dir.save_file_config());
+        let initial_grant = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
 
         let mut m12 = 0.0;
         let mut m18 = 0.0;
@@ -831,7 +838,7 @@ mod real_app {
         let mut m36 = 0.0;
         for m in 1..=36u8 {
             advance_one_month(&mut app, m);
-            let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
+            let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies) - initial_grant;
             match m {
                 12 => m12 = v,
                 18 => m18 = v,
@@ -841,14 +848,16 @@ mod real_app {
             }
         }
 
-        assert!((m12 - ARCADIA_CANONICAL_M12).abs() < 1e-6, "month12: {m12}");
-        assert!((m18 - ARCADIA_CANONICAL_M18).abs() < 1e-6, "month18: {m18}");
-        assert!((m24 - ARCADIA_CANONICAL_M24).abs() < 1e-6, "month24: {m24}");
-        assert!((m36 - ARCADIA_CANONICAL_M36).abs() < 1e-6, "month36: {m36}");
+        assert!((m12 - ARCADIA_CANONICAL_M12).abs() < 1e-6, "month12 (production only): {m12}");
+        assert!((m18 - ARCADIA_CANONICAL_M18).abs() < 1e-6, "month18 (production only): {m18}");
+        assert!((m24 - ARCADIA_CANONICAL_M24).abs() < 1e-6, "month24 (production only): {m24}");
+        assert!((m36 - ARCADIA_CANONICAL_M36).abs() < 1e-6, "month36 (production only): {m36}");
     }
 
     // Test I: 6か国全ての36か月結果(このプロセス内2回の呼び出しで最低限の
-    // 再現性を確認する。独立プロセス5回の実測は報告書に記録)。
+    // 再現性を確認する。独立プロセス5回の実測は報告書に記録)。P26-004-PRE-005導入後は
+    // 実測した初期grant量(全6か国とも31.0)を差し引いた"生産分のみ"を、この表の正規値
+    // (初期grant導入前の記録値)と突き合わせる(test_hと同じ理由)。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
@@ -863,14 +872,19 @@ mod real_app {
         for _ in 0..2 {
             let dir = TempTestDir::new("test_i");
             let mut app = setup_app_in_playing(DWARF, dir.save_file_config());
+            let initial_grants: Vec<f64> = countries
+                .iter()
+                .map(|(cid, _)| stockpile_of(&app, *cid, ResourceType::MilitarySupplies))
+                .collect();
             for m in 1..=36u8 {
                 advance_one_month(&mut app, m);
             }
-            for (cid, expected) in countries {
-                let v = stockpile_of(&app, cid, ResourceType::MilitarySupplies);
+            for ((cid, expected), initial_grant) in countries.iter().zip(initial_grants) {
+                let v = stockpile_of(&app, *cid, ResourceType::MilitarySupplies) - initial_grant;
                 assert!(
                     (v - expected).abs() < 1.0,
-                    "country {cid:?} month36 MilitarySupplies must match canonical baseline \
+                    "country {cid:?} month36 MilitarySupplies (production only, initial \
+                     grant of {initial_grant} subtracted) must match canonical baseline \
                      (expected ~{expected}, got {v})"
                 );
             }

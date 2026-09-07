@@ -34,8 +34,16 @@ impl Plugin for DataLoaderPlugin {
             // 後に置き、New Game用デバッグ初期師団配置後の軍事力を初回評価へ含める。
             // Load-from-CountrySelection経由の進入でも冪等に再評価するだけで実害はない
             // (詳細は`country::power`のドキュメント参照)。
+            // P26-004-PRE-005: grant_initial_military_supplies_bridgeはspawn_debug_divisions
+            // の直後・rebuild_country_power_on_enter_playingの前に置く。全国家の初期
+            // Division構成が確定した後にブリッジ必要量を計算し、国力再評価より前に
+            // 備蓄へ反映する(国力計算式自体は変更しない)。spawn_debug_divisionsと同じ
+            // PlayingEntryMode::NewGameガードを内部で共有するため、Loaded Game進入では
+            // 実行しない(Loaded Game側の意味的migrationはsave::apply::prepare_loadが
+            // 別途担当する)。
             (
                 spawn_debug_divisions,
+                crate::military::supply_initialization::grant_initial_military_supplies_bridge,
                 crate::country::power::rebuild_country_power_on_enter_playing,
                 reset_playing_entry_mode,
             )

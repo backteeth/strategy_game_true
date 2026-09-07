@@ -332,6 +332,24 @@ pub(crate) fn prepare_load(
         ),
     })?;
 
+    // P26-004-PRE-005: 旧SaveへMilitarySuppliesブリッジ備蓄の意味的migrationを適用する
+    // (Save V1構文互換性は維持したまま、一度限りの意味的書き換え)。`CountryData`の
+    // `military_supplies_initial_grant_applied`マーカーが既にtrueの国家(New Game由来の
+    // Save、または既にmigration済みのSave)には何も付与しない。国家単位で失敗しても
+    // 他国のmigrationやロード全体を止めない(`warn!`で記録して続行、次回ロード時に
+    // 自動再試行される、詳細は`military::supply_initialization`のモジュールdoc参照)。
+    // 対象は`preserved_division_definitions`(§4で複製済み)と`save.military.divisions`
+    // (このあとPreparedLoadGameV1へムーブされる前のローカル値)であり、Worldには
+    // 一切触れない失敗し得ない純粋なデータ変換として、mine_migration/
+    // supply_chain_migrationと同じ隣接位置に置く。
+    crate::military::supply_initialization::apply_military_supplies_bridge_migration(
+        &mut save.countries,
+        &save.military.divisions,
+        &preserved_division_definitions,
+        save.date.day,
+        save.date.month,
+    );
+
     let country_ai_registry = CountryAiRegistry {
         ai_states: save
             .country_ai

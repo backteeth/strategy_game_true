@@ -773,29 +773,47 @@ fn test_h_new_game_and_loaded_game_agree_on_identical_stockpile_value() {
     );
 }
 
+/// P26-002時点(本テストファイル作成当時)ではNew GameのMilitarySuppliesは0から
+/// 始まっていたが、P26-004-PRE-005が「初回月次生産までのブリッジ備蓄」を各国家へ
+/// 一度限り付与するようになったため、New Gameの現行データ(満編制Infantry1個師団の
+/// 日次需要1.0、初回生産までの実暦30日+予備1日)では全6か国とも厳密に31.0から
+/// 始まる(`verification_logs/phase-26/p26-004-pre-005/`)。本テストは意図的に
+/// この新しい正規挙動へ更新した(P26-002自身の会計基盤・往復変換保証には一切
+/// 変更がないため、他のTest A〜Gは無変更のまま)。
 #[test]
-fn test_h_new_game_starts_at_zero_for_all_countries() {
+fn test_h_new_game_starts_at_the_initial_bridge_grant_for_all_countries() {
     let temp_dir = TempTestDir::new("test_h_new_game_zero");
     let app = setup_app_in_playing(CountryId(0), temp_dir.save_file_config());
 
     for country in app.world().resource::<CountryRegistry>().countries.iter() {
         assert_eq!(
             country.stockpile.get(ResourceType::MilitarySupplies),
-            0.0,
-            "New Game must not grant any free MilitarySupplies stockpile to country {:?}",
+            31.0,
+            "New Game must grant exactly the P26-004-PRE-005 initial bridge stockpile \
+             (31.0 for the current 1-division/full-manpower New Game data) to country {:?}",
+            country.id
+        );
+        assert!(
+            country.military_supplies_initial_grant_applied,
+            "the one-time grant marker must be true after New Game for country {:?}",
             country.id
         );
     }
 }
 
-/// 旧V1相当ロード(MilitarySuppliesキーへの言及がないセーブ)でも0で復元されること。
+/// 旧V1相当ロード(MilitarySuppliesキー・grantマーカーへの言及がないセーブ)は、
+/// P26-004-PRE-005の意味的migrationによりブリッジ備蓄(31.0)まで一度限りtop-upされる
+/// (無条件加算ではない、`verification_logs/phase-26/p26-004-pre-005/`参照)。
 #[test]
-fn test_h_loaded_old_v1_save_also_starts_at_zero() {
+fn test_h_loaded_old_v1_save_is_topped_up_to_the_initial_bridge_grant() {
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("test_h_old_v1_load");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
-    // 旧V1相当を模すため、MilitarySuppliesキーへ一切触れずに他資源だけを変更して保存する。
+    // 旧V1相当を模すため、MilitarySuppliesキー・grantマーカーへ一切触れずに他資源だけを
+    // 変更して保存する(marker自体はNew Game時点で既にtrueのため、このテストは
+    // 「マーカー付き・備蓄31.0」のセーブをそのままsave/loadする、意味的には
+    // 「マーカーtrueなら再付与しない」不変条件の確認を兼ねる)。
     {
         let mut registry = app.world_mut().resource_mut::<CountryRegistry>();
         registry.get_mut(player).unwrap().stockpile.set(ResourceType::Iron, 999.0);
@@ -806,7 +824,7 @@ fn test_h_loaded_old_v1_save_also_starts_at_zero() {
     app.update();
     app.update();
 
-    assert_eq!(military_supplies_stockpile(&app, player), 0.0);
+    assert_eq!(military_supplies_stockpile(&app, player), 31.0);
     assert_eq!(
         app.world()
             .resource::<CountryRegistry>()
@@ -819,7 +837,11 @@ fn test_h_loaded_old_v1_save_also_starts_at_zero() {
 }
 
 /// P26-002時点では、本番App更新(日次・月次ティック含む)だけではMilitarySuppliesが
-/// 増減しないことを確認する(H・I両方の観点を兼ねる)。
+/// 増減しないことを確認していた(H・I両方の観点を兼ねる)。P26-004-PRE-005導入後は
+/// New Game時点で全6か国が31.0(合計186.0)のブリッジ備蓄を持つため基準値を更新した。
+/// この短い日次ティック(month1のday2〜10のみ、建設が完了するには短すぎる)では
+/// 実際の月次生産(P26-003で接続済み)がまだ発火しないため、「短いティックだけでは
+/// 増減しない」という本テストの主旨自体はP26-004-PRE-005後も変わらない。
 #[test]
 fn test_h_production_app_ticks_alone_do_not_change_military_supplies() {
     let player = CountryId(0);
@@ -833,7 +855,7 @@ fn test_h_production_app_ticks_alone_do_not_change_military_supplies() {
         .iter()
         .map(|c| c.stockpile.get(ResourceType::MilitarySupplies))
         .sum();
-    assert_eq!(world_total_before, 0.0);
+    assert_eq!(world_total_before, 31.0 * 6.0, "6 countries x the P26-004-PRE-005 bridge grant");
 
     // 数日分の日次ティック + 1回の月次ティック(既存の経済生産Systemが実際に走る経路)。
     for day in 2..=10u8 {
@@ -872,8 +894,9 @@ fn test_h_production_app_ticks_alone_do_not_change_military_supplies() {
         .map(|c| c.stockpile.get(ResourceType::MilitarySupplies))
         .sum();
     assert_eq!(
-        world_total_after, 0.0,
-        "MilitarySupplies must remain untouched by daily/monthly production ticks in P26-002"
+        world_total_after, world_total_before,
+        "MilitarySupplies must remain untouched by this short daily/monthly tick sequence \
+         (no building has had time to complete construction yet)"
     );
 }
 

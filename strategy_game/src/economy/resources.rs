@@ -134,24 +134,28 @@ impl CountryStockpile {
         produced: f64,
     ) -> Result<(), MilitarySuppliesUnitsError> {
         let current = self.get(ResourceType::MilitarySupplies);
-        let current_units = military_supplies_value_to_units(current)?;
-        let produced_units = military_supplies_value_to_units(produced)?;
+        let new_value = checked_military_supplies_addition(current, produced)?;
+        self.set(ResourceType::MilitarySupplies, new_value);
+        Ok(())
+    }
 
-        // checked_add自体のu64 wraparound(現実的な値域では到達不能な防御的分岐)と、
-        // ドメイン上限`MILITARY_SUPPLIES_MAX_UNITS`超過(通常の運用上あり得る分岐)を
-        // 意味的に区別する(spec §9「overflowと上限超過を必要に応じて区別」)。
-        let new_units = current_units
-            .checked_add(produced_units)
-            .ok_or(MilitarySuppliesUnitsError::ArithmeticOverflow)?;
-        if new_units > MILITARY_SUPPLIES_MAX_UNITS {
-            return Err(MilitarySuppliesUnitsError::OutOfRange);
-        }
-
-        let new_value = military_supplies_units_to_value(new_units);
-        if military_supplies_value_to_units(new_value)? != new_units {
-            return Err(MilitarySuppliesUnitsError::RoundTripFailed);
-        }
-
+    /// P26-004-PRE-005: New Game初期化・旧Save意味的migrationにおける、MilitarySupplies
+    /// 初期ブリッジ備蓄の一度限りgrantを、固定小数点units経由で原子的に行う専用API。
+    ///
+    /// `add_military_supplies_produced`と内部の演算規律(read→validate→units変換→
+    /// checked_add→上限検証→f64正規変換→往復検証→1回だけcommit)は
+    /// `checked_military_supplies_addition`として共有するが、意味的には別処理である
+    /// ("生産"ではなく"初期化時の外生的grant")ため、生産APIをそのまま呼ばず、
+    /// 呼び出し意図が型シグネチャ・関数名の両方から明確な専用APIとして独立させる
+    /// (`verification_logs/phase-26/p26-004-pre-005/`spec §9)。`grant = 0.0`は成功する
+    /// 意味的no-opとして扱う。失敗時(非有限値・負数・値域超過・overflow・往復変換失敗)は
+    /// 備蓄を完全に不変のまま`Err`を返す。他の`ResourceType`には一切影響しない。
+    pub fn try_grant_military_supplies(
+        &mut self,
+        grant: f64,
+    ) -> Result<(), MilitarySuppliesUnitsError> {
+        let current = self.get(ResourceType::MilitarySupplies);
+        let new_value = checked_military_supplies_addition(current, grant)?;
         self.set(ResourceType::MilitarySupplies, new_value);
         Ok(())
     }
@@ -360,6 +364,35 @@ pub fn military_supplies_value_to_units(value: f64) -> Result<u64, MilitarySuppl
 /// 正規units(`u64`)をMilitarySuppliesの`f64`数量へ変換する。
 pub fn military_supplies_units_to_value(units: u64) -> f64 {
     (units as f64) / (MILITARY_SUPPLIES_SCALE as f64)
+}
+
+/// `add_military_supplies_produced`(生産)と`try_grant_military_supplies`(初期化時の
+/// 一度限りgrant、P26-004-PRE-005)が共有する、加算後の正規値を1つだけ計算する内部
+/// ヘルパー。呼び出し側の`set()`コミットより前に完了する検証専用の純粋関数であり、
+/// それ自体は`CountryStockpile`を変更しない(公開APIそれぞれが、この関数の成功時のみ
+/// `set()`を1回呼ぶ)。checked_add自体のu64 wraparound(現実的な値域では到達不能な
+/// 防御的分岐)と、ドメイン上限`MILITARY_SUPPLIES_MAX_UNITS`超過(通常の運用上あり得る
+/// 分岐)を意味的に区別する。
+fn checked_military_supplies_addition(
+    current: f64,
+    delta: f64,
+) -> Result<f64, MilitarySuppliesUnitsError> {
+    let current_units = military_supplies_value_to_units(current)?;
+    let delta_units = military_supplies_value_to_units(delta)?;
+
+    let new_units = current_units
+        .checked_add(delta_units)
+        .ok_or(MilitarySuppliesUnitsError::ArithmeticOverflow)?;
+    if new_units > MILITARY_SUPPLIES_MAX_UNITS {
+        return Err(MilitarySuppliesUnitsError::OutOfRange);
+    }
+
+    let new_value = military_supplies_units_to_value(new_units);
+    if military_supplies_value_to_units(new_value)? != new_units {
+        return Err(MilitarySuppliesUnitsError::RoundTripFailed);
+    }
+
+    Ok(new_value)
 }
 
 /// 州の資源鉱床
@@ -757,6 +790,93 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, MilitarySuppliesUnitsError::Negative);
         assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    // ─── P26-004-PRE-005: try_grant_military_supplies ───────────────────────
+
+    #[test]
+    fn try_grant_military_supplies_accumulates_in_units() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.try_grant_military_supplies(31.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 31.0);
+        stockpile.try_grant_military_supplies(5.4).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 36.4);
+    }
+
+    #[test]
+    fn try_grant_military_supplies_zero_is_a_no_op() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        stockpile.try_grant_military_supplies(0.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    #[test]
+    fn try_grant_military_supplies_does_not_affect_other_resources() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::Food, 50.0);
+        stockpile.set(ResourceType::MilitaryEquipment, 5.0);
+        stockpile.try_grant_military_supplies(31.0).unwrap();
+        assert_eq!(stockpile.get(ResourceType::Food), 50.0);
+        assert_eq!(stockpile.get(ResourceType::MilitaryEquipment), 5.0);
+    }
+
+    #[test]
+    fn try_grant_military_supplies_rejects_overflow_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(
+            ResourceType::MilitarySupplies,
+            military_supplies_units_to_value(MILITARY_SUPPLIES_MAX_UNITS),
+        );
+        let err = stockpile
+            .try_grant_military_supplies(military_supplies_units_to_value(
+                MILITARY_SUPPLIES_MAX_UNITS,
+            ))
+            .unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::OutOfRange);
+        assert_eq!(
+            stockpile.get(ResourceType::MilitarySupplies),
+            military_supplies_units_to_value(MILITARY_SUPPLIES_MAX_UNITS)
+        );
+    }
+
+    #[test]
+    fn try_grant_military_supplies_rejects_invalid_current_stockpile_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile
+            .amounts
+            .insert(ResourceType::MilitarySupplies, f64::NAN);
+        let err = stockpile.try_grant_military_supplies(5.0).unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::NonFinite);
+        assert!(stockpile.get(ResourceType::MilitarySupplies).is_nan());
+    }
+
+    #[test]
+    fn try_grant_military_supplies_rejects_invalid_grant_amount_without_mutation() {
+        let mut stockpile = CountryStockpile::new();
+        stockpile.set(ResourceType::MilitarySupplies, 10.0);
+        let err = stockpile.try_grant_military_supplies(-5.0).unwrap_err();
+        assert_eq!(err, MilitarySuppliesUnitsError::Negative);
+        assert_eq!(stockpile.get(ResourceType::MilitarySupplies), 10.0);
+    }
+
+    #[test]
+    fn try_grant_and_produced_apis_compose_additively_and_are_independent_of_order() {
+        // spec §9: grantは「生産」とは独立した外生的加算だが、同じ会計基盤(units)を
+        // 共有するため、grant→produced と produced→grant の順序によらず合計は一致する。
+        let mut a = CountryStockpile::new();
+        a.try_grant_military_supplies(31.0).unwrap();
+        a.add_military_supplies_produced(42.079).unwrap();
+
+        let mut b = CountryStockpile::new();
+        b.add_military_supplies_produced(42.079).unwrap();
+        b.try_grant_military_supplies(31.0).unwrap();
+
+        assert_eq!(
+            a.get(ResourceType::MilitarySupplies),
+            b.get(ResourceType::MilitarySupplies)
+        );
+        assert_eq!(a.get(ResourceType::MilitarySupplies), 73.079);
     }
 
     #[test]

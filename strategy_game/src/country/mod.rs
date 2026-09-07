@@ -167,6 +167,17 @@ pub struct CountryData {
     /// 存在しない)は`#[serde(default)]`により`Active`として読み込む。
     #[serde(default)]
     pub status: CountryStatus,
+
+    /// P26-004-PRE-005: 初期MilitarySuppliesブリッジ備蓄が付与済みか(国家単位の
+    /// 一度限りマーカー)。旧Save(このフィールドが存在しない)は`#[serde(default)]`
+    /// によりfalseとして読み込まれ、次回ロード確定時に1回だけ
+    /// `military::supply_initialization`の意味的migrationが走る。New Gameでは
+    /// 初期Division生成直後のブリッジ付与System(`src/app/loader.rs`)が付与完了と
+    /// 同時にtrueへ設定する。trueになった後は、現在備蓄が0であっても再付与しない
+    /// (現在備蓄0を「未移行」の判定には使わない、意味的migrationの一度限り保証は
+    /// このフィールドだけが担う)。
+    #[serde(default)]
+    pub military_supplies_initial_grant_applied: bool,
 }
 
 /// P21-021: 国家の活動状態。`CountryRegistry`から国家を物理削除せず、この
@@ -226,6 +237,7 @@ impl Default for CountryData {
             monthly_military_expenses: 0.0,
             recruitment_queue: Vec::new(),
             status: CountryStatus::Active,
+            military_supplies_initial_grant_applied: false,
         }
     }
 }
@@ -305,6 +317,44 @@ mod tests {
         assert_eq!(country.status, CountryStatus::Active);
         assert!(country.is_active());
         assert!(!country.is_eliminated());
+    }
+
+    /// P26-004-PRE-005要求: `military_supplies_initial_grant_applied`フィールド自体が
+    /// 存在しない旧Save(本タスク以前)は`#[serde(default)]`によりfalseとして復元される
+    /// (Save V1構文互換性)。
+    #[test]
+    fn old_format_ron_without_military_supplies_grant_marker_defaults_to_false() {
+        let ron = r#"(
+            id: (0),
+            name: "Test Country",
+            map_color: (0.5, 0.5, 0.5),
+            capital_state_id: (0),
+            treasury: 5000.0,
+            government_type: Monarchy,
+            economic_system: Mercantilism,
+            stockpile: (amounts: {}),
+        )"#;
+        let country: CountryData = ron::from_str(ron).expect("minimal country RON must parse");
+        assert!(
+            !country.military_supplies_initial_grant_applied,
+            "an absent marker field must default to false, not true"
+        );
+    }
+
+    /// `military_supplies_initial_grant_applied`(true/false いずれも)がRON往復で
+    /// 完全に保持される。
+    #[test]
+    fn military_supplies_grant_marker_round_trips_through_ron() {
+        for marker in [true, false] {
+            let country = CountryData {
+                id: CountryId(1),
+                military_supplies_initial_grant_applied: marker,
+                ..CountryData::default()
+            };
+            let ron_text = ron::to_string(&country).unwrap();
+            let restored: CountryData = ron::from_str(&ron_text).unwrap();
+            assert_eq!(restored.military_supplies_initial_grant_applied, marker);
+        }
     }
 
     /// P21-021要求: `CountryStatus::Eliminated`(eliminated_date/annexed_by込み)が

@@ -14,6 +14,7 @@ pub mod pathfinding;
 pub mod recruitment;
 pub mod reinforcement;
 pub mod supply;
+pub mod supply_initialization;
 pub mod update;
 
 #[cfg(test)]
