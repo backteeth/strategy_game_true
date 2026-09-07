@@ -1989,6 +1989,39 @@ fn validate_divisions(
             );
         }
     }
+
+    // P26-004: `division_supply_fulfillment`(Division日次補給充足率の補助map、
+    // spec §8)。キーは既存Divisionを参照していなければならず、値は有限かつ
+    // `0.0..=1.0`の範囲内でなければならない。
+    let mut fulfillment: Vec<(&DivisionId, &f64)> =
+        save.military.division_supply_fulfillment.iter().collect();
+    fulfillment.sort_by_key(|(k, _)| k.0);
+    for (division_id, value) in fulfillment {
+        let path = format!("military.division_supply_fulfillment[{division_id:?}]");
+        if !idx.divisions.contains(division_id) {
+            push(
+                issues,
+                SaveValidationCode::DanglingReference,
+                path.clone(),
+                format!("references unknown {division_id:?}"),
+            );
+        }
+        if !value.is_finite() {
+            push(
+                issues,
+                SaveValidationCode::NonFiniteValue,
+                path.clone(),
+                "supply_fulfillment must be finite",
+            );
+        } else if !(0.0..=1.0).contains(value) {
+            push(
+                issues,
+                SaveValidationCode::InvalidRange,
+                path,
+                format!("supply_fulfillment {value} must be within 0.0..=1.0"),
+            );
+        }
+    }
 }
 
 // ─── Battle ──────────────────────────────────────────────────────────────────
@@ -3222,6 +3255,7 @@ mod tests {
             military: SavedMilitaryRegistry {
                 divisions,
                 next_division_id: 1,
+                division_supply_fulfillment: HashMap::new(),
             },
             battles: SavedBattleRegistry::default(),
             armies: SavedArmyRegistry {

@@ -3910,6 +3910,7 @@ mod tests {
             HashMap::new(),
             restored_divisions,
             military_registry.next_division_id(),
+            HashMap::new(),
         );
 
         assert_eq!(

@@ -118,6 +118,19 @@ pub struct MilitaryRegistry {
     pub definitions: HashMap<DivisionDefinitionId, DivisionDefinition>,
     pub divisions: HashMap<DivisionId, Division>,
     next_division_id: usize,
+    /// P26-004: Divisionごとの、その日確定した日次補給充足率(`0.0..=1.0`)。
+    ///
+    /// 意図的に`Division`構造体自体へフィールドを追加しない――`Division`は
+    /// `tests/land_war_combat_peace_test.rs`(変更禁止)を含む数十箇所で全フィールド
+    /// 列挙のリテラルとして直接構築されており、新規必須フィールドを追加すると
+    /// このファイルが変更なしにはコンパイルできなくなる。代わりに`ArmyRegistry.
+    /// division_army_map`と同じ「DivisionId をキーにした補助map」設計を踏襲する。
+    ///
+    /// キーが存在しないDivisionId(まだ一度も日次補給処理を経ていない・
+    /// 旧Save・存在しないID)は`supply_fulfillment_of`経由で`1.0`として扱う
+    /// (spec §8: 旧SaveのdefaultはRustの`f64::default()`(0.0)ではなく1.0でなければ
+    /// ならない――空mapからの欠落キー参照が自然にこの意味論を実現する)。
+    pub division_supply_fulfillment: HashMap<DivisionId, f64>,
 }
 
 impl MilitaryRegistry {
@@ -125,20 +138,31 @@ impl MilitaryRegistry {
         self.next_division_id
     }
 
-    /// 保存されていたDivision・次回ID発行値から`MilitaryRegistry`を復元する
-    /// （P21-SAVE-002D）。`definitions`(静的師団定義)は引数で明示的に受け取る
-    /// (セーブには含まれないため、呼び出し側が適用先Worldの現在値を渡す想定)。
-    /// `crate::save`のDTO型ではなく、通常のコレクションとカウンタだけを引数にとる。
+    /// 保存されていたDivision・次回ID発行値・Division補給充足率から`MilitaryRegistry`を
+    /// 復元する（P21-SAVE-002D、P26-004で`division_supply_fulfillment`を追加）。
+    /// `definitions`(静的師団定義)は引数で明示的に受け取る(セーブには含まれないため、
+    /// 呼び出し側が適用先Worldの現在値を渡す想定)。`crate::save`のDTO型ではなく、
+    /// 通常のコレクションとカウンタだけを引数にとる。
     pub(crate) fn from_saved_parts(
         definitions: HashMap<DivisionDefinitionId, DivisionDefinition>,
         divisions: HashMap<DivisionId, Division>,
         next_division_id: usize,
+        division_supply_fulfillment: HashMap<DivisionId, f64>,
     ) -> Self {
         Self {
             definitions,
             divisions,
             next_division_id,
+            division_supply_fulfillment,
         }
+    }
+
+    /// Divisionの現在の日次補給充足率を取得する(spec §8)。未確定・未対象の
+    /// DivisionIdは`1.0`(常に完全充足)を返す――需要0のDivision・まだ日次補給処理を
+    /// 経ていない新規Division・旧Saveからロードした直後のDivision、いずれもこの
+    /// defaultで安全にカバーされる。
+    pub fn supply_fulfillment_of(&self, id: DivisionId) -> f64 {
+        self.division_supply_fulfillment.get(&id).copied().unwrap_or(1.0)
     }
 
     pub fn add_division(&mut self, mut division: Division) -> DivisionId {
@@ -150,6 +174,10 @@ impl MilitaryRegistry {
 
     pub fn remove_division(&mut self, id: DivisionId) {
         self.divisions.remove(&id);
+        // P26-004: 除去されたDivisionの補給充足率エントリも一緒に消す(DivisionIdは
+        // 再利用されないため、放置しても実害はないが、際限なく増え続ける迷子データを
+        // 残さないための衛生措置)。
+        self.division_supply_fulfillment.remove(&id);
     }
 
     pub fn get_divisions_in_state(&self, state: StateId) -> Vec<&Division> {

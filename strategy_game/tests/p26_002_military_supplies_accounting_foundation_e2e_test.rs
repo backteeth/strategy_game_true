@@ -839,9 +839,15 @@ fn test_h_loaded_old_v1_save_is_topped_up_to_the_initial_bridge_grant() {
 /// P26-002時点では、本番App更新(日次・月次ティック含む)だけではMilitarySuppliesが
 /// 増減しないことを確認していた(H・I両方の観点を兼ねる)。P26-004-PRE-005導入後は
 /// New Game時点で全6か国が31.0(合計186.0)のブリッジ備蓄を持つため基準値を更新した。
-/// この短い日次ティック(month1のday2〜10のみ、建設が完了するには短すぎる)では
-/// 実際の月次生産(P26-003で接続済み)がまだ発火しないため、「短いティックだけでは
-/// 増減しない」という本テストの主旨自体はP26-004-PRE-005後も変わらない。
+///
+/// P26-004導入後は、日次ティック自体が(月次生産とは独立に)Division日次補給を実際に
+/// 消費するようになったため、「短いティックだけでは増減しない」という主旨はもはや
+/// 成り立たない――day 2〜10の9回の日次ティックは、New Gameが各国に1個ずつ配置する
+/// 満編制Infantry1個師団の日次需要(1.0/日)を、6か国全てが備蓄31.0から確実に賄える
+/// (常に充足)ため、世界合計は`186.0 - 6か国 × 9日 × 1.0/日 = 132.0`だけ減少する。
+/// 実際の月次生産(P26-003で接続済み)は、この短い区間(建設が完了するには短すぎる)
+/// ではまだ発火しないため、"生産"側が変化しないという本テストの主旨自体は
+/// P26-004後も変わらない――日次"消費"の分だけ、期待値を明示的に更新した。
 #[test]
 fn test_h_production_app_ticks_alone_do_not_change_military_supplies() {
     let player = CountryId(0);
@@ -893,10 +899,15 @@ fn test_h_production_app_ticks_alone_do_not_change_military_supplies() {
         .iter()
         .map(|c| c.stockpile.get(ResourceType::MilitarySupplies))
         .sum();
+    // P26-004: day 2..=10 (9 ticks) x 6 countries x 1.0/day (each country's single
+    // full-strength New Game Infantry division) daily consumption; month-2 production
+    // is still 0 in this short window (construction has not had time to complete).
+    let expected_after = world_total_before - (9.0 * 6.0 * 1.0);
     assert_eq!(
-        world_total_after, world_total_before,
-        "MilitarySupplies must remain untouched by this short daily/monthly tick sequence \
-         (no building has had time to complete construction yet)"
+        world_total_after, expected_after,
+        "MilitarySupplies must decrease by exactly the known daily consumption (P26-004) and \
+         by nothing else (no building has had time to complete construction yet, so production \
+         stays 0)"
     );
 }
 

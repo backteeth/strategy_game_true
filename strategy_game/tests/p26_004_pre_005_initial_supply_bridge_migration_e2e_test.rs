@@ -26,6 +26,7 @@ use strategy_game::diplomacy::DiplomacyPlugin;
 use strategy_game::economy::EconomyPlugin;
 use strategy_game::economy::resources::ResourceType;
 use strategy_game::military::MilitaryPlugin;
+use strategy_game::military::data::MilitaryRegistry;
 use strategy_game::military::supply_initialization::grant_initial_military_supplies_bridge;
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::population::PopulationPlugin;
@@ -200,6 +201,14 @@ fn set_military_supplies_stockpile(app: &mut App, country_id: CountryId, value: 
         .set(ResourceType::MilitarySupplies, value);
 }
 
+/// P26-004: 全Divisionを取り除く(需要0、日次消費が常に0になる)。本タスクが新たに
+/// 導入した日次消費が、P26-004-PRE-005自身の関心事(月次生産と初期grantの関係)とは
+/// 無関係な交絡因子として混入するのを避けるため、Category B(月次生産の二重計上なし)
+/// の比較シナリオでのみ使う。
+fn clear_all_divisions(app: &mut App) {
+    app.world_mut().resource_mut::<MilitaryRegistry>().divisions.clear();
+}
+
 /// セーブファイルを`SaveGameV1`として読み込み、渡した関数で編集した上で書き戻す
 /// (P26-004-PRE-004と同じ手法: 実際のRONラウンドトリップを通した「合成された旧Save」を
 /// 構築する。実ユーザーセーブ[`saves/savegame_v1.ron`]は一切使用しない)。
@@ -259,22 +268,35 @@ fn test_a1_all_six_countries_get_exactly_31_and_marker_true() {
     }
 }
 
+/// P26-004本体(`military::daily_supply`)が日次消費を実際に接続したため、日次Tick
+/// だけではMilitarySuppliesが変化しない、という本テストの元の主旨(P26-004-PRE-005
+/// 完了時点)はもう成り立たない――これは退行ではなく、P26-004が意図して追加した
+/// 接続そのものである。代わりに、31.0のブリッジ備蓄が、まさにこの日次消費を
+/// 初回月次生産までちょうど賄うために設計された値であることを、実際に日を追って
+/// 検証する: New Gameの満編制Infantry1個師団の日次需要は1.0/日(P26-004-PRE-005
+/// §14で導出済み)であり、day2〜28(27回)の日次ティックで31.0から27.0が消費され、
+/// 常に不足なく1.0/日が充足される(初回月次生産[月2]より前の1日分の予備を含む
+/// 31.0という設計どおり、day28終了時点でもちょうど4.0が残っている)。
 #[test]
-fn test_a2_stockpile_unchanged_by_daily_ticks_before_first_monthly_production() {
-    // P26-004本体の日次消費を実装していないため、日次Tickだけでは
-    // MilitarySuppliesが減少しない(spec §14末尾要求)。
+fn test_a2_stockpile_decreases_by_exactly_the_known_daily_demand_before_first_monthly_production() {
     let dir = TempTestDir::new("a2");
     let mut app = setup_app_in_playing(DWARF, dir.save_file_config());
     let before = stockpile_of(&app, DWARF, ResourceType::MilitarySupplies);
     assert_eq!(before, 31.0);
     for day in 2..=28u8 {
         tick_day(&mut app, 1800, 1, day);
+        let expected = before - (day as f64 - 1.0);
         assert_eq!(
             stockpile_of(&app, DWARF, ResourceType::MilitarySupplies),
-            before,
-            "stockpile must stay exactly at the bridge grant through day {day} of month 1"
+            expected,
+            "stockpile must decrease by exactly 1.0/day (the single Infantry division's daily \
+             demand, P26-004) through day {day} of month 1"
         );
     }
+    // day28終了時点で27日分(day2..=28)の消費を終え、31.0 - 27.0 = 4.0(=予備1日分+
+    // 月末残り0日分)が残る――P26-004-PRE-005が31.0を導出した根拠(30イベント+1日
+    // 予備)と整合する。
+    assert_eq!(stockpile_of(&app, DWARF, ResourceType::MilitarySupplies), 4.0);
 }
 
 #[test]
@@ -312,11 +334,20 @@ fn test_b1_first_monthly_production_adds_normally_without_double_counting_the_br
     // ゼロへ戻した」比較経路を、同じ月数分だけ進める。両者の最終差分が常に
     // ちょうど31.0であれば、(1)月次生産量は初期付与の有無に左右されず、
     // (2)初期付与が生産として二重計上されていないことが実証される。
+    //
+    // P26-004: 日次消費が実際に接続されたため、Divisionが存在すると
+    // `consumed = min(demand, stockpile)`という非線形なclampが働き、「without_grant」
+    // 側(stockpile=0スタート)は"with_grant"側より少なく消費されることがあるため、
+    // 単純な固定オフセット比較が成り立たなくなる(本タスクの関心事[月次生産と
+    // 初期grantの二重計上なし]とは無関係な交絡)。両アプリからDivisionを取り除き
+    // (需要0=日次消費0)、この交絡を排除した上で、月次生産だけの比較を維持する。
     let dir_a = TempTestDir::new("b1_with_grant");
     let mut app_with_grant = setup_app_in_playing(DWARF, dir_a.save_file_config());
+    clear_all_divisions(&mut app_with_grant);
 
     let dir_b = TempTestDir::new("b1_without_grant");
     let mut app_without_grant = setup_app_in_playing(DWARF, dir_b.save_file_config());
+    clear_all_divisions(&mut app_without_grant);
     for cid in ALL_SIX {
         set_military_supplies_stockpile(&mut app_without_grant, cid, 0.0);
     }
@@ -513,7 +544,12 @@ fn test_d3_month_crossing_save_load_is_stable() {
     let mut app = setup_app_in_playing(DWARF, dir.save_file_config());
     advance_one_month(&mut app, 1);
     let before = stockpile_of(&app, DWARF, ResourceType::MilitarySupplies);
-    assert!(before >= 31.0, "production must never reduce the stockpile below the bridge");
+    // P26-004: 日次消費が実際に接続されたため、月1のブリッジ備蓄(31.0)は27日分の
+    // 日次需要(1.0/日)でday28終了時点で4.0まで減り、その後の月2生産が加わる――
+    // 「31.0を決して下回らない」という以前の前提はもう成り立たない。ここでは
+    // stockpileが決して負にならないという、より基本的な不変条件だけを確認する
+    // (本テストの主旨は次の行の「月境界を跨いだsave/loadが値を完全保持する」こと)。
+    assert!(before >= 0.0, "MilitarySupplies stockpile must never go negative: {before}");
 
     send_save_request(&mut app);
     send_load_request(&mut app);
@@ -596,11 +632,21 @@ fn test_f2_arcadia_deterministic_production_values_are_protected_after_the_initi
     let initial_grant = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
     assert_eq!(initial_grant, 31.0);
 
+    // P26-004: 日次消費(実測)も加え戻して"生産分のみ"を分離する(初期grantを引く
+    // だけでは、日次消費も混入したままになるため、spec §20と同じ理由)。
+    let mut consumed = 0.0;
     let mut m12 = 0.0;
     let mut m18 = 0.0;
     for m in 1..=18u8 {
-        advance_one_month(&mut app, m);
-        let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies) - initial_grant;
+        for day in 2..=28u8 {
+            let before = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
+            tick_day(&mut app, 1800, m, day);
+            let after = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
+            consumed += (before - after).max(0.0);
+        }
+        tick_month(&mut app, 1800, m.wrapping_add(1));
+        let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies) - initial_grant
+            + consumed;
         match m {
             12 => m12 = v,
             18 => m18 = v,

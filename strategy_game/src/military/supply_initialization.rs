@@ -72,7 +72,11 @@ pub enum SupplyDemandError {
 /// 生存Divisionかどうか(既存コードベース全体の規約、`military::manpower::is_living`と
 /// 同じ判定式を複製する――`manpower > 0 && status != Destroyed`)。死亡Divisionは
 /// 需要0として自然に除外する(不正状態としては扱わない、正規のライフサイクル終端)。
-fn is_living(division: &Division) -> bool {
+///
+/// `pub(crate)`: P26-004(`military::daily_supply`)が、日次配分対象Divisionの
+/// 母集合(`country_daily_demand_units`の合計と厳密に一致する母集合)を組み立てる際に
+/// この同じ判定式を再利用する(複製しない)。
+pub(crate) fn is_living(division: &Division) -> bool {
     division.manpower > 0 && division.status != DivisionStatus::Destroyed
 }
 

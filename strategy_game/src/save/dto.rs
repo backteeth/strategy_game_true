@@ -227,6 +227,13 @@ pub struct SavedMilitaryAiRegistry {
 pub struct SavedMilitaryRegistry {
     pub divisions: HashMap<DivisionId, Division>,
     pub next_division_id: usize,
+    /// P26-004: Divisionごとの日次補給充足率(`military::data::MilitaryRegistry::
+    /// division_supply_fulfillment`)。旧Save(このフィールド自体が存在しない)は
+    /// `#[serde(default)]`により空`HashMap`として読み込まれ、`supply_fulfillment_of`が
+    /// 欠落キーを`1.0`として扱うため、旧Saveのロード直後は全Divisionが暗黙に
+    /// 完全充足(1.0)として振る舞う(spec §8のdefault要件そのもの)。
+    #[serde(default)]
+    pub division_supply_fulfillment: HashMap<DivisionId, f64>,
 }
 
 /// `military::battle::BattleRegistry`のコンテナDTO。
@@ -436,6 +443,7 @@ mod tests {
             military: SavedMilitaryRegistry {
                 divisions,
                 next_division_id: 8,
+                division_supply_fulfillment: [(DivisionId(7), 0.75_f64)].into_iter().collect(),
             },
             battles: SavedBattleRegistry::default(),
             armies: SavedArmyRegistry {
@@ -616,6 +624,35 @@ mod tests {
         assert_eq!(orig_division.status, DivisionStatus::Moving);
         assert!(orig_division.destination.is_some());
         assert!(!orig_division.current_path.is_empty());
+    }
+
+    /// P26-004: `division_supply_fulfillment`(Division日次補給充足率)がRON往復で維持される。
+    #[test]
+    fn round_trip_preserves_division_supply_fulfillment() {
+        let original = representative_save();
+        let restored = round_trip(&original);
+
+        assert_eq!(
+            restored.military.division_supply_fulfillment,
+            original.military.division_supply_fulfillment
+        );
+        assert_eq!(
+            restored.military.division_supply_fulfillment.get(&DivisionId(7)),
+            Some(&0.75)
+        );
+    }
+
+    /// P26-004: `division_supply_fulfillment`フィールド自体が存在しない旧Saveは
+    /// `#[serde(default)]`により空`HashMap`として読み込まれる(Save V1構文互換性)。
+    #[test]
+    fn old_save_ron_without_division_supply_fulfillment_field_loads_as_empty_map() {
+        let ron = r#"(
+            divisions: {},
+            next_division_id: 0,
+        )"#;
+        let military: SavedMilitaryRegistry =
+            ron::from_str(ron).expect("minimal SavedMilitaryRegistry RON must parse");
+        assert!(military.division_supply_fulfillment.is_empty());
     }
 
     /// 要求テスト項目: Army所属関係がRON往復で維持される。

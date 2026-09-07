@@ -123,6 +123,10 @@ pub fn build_save_game_v1(sources: &SaveGameSources) -> SaveGameV1 {
         military: SavedMilitaryRegistry {
             divisions: sources.military_registry.divisions.clone(),
             next_division_id: sources.military_registry.next_division_id(),
+            division_supply_fulfillment: sources
+                .military_registry
+                .division_supply_fulfillment
+                .clone(),
         },
         battles: SavedBattleRegistry {
             battles: sources.battle_registry.battles.clone(),

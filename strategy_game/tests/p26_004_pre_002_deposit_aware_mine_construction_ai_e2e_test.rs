@@ -170,6 +170,28 @@ fn advance_months(app: &mut App, months: u8) {
     }
 }
 
+/// P26-004: `advance_one_month`と同じ日次+月次ティックを行いながら、対象国家の
+/// MilitarySupplies日次消費量(day-tick前後の減少分――この合成harnessでは`tick_day`は
+/// `DayChangedMessage`のみ・`tick_month`は`MonthChangedMessage`のみを発行するため、
+/// day-tick区間の減少は日次消費以外に起こり得ない)を積算する。既存の「旧AIの恒久
+/// 停止プラトー値との比較」テスト(P26-004-PRE-001実測、消費経路が存在しなかった
+/// 時代の記録値)から、本タスクが新たに導入した日次消費の影響を分離するための
+/// 追加計測。
+fn advance_one_month_tracking_supply_consumption(
+    app: &mut App,
+    current_month_index: u8,
+    country_id: CountryId,
+    consumed: &mut f64,
+) {
+    for day in 2..=28u8 {
+        let before = stockpile_of(app, country_id, ResourceType::MilitarySupplies);
+        tick_day(app, 1800, current_month_index, day);
+        let after = stockpile_of(app, country_id, ResourceType::MilitarySupplies);
+        *consumed += (before - after).max(0.0);
+    }
+    tick_month(app, 1800, current_month_index.wrapping_add(1));
+}
+
 fn stockpile_of(app: &App, country_id: CountryId, resource: ResourceType) -> f64 {
     app.world()
         .resource::<CountryRegistry>()
@@ -287,12 +309,19 @@ fn test_j2_arcadia_mine_completes_and_iron_production_improves_over_36_months() 
     let player = DWARF;
     let temp_dir = TempTestDir::new("j2");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
+    let initial_grant = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
 
-    let mut monthly_supplies = Vec::new();
+    // P26-004: 日次消費(実測)を加え戻した"生産分のみ"(production_only)で判定する。
+    // raw値は日次消費で減りうるため、P26-004-PRE-001の恒久停止プラトー値(373.96、
+    // 消費経路が存在しなかった時代の記録)とはproduction_onlyの方で比較する。
+    let mut monthly_production_only = Vec::new();
     let mut monthly_iron = Vec::new();
+    let mut consumed = 0.0;
     for m in 1..=36u8 {
-        advance_one_month(&mut app, m);
-        monthly_supplies.push(stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies));
+        advance_one_month_tracking_supply_consumption(&mut app, m, ARCADIA, &mut consumed);
+        let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies) - initial_grant
+            + consumed;
+        monthly_production_only.push(v);
         monthly_iron.push(stockpile_of(&app, ARCADIA, ResourceType::Iron));
     }
 
@@ -302,16 +331,16 @@ fn test_j2_arcadia_mine_completes_and_iron_production_improves_over_36_months() 
          simplified months) well within 36 months"
     );
 
-    let supplies_month_18 = monthly_supplies[17];
-    let supplies_month_36 = monthly_supplies[35];
+    let supplies_month_18 = monthly_production_only[17];
+    let supplies_month_36 = monthly_production_only[35];
     assert!(
         supplies_month_36 > supplies_month_18,
         "P26-004-PRE-001 recorded a permanent freeze at 373.96 from month 18 onward under the \
-         old AI; with the deposit-aware fix, month 36 ({supplies_month_36}) must exceed month 18 \
-         ({supplies_month_18}), proving production did not permanently stall"
+         old AI; with the deposit-aware fix, month 36 production_only ({supplies_month_36}) must \
+         exceed month 18 ({supplies_month_18}), proving production did not permanently stall"
     );
     assert!(
-        monthly_iron[35] > 0.0 || monthly_supplies[35] > 373.96,
+        monthly_iron[35] > 0.0 || monthly_production_only[35] > 373.96,
         "Iron supply must not have permanently bottomed out at the old broken plateau"
     );
 }
@@ -449,7 +478,11 @@ fn test_l2_ferrowyn_supply_chain_is_now_resolved_by_p26_004_pre_004() {
          (StateId 21) = 3; StateId 21 is now co-located with the P26-004-PRE-004 deposit"
     );
 
-    advance_months(&mut app, 36);
+    let initial_grant = stockpile_of(&app, FERROWYN, ResourceType::MilitarySupplies);
+    let mut consumed = 0.0;
+    for m in 1..=36u8 {
+        advance_one_month_tracking_supply_consumption(&mut app, m, FERROWYN, &mut consumed);
+    }
 
     assert!(
         total_mine_level_owned_by(&app, FERROWYN) >= initial_mine_level,
@@ -457,11 +490,15 @@ fn test_l2_ferrowyn_supply_chain_is_now_resolved_by_p26_004_pre_004() {
          further now that it has a real deposit"
     );
     let supplies = stockpile_of(&app, FERROWYN, ResourceType::MilitarySupplies);
+    // P26-004: 日次消費(実測)を加え戻した"生産分のみ"(production_only)で、旧来の
+    // 恒久停止プラトー値(320.84、消費経路が存在しなかった時代の記録)と比較する。
+    let production_only = supplies - initial_grant + consumed;
     assert!(
-        supplies > 400.0,
-        "Ferrowyn's supply must now clearly exceed the old permanent plateau (320.84, bounded \
-         by a one-time initial stockpile only) now that State 21's deposit feeds its existing \
-         Factory on a continuous basis (measured: {supplies})"
+        production_only > 400.0,
+        "Ferrowyn's production must now clearly exceed the old permanent plateau (320.84, \
+         bounded by a one-time initial stockpile only) now that State 21's deposit feeds its \
+         existing Factory on a continuous basis (measured production_only: {production_only}, \
+         raw: {supplies})"
     );
 }
 
@@ -477,23 +514,38 @@ fn test_dwarf_supply_chain_is_not_disturbed_by_the_proactive_rule() {
     let player = ARCADIA;
     let temp_dir = TempTestDir::new("dwarf_regression");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
+    let initial_grant = stockpile_of(&app, DWARF, ResourceType::MilitarySupplies);
 
-    let mut monthly_supplies = Vec::new();
+    // P26-004: 日次消費(実測)を加え戻した"生産分のみ"(production_only)で判定する。
+    // P26-004以前はraw stockpileの月次系列そのものが単調非減少だったが、日次消費が
+    // 実際に接続された後はraw値はもう単調非減少ではない。生産という行為自体は
+    // "起こらなかったことになる"ことがないため、production_only系列に対しては
+    // 引き続き単調非減少判定を適用できる。
+    let mut monthly_production_only = Vec::new();
+    let mut consumed = 0.0;
     for m in 1..=36u8 {
-        advance_one_month(&mut app, m);
-        monthly_supplies.push(stockpile_of(&app, DWARF, ResourceType::MilitarySupplies));
+        for day in 2..=28u8 {
+            let before = stockpile_of(&app, DWARF, ResourceType::MilitarySupplies);
+            tick_day(&mut app, 1800, m, day);
+            let after = stockpile_of(&app, DWARF, ResourceType::MilitarySupplies);
+            consumed += (before - after).max(0.0);
+        }
+        tick_month(&mut app, 1800, m.wrapping_add(1));
+        let v = stockpile_of(&app, DWARF, ResourceType::MilitarySupplies) - initial_grant
+            + consumed;
+        monthly_production_only.push(v);
     }
 
-    // 単調非減少(消費経路が未接続のため常に非減少)。
-    for window in monthly_supplies.windows(2) {
+    for window in monthly_production_only.windows(2) {
         assert!(
-            window[1] >= window[0],
-            "Dwarf's MilitarySupplies must remain monotonically non-decreasing: {:?}",
+            window[1] >= window[0] - 1e-6,
+            "Dwarf's MilitarySupplies production_only must remain monotonically non-decreasing: \
+             {:?}",
             window
         );
     }
     assert!(
-        monthly_supplies[35] > 0.0,
+        monthly_production_only[35] > 0.0,
         "Dwarf must still be producing MilitarySupplies after 36 months"
     );
 }
@@ -661,11 +713,32 @@ fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes
         .iter()
         .map(|(name, id)| (*name, total_mine_level_owned_by(&app, *id)))
         .collect();
-
-    advance_months(&mut app, 36);
+    // P26-004: 日次消費(実測)を加え戻した"生産分のみ"(production_only)で、旧来の
+    // 恒久停止プラトー値(消費経路が存在しなかった時代の記録)と比較する。
+    let initial_grants: std::collections::HashMap<&str, f64> = countries
+        .iter()
+        .map(|(name, id)| (*name, stockpile_of(&app, *id, ResourceType::MilitarySupplies)))
+        .collect();
+    let mut consumed: std::collections::HashMap<&str, f64> =
+        countries.iter().map(|(name, _)| (*name, 0.0)).collect();
+    for m in 1..=36u8 {
+        for day in 2..=28u8 {
+            let before: std::collections::HashMap<&str, f64> = countries
+                .iter()
+                .map(|(name, id)| (*name, stockpile_of(&app, *id, ResourceType::MilitarySupplies)))
+                .collect();
+            tick_day(&mut app, 1800, m, day);
+            for (name, id) in countries {
+                let after = stockpile_of(&app, id, ResourceType::MilitarySupplies);
+                *consumed.get_mut(name).unwrap() += (before[name] - after).max(0.0);
+            }
+        }
+        tick_month(&mut app, 1800, m.wrapping_add(1));
+    }
 
     for (name, id) in countries {
         let supplies = stockpile_of(&app, id, ResourceType::MilitarySupplies);
+        let production_only = supplies - initial_grants[name] + consumed[name];
         let mine_total = total_mine_level_owned_by(&app, id);
         let initial_mine_total = initial_mine_totals[name];
         match name {
@@ -676,9 +749,9 @@ fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes
                      (initial={initial_mine_total}, final={mine_total})"
                 );
                 assert!(
-                    supplies > 373.96,
-                    "Arcadia's month-36 supplies ({supplies}) must exceed the old permanent \
-                     plateau of 373.96"
+                    production_only > 373.96,
+                    "Arcadia's month-36 production_only ({production_only}, raw={supplies}) \
+                     must exceed the old permanent plateau of 373.96"
                 );
             }
             "Elfin" => {
@@ -712,10 +785,10 @@ fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes
                 // P26-004-PRE-004実測(`verification_logs/phase-26/p26-004-pre-004/`): 州21の
                 // 新規鉱床が既存Factoryへ継続供給し、旧来の恒久停止値(320.84)を明確に超える。
                 assert!(
-                    supplies > 400.0,
-                    "Ferrowyn's supply must now clearly exceed the old permanent plateau (320.84) \
-                     now that State 21's deposit feeds its existing Factory continuously \
-                     (measured: {supplies})"
+                    production_only > 400.0,
+                    "Ferrowyn's production must now clearly exceed the old permanent plateau \
+                     (320.84) now that State 21's deposit feeds its existing Factory \
+                     continuously (measured production_only: {production_only}, raw: {supplies})"
                 );
             }
             "Passguard" => {

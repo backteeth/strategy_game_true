@@ -698,12 +698,93 @@ fn run_six_country_36_month_scenario() -> (App, std::collections::HashMap<Countr
     (app, series)
 }
 
+/// P26-004: `advance_one_month`と同じ日次+月次ティックを行いながら、指定した国家群の
+/// MilitarySupplies日次消費量(day-tickだけを挟んだ前後の減少量、この合成harnessでは
+/// `tick_day`は`DayChangedMessage`のみ・`tick_month`は`MonthChangedMessage`のみを
+/// 発行するため、day-tick区間の減少は日次消費以外に起こり得ない)を積算する。
+fn advance_one_month_tracking_supply_consumption(
+    app: &mut App,
+    current_month_index: u8,
+    tracked: &[CountryId],
+    consumed: &mut std::collections::HashMap<CountryId, f64>,
+) {
+    for day in 2..=28u8 {
+        let before: std::collections::HashMap<CountryId, f64> = tracked
+            .iter()
+            .map(|&c| (c, stockpile_of(app, c, ResourceType::MilitarySupplies)))
+            .collect();
+        tick_day(app, 1800, current_month_index, day);
+        for &c in tracked {
+            let after = stockpile_of(app, c, ResourceType::MilitarySupplies);
+            let delta = (before[&c] - after).max(0.0);
+            *consumed.entry(c).or_insert(0.0) += delta;
+        }
+    }
+    tick_month(app, 1800, current_month_index.wrapping_add(1));
+}
+
+/// P26-004: `run_six_country_36_month_scenario`と同じ6か国36か月シナリオを実行しながら、
+/// 日次消費(実測)を加え戻した"生産分のみ"の月次系列も返す。P26-004以前は
+/// (消費経路が存在しなかったため)raw stockpileの月次系列自体が"生産分のみ"と
+/// 常に一致しており、単調非減少という不変条件をraw値へ直接適用できた。P26-004が
+/// 日次消費を実際に接続した後は、raw stockpileはもう単調非減少ではない(消費が
+/// 生産を上回る月には減少しうる、spec §15: 「不足が起きること自体を自動的にバグと
+/// 判定しない」)ため、raw値ではなくこの"生産分のみ"系列に対して単調非減少・
+/// 到達判定を検証する(生産という行為自体は決して"起こらなかったことになる"
+/// ことがないため、この系列は引き続き単調非減少のはずである)。
+type MonthlySupplySeriesByCountry = std::collections::HashMap<CountryId, Vec<f64>>;
+
+fn run_six_country_36_month_scenario_tracking_consumption()
+-> (App, MonthlySupplySeriesByCountry, MonthlySupplySeriesByCountry) {
+    let player = DWARF;
+    let temp_dir = TempTestDir::new("scenario_36mo_consumption");
+    let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
+    std::mem::forget(temp_dir);
+
+    let countries = [ARCADIA, ELFIN, DWARF, OCEANIC, PASSGUARD, FERROWYN];
+    let initial_grants: std::collections::HashMap<CountryId, f64> = countries
+        .iter()
+        .map(|&c| (c, stockpile_of(&app, c, ResourceType::MilitarySupplies)))
+        .collect();
+    let mut series: std::collections::HashMap<CountryId, Vec<f64>> =
+        countries.iter().map(|c| (*c, Vec::with_capacity(36))).collect();
+    let mut production_only_series: std::collections::HashMap<CountryId, Vec<f64>> =
+        countries.iter().map(|c| (*c, Vec::with_capacity(36))).collect();
+    let mut cumulative_consumed: std::collections::HashMap<CountryId, f64> =
+        std::collections::HashMap::new();
+
+    for m in 1..=36u8 {
+        advance_one_month_tracking_supply_consumption(
+            &mut app,
+            m,
+            &countries,
+            &mut cumulative_consumed,
+        );
+        for c in countries {
+            let v = stockpile_of(&app, c, ResourceType::MilitarySupplies);
+            series.get_mut(&c).unwrap().push(v);
+            let production_only =
+                v - initial_grants[&c] + cumulative_consumed.get(&c).copied().unwrap_or(0.0);
+            production_only_series.get_mut(&c).unwrap().push(production_only);
+        }
+    }
+    (app, series, production_only_series)
+}
+
+/// P26-004: 日次消費(実測、`run_six_country_36_month_scenario_tracking_consumption`)を
+/// 加え戻した"生産分のみ"の月次系列(`production_only`)で判定する。P26-004以前は
+/// raw stockpileの月次系列そのものが"生産分のみ"と一致していたため、raw値へ直接
+/// 単調非減少・到達判定を適用していたが、P26-004が日次消費を実際に接続した後は
+/// raw stockpileはもう単調非減少ではない(spec §15: 「不足が起きること自体を自動的に
+/// バグと判定しない」)。生産という行為自体は"起こらなかったことになる"ことがないため、
+/// この`production_only`系列に対しては引き続き単調非減少・到達判定を適用できる。
 #[test]
 fn test_i_j_four_countries_reach_positive_production_and_dwarf_arcadia_are_not_worse() {
-    let (_app, series) = run_six_country_36_month_scenario();
+    let (_app, series, production_only) = run_six_country_36_month_scenario_tracking_consumption();
 
     // Test J: 6か国比較用の実測値を記録する(`verification_logs/phase-26/p26-004-pre-004/`
-    // 報告書§24が転記する、p26-004-pre-003の投影値との比較対象)。
+    // 報告書§24が転記する、p26-004-pre-003の投影値との比較対象)。raw(実際の備蓄)と
+    // production_only(生産分のみ)の両方を記録する。
     for (name, id) in [
         ("Arcadia", ARCADIA),
         ("Elfin", ELFIN),
@@ -713,43 +794,49 @@ fn test_i_j_four_countries_reach_positive_production_and_dwarf_arcadia_are_not_w
         ("Ferrowyn", FERROWYN),
     ] {
         let monthly = &series[&id];
+        let prod_only = &production_only[&id];
         eprintln!(
-            "[P26-004-PRE-004 Test J] {name}: month12={:.3}, month18={:.3}, month24={:.3}, \
+            "[P26-004 Test J] {name}: raw month12={:.3}, month18={:.3}, month24={:.3}, \
+             month36={:.3}; production_only month12={:.3}, month18={:.3}, month24={:.3}, \
              month36={:.3}",
-            monthly[11], monthly[17], monthly[23], monthly[35]
+            monthly[11], monthly[17], monthly[23], monthly[35],
+            prod_only[11], prod_only[17], prod_only[23], prod_only[35]
         );
     }
 
-    // Test I: Elfin/Ferrowyn/Passguard/Oceanicが36か月以内に正の生産へ到達する。
+    // Test I: Elfin/Ferrowyn/Passguard/Oceanicが36か月以内に正の生産(生産分のみ)へ
+    // 到達する。
     for (name, id) in [
         ("Elfin", ELFIN),
         ("Ferrowyn", FERROWYN),
         ("Passguard", PASSGUARD),
         ("Oceanic", OCEANIC),
     ] {
-        let monthly = &series[&id];
-        let first_production_month = monthly.iter().position(|&v| v > 0.0).map(|idx| idx + 1);
+        let monthly = &production_only[&id];
+        let first_production_month = monthly.iter().position(|&v| v > 1e-6).map(|idx| idx + 1);
         eprintln!(
-            "[P26-004-PRE-004 Test I] {name}: first_production_month={:?}",
+            "[P26-004 Test I] {name}: first_production_month(production_only)={:?}",
             first_production_month
         );
         assert!(
             first_production_month.is_some(),
-            "{name} must reach positive MilitarySupplies production within 36 months (monthly \
-             series: {monthly:?})"
+            "{name} must reach positive MilitarySupplies production within 36 months \
+             (production_only series: {monthly:?})"
         );
         let month36 = monthly[35];
         assert!(
             month36 > 0.0,
-            "{name}'s month-36 MilitarySupplies must be positive (measured: {month36})"
+            "{name}'s month-36 MilitarySupplies production_only must be positive (measured: \
+             {month36})"
         );
-        // 単調非減少(消費経路が未接続のため、備蓄は生産開始後は常に非減少のはず)。
+        // 単調非減少(production_onlyは"これまでに生産された累計量"であるため、
+        // 消費が接続された後も引き続き単調非減少のはずである)。
         let first_idx = first_production_month.unwrap() - 1;
         for window in monthly[first_idx..].windows(2) {
             assert!(
-                window[1] >= window[0] - 1e-9,
-                "{name}'s MilitarySupplies must not decrease month over month once production \
-                 starts (no consumption path exists yet): {:?}",
+                window[1] >= window[0] - 1e-6,
+                "{name}'s MilitarySupplies production_only must not decrease month over month \
+                 once production starts: {:?}",
                 &monthly[first_idx..]
             );
         }
@@ -771,9 +858,10 @@ fn test_i_j_four_countries_reach_positive_production_and_dwarf_arcadia_are_not_w
     // finding として報告書に記録する)。したがって、ここでは単一の固定基準値との
     // 厳密な比較ではなく、P26-004-PRE-002が実際に採用した基準
     // (「旧来の恒久停止バグ値[373.96]を明確に上回り、単調増加していること」)を
-    // 踏襲した、この非決定性の変動幅を十分に許容する検証を行う。
-    let arcadia_month36 = series[&ARCADIA][35];
-    let dwarf_month36 = series[&DWARF][35];
+    // 踏襲した、この非決定性の変動幅を十分に許容する検証を行う。P26-004導入後は
+    // production_only(生産分のみ)で判定する(raw値は日次消費で減るため)。
+    let arcadia_month36 = production_only[&ARCADIA][35];
+    let dwarf_month36 = production_only[&DWARF][35];
     assert!(
         arcadia_month36 > 373.96,
         "Arcadia's month-36 production must clearly exceed the old permanent-stall bug value \
@@ -792,42 +880,56 @@ fn test_i_j_four_countries_reach_positive_production_and_dwarf_arcadia_are_not_w
 // Test K: Oceanicの48/60か月挙動
 // ─────────────────────────────────────────────────────────────────────────
 
+/// P26-004: 日次消費(実測)を加え戻した"生産分のみ"(production_only)で判定する。
+/// P26-004以前はraw stockpileの月次系列そのものが"生産分のみ"と一致していたため、
+/// raw値の単調非減少をそのまま「恒久的にゼロへ落ち込んでいない」の代理指標として
+/// 使えたが、P26-004が日次消費を実際に接続した後はraw stockpileはもう単調非減少では
+/// ない。生産という行為自体は"起こらなかったことになる"ことがないため、
+/// production_only系列に対しては引き続き単調非減少・フロー判定を適用できる。
 #[test]
 fn test_k_oceanic_60_month_trend_does_not_permanently_collapse_to_zero() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("oceanic_60mo");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
+    let initial_grant = stockpile_of(&app, OCEANIC, ResourceType::MilitarySupplies);
 
     let mut monthly_supplies = Vec::with_capacity(60);
+    let mut monthly_production_only = Vec::with_capacity(60);
     let mut monthly_iron = Vec::with_capacity(60);
     let mut monthly_coal = Vec::with_capacity(60);
+    let mut consumed: std::collections::HashMap<CountryId, f64> = std::collections::HashMap::new();
     for m in 1..=60u8 {
-        advance_one_month(&mut app, m);
-        monthly_supplies.push(stockpile_of(&app, OCEANIC, ResourceType::MilitarySupplies));
+        advance_one_month_tracking_supply_consumption(&mut app, m, &[OCEANIC], &mut consumed);
+        let v = stockpile_of(&app, OCEANIC, ResourceType::MilitarySupplies);
+        monthly_supplies.push(v);
+        monthly_production_only
+            .push(v - initial_grant + consumed.get(&OCEANIC).copied().unwrap_or(0.0));
         monthly_iron.push(stockpile_of(&app, OCEANIC, ResourceType::Iron));
         monthly_coal.push(stockpile_of(&app, OCEANIC, ResourceType::Coal));
     }
 
-    let supplies_36 = monthly_supplies[35];
-    let supplies_48 = monthly_supplies[47];
-    let supplies_60 = monthly_supplies[59];
+    let supplies_36 = monthly_production_only[35];
+    let supplies_48 = monthly_production_only[47];
+    let supplies_60 = monthly_production_only[59];
 
     assert!(supplies_36 > 0.0, "Oceanic must be producing by month 36 (measured: {supplies_36})");
-    // MilitarySuppliesの消費経路は未実装のため、これまでに生産した累積備蓄が
-    // 過去の値を下回ることは起こり得ない(単調非減少)。「恒久的にゼロへ落ち込む」
-    // (spec §8 Test K)というのは、月間の増分(生産フロー)が停止することを指す。
+    // production_onlyは"これまでに生産された累計量"であるため、日次消費が接続された
+    // 後も引き続き単調非減少のはずである。「恒久的にゼロへ落ち込む」(spec §8 Test K)
+    // というのは、月間の増分(生産フロー)が停止することを指す。
     assert!(
         supplies_60 >= supplies_48 && supplies_48 >= supplies_36,
-        "累積備蓄は消費経路が存在しない限り単調非減少のはず: month36={supplies_36}, \
+        "累積生産(production_only)は単調非減少のはず: month36={supplies_36}, \
          month48={supplies_48}, month60={supplies_60}"
     );
 
     let flow_36_to_48 = supplies_48 - supplies_36;
     let flow_48_to_60 = supplies_60 - supplies_48;
     eprintln!(
-        "[P26-004-PRE-004 Test K] Oceanic month36={supplies_36}, month48={supplies_48}, \
-         month60={supplies_60}, flow(36->48)={flow_36_to_48}, flow(48->60)={flow_48_to_60}, \
-         Iron(36/48/60)=({}/{}/{}), Coal(36/48/60)=({}/{}/{})",
+        "[P26-004 Test K] Oceanic raw month36={}, month48={}, month60={}; production_only \
+         month36={supplies_36}, month48={supplies_48}, month60={supplies_60}, \
+         flow(36->48)={flow_36_to_48}, flow(48->60)={flow_48_to_60}, Iron(36/48/60)=({}/{}/{}), \
+         Coal(36/48/60)=({}/{}/{})",
+        monthly_supplies[35], monthly_supplies[47], monthly_supplies[59],
         monthly_iron[35], monthly_iron[47], monthly_iron[59],
         monthly_coal[35], monthly_coal[47], monthly_coal[59],
     );
@@ -837,8 +939,8 @@ fn test_k_oceanic_60_month_trend_does_not_permanently_collapse_to_zero() {
     // 完全に恒久停止しない」ことだけを確認する。
     assert!(
         flow_36_to_48 > 0.0 || flow_48_to_60 > 0.0,
-        "Oceanic's MilitarySupplies flow must not have already gone permanently to zero by \
-         month 60 (36->48={flow_36_to_48}, 48->60={flow_48_to_60})"
+        "Oceanic's MilitarySupplies production flow must not have already gone permanently to \
+         zero by month 60 (36->48={flow_36_to_48}, 48->60={flow_48_to_60})"
     );
 }
 

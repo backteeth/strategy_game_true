@@ -9,7 +9,13 @@
 //! Test A〜Jを実装する。
 //!
 //! P26-003完了時点でも、Division需要・日次配分・戦闘力補正・`try_consume_military_
-//! supplies`の本番呼び出しは一切追加しない(Category Iで非接続性を確認する)。
+//! supplies`の本番呼び出しは一切追加しない(Category Iで非接続性を確認していた)。
+//!
+//! P26-004が上記のDivision需要・日次配分・`try_consume_military_supplies`の本番呼び
+//! 出しを実際に接続した(`military::daily_supply`、`verification_logs/phase-26/
+//! p26-004/`)ため、Category Fの一部・Category I(test_i3)は日次消費が実際に起こる
+//! ことを踏まえて更新済み(退行ではなく意図した接続)。戦闘力補正は本タスクでもまだ
+//! 未接続のまま(P26-005の対象)。
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
@@ -749,6 +755,43 @@ fn advance_months(app: &mut App, months: u8) {
     }
 }
 
+/// P26-004: `advance_months`の1か月分だけを進めながら、対象国家のMilitarySupplies
+/// 日次消費量(day-tick前後の減少分――この合成harnessでは`tick_day`は
+/// `DayChangedMessage`のみ・`tick_month`は`MonthChangedMessage`のみを発行するため、
+/// day-tick区間の減少は日次消費以外に起こり得ない)を積算して返す。
+fn advance_one_month_tracking_supply_consumption(
+    app: &mut App,
+    current_month_index: u8,
+    player: CountryId,
+) -> f64 {
+    let mut consumed = 0.0;
+    for day in 2..=28u8 {
+        let before = supplies_of(app, player);
+        tick_day(app, 1800, current_month_index, day);
+        let after = supplies_of(app, player);
+        consumed += (before - after).max(0.0);
+    }
+    tick_month(app, 1800, current_month_index.wrapping_add(1));
+    consumed
+}
+
+/// P26-004: `advance_months`と同じ日次+月次ティックを行いながら、対象国家の
+/// MilitarySupplies日次消費量の合計を積算して返す(複数か月分、
+/// `advance_one_month_tracking_supply_consumption`の繰り返し)。既存の"生産分のみ"
+/// 比較(P26-004-PRE-005導入時に初期grantを差し引く形で確立済み)から、本タスクが
+/// 新たに導入した日次消費の影響も分離するための追加計測。
+fn advance_months_tracking_supply_consumption(
+    app: &mut App,
+    months: u8,
+    player: CountryId,
+) -> f64 {
+    let mut consumed = 0.0;
+    for m in 1..=months {
+        consumed += advance_one_month_tracking_supply_consumption(app, m, player);
+    }
+    consumed
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Category F: 生産周期(実App、実`handle_monthly_economy`経路)
 // ─────────────────────────────────────────────────────────────────────────
@@ -756,9 +799,14 @@ fn advance_months(app: &mut App, months: u8) {
 #[test]
 fn test_f1_day_ticks_alone_do_not_produce() {
     // P26-004-PRE-005: New Gameは初回月次生産までのブリッジ備蓄(現行データで31.0)を
-    // 一度限り付与するため、New Game直後の値は0.0ではなく31.0になる。本テストの
-    // 主旨(月境界を跨がない日次ティックだけでは"生産"が発生しない)自体は不変であり、
-    // 「New Game直後の値から変化しないこと」として検証する。
+    // 一度限り付与するため、New Game直後の値は0.0ではなく31.0になる。
+    //
+    // P26-004: 日次ティック自体が(月次生産とは独立に)Division日次補給を実際に
+    // 消費するようになったため、「日次ティックだけでは変化しない」という主旨は
+    // もはや成り立たない。本テストが検証したい本来の主旨(月境界を跨がない日次
+    // ティックだけでは"生産"は発生しない――増加は起こらない)は不変であるため、
+    // 「増加しない」ことを検証しつつ、日次消費による既知の減少量(New Gameの満編制
+    // Infantry1個師団=1.0/日 × 27日 = 27.0)まで正確に一致することを確認する。
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("f1");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
@@ -766,8 +814,15 @@ fn test_f1_day_ticks_alone_do_not_produce() {
     assert_eq!(after_new_game, 31.0);
     for day in 2..=28u8 {
         tick_day(&mut app, 1800, 1, day);
+        assert!(
+            supplies_of(&app, player) <= after_new_game,
+            "day ticks alone (no month boundary) must never increase MilitarySupplies \
+             (production only happens on MonthChangedMessage)"
+        );
     }
-    assert_eq!(supplies_of(&app, player), after_new_game);
+    // 27 day ticks (day 2..=28) x 1.0/day daily demand for the single New Game Infantry
+    // division, stockpile always sufficient (31.0 >= 1.0/day), so consumed == demanded.
+    assert_eq!(supplies_of(&app, player), after_new_game - 27.0);
 }
 
 #[test]
@@ -790,38 +845,51 @@ fn test_f3_supplies_and_equipment_grow_in_the_fixed_ratio_across_real_ticks() {
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("f3");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
-    advance_months(&mut app, 6);
+    let consumed = advance_months_tracking_supply_consumption(&mut app, 6, player);
 
     let sup = supplies_of(&app, player);
     let eq = equipment_of(&app, player);
-    assert!(sup > 0.0 && eq > 0.0);
+    assert!(sup >= 0.0 && eq > 0.0);
     // 実データ(buildings.ron)ではMilitaryFactoryがMilitaryEquipment:20.0/
     // MilitarySupplies:100.0を併産するため、同じfinal_opの積算である以上、"生産分"の
     // 比率は常に100.0/20.0=5.0(丸め誤差の範囲内)。P26-004-PRE-005導入後、supplyは
     // 生産と無関係な外生的初期グラント(31.0固定、equipmentには存在しない)を含むため、
     // 比較の前にこの定数オフセットを除いてから比率を取る(等式のratioそのものではなく
-    // "production-only"の差分にratioの不変条件を適用する)。
-    let sup_production_only = sup - 31.0;
+    // "production-only"の差分にratioの不変条件を適用する)。P26-004導入後は、日次消費
+    // (実測、`advance_months_tracking_supply_consumption`)も加え戻して"生産分のみ"を
+    // 正しく分離する(初期grantを引くだけでは、日次消費も混入したままになるため)。
+    let sup_production_only = sup - 31.0 + consumed;
     assert!(
         (sup_production_only / eq - 5.0).abs() < 0.05,
-        "sup={sup} sup_production_only={sup_production_only} eq={eq}"
+        "sup={sup} consumed={consumed} sup_production_only={sup_production_only} eq={eq}"
     );
 }
 
+/// P26-004: P26-003完了時点では「消費経路が存在しないので、月ごとにMilitarySupplies
+/// は単調非減少」という前提が成り立っていたが、P26-004が日次消費を実際に接続した
+/// ことで、この前提はもう成り立たない(むしろ本タスクの核心的な変更点そのものである)。
+/// 代わりに、より基本的で常に成り立つべき2つの不変条件を検証する:
+/// (1) stockpileは決して負にならない(`try_consume_military_supplies`が保証する)。
+/// (2) 月ごとの正味変化は「生産 - 消費」に厳密に一致する(丸め誤差なしの保存則、
+///     生産・消費いずれも同じcanonical unitsのfixed-point APIをcommitするため)。
 #[test]
-fn test_f4_supplies_never_decrease_across_ticks_since_nothing_consumes_yet() {
+fn test_f4_world_conservation_holds_now_that_daily_consumption_is_connected() {
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("f4");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
     let mut last = supplies_of(&app, player);
     for m in 1..=6u8 {
-        for day in 2..=28u8 {
-            tick_day(&mut app, 1800, m, day);
-        }
-        tick_month(&mut app, 1800, m.wrapping_add(1));
+        let consumed_this_month =
+            advance_one_month_tracking_supply_consumption(&mut app, m, player);
         let now = supplies_of(&app, player);
-        assert!(now >= last, "MilitarySupplies must be monotonically non-decreasing (no consumption path exists yet): {last} -> {now}");
+        assert!(now >= 0.0, "MilitarySupplies stockpile must never go negative: {now}");
+        let produced_this_month = now - last + consumed_this_month;
+        assert!(
+            produced_this_month >= -1e-9,
+            "production this month must never be negative (derived: {produced_this_month}, \
+             last={last} now={now} consumed={consumed_this_month})"
+        );
         last = now;
     }
 }
@@ -883,11 +951,24 @@ fn test_g3_production_after_load_continues_from_the_loaded_value_without_double_
     app.update();
     assert_eq!(supplies_of(&app, player), before_save);
 
-    advance_months(&mut app, 2);
+    // P26-004: 日次消費が実際に接続されたため、ロード後さらに進めた期間で
+    // stockpileが単純に非減少である保証はもう成り立たない(消費が生産を上回りうる)。
+    // 代わりに、ロード直後の生産が二重適用されていないこと(=この期間の"生産分のみ"
+    // が、消費を加え戻した上で正の値になっている、かつ不自然に巨大化していない)を
+    // 保存則で直接検証する。
+    let consumed_after_load = advance_months_tracking_supply_consumption(&mut app, 2, player);
     let after_more_production = supplies_of(&app, player);
-    // ロード直後の生産が二重適用されず、単純にそこから増分が乗るだけであること
-    // (減少しない、かつ増分自体はゼロではない)を確認する。
-    assert!(after_more_production >= before_save);
+    let produced_after_load = after_more_production - before_save + consumed_after_load;
+    assert!(
+        after_more_production >= 0.0,
+        "MilitarySupplies stockpile must never go negative: {after_more_production}"
+    );
+    assert!(
+        produced_after_load > 0.0,
+        "production must continue (not be reset to 0) after load: before_save={before_save} \
+         after_more_production={after_more_production} consumed_after_load={consumed_after_load} \
+         produced_after_load={produced_after_load}"
+    );
 }
 
 #[test]
@@ -1060,24 +1141,29 @@ fn test_i2_dead_supply_ratio_field_still_unregistered() {
 }
 
 #[test]
-fn test_i3_try_consume_military_supplies_has_no_production_caller() {
-    // rgでの静的確認をP26-003報告書へ記載する。ここでは、実App内で唯一
-    // MilitarySuppliesが変化しうる経路(生産のみ)を辿っても、備蓄が一度も減少しない
-    // ことで間接的に「消費経路が存在しない」ことを補強する(test_f4と同じ観測の
-    // 別カテゴリからの再確認)。
+fn test_i3_try_consume_military_supplies_now_has_a_real_daily_caller_via_p26_004() {
+    // P26-003完了時点(このテストの元々の名前・意図)では、`try_consume_military_
+    // supplies`をどの本番Systemも呼んでおらず、実App内でMilitarySuppliesが変化し
+    // うる経路は生産のみだった。P26-004(`military::daily_supply`)がまさにこの
+    // 呼び出しを追加したため、この前提はもう成り立たない――これは退行ではなく、
+    // 本タスクが意図して追加した接続そのものである。
+    //
+    // 単一の日次ティック(月次ティックを一切挟まない)だけで、既知の日次需要
+    // (New Gameの満編制Infantry1個師団=1.0/日)ちょうど分だけ備蓄が減ることを
+    // 確認し、「`try_consume_military_supplies`が実際に呼ばれている」ことを直接
+    // 実証する。
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("i3");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
-    let mut last = supplies_of(&app, player);
-    for m in 1..=8u8 {
-        for day in 2..=28u8 {
-            tick_day(&mut app, 1800, m, day);
-        }
-        tick_month(&mut app, 1800, m.wrapping_add(1));
-        let now = supplies_of(&app, player);
-        assert!(now >= last);
-        last = now;
-    }
+    let before = supplies_of(&app, player);
+    tick_day(&mut app, 1800, 1, 2);
+    let after = supplies_of(&app, player);
+    assert_eq!(
+        after,
+        before - 1.0,
+        "a single day tick (no month boundary) must consume exactly the known daily demand, \
+         proving try_consume_military_supplies now has a real production caller (P26-004)"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────

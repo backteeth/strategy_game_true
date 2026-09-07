@@ -432,6 +432,7 @@ pub(crate) fn prepare_load(
             preserved_division_definitions,
             save.military.divisions,
             save.military.next_division_id,
+            save.military.division_supply_fulfillment,
         ),
         battle_registry: BattleRegistry::from_saved_parts(
             save.battles.battles,
@@ -741,6 +742,7 @@ mod tests {
             s.divisions.clone(),
             HashMap::new(),
             50,
+            HashMap::new(),
         ));
         world.insert_resource(BattleRegistry::default());
         world.insert_resource(ArmyRegistry::default());
@@ -1031,6 +1033,7 @@ mod tests {
             military: SavedMilitaryRegistry {
                 divisions,
                 next_division_id: 9,
+                division_supply_fulfillment: HashMap::new(),
             },
             battles: SavedBattleRegistry {
                 battles,

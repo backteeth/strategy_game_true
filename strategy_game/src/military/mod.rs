@@ -3,6 +3,7 @@ pub mod army;
 pub mod battle;
 pub mod combat;
 pub mod combat_calc;
+pub mod daily_supply;
 pub mod data;
 pub mod demobilization;
 pub mod equipment;
@@ -54,6 +55,22 @@ impl Plugin for MilitaryPlugin {
                 // (Set順序自体は`app::time::DailySimulationSet`の宣言順が保証する)。
                 handle_monthly_ai_recruitment
                     .in_set(DailySimulationSet::CountryAi)
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                // P26-004: 日次補給消費・配分。`economy::handle_monthly_economy`
+                // (MilitarySupplies月次生産を含む、P26-003)と同じ`Economy`Setに置き、
+                // `.after()`で明示的にその直後へ固定する――月境界日には月次生産が
+                // 必ず先に完了してからこの日次消費が走る(spec §6.2)。`Economy`Set全体は
+                // `DailySimulationSet`の宣言順により`MilitaryAction`Set
+                // (`handle_daily_military`――募兵完了・移動・戦闘)より必ず先に実行される
+                // ため、「前日終値状態から需要を確定してから当日の移動・戦闘・募兵完了が
+                // 起こる」という正規順序(spec §6)が、イベントreaderの偶然の登録順ではなく
+                // 明示的なSystem順序制約として保証される。
+                daily_supply::process_daily_military_supply_consumption
+                    .in_set(DailySimulationSet::Economy)
+                    .after(crate::economy::handle_monthly_economy)
                     .run_if(in_state(GameState::Playing)),
             );
     }

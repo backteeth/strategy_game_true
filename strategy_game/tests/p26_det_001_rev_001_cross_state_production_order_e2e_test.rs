@@ -640,6 +640,7 @@ mod real_app {
     use bevy::app::ScheduleRunnerPlugin;
     use bevy::ecs::system::SystemState;
     use bevy::prelude::*;
+    use std::collections::HashMap;
     use strategy_game::app::AppPlugin;
     use strategy_game::app::game_state::GameState;
     use strategy_game::app::time::{DayChangedMessage, MonthChangedMessage};
@@ -786,6 +787,35 @@ mod real_app {
         tick_month(app, 1800, current_month_index.wrapping_add(1));
     }
 
+    /// P26-004: `advance_one_month`と同じ日次+月次ティックを行いながら、指定した
+    /// 国家群のMilitarySupplies日次消費量(day-tickだけを挟んだ前後の減少量、この
+    /// 合成harnessでは`tick_day`は`DayChangedMessage`のみ・`tick_month`は
+    /// `MonthChangedMessage`のみを発行するため、day-tick区間の減少は日次消費以外に
+    /// 起こり得ない)を積算する。既存の決定性テスト(test_h/test_i)が検証したい対象
+    /// (月次生産の"順序"決定性)から、本タスクが新たに導入した日次消費の影響を
+    /// 分離するための追加計測(spec §20: 「生産分を分離して正規値と比較する現在の
+    /// 意味を維持」)。`advance_one_month`自体は他の多数のテストが参照するため変更しない。
+    fn advance_one_month_tracking_supply_consumption(
+        app: &mut App,
+        current_month_index: u8,
+        tracked: &[CountryId],
+        consumed: &mut HashMap<CountryId, f64>,
+    ) {
+        for day in 2..=28u8 {
+            let before: HashMap<CountryId, f64> = tracked
+                .iter()
+                .map(|&c| (c, stockpile_of(app, c, ResourceType::MilitarySupplies)))
+                .collect();
+            tick_day(app, 1800, current_month_index, day);
+            for &c in tracked {
+                let after = stockpile_of(app, c, ResourceType::MilitarySupplies);
+                let delta = (before[&c] - after).max(0.0);
+                *consumed.entry(c).or_insert(0.0) += delta;
+            }
+        }
+        tick_month(app, 1800, current_month_index.wrapping_add(1));
+    }
+
     fn stockpile_of(app: &App, country_id: CountryId, resource: ResourceType) -> f64 {
         app.world()
             .resource::<CountryRegistry>()
@@ -831,14 +861,18 @@ mod real_app {
         let dir = TempTestDir::new("test_h");
         let mut app = setup_app_in_playing(DWARF, dir.save_file_config());
         let initial_grant = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
+        let mut consumed: HashMap<CountryId, f64> = HashMap::new();
 
         let mut m12 = 0.0;
         let mut m18 = 0.0;
         let mut m24 = 0.0;
         let mut m36 = 0.0;
         for m in 1..=36u8 {
-            advance_one_month(&mut app, m);
-            let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies) - initial_grant;
+            advance_one_month_tracking_supply_consumption(&mut app, m, &[ARCADIA], &mut consumed);
+            // P26-004: 日次消費(実測)を加え戻して"生産分のみ"を分離する(初期grantを
+            // 引くだけでは、日次消費も混入したままになるため、spec §20)。
+            let v = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies) - initial_grant
+                + consumed.get(&ARCADIA).copied().unwrap_or(0.0);
             match m {
                 12 => m12 = v,
                 18 => m18 = v,
@@ -868,6 +902,7 @@ mod real_app {
             (PASSGUARD, 3325.079),
             (FERROWYN, 1089.859),
         ];
+        let tracked: Vec<CountryId> = countries.iter().map(|(cid, _)| *cid).collect();
 
         for _ in 0..2 {
             let dir = TempTestDir::new("test_i");
@@ -876,16 +911,20 @@ mod real_app {
                 .iter()
                 .map(|(cid, _)| stockpile_of(&app, *cid, ResourceType::MilitarySupplies))
                 .collect();
+            let mut consumed: HashMap<CountryId, f64> = HashMap::new();
             for m in 1..=36u8 {
-                advance_one_month(&mut app, m);
+                advance_one_month_tracking_supply_consumption(&mut app, m, &tracked, &mut consumed);
             }
             for ((cid, expected), initial_grant) in countries.iter().zip(initial_grants) {
-                let v = stockpile_of(&app, *cid, ResourceType::MilitarySupplies) - initial_grant;
+                // P26-004: 日次消費(実測)を加え戻して"生産分のみ"を分離する(spec §20)。
+                let v = stockpile_of(&app, *cid, ResourceType::MilitarySupplies) - initial_grant
+                    + consumed.get(cid).copied().unwrap_or(0.0);
                 assert!(
                     (v - expected).abs() < 1.0,
                     "country {cid:?} month36 MilitarySupplies (production only, initial \
-                     grant of {initial_grant} subtracted) must match canonical baseline \
-                     (expected ~{expected}, got {v})"
+                     grant of {initial_grant} subtracted, {} daily consumption added back) \
+                     must match canonical baseline (expected ~{expected}, got {v})",
+                    consumed.get(cid).copied().unwrap_or(0.0)
                 );
             }
         }
