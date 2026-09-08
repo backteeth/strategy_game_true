@@ -3,8 +3,8 @@ use crate::common::{BattleId, DivisionId, StateId};
 use crate::country::CountryRegistry;
 use crate::military::battle::{BattleRegistry, BattleStatus};
 use crate::military::combat_calc::{
-    ORG_RECOVERY_PER_DAY, RETREAT_MANPOWER_LOSS_RATIO, calculate_combat_readiness,
-    calculate_terrain_defense_bonus, resolve_combat_day_multi,
+    ORG_RECOVERY_PER_DAY, RETREAT_MANPOWER_LOSS_RATIO, calculate_combat_readiness_with_supply,
+    calculate_terrain_defense_bonus, resolve_combat_day_multi_with_supply,
 };
 use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
 use crate::military::equipment::{calculate_proportional_equipment_loss, try_destroy_equipment};
@@ -174,24 +174,33 @@ fn process_daily_battles(
             .filter_map(|id| military_registry.divisions.get(id).cloned())
             .collect();
 
-        // P25-007(§15): 戦闘充足率(manpower/装備状態)の妥当性を、この戦闘の
-        // 当日解決(manpower/equipment/organization/battle statisticsの更新、
+        // P25-007(§15)/P26-005(§9): 戦闘充足率(manpower/装備/補給状態)の妥当性を、
+        // この戦闘の当日解決(manpower/equipment/organization/battle statisticsの更新、
         // elapsed_days加算)を一切行う前に全参加Divisionについて検証する。
-        // 1件でも不正(NaN装備・manpower>max_manpower等)なら、このBattleの
-        // 当日解決を丸ごとskipし(他のBattle・他国家には影響しない)、次のBattleへ
-        // 進む。乱数はこのコードベースの戦闘計算がそもそも使用しないため、
+        // 1件でも不正(NaN装備・manpower>max_manpower・補給充足率が非有限または
+        // 0.0..=1.0の範囲外等)なら、このBattleの当日解決を丸ごとskipし(他のBattle・
+        // 他国家には影響しない)、次のBattleへ進む。補給充足率は`process_daily_battles`
+        // より前(`DailySimulationSet::Economy`)で当日分が確定済みの値を
+        // `MilitaryRegistry::supply_fulfillment_of`経由で読み取る(P26-004)。
+        // 乱数はこのコードベースの戦闘計算がそもそも使用しないため、
         // 「RNGを消費しない」は構造的に自明に満たされる。
         let readiness_invalid = attacker_divisions
             .iter()
             .chain(defender_divisions.iter())
             .any(|d| {
-                calculate_combat_readiness(d.manpower, d.max_manpower, d.equipment, d.max_equipment)
-                    .is_err()
+                calculate_combat_readiness_with_supply(
+                    d.manpower,
+                    d.max_manpower,
+                    d.equipment,
+                    d.max_equipment,
+                    military_registry.supply_fulfillment_of(d.id),
+                )
+                .is_err()
             });
         if readiness_invalid {
             error!(
                 "[Battle] battle {:?} has a participant with invalid combat readiness state \
-                 (manpower/equipment out of the canonical range); skipping resolution this tick",
+                 (manpower/equipment/supply out of the canonical range); skipping resolution this tick",
                 battle_id
             );
             continue;
@@ -201,7 +210,7 @@ fn process_daily_battles(
         let defender_refs: Vec<&Division> = defender_divisions.iter().collect();
 
         let (atk_results, def_results) =
-            resolve_combat_day_multi(&attacker_refs, &defender_refs, terrain_bonus);
+            resolve_combat_day_multi_with_supply(&attacker_refs, &defender_refs, terrain_bonus, military_registry);
 
         for (division_id, (manpower_loss, org_loss)) in atk_results {
             apply_combat_casualty(military_registry, division_id, manpower_loss, org_loss);
@@ -2128,5 +2137,299 @@ mod tests {
             mil.divisions[&defender_d.id].manpower < defender_d.manpower,
             "不正状態のBattleとは無関係な別Battleは通常どおり解決されるはず"
         );
+    }
+
+    // ─── P26-005: 補給充足率の戦闘力反映(実production経路: process_daily_battles/
+    // resolve_finished_battles、`MilitaryRegistry::supply_fulfillment_of`経由) ────
+
+    /// process_daily_battlesのpreflightは、補給充足率が非有限・範囲外の場合も
+    /// 装備/manpowerの既存不正状態と同じく、そのBattleの当日解決を丸ごとskipする
+    /// (spec §9、P25-007のpreflight方針をP26-005の補給率にも拡張)。
+    #[test]
+    fn p26_005_preflight_skips_battle_resolution_when_a_participant_has_invalid_supply_fulfillment() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker = make_division(0, attacker_country, target, 10, 10);
+        let defender = make_division(1, defender_country, target, 10, 15);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker.id, attacker.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+        // 到達不能のはずの不正状態(NaN)を明示的に注入し、preflightが黙って
+        // 戦闘計算へ流さないことを確認する(spec §8の防御方針)。
+        mil.division_supply_fulfillment.insert(attacker.id, f64::NAN);
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(attacker_country, defender_country, target, vec![attacker.id], vec![defender.id]))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        assert_eq!(mil.divisions[&attacker.id].manpower, attacker.manpower, "不正な補給充足率を持つBattleは当日解決をskipするはず");
+        assert_eq!(mil.divisions[&defender.id].manpower, defender.manpower);
+    }
+
+    /// 同じmanpower/equipment/base strengthの2個師団で、補給充足率だけが異なるとき、
+    /// その違いが実production経路(process_daily_battles)で対称的に戦闘力へ反映される
+    /// ことを確認する(spec §10)。
+    #[test]
+    fn p26_005_real_path_attacker_supply_shortage_reduces_damage_dealt_to_defender() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+        let target = StateId(2);
+        let state_reg = StateRegistry::build(vec![]);
+
+        fn run_scenario(atk_supply: f64) -> u64 {
+            let attacker_country = CountryId(1);
+            let defender_country = CountryId(2);
+            let war_reg = setup_war(attacker_country, defender_country);
+            let target = StateId(2);
+            let state_reg = StateRegistry::build(vec![]);
+            let attacker = make_division_ex(0, attacker_country, target, 10_000, 10_000, 100.0, 100.0, 10, 10);
+            let defender = make_division_ex(1, defender_country, target, 10_000, 10_000, 100.0, 100.0, 10, 10);
+            let mut mil = MilitaryRegistry::default();
+            mil.divisions.insert(attacker.id, attacker.clone());
+            mil.divisions.insert(defender.id, defender.clone());
+            mil.division_supply_fulfillment.insert(attacker.id, atk_supply);
+            let mut battle_reg = BattleRegistry::default();
+            battle_reg
+                .start_battle(make_battle(attacker_country, defender_country, target, vec![attacker.id], vec![defender.id]))
+                .unwrap();
+            process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+            defender.manpower - mil.divisions[&defender.id].manpower
+        }
+
+        let def_loss_full_supply = run_scenario(1.0);
+        let def_loss_half_supply = run_scenario(0.5);
+        assert!(
+            def_loss_half_supply < def_loss_full_supply,
+            "攻撃側の補給不足(50%)は、実production経路でも防御側への被害を減らすはず"
+        );
+        let _ = (attacker_country, defender_country, war_reg, target, state_reg);
+    }
+
+    /// 上と対称: 防御側だけが補給不足の場合も、反撃力(攻撃側が受ける被害)が
+    /// 実production経路で低下する(spec §10、陣営による特別扱いをしていないことの確認)。
+    #[test]
+    fn p26_005_real_path_defender_supply_shortage_reduces_damage_dealt_to_attacker() {
+        fn run_scenario(def_supply: f64) -> u64 {
+            let attacker_country = CountryId(1);
+            let defender_country = CountryId(2);
+            let war_reg = setup_war(attacker_country, defender_country);
+            let target = StateId(2);
+            let state_reg = StateRegistry::build(vec![]);
+            let attacker = make_division_ex(0, attacker_country, target, 10_000, 10_000, 100.0, 100.0, 10, 10);
+            let defender = make_division_ex(1, defender_country, target, 10_000, 10_000, 100.0, 100.0, 10, 15);
+            let mut mil = MilitaryRegistry::default();
+            mil.divisions.insert(attacker.id, attacker.clone());
+            mil.divisions.insert(defender.id, defender.clone());
+            mil.division_supply_fulfillment.insert(defender.id, def_supply);
+            let mut battle_reg = BattleRegistry::default();
+            battle_reg
+                .start_battle(make_battle(attacker_country, defender_country, target, vec![attacker.id], vec![defender.id]))
+                .unwrap();
+            process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+            attacker.manpower - mil.divisions[&attacker.id].manpower
+        }
+
+        let atk_loss_full_supply = run_scenario(1.0);
+        let atk_loss_half_supply = run_scenario(0.5);
+        assert!(
+            atk_loss_half_supply < atk_loss_full_supply,
+            "防御側の補給不足(50%)は反撃力を弱め、攻撃側が受ける被害を実production経路でも減らすはず"
+        );
+    }
+
+    /// spec §16: 一国の補給不足が別の同時進行Battle(別国家の組)の結果へ波及しない。
+    #[test]
+    fn p26_005_real_path_one_countrys_supply_shortage_does_not_leak_into_an_unrelated_battle() {
+        let country_a = CountryId(1);
+        let country_b = CountryId(2);
+        let country_c = CountryId(3);
+        let country_d = CountryId(4);
+
+        let mut war_reg = WarRegistry::default();
+        for (id, attackers, defenders) in [
+            (0usize, [country_a], [country_b]),
+            (1usize, [country_c], [country_d]),
+        ] {
+            war_reg.wars.insert(
+                WarId(id),
+                War {
+                    id: WarId(id),
+                    name: "Test War".to_string(),
+                    attackers: attackers.into_iter().collect(),
+                    defenders: defenders.into_iter().collect(),
+                    primary_attacker: None,
+                    primary_defender: None,
+                    source_crisis_id: None,
+                    war_goals: vec![],
+                    start_date: "1800/01/01".to_string(),
+                    end_date: None,
+                    duration_days: 0,
+                    war_score: 0.0,
+                    attacker_war_exhaustion: 0.0,
+                    defender_war_exhaustion: 0.0,
+                    occupied_states: HashSet::new(),
+                    status: WarStatus::Active,
+                    winner: None,
+                    end_reason: None,
+                    applied_terms: Vec::new(),
+                    won_attacker_battles: 0,
+                    won_defender_battles: 0,
+                    processed_battle_ids: HashSet::new(),
+                },
+            );
+        }
+
+        let target_ab = StateId(2);
+        let target_cd = StateId(3);
+        let state_reg = StateRegistry::build(vec![]);
+
+        let attacker_a = make_division_ex(0, country_a, target_ab, 10_000, 10_000, 100.0, 100.0, 10, 10);
+        let defender_b = make_division_ex(1, country_b, target_ab, 10_000, 10_000, 100.0, 100.0, 10, 10);
+        let attacker_c = make_division_ex(2, country_c, target_cd, 10_000, 10_000, 100.0, 100.0, 10, 10);
+        let defender_d = make_division_ex(3, country_d, target_cd, 10_000, 10_000, 100.0, 100.0, 10, 10);
+
+        let mut mil = MilitaryRegistry::default();
+        for d in [&attacker_a, &defender_b, &attacker_c, &defender_d] {
+            mil.divisions.insert(d.id, d.clone());
+        }
+        // country_aの攻撃側だけが深刻な補給不足。country_c/dは無関係(supply指定なし=1.0)。
+        mil.division_supply_fulfillment.insert(attacker_a.id, 0.1);
+
+        let mut battle_reg = BattleRegistry::default();
+        battle_reg
+            .start_battle(make_battle(country_a, country_b, target_ab, vec![attacker_a.id], vec![defender_b.id]))
+            .unwrap();
+        battle_reg
+            .start_battle(make_battle(country_c, country_d, target_cd, vec![attacker_c.id], vec![defender_d.id]))
+            .unwrap();
+
+        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+
+        // Battle(c vs d、両者とも補給充足)は、補給充足率が同一の別途独立計算した
+        // 基準シナリオと完全に一致する(country_aの不足が漏れていない)。
+        let mut reference_mil = MilitaryRegistry::default();
+        reference_mil.divisions.insert(attacker_c.id, attacker_c.clone());
+        reference_mil.divisions.insert(defender_d.id, defender_d.clone());
+        let mut reference_battle_reg = BattleRegistry::default();
+        reference_battle_reg
+            .start_battle(make_battle(country_c, country_d, target_cd, vec![attacker_c.id], vec![defender_d.id]))
+            .unwrap();
+        process_daily_battles(&mut reference_mil, &mut reference_battle_reg, &state_reg, &war_reg);
+
+        assert_eq!(
+            mil.divisions[&defender_d.id].manpower,
+            reference_mil.divisions[&defender_d.id].manpower,
+            "country_aの補給不足はcountry_c/dの独立したBattleへ波及してはいけない"
+        );
+        assert_eq!(
+            mil.divisions[&attacker_c.id].manpower,
+            reference_mil.divisions[&attacker_c.id].manpower
+        );
+    }
+
+    /// spec §13/§21: 供給不足による戦闘力低下が、実際に下流(撃破可否・州支配権)へ
+    /// 伝播することを示す。既存の`test_combined_multiple_attackers_can_break_well_defended_state`
+    /// と全く同じ3個師団攻撃側の構成だが、補給率を著しく下げると同じ攻撃側でも
+    /// 突破できなくなる(=補給不足が実際にゲームプレイの勝敗へ影響する)。
+    #[test]
+    fn p26_005_severe_supply_shortage_prevents_an_attack_that_would_otherwise_break_the_defender() {
+        let attacker_country = CountryId(1);
+        let defender_country = CountryId(2);
+        let war_reg = setup_war(attacker_country, defender_country);
+
+        let origin = StateId(1);
+        let target = StateId(2);
+        let mut state_reg = StateRegistry::build(vec![
+            StateData { id: origin, owner_country_id: attacker_country, ..Default::default() },
+            StateData { id: target, owner_country_id: defender_country, ..Default::default() },
+        ]);
+
+        let attacker_a = make_division(0, attacker_country, target, 10, 10);
+        let attacker_b = make_division(3, attacker_country, target, 10, 10);
+        let attacker_c = make_division(4, attacker_country, target, 10, 10);
+        let defender = make_division(1, defender_country, target, 10, 15);
+
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(attacker_a.id, attacker_a.clone());
+        mil.divisions.insert(attacker_b.id, attacker_b.clone());
+        mil.divisions.insert(attacker_c.id, attacker_c.clone());
+        mil.divisions.insert(defender.id, defender.clone());
+        // 3個師団とも深刻な補給不足(10%)。既存テストでは補給を考慮していなかった
+        // ため常に1.0扱いで突破できていたが、P26-005導入後は突破できなくなるはず。
+        for id in [attacker_a.id, attacker_b.id, attacker_c.id] {
+            mil.division_supply_fulfillment.insert(id, 0.1);
+        }
+
+        let mut battle_reg = BattleRegistry::default();
+        let battle = make_battle(
+            attacker_country,
+            defender_country,
+            target,
+            vec![attacker_a.id, attacker_b.id, attacker_c.id],
+            vec![defender.id],
+        );
+        battle_reg.start_battle(battle).unwrap();
+
+        for _ in 0..30 {
+            run_one_day(&mut mil, &mut state_reg, &mut battle_reg, &war_reg);
+            if battle_reg.battles[&BattleId(0)].status != BattleStatus::Ongoing {
+                break;
+            }
+        }
+
+        let battle = &battle_reg.battles[&BattleId(0)];
+        assert_ne!(
+            battle.status,
+            BattleStatus::AttackerWon,
+            "深刻な補給不足(10%)により、同じ30日以内では本来突破できたはずの3個師団攻撃側も\
+             突破できなくなるはず(Ongoing継続またはDefenderWonのいずれか、AttackerWonにはならない)"
+        );
+        assert_eq!(
+            state_reg.get(target).unwrap().controller(),
+            defender_country,
+            "補給不足により突破できなかった以上、州の支配権は変化しないはず"
+        );
+    }
+
+    /// spec §19: 補給率map挿入順・Division列挙順・国家挿入順を変えても、
+    /// 実production経路の結果はbit-for-bit一致する。
+    #[test]
+    fn p26_005_real_path_result_is_deterministic_regardless_of_supply_map_insertion_order() {
+        fn run_scenario(insert_defender_supply_first: bool) -> (u64, u64) {
+            let attacker_country = CountryId(1);
+            let defender_country = CountryId(2);
+            let war_reg = setup_war(attacker_country, defender_country);
+            let target = StateId(2);
+            let state_reg = StateRegistry::build(vec![]);
+            let attacker = make_division_ex(0, attacker_country, target, 10_000, 10_000, 100.0, 100.0, 10, 10);
+            let defender = make_division_ex(1, defender_country, target, 10_000, 10_000, 100.0, 100.0, 10, 15);
+            let mut mil = MilitaryRegistry::default();
+            mil.divisions.insert(attacker.id, attacker.clone());
+            mil.divisions.insert(defender.id, defender.clone());
+            if insert_defender_supply_first {
+                mil.division_supply_fulfillment.insert(defender.id, 0.6);
+                mil.division_supply_fulfillment.insert(attacker.id, 0.8);
+            } else {
+                mil.division_supply_fulfillment.insert(attacker.id, 0.8);
+                mil.division_supply_fulfillment.insert(defender.id, 0.6);
+            }
+            let mut battle_reg = BattleRegistry::default();
+            battle_reg
+                .start_battle(make_battle(attacker_country, defender_country, target, vec![attacker.id], vec![defender.id]))
+                .unwrap();
+            process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+            (mil.divisions[&attacker.id].manpower, mil.divisions[&defender.id].manpower)
+        }
+
+        assert_eq!(run_scenario(true), run_scenario(false));
     }
 }
