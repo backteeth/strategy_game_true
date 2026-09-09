@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod army;
 pub mod battle;
+pub mod capital_connectivity;
 pub mod combat;
 pub mod combat_calc;
 pub mod daily_supply;

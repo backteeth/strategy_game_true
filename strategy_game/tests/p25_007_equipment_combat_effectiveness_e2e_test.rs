@@ -723,10 +723,13 @@ fn test_34_combat_readiness_uses_the_post_reinforcement_equipment_value() {
 
     // Day 2: 補充済みの状態でBattleへ組み込み、combat_calcがこの
     // post-reinforcement equipment(100.0)を基準にreadinessを計算することを確認する。
+    // P26-006: defenderはai自身が支配する実マップ州へ配置する(`home`はplayerの
+    // 支配州であり、aiにとっては首都連結性がなく補給率0になってしまうため)。
+    let ai_home = state_owned_by(&app, ai);
     let defender_id = spawn_division_at(
         &mut app,
         ai,
-        home,
+        ai_home,
         DivisionStatus::Fighting,
         10_000,
         10_000,
@@ -766,8 +769,17 @@ fn test_35_p25_004_equipment_loss_still_follows_the_actual_applied_casualty() {
     let temp_dir = TempTestDir::new("p25_004_link");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
-    let attacker_id = spawn_division(&mut app, player, 10_000, 10_000, 100.0, 100.0, 10, 10);
-    let defender_id = spawn_division(&mut app, ai, 10_000, 10_000, 50.0, 100.0, 10, 15);
+    // P26-006: 首都連結性が戦闘力へ影響するため、各Divisionを自国が実際に支配する
+    // 実マップ州(`TEST_STATE_ID`ではなく)へ配置し、両者とも補給充足率1.0(完全連結)の
+    // まま本テストの主眼(P25-004の装備損失連動)を検証する。
+    let player_home = state_owned_by(&app, player);
+    let ai_home = state_owned_by(&app, ai);
+    let attacker_id = spawn_division_at(
+        &mut app, player, player_home, DivisionStatus::Fighting, 10_000, 10_000, 100.0, 100.0, 10, 10,
+    );
+    let defender_id = spawn_division_at(
+        &mut app, ai, ai_home, DivisionStatus::Fighting, 10_000, 10_000, 50.0, 100.0, 10, 15,
+    );
     let war_id = create_war(&mut app, player, ai);
     create_battle(&mut app, war_id, player, ai, vec![attacker_id], vec![defender_id]);
 

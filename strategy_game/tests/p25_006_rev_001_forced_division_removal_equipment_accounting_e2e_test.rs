@@ -282,6 +282,18 @@ fn get_division(app: &App, id: DivisionId) -> Option<Division> {
         .cloned()
 }
 
+/// P26-006: 首都連結性が戦闘力へ影響するため、Divisionを自国が実際に支配する
+/// 実マップ州(`TEST_STATE_ID`ではなく)へ配置するためのヘルパー(P25-007と同じ方式)。
+fn state_owned_by(app: &App, owner: CountryId) -> StateId {
+    app.world()
+        .resource::<StateRegistry>()
+        .states
+        .iter()
+        .find(|s| s.owner_country_id == owner)
+        .map(|s| s.id)
+        .expect("real map must have at least one state owned by this country")
+}
+
 /// 攻撃側が単独では守備側を突破できない(=組織率0に達して撤退する)、
 /// P21-siegeの`test_solo_attacker_cannot_break_well_defended_state`と同じ
 /// 攻撃10/防御15の非対称statsで、実App上に1対1戦闘を組み立てる。
@@ -293,11 +305,15 @@ fn get_division(app: &App, id: DivisionId) -> Option<Division> {
 fn setup_retreating_battle(app: &mut App, attacker_equipment: f64) -> (DivisionId, DivisionId) {
     let player = CountryId(0);
     let ai_country = CountryId(1);
+    // P26-006: 首都連結性が戦闘力へ影響するため、実マップ州(自国支配)へ配置する
+    // (P25-007と同じ`state_owned_by`方式)。
+    let player_home = state_owned_by(app, player);
+    let ai_home = state_owned_by(app, ai_country);
 
     let attacker_id = spawn_division(
         app,
         player,
-        TEST_STATE_ID,
+        player_home,
         10_000,
         10_000,
         attacker_equipment,
@@ -309,7 +325,7 @@ fn setup_retreating_battle(app: &mut App, attacker_equipment: f64) -> (DivisionI
     let defender_id = spawn_division(
         app,
         ai_country,
-        TEST_STATE_ID,
+        ai_home,
         10_000,
         10_000,
         100.0,

@@ -38,16 +38,18 @@
 //! 「旧Save・未処理Divisionのdefaultは1.0」というspec §8の要件を満たす。
 
 use crate::app::time::DayChangedMessage;
-use crate::common::{CountryId, DivisionDefinitionId, DivisionId};
+use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use crate::country::{CountryData, CountryRegistry};
 use crate::economy::resources::{
     MilitarySuppliesUnitsError, ResourceType, military_supplies_units_to_value,
     military_supplies_value_to_units,
 };
+use crate::military::capital_connectivity::connected_states_from_capital;
 use crate::military::data::{Division, DivisionDefinition, DivisionStatus, MilitaryRegistry};
 use crate::military::supply_initialization::{
     SupplyDemandError, country_daily_demand_units, division_daily_demand_units, is_living,
 };
+use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
@@ -68,13 +70,22 @@ pub struct DivisionSupplyAllocation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CountrySupplyPlan {
     pub country_id: CountryId,
-    /// `D_c = Σ D_i`。
+    /// `D_c = Σ D_i`(首都連結性に関わらず、生存する全Divisionの需要合計)。
+    /// P26-004-PRE-005の`country_daily_demand_units`と常に一致する
+    /// (`debug_assert_eq!`で突き合わせる、既存の不変条件をP26-006でも維持する)。
     pub total_demand_units: u128,
-    /// `C_c = min(D_c, A_c)`。
+    /// P26-006: `eligible_demand_c = Σ D_i`(首都と陸路で連結しているDivisionのみ)。
+    /// 国家備蓄からの実消費・Hamilton配分は、この値だけを基準にする
+    /// (spec §10)。全Divisionが連結している通常時は`total_demand_units`と一致する。
+    pub eligible_demand_units: u128,
+    /// `C_c = min(eligible_demand_c, A_c)`(P26-006で連結Divisionの需要だけを基準に
+    /// 変更、切断Divisionの需要は国家備蓄から一切消費しない、spec §10)。
     pub consumed_units: u128,
     /// `DivisionId`昇順。国家が保有する生存Division(`is_living`、P26-004-PRE-005と
-    /// 同じ判定式)のみを含む――manpower 0・DestroyedのDivisionはここに現れない
-    /// (需要0として自然に除外される、spec §12)。
+    /// 同じ判定式)全員を含む――manpower 0・DestroyedのDivisionはここに現れない
+    /// (需要0として自然に除外される、spec §12)。P26-006により、連結Division
+    /// (Hamilton配分・需要0なら1.0)と切断Division(配分0、需要正なら0.0・需要0なら
+    /// 1.0、spec §11)の両方をこの1つのリストへ統合する。
     pub allocations: Vec<DivisionSupplyAllocation>,
 }
 
@@ -117,11 +128,18 @@ pub enum DailySupplyApplyError {
 /// (`DivisionId`昇順)は`country_daily_demand_units`と完全に同じ規約を用いるため、
 /// `total_demand_units`は常に`country_daily_demand_units`の戻り値と一致する
 /// (debugビルドでは`debug_assert_eq!`により実際に突き合わせる)。
+///
+/// `connected_states`(P26-006、`capital_connectivity::connected_states_from_capital`が
+/// 前日終値のcontroller()から算出した集合)に`division.current_state`が含まれる
+/// Divisionだけが「連結」として国家備蓄からの実消費・Hamilton配分の対象になる
+/// (spec §10)。含まれないDivisionは「切断」として配分0を受け、需要が正なら
+/// 補給率0.0・需要0なら補給率1.0になる(spec §11、国家備蓄からは一切消費しない)。
 pub fn plan_country_daily_supply(
     country_id: CountryId,
     current_stockpile_value: f64,
     divisions: &HashMap<DivisionId, Division>,
     definitions: &HashMap<DivisionDefinitionId, DivisionDefinition>,
+    connected_states: &HashSet<StateId>,
 ) -> Result<CountrySupplyPlan, DailySupplyPlanError> {
     let mut ids: Vec<DivisionId> = divisions
         .values()
@@ -144,6 +162,8 @@ pub fn plan_country_daily_supply(
     // P26-004-PRE-005の正規合計関数と厳密に一致することを実測で突き合わせる
     // (同じis_livingフィルタ・同じDivisionId昇順・同じdivision_daily_demand_unitsの
     // 呼び出しから導かれる合計であるため、数学的に常に一致するはずの不変条件)。
+    // P26-006: この総需要は首都連結性に関わらない値のままであり続ける(P26-006が
+    // 変更するのは「そのうちどれだけを実際に配分・消費するか」だけである)。
     debug_assert_eq!(
         Ok(total_demand_units),
         country_daily_demand_units(country_id, divisions, definitions),
@@ -152,16 +172,33 @@ pub fn plan_country_daily_supply(
          legitimate error state"
     );
 
+    // P26-006(spec §10): 連結/切断への分類。DivisionId昇順を維持したまま分割する。
+    let mut eligible: Vec<(DivisionId, u128)> = Vec::with_capacity(per_division.len());
+    let mut disconnected: Vec<(DivisionId, u128)> = Vec::new();
+    for &(id, demand) in &per_division {
+        let division = &divisions[&id];
+        if connected_states.contains(&division.current_state) {
+            eligible.push((id, demand));
+        } else {
+            disconnected.push((id, demand));
+        }
+    }
+    let eligible_demand_units: u128 = eligible
+        .iter()
+        .try_fold(0u128, |acc, &(_, demand)| acc.checked_add(demand))
+        .ok_or(DailySupplyPlanError::Overflow)?;
+
     let current_units = military_supplies_value_to_units(current_stockpile_value)
         .map_err(|_| DailySupplyPlanError::InvalidCurrentStockpile)?;
 
-    let consumed_units = total_demand_units.min(current_units as u128);
+    let consumed_units = eligible_demand_units.min(current_units as u128);
 
-    let allocations = if total_demand_units == 0 || consumed_units == total_demand_units {
-        // 需要0、または備蓄が総需要以上(spec §7: 常に需要全量を配分する)。
-        per_division
-            .into_iter()
-            .map(|(id, demand)| DivisionSupplyAllocation {
+    let mut allocations = if eligible_demand_units == 0 || consumed_units == eligible_demand_units {
+        // 連結Divisionの需要0、または備蓄が連結Divisionの総需要以上
+        // (spec §7/§10: 常に連結Divisionの需要全量を配分する)。
+        eligible
+            .iter()
+            .map(|&(id, demand)| DivisionSupplyAllocation {
                 division_id: id,
                 demand_units: demand,
                 allocated_units: demand,
@@ -169,12 +206,28 @@ pub fn plan_country_daily_supply(
             })
             .collect()
     } else {
-        allocate_by_largest_remainder(consumed_units, total_demand_units, &per_division)?
+        allocate_by_largest_remainder(consumed_units, eligible_demand_units, &eligible)?
     };
+
+    // P26-006(spec §11): 切断Divisionは配分0。需要が正なら補給率0.0、需要0なら
+    // 「要求がない状態は完全充足として扱う」という既存契約(spec §11・P26-004 §8)を
+    // 維持して補給率1.0とする。国家備蓄への影響は一切ない(このループは
+    // `consumed_units`計算より後にあり、`disconnected`の需要をどこにも加算しない)。
+    for &(id, demand) in &disconnected {
+        let fulfillment = if demand == 0 { 1.0 } else { 0.0 };
+        allocations.push(DivisionSupplyAllocation {
+            division_id: id,
+            demand_units: demand,
+            allocated_units: 0,
+            fulfillment,
+        });
+    }
+    allocations.sort_by_key(|a| a.division_id.0);
 
     Ok(CountrySupplyPlan {
         country_id,
         total_demand_units,
+        eligible_demand_units,
         consumed_units,
         allocations,
     })
@@ -322,9 +375,14 @@ pub fn apply_country_daily_supply_plan(
 /// 1日分の全国家の日次補給処理を実行する(spec §9)。`CountryId`昇順で決定的に処理し、
 /// ある国家の失敗(不正Division・不正備蓄等)は`warn!`で記録してその国家の備蓄・
 /// Division充足率を一切変更せず、他国家の処理へ影響しない(spec §9)。
+///
+/// P26-006: 各国家の首都連結州集合(`state_registry`が保持する前日終値の
+/// `controller()`から算出)を需要算定より先に求め、`plan_country_daily_supply`へ
+/// 渡す(spec §10・§14)。
 pub fn run_daily_military_supply_consumption(
     country_registry: &mut CountryRegistry,
     military_registry: &mut MilitaryRegistry,
+    state_registry: &StateRegistry,
 ) {
     let mut country_ids: Vec<CountryId> =
         country_registry.countries.iter().map(|c| c.id).collect();
@@ -340,11 +398,24 @@ pub fn run_daily_military_supply_consumption(
         }
         let stockpile_value = country.stockpile.get(ResourceType::MilitarySupplies);
 
+        // P26-006(spec §7): 首都が存在しない・海上州・敵支配等でtraversableでない
+        // 場合、`connected_states_from_capital`は空集合を返す――このとき正の需要を
+        // 持つ全Divisionは下の`plan_country_daily_supply`によって補給率0として
+        // 扱われる。`current_capital_state_id()`は`is_active()`を満たす国家では
+        // 常に`Some`だが、将来の変更に対して安全側(空集合)に倒す。
+        let connected_states = match country.current_capital_state_id() {
+            Some(capital) => {
+                connected_states_from_capital(capital, country_id, state_registry)
+            }
+            None => HashSet::new(),
+        };
+
         let plan = match plan_country_daily_supply(
             country_id,
             stockpile_value,
             &military_registry.divisions,
             &military_registry.definitions,
+            &connected_states,
         ) {
             Ok(plan) => plan,
             Err(err) => {
@@ -391,17 +462,22 @@ pub fn process_daily_military_supply_consumption(
     mut day_events: MessageReader<DayChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     mut military_registry: ResMut<MilitaryRegistry>,
+    state_registry: Res<StateRegistry>,
 ) {
     for _event in day_events.read() {
-        run_daily_military_supply_consumption(&mut country_registry, &mut military_registry);
+        run_daily_military_supply_consumption(
+            &mut country_registry,
+            &mut military_registry,
+            &state_registry,
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::StateId;
     use crate::military::data::{DivisionSize, DivisionType};
+    use crate::state::data::StateData;
 
     // ─── フィクスチャ(supply_initializationと同じ構成方針) ─────────────
 
@@ -491,13 +567,22 @@ mod tests {
         }
     }
 
+    /// P26-006以前の全既存テストが暗黙に前提としていた「全Divisionが常に連結」
+    /// 状態を再現するヘルパー。このモジュールの`division()`フィクスチャは常に
+    /// `current_state: StateId(0)`を使うため、`{StateId(0)}`を渡せば
+    /// P26-006導入前と数学的に同一の(`eligible_demand_units == total_demand_units`
+    /// となる)計画になる。
+    fn connected_all() -> HashSet<StateId> {
+        [StateId(0)].into_iter().collect()
+    }
+
     // ─── A. 需要(reuse, not duplicated) ──────────────────────────────
 
     #[test]
     fn plan_reuses_the_canonical_demand_function_for_a_single_full_strength_infantry() {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000)]);
-        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.total_demand_units, 1_000_000);
         assert_eq!(plan.allocations.len(), 1);
@@ -514,7 +599,7 @@ mod tests {
         ]);
         let expected =
             country_daily_demand_units(CountryId(0), &divisions, &definitions).unwrap();
-        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.total_demand_units, expected);
     }
@@ -523,7 +608,7 @@ mod tests {
     fn half_manpower_division_demands_half() {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 5_000, 10_000)]);
-        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.total_demand_units, 500_000);
     }
@@ -532,7 +617,7 @@ mod tests {
     fn zero_manpower_division_is_excluded_from_demand_and_gets_full_fulfillment_on_apply() {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 0, 10_000)]);
-        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.total_demand_units, 0);
         assert!(plan.allocations.is_empty(), "manpower 0 division is not a living division");
@@ -554,7 +639,7 @@ mod tests {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 99, 10_000, 10_000)]);
         let err =
-            plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions).unwrap_err();
+            plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all()).unwrap_err();
         assert!(matches!(err, DailySupplyPlanError::Demand(_)));
     }
 
@@ -563,7 +648,7 @@ mod tests {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 11_000, 10_000)]);
         let err =
-            plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions).unwrap_err();
+            plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all()).unwrap_err();
         assert!(matches!(err, DailySupplyPlanError::Demand(_)));
     }
 
@@ -576,7 +661,7 @@ mod tests {
             division(0, 0, 0, 10_000, 10_000),
             division(1, 0, 0, 10_000, 10_000),
         ]);
-        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.consumed_units, 2_000_000);
         for a in &plan.allocations {
@@ -590,7 +675,7 @@ mod tests {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000)]);
         // 1.0 value = 1_000_000 units = exactly the demand.
-        let plan = plan_country_daily_supply(CountryId(0), 1.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 1.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.consumed_units, 1_000_000);
         assert_eq!(plan.total_demand_units, 1_000_000);
@@ -602,7 +687,7 @@ mod tests {
         let divisions: HashMap<DivisionId, Division> = HashMap::new();
         let mut country = test_country(0);
         country.stockpile.set(ResourceType::MilitarySupplies, 42.0);
-        let plan = plan_country_daily_supply(CountryId(0), 42.0, &divisions, &definitions)
+        let plan = plan_country_daily_supply(CountryId(0), 42.0, &divisions, &definitions, &connected_all())
             .unwrap();
         assert_eq!(plan.consumed_units, 0);
         let mut military_registry =
@@ -618,7 +703,7 @@ mod tests {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000)]);
         let plan =
-            plan_country_daily_supply(CountryId(0), 0.0, &divisions, &definitions).unwrap();
+            plan_country_daily_supply(CountryId(0), 0.0, &divisions, &definitions, &connected_all()).unwrap();
         assert_eq!(plan.consumed_units, 0);
         assert_eq!(plan.allocations[0].allocated_units, 0);
         assert_eq!(plan.allocations[0].fulfillment, 0.0);
@@ -629,7 +714,7 @@ mod tests {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000)]);
         let plan =
-            plan_country_daily_supply(CountryId(0), 0.5, &divisions, &definitions).unwrap();
+            plan_country_daily_supply(CountryId(0), 0.5, &divisions, &definitions, &connected_all()).unwrap();
         assert_eq!(plan.consumed_units, 500_000);
         assert_eq!(plan.allocations[0].allocated_units, 500_000);
         assert_eq!(plan.allocations[0].fulfillment, 0.5);
@@ -646,7 +731,7 @@ mod tests {
         let consumed_units = 2_000_000u128 - 1;
         let stockpile_value = military_supplies_units_to_value(consumed_units as u64);
         let plan =
-            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions)
+            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected_all())
                 .unwrap();
         assert_eq!(plan.consumed_units, consumed_units);
         let sum: u128 = plan.allocations.iter().map(|a| a.allocated_units).sum();
@@ -672,7 +757,7 @@ mod tests {
         ]);
         let stockpile_value = military_supplies_units_to_value(1);
         let plan =
-            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions)
+            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected_all())
                 .unwrap();
         assert_eq!(plan.consumed_units, 1);
         let sum: u128 = plan.allocations.iter().map(|a| a.allocated_units).sum();
@@ -698,7 +783,7 @@ mod tests {
         ]);
         let stockpile_value = military_supplies_units_to_value(2_500_000);
         let plan =
-            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions)
+            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected_all())
                 .unwrap();
         assert_eq!(plan.consumed_units, 2_500_000);
         // base_0 = floor(2_500_000*1_000_000/4_000_000) = 625_000, remainder 0
@@ -727,7 +812,7 @@ mod tests {
         for units in 0..=total {
             let value = military_supplies_units_to_value(units as u64);
             let plan =
-                plan_country_daily_supply(CountryId(0), value, &divisions, &definitions).unwrap();
+                plan_country_daily_supply(CountryId(0), value, &divisions, &definitions, &connected_all()).unwrap();
             let sum: u128 = plan.allocations.iter().map(|a| a.allocated_units).sum();
             assert_eq!(sum, plan.consumed_units, "allocation sum must equal consumed units");
             for a in &plan.allocations {
@@ -746,7 +831,7 @@ mod tests {
     fn invalid_current_stockpile_is_an_explicit_planning_error() {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000)]);
-        let err = plan_country_daily_supply(CountryId(0), f64::NAN, &divisions, &definitions)
+        let err = plan_country_daily_supply(CountryId(0), f64::NAN, &divisions, &definitions, &connected_all())
             .unwrap_err();
         assert_eq!(err, DailySupplyPlanError::InvalidCurrentStockpile);
     }
@@ -756,7 +841,7 @@ mod tests {
         let definitions = defs(vec![infantry_def(0)]);
         let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000)]);
         let err =
-            plan_country_daily_supply(CountryId(0), f64::INFINITY, &divisions, &definitions)
+            plan_country_daily_supply(CountryId(0), f64::INFINITY, &divisions, &definitions, &connected_all())
                 .unwrap_err();
         assert_eq!(err, DailySupplyPlanError::InvalidCurrentStockpile);
     }
@@ -772,6 +857,7 @@ mod tests {
         let bad_plan = CountrySupplyPlan {
             country_id: CountryId(0),
             total_demand_units: 1_000_000,
+            eligible_demand_units: 1_000_000,
             consumed_units: (u64::MAX as u128) + 1, // out of u64 range on purpose
             allocations: vec![DivisionSupplyAllocation {
                 division_id: DivisionId(0),
@@ -803,6 +889,7 @@ mod tests {
         let plan = CountrySupplyPlan {
             country_id: CountryId(0),
             total_demand_units: 1_000_000,
+            eligible_demand_units: 1_000_000,
             consumed_units: 1_000_000, // more than the 100_000 units actually present
             allocations: vec![DivisionSupplyAllocation {
                 division_id: DivisionId(0),
@@ -829,7 +916,7 @@ mod tests {
             division(0, 0, 0, 10_000, 10_000),
             division(1, 0, 99, 10_000, 10_000), // unknown definition
         ]);
-        let err = plan_country_daily_supply(CountryId(0), 10.0, &divisions, &definitions)
+        let err = plan_country_daily_supply(CountryId(0), 10.0, &divisions, &definitions, &connected_all())
             .unwrap_err();
         assert!(matches!(err, DailySupplyPlanError::Demand(_)));
     }
@@ -837,12 +924,24 @@ mod tests {
     #[test]
     fn one_countrys_planning_failure_does_not_disturb_another_countrys_processing() {
         let definitions = defs(vec![infantry_def(0)]);
+        let mut division_1 = division(1, 1, 0, 10_000, 10_000); // country 1: healthy
+        division_1.current_state = StateId(1); // P26-006: country 1's own state, not country 0's
         let divisions = divs(vec![
             division(0, 0, 0, 11_000, 10_000), // country 0: corrupt (manpower>max)
-            division(1, 1, 0, 10_000, 10_000), // country 1: healthy
+            division_1,
+        ]);
+        // P26-006: 各国家が自国の首都を実効支配している最小のStateRegistry
+        // (country 0の破損検証自体は接続性と無関係だが、country 1が正常に
+        // 処理されるためには自国の首都と繋がっている必要がある)。
+        let state_registry = StateRegistry::build(vec![
+            StateData { id: StateId(0), owner_country_id: CountryId(0), ..Default::default() },
+            StateData { id: StateId(1), owner_country_id: CountryId(1), ..Default::default() },
         ]);
         let mut country_registry = CountryRegistry {
-            countries: vec![test_country(0), test_country(1)],
+            countries: vec![
+                CountryData { capital_state_id: StateId(0), ..test_country(0) },
+                CountryData { capital_state_id: StateId(1), ..test_country(1) },
+            ],
         };
         country_registry
             .get_mut(CountryId(0))
@@ -857,7 +956,7 @@ mod tests {
         let mut military_registry =
             MilitaryRegistry::from_saved_parts(definitions, divisions, 2, HashMap::new());
 
-        run_daily_military_supply_consumption(&mut country_registry, &mut military_registry);
+        run_daily_military_supply_consumption(&mut country_registry, &mut military_registry, &state_registry);
 
         // country 0 untouched (planning failed).
         assert_eq!(
@@ -899,6 +998,7 @@ mod tests {
             stockpile_value,
             &divs(list_a),
             &definitions,
+            &connected_all(),
         )
         .unwrap();
         let plan_b = plan_country_daily_supply(
@@ -906,6 +1006,7 @@ mod tests {
             stockpile_value,
             &divs(list_b),
             &definitions,
+            &connected_all(),
         )
         .unwrap();
         assert_eq!(plan_a, plan_b);
@@ -914,15 +1015,28 @@ mod tests {
     #[test]
     fn country_insertion_order_does_not_change_the_outcome() {
         let definitions = defs(vec![infantry_def(0)]);
-        let divisions = divs(vec![
-            division(0, 0, 0, 10_000, 10_000),
-            division(1, 1, 0, 10_000, 10_000),
+        let mut division_1 = division(1, 1, 0, 10_000, 10_000);
+        division_1.current_state = StateId(1); // P26-006: country 1's own state
+        let divisions = divs(vec![division(0, 0, 0, 10_000, 10_000), division_1]);
+        // P26-006: 両国とも自国の首都を実効支配している最小のStateRegistry
+        // (国家処理順序を変えても、connected_states_from_capitalの入力自体は
+        // country registryの反復順に一切依存しないため、この決定性テストの
+        // 前提は影響を受けない)。
+        let state_registry = StateRegistry::build(vec![
+            StateData { id: StateId(0), owner_country_id: CountryId(0), ..Default::default() },
+            StateData { id: StateId(1), owner_country_id: CountryId(1), ..Default::default() },
         ]);
         let mut order_a = CountryRegistry {
-            countries: vec![test_country(0), test_country(1)],
+            countries: vec![
+                CountryData { capital_state_id: StateId(0), ..test_country(0) },
+                CountryData { capital_state_id: StateId(1), ..test_country(1) },
+            ],
         };
         let mut order_b = CountryRegistry {
-            countries: vec![test_country(1), test_country(0)],
+            countries: vec![
+                CountryData { capital_state_id: StateId(1), ..test_country(1) },
+                CountryData { capital_state_id: StateId(0), ..test_country(0) },
+            ],
         };
         for reg in [&mut order_a, &mut order_b] {
             for id in [0usize, 1] {
@@ -937,8 +1051,8 @@ mod tests {
         let mut mil_b =
             MilitaryRegistry::from_saved_parts(definitions, divisions, 2, HashMap::new());
 
-        run_daily_military_supply_consumption(&mut order_a, &mut mil_a);
-        run_daily_military_supply_consumption(&mut order_b, &mut mil_b);
+        run_daily_military_supply_consumption(&mut order_a, &mut mil_a, &state_registry);
+        run_daily_military_supply_consumption(&mut order_b, &mut mil_b, &state_registry);
 
         for id in [0usize, 1] {
             assert_eq!(
@@ -962,11 +1076,206 @@ mod tests {
                 division(2, 0, 2, 9_999, 10_000),
             ]);
             let stockpile_value = military_supplies_units_to_value(1_234_567);
-            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions)
+            plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected_all())
                 .unwrap()
         }
         let a = run();
         let b = run();
         assert_eq!(a, b);
+    }
+
+    // ─── P26-006: 首都連結性による分類(spec §10・§11・§21 Category D) ────────
+
+    /// `division()`と同じ規格だが、`current_state`を指定できる版
+    /// (P26-006の接続/切断分類テスト専用)。
+    fn division_at(div_id: usize, owner: usize, def_id: usize, manpower: u64, max_manpower: u64, state: usize) -> Division {
+        let mut d = division(div_id, owner, def_id, manpower, max_manpower);
+        d.current_state = StateId(state);
+        d
+    }
+
+    #[test]
+    fn p26_006_all_divisions_connected_matches_pre_p26_006_result_exactly() {
+        // connected_all()(={StateId(0)})は全Divisionのcurrent_stateと一致するため、
+        // eligible_demand_units == total_demand_unitsとなり、P26-004時点と数学的に
+        // 同一の計画になる(既存の24件がそのまま無変更で合格していることの直接証拠、
+        // ここでは明示的にeligible==totalを確認する)。
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![
+            division(0, 0, 0, 10_000, 10_000),
+            division(1, 0, 0, 5_000, 10_000),
+        ]);
+        let plan = plan_country_daily_supply(CountryId(0), 0.5, &divisions, &definitions, &connected_all())
+            .unwrap();
+        assert_eq!(plan.eligible_demand_units, plan.total_demand_units);
+    }
+
+    #[test]
+    fn p26_006_disconnected_division_with_positive_demand_gets_zero_allocation_and_zero_fulfillment() {
+        let definitions = defs(vec![infantry_def(0)]);
+        // division 0 は連結州(0)、division 1 は切断州(99)
+        let divisions = divs(vec![
+            division_at(0, 0, 0, 10_000, 10_000, 0),
+            division_at(1, 0, 0, 10_000, 10_000, 99),
+        ]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected)
+            .unwrap();
+
+        let d0 = plan.allocations.iter().find(|a| a.division_id == DivisionId(0)).unwrap();
+        let d1 = plan.allocations.iter().find(|a| a.division_id == DivisionId(1)).unwrap();
+        assert_eq!(d0.fulfillment, 1.0, "接続Divisionは通常どおり満タン充足のはず");
+        assert_eq!(d1.allocated_units, 0, "切断Divisionへの配分は常に0のはず");
+        assert_eq!(d1.fulfillment, 0.0, "切断・正需要Divisionの補給率は0.0のはず");
+    }
+
+    #[test]
+    fn p26_006_all_divisions_disconnected_consumes_nothing_from_stockpile() {
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![division_at(0, 0, 0, 10_000, 10_000, 99)]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect(); // division 0(state 99)は含まれない
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected)
+            .unwrap();
+        assert_eq!(plan.eligible_demand_units, 0);
+        assert_eq!(plan.consumed_units, 0, "切断Divisionの需要は国家備蓄から一切消費しないはず");
+        assert_eq!(plan.allocations[0].fulfillment, 0.0);
+        // total_demand_unitsは接続性に関わらず正のまま(P26-004-PRE-005の正規合計)。
+        assert!(plan.total_demand_units > 0);
+    }
+
+    #[test]
+    fn p26_006_disconnected_division_with_zero_demand_gets_full_fulfillment() {
+        // manpower 0 は is_living で除外されるため、「需要0の切断Division」は
+        // 生存(manpower>0)かつsupply_usage=0.0のDefinitionを使って作る。
+        let mut zero_usage_def = infantry_def(0);
+        zero_usage_def.supply_usage = 0.0;
+        let definitions = defs(vec![zero_usage_def]);
+        let divisions = divs(vec![division_at(0, 0, 0, 10_000, 10_000, 99)]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        let plan = plan_country_daily_supply(CountryId(0), 100.0, &divisions, &definitions, &connected)
+            .unwrap();
+        assert_eq!(plan.allocations[0].demand_units, 0);
+        assert_eq!(plan.allocations[0].allocated_units, 0);
+        assert_eq!(
+            plan.allocations[0].fulfillment, 1.0,
+            "切断・需要0のDivisionは「要求がない状態は完全充足」の既存契約どおり1.0のはず"
+        );
+    }
+
+    #[test]
+    fn p26_006_shortage_is_computed_against_connected_demand_only_not_total_demand() {
+        // 接続Division 1体(需要1.0)+切断Division 1体(需要1.0、需要は多いが対象外)。
+        // 備蓄0.6は接続分の需要(1.0)には足りないが、総需要(2.0)よりは少ない
+        // ――もし誤って総需要を基準にすると備蓄不足の判定自体が変わってしまう。
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![
+            division_at(0, 0, 0, 10_000, 10_000, 0), // 接続
+            division_at(1, 0, 0, 10_000, 10_000, 99), // 切断
+        ]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        let stockpile_value = military_supplies_units_to_value(600_000); // 0.6 units
+        let plan = plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected)
+            .unwrap();
+        assert_eq!(plan.eligible_demand_units, 1_000_000);
+        assert_eq!(plan.total_demand_units, 2_000_000);
+        assert_eq!(plan.consumed_units, 600_000, "消費量は接続分の需要だけを基準にするはず");
+        let d0 = plan.allocations.iter().find(|a| a.division_id == DivisionId(0)).unwrap();
+        assert_eq!(d0.fulfillment, 0.6);
+    }
+
+    #[test]
+    fn p26_006_disconnected_divisions_are_excluded_from_the_hamilton_denominator() {
+        // 接続2体(需要1.0ずつ)+切断1体(需要1.0)。備蓄1.0(接続分の需要2.0の半分)を
+        // 接続2体だけで50%ずつ均等配分するはず――切断分の需要が分母(D_c)へ
+        // 紛れ込んでいたら按分比率が変わってしまう。
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![
+            division_at(0, 0, 0, 10_000, 10_000, 0),
+            division_at(1, 0, 0, 10_000, 10_000, 0),
+            division_at(2, 0, 0, 10_000, 10_000, 99),
+        ]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        let stockpile_value = military_supplies_units_to_value(1_000_000); // 1.0 units
+        let plan = plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected)
+            .unwrap();
+        let d0 = plan.allocations.iter().find(|a| a.division_id == DivisionId(0)).unwrap();
+        let d1 = plan.allocations.iter().find(|a| a.division_id == DivisionId(1)).unwrap();
+        let d2 = plan.allocations.iter().find(|a| a.division_id == DivisionId(2)).unwrap();
+        assert_eq!(d0.allocated_units, 500_000);
+        assert_eq!(d1.allocated_units, 500_000);
+        assert_eq!(d2.allocated_units, 0);
+        assert_eq!(d0.fulfillment, 0.5);
+        assert_eq!(d1.fulfillment, 0.5);
+        assert_eq!(d2.fulfillment, 0.0);
+    }
+
+    #[test]
+    fn p26_006_sum_of_connected_allocations_equals_consumed_units_disconnected_stays_out() {
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![
+            division_at(0, 0, 0, 10_000, 10_000, 0),
+            division_at(1, 0, 0, 7_000, 10_000, 0),
+            division_at(2, 0, 0, 10_000, 10_000, 99),
+        ]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        let stockpile_value = military_supplies_units_to_value(1_500_000);
+        let plan = plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected)
+            .unwrap();
+        let sum_allocated: u128 = plan.allocations.iter().map(|a| a.allocated_units).sum();
+        assert_eq!(sum_allocated, plan.consumed_units, "配分合計は消費量と一致するはず(切断分は常に0)");
+        let disconnected_total: u128 = plan
+            .allocations
+            .iter()
+            .filter(|a| a.division_id == DivisionId(2))
+            .map(|a| a.allocated_units)
+            .sum();
+        assert_eq!(disconnected_total, 0);
+    }
+
+    #[test]
+    fn p26_006_hamilton_tie_break_by_division_id_is_preserved_among_connected_divisions() {
+        // P26-004の既存tie-break(remainder降順→DivisionId昇順)が、接続Divisionだけの
+        // 母集合でも維持されることを確認する(P26-004-PRE-005/P26-004のtie-breakテストと
+        // 同じ数値設定、切断Divisionを1体追加しただけ)。
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![
+            division_at(0, 0, 0, 10_000, 10_000, 0),
+            division_at(1, 0, 0, 10_000, 10_000, 0),
+            division_at(2, 0, 0, 10_000, 10_000, 99), // 切断、tie-breakに関与しない
+        ]);
+        let connected: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        // 総需要2.0のうち1単位不足(1_999_999 units)。remainderが同値なら
+        // DivisionId昇順(0が優先)で端数を受け取るはず。
+        let stockpile_value = military_supplies_units_to_value(1_999_999);
+        let plan = plan_country_daily_supply(CountryId(0), stockpile_value, &divisions, &definitions, &connected)
+            .unwrap();
+        let d0 = plan.allocations.iter().find(|a| a.division_id == DivisionId(0)).unwrap();
+        let d1 = plan.allocations.iter().find(|a| a.division_id == DivisionId(1)).unwrap();
+        assert_eq!(d0.allocated_units, 1_000_000, "DivisionId昇順で端数を受け取るのは0のはず");
+        assert_eq!(d1.allocated_units, 999_999);
+    }
+
+    #[test]
+    fn p26_006_one_countrys_disconnected_division_does_not_change_another_countrys_plan() {
+        // plan_country_daily_supplyは国家単位の純粋関数のため、他国家の切断状態は
+        // そもそも入力に現れない――country_idでフィルタされるdivisionsの母集合が
+        // 国家間分離を構造的に保証することを明示的に確認する。
+        let definitions = defs(vec![infantry_def(0)]);
+        let divisions = divs(vec![
+            division_at(0, 0, 0, 10_000, 10_000, 0),  // country 0: 接続
+            division_at(1, 1, 0, 10_000, 10_000, 99), // country 1: 切断(country 0視点では無関係)
+        ]);
+        let connected_for_country_0: HashSet<StateId> = [StateId(0)].into_iter().collect();
+        let plan = plan_country_daily_supply(
+            CountryId(0),
+            100.0,
+            &divisions,
+            &definitions,
+            &connected_for_country_0,
+        )
+        .unwrap();
+        assert_eq!(plan.allocations.len(), 1);
+        assert_eq!(plan.allocations[0].division_id, DivisionId(0));
+        assert_eq!(plan.allocations[0].fulfillment, 1.0);
     }
 }

@@ -478,6 +478,10 @@ fn equipment_reinforced_the_same_day_can_still_be_lost_to_combat_that_day() {
     let temp_dir = TempTestDir::new("reinforce_then_combat");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
     let home = state_owned_by(&app, player);
+    // P26-006: defenderはai_country自身が支配する実マップ州へ配置する(`home`は
+    // playerの支配州であり、ai_countryにとっては首都連結性がなく補給率0になり、
+    // このテストの主眼[同日中の補充→戦闘]と無関係に戦闘力が0になってしまうため)。
+    let ai_home = state_owned_by(&app, ai_country);
 
     let attacker = spawn_division(
         &mut app,
@@ -492,7 +496,7 @@ fn equipment_reinforced_the_same_day_can_still_be_lost_to_combat_that_day() {
     let defender = spawn_division(
         &mut app,
         ai_country,
-        home,
+        ai_home,
         10_000,
         10_000,
         60.0,

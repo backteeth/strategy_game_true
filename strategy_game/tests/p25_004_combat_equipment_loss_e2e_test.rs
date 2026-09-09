@@ -40,6 +40,7 @@ use strategy_game::save::write::SavePathConfig;
 use strategy_game::save::{LoadGamePlugin, SaveGamePlugin, SaveRequestMessage};
 use strategy_game::state::SelectedState;
 use strategy_game::state::StatePlugin;
+use strategy_game::state::data::StateRegistry;
 use strategy_game::war::WarPlugin;
 use strategy_game::war::data::{War, WarRegistry, WarStatus};
 
@@ -276,15 +277,29 @@ fn get_division(app: &App, id: DivisionId) -> Option<Division> {
         .cloned()
 }
 
+/// P26-006: 首都連結性が戦闘力へ影響するため、Divisionを自国が実際に支配する
+/// 実マップ州(`TEST_STATE_ID`ではなく)へ配置するためのヘルパー(P25-007と同じ方式)。
+fn state_owned_by(app: &App, owner: CountryId) -> StateId {
+    app.world()
+        .resource::<StateRegistry>()
+        .states
+        .iter()
+        .find(|s| s.owner_country_id == owner)
+        .map(|s| s.id)
+        .expect("real map must have at least one state owned by this country")
+}
+
 /// player(CountryId(0))・ai_country(CountryId(1))間の1対1戦闘を実App上に組み立てる。
 fn setup_standard_battle(app: &mut App) -> (DivisionId, DivisionId) {
     let player = CountryId(0);
     let ai_country = CountryId(1);
+    let player_home = state_owned_by(app, player);
+    let ai_home = state_owned_by(app, ai_country);
 
     let attacker_id = spawn_division(
         app,
         player,
-        TEST_STATE_ID,
+        player_home,
         10_000,
         10_000,
         90.0,
@@ -295,7 +310,7 @@ fn setup_standard_battle(app: &mut App) -> (DivisionId, DivisionId) {
     let defender_id = spawn_division(
         app,
         ai_country,
-        TEST_STATE_ID,
+        ai_home,
         10_000,
         10_000,
         60.0,
@@ -460,11 +475,14 @@ fn test_y_zero_equipment_divisions_reproduce_the_pre_p25_004_manpower_and_organi
     let ai_country = CountryId(1);
     let temp_dir = TempTestDir::new("test_y");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
+    // P26-006: 首都連結性が戦闘力へ影響するため、実マップ州(自国支配)へ配置する。
+    let player_home = state_owned_by(&app, player);
+    let ai_home = state_owned_by(&app, ai_country);
 
     let attacker_id = spawn_division(
         &mut app,
         player,
-        TEST_STATE_ID,
+        player_home,
         10_000,
         10_000,
         0.0,
@@ -475,7 +493,7 @@ fn test_y_zero_equipment_divisions_reproduce_the_pre_p25_004_manpower_and_organi
     let defender_id = spawn_division(
         &mut app,
         ai_country,
-        TEST_STATE_ID,
+        ai_home,
         10_000,
         10_000,
         0.0,
