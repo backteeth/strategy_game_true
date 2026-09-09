@@ -1616,7 +1616,8 @@ pub fn process_daily_frontline_plans(
         frontline_registry,
     );
 
-    let frontline_ids: Vec<FrontlineId> = frontline_registry.frontlines.keys().copied().collect();
+    let mut frontline_ids: Vec<FrontlineId> = frontline_registry.frontlines.keys().copied().collect();
+    frontline_ids.sort_by_key(|id| id.0);
 
     for fl_id in frontline_ids {
         let frontline = match frontline_registry.frontlines.get(&fl_id).cloned() {
