@@ -269,6 +269,6 @@ P26-008-PRE-001は報告書のみのタスクで本番コード変更が無か�
 - 変更: `src/save/apply.rs`, `src/save/dto.rs`, `src/save/export.rs`, `src/save/runtime.rs`, `src/save/validate.rs`, `src/war/mod.rs`, `src/war/update.rs`
 - 変更(§32〜35の暦拡張・canonical値更新): `tests/p26_004_pre_002_deposit_aware_mine_construction_ai_e2e_test.rs`, `tests/p26_004_pre_004_minimum_supply_chain_data_migration_e2e_test.rs`, `tests/p26_004_pre_005_initial_supply_bridge_migration_e2e_test.rs`, `tests/p26_006_capital_connectivity_supply_e2e_test.rs`, `tests/p26_det_001_construction_ai_determinism_e2e_test.rs`, `tests/p26_det_001_rev_001_cross_state_production_order_e2e_test.rs`
 
-コミット前の最終`git status --short`は、上記ファイルのステージ後に空になる見込み(コミット実行時に実測して確定する、§後続の最終報告参照)。
+コミット後の最終`git status --short`は空(実測確認済み)。コミットハッシュ: `3944cd8f4b512308384a8e8d4b5eda9737c998a1`。
 
 **P26-008-A READY**: 本タスクにより、AI評価cadenceが正規の週次/月次/3日おき頻度へ復帰し、州支配・戦争変化への即時再評価が関係国だけに限定され、Save連続性(継続プレイとロード後の次回評価タイミング一致)が保証された。P26-008-PRE-001が設計した募兵ゲート・攻勢ゲート・建設優先度拡張は、この正しいcadence基盤の上に実装できる状態にある。
