@@ -160,22 +160,21 @@ pub struct SavedCrisisRegistry {
     pub next_id: usize,
 }
 
-/// `country::country_ai::CountryAiState`から派生キャッシュ無効化フラグ(`dirty`)を除いた
-/// 正規状態のみのDTO。
+/// `country::country_ai::CountryAiState`の正規状態DTO。
 ///
-/// P21-SAVE-002A1で実コード(`country::country_ai`)を再確認した結果、ランタイムの
-/// `dirty: bool`は`process_daily_country_ai`内の`is_weekly_due`/`is_monthly_due`判定
-/// (`(current_day % 7 == country_id % 7) || ai_state.dirty`等)にのみ使われ、評価の
-/// たびに`false`へリセットされる(かつ`mark_all_dirty`/`mark_country_dirty`で`true`に
-/// 戻される)、純粋なキャッシュ無効化・再評価要求フラグであることを確認した。ゲーム結果
-/// (資金・研究・戦争準備等の実際の判断内容)は`mode`/`decision_reason`/各`last_*_day`/
-/// `cooldown_until_day`にのみ現れ、`dirty`自体はいつ再評価するかのタイミングにしか
-/// 影響しない。よってこのDTOは保存対象から除外する。
-///
-/// 将来のロード実装(タスクD)では、この`dirty`を保存しない代わりに、復元後は
-/// (レジストリ・要素の両方とも)常に`true`から再開する方針を採る。古いキャッシュが
-/// 有効扱いになる状態を作らないため、ロード後最初の評価タイミングで必ず全AI国家が
-/// 再計算される。
+/// P21-SAVE-002A1では`dirty`を「純粋なキャッシュ無効化フラグ、いつ再評価するかの
+/// タイミングにしか影響しない」と判断して保存対象から除外していたが、この判断は
+/// `war::update::mark_ai_registries_dirty_daily`(当時の実装)が`DayChangedMessage`の
+/// たびに全国家を無条件で`dirty=true`へ戻していたため「dirtyの値自体はロード直後
+/// 何であっても、その日のうちにどうせtrueへ上書きされる」という事実の上に成り立って
+/// いた(P26-008-PRE-001で実測確認)。P26-008-PRE-002でこの無条件上書きを
+/// イベント駆動(`war::ai_change_tracking`)へ置き換えた結果、`dirty`は初めて
+/// **意味を持つ正規状態**になった――ロード直後に`dirty`を常に`true`へ戻すと、
+/// 継続プレイでは`dirty=false`だったはずの国家がロード後だけ余分に即時再評価
+/// されてしまう(save/loadの決定性が壊れる)。そのため`dirty`を実際の値のまま
+/// 保存・復元する。`#[serde(default = "default_dirty_true")]`により、この
+/// フィールドを持たない旧SaveはP21-SAVE-002A1と同じ安全側(`true`=初回即時再評価)
+/// から復元される。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedCountryAiState {
     pub country_id: CountryId,
@@ -185,12 +184,12 @@ pub struct SavedCountryAiState {
     pub last_weekly_evaluation_day: u32,
     pub last_monthly_evaluation_day: u32,
     pub cooldown_until_day: u32,
+    #[serde(default = "default_dirty_true")]
+    pub dirty: bool,
 }
 
-/// `war::military_ai::MilitaryAiState`から派生キャッシュ無効化フラグ(`dirty`)を除いた
-/// 正規状態のみのDTO。理由・将来方針は`SavedCountryAiState`と同じ(P21-SAVE-002A1で
-/// `war::military_ai`を再確認した結果、ランタイムの`dirty`は`process_daily_military_ai`
-/// 内の`is_evaluation_due`判定にのみ使われる純粋なキャッシュ無効化フラグであることを確認)。
+/// `war::military_ai::MilitaryAiState`の正規状態DTO。`dirty`往復の理由は
+/// `SavedCountryAiState`と同じ(P26-008-PRE-002、上記doc参照)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedMilitaryAiState {
     pub country_id: CountryId,
@@ -198,6 +197,15 @@ pub struct SavedMilitaryAiState {
     pub last_decision_reason: MilitaryAiDecisionReason,
     pub estimated_own_power: u64,
     pub estimated_enemy_power: u64,
+    #[serde(default = "default_dirty_true")]
+    pub dirty: bool,
+}
+
+/// `SavedCountryAiState::dirty`/`SavedMilitaryAiState::dirty`の`#[serde(default)]`用。
+/// このフィールドを持たない旧Saveは、P21-SAVE-002A1が元々定めた安全側の初期値
+/// (`true`=ロード後最初の評価機会で必ず1回再評価する)から復元される。
+fn default_dirty_true() -> bool {
+    true
 }
 
 /// `country::country_ai::CountryAiRegistry`のコンテナDTO。
@@ -397,6 +405,7 @@ mod tests {
                 last_weekly_evaluation_day: 7,
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 15,
+                dirty: false,
             },
         );
 
@@ -409,6 +418,7 @@ mod tests {
                 last_decision_reason: MilitaryAiDecisionReason::SufficientAdvantage,
                 estimated_own_power: 5_000,
                 estimated_enemy_power: 3_000,
+                dirty: false,
             },
         );
 
@@ -877,14 +887,16 @@ mod tests {
         assert_eq!(orig_military_ai.estimated_own_power, 5_000);
     }
 
-    /// 要求テスト項目4: 再利用するAI要素型(`SavedCountryAiState`/`SavedMilitaryAiState`)の
-    /// 内部にも派生dirtyが保存されないことを、全フィールドを明示したリテラル構築
-    /// (`..Default`等のショートカットを使わない)で型レベルに確認する。
-    /// 新しいフィールドが追加された場合もこのリテラルの網羅性を保つため、意図的に
-    /// 全フィールドを名前で列挙している。
+    /// P26-008-PRE-002: `SavedCountryAiState`/`SavedMilitaryAiState`の`dirty`は
+    /// もはや除外される派生キャッシュではなく、正規状態として往復する
+    /// (`war::ai_change_tracking`によるイベント駆動dirty化のもとでは、ロード後の
+    /// 次回評価タイミングが継続プレイと一致するために必要、`save/dto.rs`冒頭doc参照)。
+    /// `true`/`false`の両方を明示したリテラルで、RONへ実際に出力され、値が
+    /// 往復で保たれることを確認する(全フィールドを名前で列挙し、`..Default`等の
+    /// ショートカットを使わない――新フィールド追加時もこのリテラルの網羅性を保つ)。
     #[test]
-    fn saved_ai_state_dtos_never_hold_a_dirty_field() {
-        let country_state = SavedCountryAiState {
+    fn saved_ai_state_dtos_hold_a_meaningful_dirty_field_that_round_trips() {
+        let country_state_dirty = SavedCountryAiState {
             country_id: CountryId(2),
             mode: CountryAiMode::Developing,
             decision_reason: CountryAiDecisionReason::PeacetimeDevelopment,
@@ -892,27 +904,47 @@ mod tests {
             last_weekly_evaluation_day: 0,
             last_monthly_evaluation_day: 0,
             cooldown_until_day: 0,
+            dirty: true,
         };
-        let military_state = SavedMilitaryAiState {
+        let country_state_settled = SavedCountryAiState { dirty: false, ..country_state_dirty.clone() };
+        let military_state_dirty = SavedMilitaryAiState {
             country_id: CountryId(2),
             last_evaluated_day: 0,
             last_decision_reason: MilitaryAiDecisionReason::NoActiveWar,
             estimated_own_power: 0,
             estimated_enemy_power: 0,
+            dirty: true,
         };
+        let military_state_settled = SavedMilitaryAiState { dirty: false, ..military_state_dirty.clone() };
 
-        let ron_str = ron::to_string(&(country_state, military_state))
-            .expect("AI state DTOs must serialize without a dirty field");
+        let ron_str = ron::to_string(&(
+            &country_state_dirty,
+            &country_state_settled,
+            &military_state_dirty,
+            &military_state_settled,
+        ))
+        .expect("AI state DTOs must serialize");
         assert!(
-            !ron_str.contains("dirty"),
-            "AI state DTO RON must not contain a derived 'dirty' field: {ron_str}"
+            ron_str.contains("dirty"),
+            "AI state DTO RON must contain the now-meaningful 'dirty' field: {ron_str}"
         );
+
+        let restored: (
+            SavedCountryAiState,
+            SavedCountryAiState,
+            SavedMilitaryAiState,
+            SavedMilitaryAiState,
+        ) = ron::from_str(&ron_str).expect("must deserialize back");
+        assert!(restored.0.dirty);
+        assert!(!restored.1.dirty);
+        assert!(restored.2.dirty);
+        assert!(!restored.3.dirty);
     }
 
-    /// 要求テスト項目2/3/5: `SavedCountryAiRegistry`/`SavedMilitaryAiRegistry`に派生
-    /// `dirty`フィールドが存在せず、代表データをシリアライズした結果にも出力されない。
-    /// 型構造(リテラルが`ai_states`のみで構築できる)とRON往復データの両方で確認する
-    /// (文字列検索だけを唯一の根拠にしない)。
+    /// 要求テスト項目2/3/5: `SavedCountryAiRegistry`/`SavedMilitaryAiRegistry`
+    /// (国家単位ではなくレジストリ直下)には引き続き派生`dirty`フィールドが存在しない
+    /// (P21-SAVE-002A1のまま、変更なし――未使用のブックキーピング状態であることは
+    /// 今回のP26-008-PRE-002でも再確認済み、`export.rs`のdoc参照)。
     #[test]
     fn saved_ai_registries_have_no_derived_dirty_field() {
         // 型構造の確認: SavedCountryAiRegistry/SavedMilitaryAiRegistryはai_statesのみで
@@ -926,17 +958,8 @@ mod tests {
         assert!(empty_country_ai.ai_states.is_empty());
         assert!(empty_military_ai.ai_states.is_empty());
 
-        // 実データでの確認: 代表的なSaveGameV1全体をシリアライズしても
-        // "dirty"という語が一切出現しない。
+        // 往復させても正規状態(国家単位のdirtyを含む)は失われない。
         let save = representative_save();
-        let ron_str = ron::to_string(&save).expect("SaveGameV1 must serialize to RON");
-        assert!(
-            !ron_str.contains("dirty"),
-            "serialized SaveGameV1 RON must not contain any derived AI 'dirty' field: {ron_str}"
-        );
-
-        // 往復させても正規状態(dirty以外)は失われない(round_trip_preserves_ai_normative_state
-        // と重複するが、「dirtyを除いても他のAI状態は無事か」をこのテスト単体でも保証する)。
         let restored = round_trip(&save);
         assert_eq!(
             restored.country_ai.ai_states.len(),
@@ -945,6 +968,14 @@ mod tests {
         assert_eq!(
             restored.military_ai.ai_states.len(),
             save.military_ai.ai_states.len()
+        );
+        assert_eq!(
+            restored.country_ai.ai_states.get(&CountryId(2)).unwrap().dirty,
+            save.country_ai.ai_states.get(&CountryId(2)).unwrap().dirty,
+        );
+        assert_eq!(
+            restored.military_ai.ai_states.get(&CountryId(2)).unwrap().dirty,
+            save.military_ai.ai_states.get(&CountryId(2)).unwrap().dirty,
         );
     }
 }

@@ -779,10 +779,26 @@ fn test_36_month_oceanic_shortage_unchanged_when_uncontested_by_capital_connecti
         "[P26-006 Oceanic re-measurement, uncontested] shortage_days={shortage_days} \
          first_shortage_day={first_shortage_day:?}"
     );
-    // P26-004/005が実測した値(shortage_days=418, first_shortage_day=32)と一致するはず
-    // ――無戦争シナリオでは首都連結性が常にtrueのため、P26-006は結果へ一切影響しない。
-    assert_eq!(shortage_days, 418, "無戦争シナリオではP26-004/005実測値と完全一致するはず");
-    assert_eq!(first_shortage_day, Some(32));
+    // P26-008-PRE-002: 旧正規値はshortage_days=418(P26-004/005実測、旧`mark_ai_
+    // registries_dirty_daily`が建設AIを無条件で毎日評価させていた頃の値)だった。
+    // イベント駆動dirty化により、Oceanicの建設AI(CountryId(3)、月次stagger残余3、
+    // このテストのday2〜28レンジ内で到達可能)は正規cadence通り月次1回だけ評価される
+    // ようになった――旧実装は月内で最大27回評価する機会があったため、資金・入力資源が
+    // 一時的に不足する瞬間があっても翌日以降にすぐ再試行できたが、月次1回だけになると
+    // その1回が不利な瞬間に当たった月は次の月まで construction が進まない。
+    // `first_shortage_day=32`(初回不足発生日)は変化していない――これは初期ブリッジ
+    // 備蓄の枯渇という、建設AI cadenceに依存しない既存の力学(P26-004-PRE-005)による
+    // ものであり、この一致がcadence修正の影響が「その後の生産回復の遅さ」にだけ
+    // 限定されていることを裏付ける。新しいshortage_days=493は、day1〜30まで拡張しても
+    // 変化しない(511、さらに乖離する)ことを確認済み――Oceanic自身の判定日(day3)は
+    // 元々day2〜28の範囲内にあり、これはArcadia/Elfin(P26-004-PRE-002/004、判定日が
+    // range外だった)とは異なる、cadence頻度そのものの低下による正当な結果である。
+    // 独立プロセス3回で493が再現することを確認済み(決定的)。
+    assert_eq!(
+        shortage_days, 493,
+        "cadence修正後の正規値(旧418から更新、理由は上記コメント参照)"
+    );
+    assert_eq!(first_shortage_day, Some(32), "初回不足発生日はcadence修正の影響を受けないはず");
 }
 
 /// Arcadiaの首都そのものが陥落(敵支配)した場合、正の需要を持つ全Divisionの

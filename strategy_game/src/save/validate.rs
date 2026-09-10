@@ -3210,6 +3210,7 @@ mod tests {
                 last_weekly_evaluation_day: 0,
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 0,
+                dirty: false,
             },
         );
         let mut military_ai_states = HashMap::new();
@@ -3221,6 +3222,7 @@ mod tests {
                 last_decision_reason: MilitaryAiDecisionReason::NoActiveWar,
                 estimated_own_power: 0,
                 estimated_enemy_power: 0,
+                dirty: false,
             },
         );
 

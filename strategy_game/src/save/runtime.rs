@@ -529,6 +529,7 @@ mod tests {
             .insert_resource(BattleRegistry::default())
             .insert_resource(ArmyRegistry::default())
             .insert_resource(FrontlineRegistry::default())
+            .insert_resource(crate::war::ai_change_tracking::AiChangeSnapshot::default())
             .insert_resource(BuildingRegistry::default())
             .insert_resource(TechnologyRegistry::default())
             .insert_resource(crate::app::time::GamePaused(true))

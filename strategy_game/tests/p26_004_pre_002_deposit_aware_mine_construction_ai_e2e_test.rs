@@ -153,12 +153,28 @@ fn tick_month(app: &mut App, year: i32, month: u8) {
     app.update();
 }
 
-/// P26-003と同じ簡略暦(1か月=27日[day2〜28]+月境界tick)で、`month_index`か月分
+/// P26-003と同じ簡略暦(1か月=30日[day1〜30]+月境界tick)で、`month_index`か月分
 /// (1始まり)を進める。呼び出し側が月ごとにチェックポイントを取れるよう、
 /// 実App全体を進めるのではなく1か月分だけを進める関数として分離する
 /// (`verification_logs/phase-26/p26-004-pre-001/`§12と同じ簡略暦を踏襲)。
+///
+/// P26-008-PRE-002: 旧実装は`day2〜28`(day1とday29〜30を含まない)だった。
+/// `process_daily_country_ai`の月次stagger判定`current_day % 30 == country_id %
+/// 30`は、このテストの暦では`day % 30`と等価になるため(`event.year*365`/
+/// `event.month*30`はいずれも30の倍数)、`country_id % 30 == 0`(Arcadia、
+/// CountryId(0))は`day == 30`、`country_id % 30 == 1`(Elfin、CountryId(1))は
+/// `day == 1`でしか成立しない。旧`mark_ai_registries_dirty_daily`はこの判定を
+/// 無条件`dirty`で常に無効化していたため気づかれなかったが、P26-008-PRE-002で
+/// イベント駆動化した結果、`day1`・`day30`を欠くこの暦ではArcadia/Elfinの建設AIが
+/// New Game直後の初回評価(`dirty`初期値`true`)以降、二度と定期評価されなくなり、
+/// `test_k1`/`test_m1`(Elfin関連assertion)が退行した(実測: IndustrialGoods生産
+/// 経路の解消に必要な2回目以降の事前開発判定が一度も起こらない)。これは実際の
+/// ゲームプレイでは起こらない――本物の`DayChangedMessage`はday1〜30を含む全ての
+/// 暦日で発行されるため、この暦簡略化がテストだけに存在する欠落だった。`day1`と
+/// `day30`を含めて実ゲームプレイの日次網羅性に合わせる(他の4か国の判定日は
+/// day2〜28の範囲に既に収まるため影響しない)。
 fn advance_one_month(app: &mut App, current_month_index: u8) {
-    for day in 2..=28u8 {
+    for day in 1..=30u8 {
         tick_day(app, 1800, current_month_index, day);
     }
     tick_month(app, 1800, current_month_index.wrapping_add(1));
@@ -183,7 +199,9 @@ fn advance_one_month_tracking_supply_consumption(
     country_id: CountryId,
     consumed: &mut f64,
 ) {
-    for day in 2..=28u8 {
+    // P26-008-PRE-002: `advance_one_month`と同じday1〜30へ揃える(同じファイル内で
+    // 「1か月」の長さが揃っていないと、テストごとに実質異なる暦を使うことになる)。
+    for day in 1..=30u8 {
         let before = stockpile_of(app, country_id, ResourceType::MilitarySupplies);
         tick_day(app, 1800, current_month_index, day);
         let after = stockpile_of(app, country_id, ResourceType::MilitarySupplies);
@@ -722,7 +740,10 @@ fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes
     let mut consumed: std::collections::HashMap<&str, f64> =
         countries.iter().map(|(name, _)| (*name, 0.0)).collect();
     for m in 1..=36u8 {
-        for day in 2..=28u8 {
+        // P26-008-PRE-002: `advance_one_month`と同じ理由でday1・day30を含める(Elfin
+        // [CountryId(1)]の建設AI月次stagger判定`day % 30 == 1`はday1でしか
+        // 成立せず、day1を欠く暦では初回評価以降二度と定期評価されなくなるため)。
+        for day in 1..=30u8 {
             let before: std::collections::HashMap<&str, f64> = countries
                 .iter()
                 .map(|(name, id)| (*name, stockpile_of(&app, *id, ResourceType::MilitarySupplies)))

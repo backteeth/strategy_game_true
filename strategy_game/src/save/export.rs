@@ -64,9 +64,12 @@ pub struct SaveGameSources<'a> {
 /// 読み取るだけで、いかなるランタイムResourceも変更しない(引数が全て共有参照のため
 /// 変更のしようがない)。静的マスターデータ(`MilitaryRegistry.definitions`/
 /// `WorldCivilizationState.stage_definitions`/`StateRegistry.index_map`)は読まない。
-/// AIの4つの`dirty`フィールド(`CountryAiRegistry.dirty`/`CountryAiState.dirty`/
-/// `MilitaryAiRegistry.dirty`/`MilitaryAiState.dirty`、いずれもP21-SAVE-002A1で
-/// 派生状態と確定済み)は読み捨てる。
+/// レジストリ直下の2つの`dirty`フィールド(`CountryAiRegistry.dirty`/
+/// `MilitaryAiRegistry.dirty`、いずれも読み取り箇所が存在しない未使用の
+/// ブックキーピング状態、P21-SAVE-002A1で確認済み)は読み捨てる。一方、国家単位の
+/// `CountryAiState.dirty`/`MilitaryAiState.dirty`はP26-008-PRE-002で意味を持つ
+/// 正規状態になったため、`export_country_ai_state`/`export_military_ai_state`が
+/// そのまま含める(`save/dto.rs`のdoc参照)。
 pub fn build_save_game_v1(sources: &SaveGameSources) -> SaveGameV1 {
     SaveGameV1 {
         version: SAVE_FORMAT_VERSION_V1,
@@ -152,8 +155,8 @@ pub fn build_save_game_v1(sources: &SaveGameSources) -> SaveGameV1 {
     }
 }
 
-/// `CountryAiState`から派生キャッシュ無効化フラグ(`dirty`)を除いた正規状態だけを取り出す
-/// (P21-SAVE-002A1で確定した分類に基づく)。
+/// `CountryAiState`の正規状態を取り出す(P26-008-PRE-002で`dirty`も意味を持つ正規状態と
+/// なったため、そのまま含める――`save/dto.rs::SavedCountryAiState`のdoc参照)。
 fn export_country_ai_state(state: &CountryAiState) -> SavedCountryAiState {
     SavedCountryAiState {
         country_id: state.country_id,
@@ -163,10 +166,12 @@ fn export_country_ai_state(state: &CountryAiState) -> SavedCountryAiState {
         last_weekly_evaluation_day: state.last_weekly_evaluation_day,
         last_monthly_evaluation_day: state.last_monthly_evaluation_day,
         cooldown_until_day: state.cooldown_until_day,
+        dirty: state.dirty,
     }
 }
 
-/// `MilitaryAiState`から派生キャッシュ無効化フラグ(`dirty`)を除いた正規状態だけを取り出す。
+/// `MilitaryAiState`の正規状態を取り出す(`dirty`往復の理由は`export_country_ai_state`と
+/// 同じ、P26-008-PRE-002)。
 fn export_military_ai_state(state: &MilitaryAiState) -> SavedMilitaryAiState {
     SavedMilitaryAiState {
         country_id: state.country_id,
@@ -174,6 +179,7 @@ fn export_military_ai_state(state: &MilitaryAiState) -> SavedMilitaryAiState {
         last_decision_reason: state.last_decision_reason,
         estimated_own_power: state.estimated_own_power,
         estimated_enemy_power: state.estimated_enemy_power,
+        dirty: state.dirty,
     }
 }
 
@@ -804,7 +810,12 @@ mod tests {
 
     /// 要求テスト項目: dirtyだけ異なるランタイムAI状態から同一のSaved AI DTOが生成される。
     #[test]
-    fn dirty_only_difference_produces_semantically_identical_saved_country_ai_dto() {
+    fn dirty_only_difference_produces_a_differing_saved_country_ai_dto() {
+        // P26-008-PRE-002: `dirty`はもはや派生キャッシュではなく正規状態のため、
+        // dirtyだけが異なる2つのランタイム状態は、変換結果のDTOも異なる
+        // (旧P21-SAVE-002A1時代とは逆の主張――`war::ai_change_tracking`による
+        // イベント駆動化のもとでは、dirtyの値自体が「次に評価すべきか」を左右する
+        // 正規状態になったため、`export_country_ai_state`は`dirty`をそのまま含める)。
         let mut resources_a = representative_resources();
         let mut resources_b = representative_resources();
         resources_a
@@ -823,15 +834,17 @@ mod tests {
         let save_a = build_save_game_v1(&resources_a.sources());
         let save_b = build_save_game_v1(&resources_b.sources());
 
-        assert_eq!(
+        assert_ne!(
             save_a.country_ai.ai_states.get(&CountryId(2)),
             save_b.country_ai.ai_states.get(&CountryId(2)),
-            "dirty以外が同一なら、変換結果のSavedCountryAiStateも意味的に同一であること"
+            "dirtyだけが異なる場合、SavedCountryAiStateも異なるはず(dirtyは正規状態)"
         );
+        assert!(save_a.country_ai.ai_states.get(&CountryId(2)).unwrap().dirty);
+        assert!(!save_b.country_ai.ai_states.get(&CountryId(2)).unwrap().dirty);
     }
 
     #[test]
-    fn dirty_only_difference_produces_semantically_identical_saved_military_ai_dto() {
+    fn dirty_only_difference_produces_a_differing_saved_military_ai_dto() {
         let mut resources_a = representative_resources();
         let mut resources_b = representative_resources();
         resources_a
@@ -850,10 +863,12 @@ mod tests {
         let save_a = build_save_game_v1(&resources_a.sources());
         let save_b = build_save_game_v1(&resources_b.sources());
 
-        assert_eq!(
+        assert_ne!(
             save_a.military_ai.ai_states.get(&CountryId(2)),
             save_b.military_ai.ai_states.get(&CountryId(2)),
-            "dirty以外が同一なら、変換結果のSavedMilitaryAiStateも意味的に同一であること"
+            "dirtyだけが異なる場合、SavedMilitaryAiStateも異なるはず(dirtyは正規状態)"
         );
+        assert!(save_a.military_ai.ai_states.get(&CountryId(2)).unwrap().dirty);
+        assert!(!save_b.military_ai.ai_states.get(&CountryId(2)).unwrap().dirty);
     }
 }

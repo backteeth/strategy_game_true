@@ -83,26 +83,49 @@ pub fn handle_daily_war_prep(
 }
 
 /// P21-020: `handle_daily_war_resolution`から分離した、軍事AI・国家AI作戦状態の
-/// 日次dirty化のみを行う独立System。P21-020でエラー通知系の引数(4件)が
+/// dirty化のみを行う独立System。P21-020でエラー通知系の引数(4件)が
 /// `handle_daily_war_resolution`へ追加され、Bevyのfunction-system引数上限
 /// (`update_recruit_button_ui`等が既に同じ理由で分離済み)へ達したため分離した。
 /// `MessageReader<DayChangedMessage>`は各Systemが自分専用の読み取りカーソルを
 /// 持つため、同じMessageを複数Systemで独立に読んでも問題ない(既存の
 /// `handle_daily_war_prep`/`handle_daily_war_resolution`の分割と同じ前提)。
-pub fn mark_ai_registries_dirty_daily(
+///
+/// P26-008-PRE-002: 旧実装(`mark_ai_registries_dirty_daily`)は`DayChangedMessage`の
+/// たびに全国家を無条件で`mark_all_dirty()`しており、週次(研究AI・戦争準備AI)・
+/// 月次(建設AI)・3日おき(戦線計画AI)というAI評価cadenceの設計意図を実質的に
+/// 無効化していた(`verification_logs/phase-26/p26-008-pre-001/`で実測確認)。
+/// 本Systemは`war::ai_change_tracking::AiChangeSnapshot`を使い、州支配
+/// (controller/owner)または戦争(status/参加国)が**実際に変化した**国家だけを
+/// `mark_country_dirty`する――このSystemが`handle_daily_war_resolution`の後に
+/// 置かれるのは、その日の講和・国家消滅・州所有権移転(`MilitaryAction` Setでの
+/// 占領も含め、その日確定した最終状態)が全て反映された後の状態を、前日終値の
+/// スナップショットと比較するため(スナップショット自体はSaveしない、P26-006の
+/// 首都連結性と同じ「再計算専用」方針――理由は`ai_change_tracking`モジュールdoc参照)。
+pub fn mark_ai_registries_dirty_on_change(
     mut day_events: MessageReader<DayChangedMessage>,
+    state_registry: Res<StateRegistry>,
+    war_registry: Res<WarRegistry>,
+    mut snapshot: ResMut<crate::war::ai_change_tracking::AiChangeSnapshot>,
     mut ai_registry: ResMut<crate::war::military_ai::MilitaryAiRegistry>,
     mut country_ai_registry: ResMut<crate::country::country_ai::CountryAiRegistry>,
 ) {
     for _event in day_events.read() {
-        ai_registry.mark_all_dirty();
-        country_ai_registry.mark_all_dirty();
+        let current = crate::war::ai_change_tracking::AiChangeSnapshot::capture(
+            &state_registry,
+            &war_registry,
+        );
+        let affected = snapshot.diff_affected_countries(&current);
+        for country_id in affected {
+            ai_registry.mark_country_dirty(country_id);
+            country_ai_registry.mark_country_dirty(country_id);
+        }
+        *snapshot = current;
     }
 }
 
 /// 戦争解決・後処理システム (WarResolution Set)
 /// 戦闘結果の集計、戦勝点更新、降伏判定・自動講和、戦後整理を行う
-/// (AI dirty化は`mark_ai_registries_dirty_daily`へ分離済み、上記コメント参照)。
+/// (AI dirty化は`mark_ai_registries_dirty_on_change`へ分離済み、上記コメント参照)。
 #[allow(clippy::too_many_arguments)]
 pub fn handle_daily_war_resolution(
     mut day_events: MessageReader<DayChangedMessage>,

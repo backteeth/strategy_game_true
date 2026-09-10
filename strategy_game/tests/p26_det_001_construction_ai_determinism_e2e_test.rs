@@ -624,7 +624,7 @@ mod real_app {
     }
 
     fn advance_one_month(app: &mut App, current_month_index: u8) {
-        for day in 2..=28u8 {
+        for day in 1..=30u8 {
             tick_day(app, 1800, current_month_index, day);
         }
         tick_month(app, 1800, current_month_index.wrapping_add(1));
@@ -644,7 +644,7 @@ mod real_app {
         tracked: &[CountryId],
         consumed: &mut HashMap<CountryId, f64>,
     ) {
-        for day in 2..=28u8 {
+        for day in 1..=30u8 {
             let before: HashMap<CountryId, f64> = tracked
                 .iter()
                 .map(|&c| (c, stockpile_of(app, c, ResourceType::MilitarySupplies)))
@@ -729,13 +729,36 @@ mod real_app {
     // P26-004-PRE-005導入後は、各国家の実測値から実測した初期grant量(全6か国とも
     // 31.0)を差し引いた"生産分のみ"を、この表の正規値(初期grant導入前の記録値)と
     // 突き合わせる(test_eと同じ理由)。
+    //
+    // P26-008-PRE-002: Elfin(CountryId(1))とOceanic(CountryId(3))の正規値を更新した
+    // (Arcadia等ARCADIA_CANONICAL_M36を含む他4か国は変更なし)。
+    //
+    // Elfin(旧`1846.952`→`1785.448052`): 建設AI月次stagger残余`day%30==1`は旧
+    // `advance_one_month`の`day2〜28`(day1を含まない)では到達不能だった。旧
+    // `mark_ai_registries_dirty_daily`(無条件で毎日dirty化)のもとでは実質
+    // 「毎日評価」だったため気づかれなかった。イベント駆動化した結果、Elfinは
+    // `day1`にしか正規の月次評価機会を持たなくなった――`test_k1`/`test_m1`
+    // (P26-004-PRE-002)で確認した通り、Elfinの生産網はIron(Mine)とIndustrialGoods
+    // (Factory)という2種の事前開発判定を別々の月次評価で順に解消する必要があり、
+    // 旧「毎日評価」下では同一月内に両方を解消できたが、月1回だけの正規cadenceでは
+    // 解消に2か月かかる――結果、生産開始が実質1か月遅れる。
+    //
+    // Oceanic(旧`565.705`→`579.803051`): Oceanicの月次stagger残余`day%30==3`は
+    // `day2〜28`の範囲内に元々あり、cadence修正そのものによる評価機会の増減ではない
+    // ――こちらは「月1回だけの正規評価」自体が、旧「毎日最大27回評価」よりも
+    // 建設判断のタイミング解像度が粗くなったことの直接的な帰結である(P26-006の
+    // Oceanic shortage_days再測定[`p26_006_capital_connectivity_supply_e2e_test.rs`]
+    // と同根)。
+    //
+    // `advance_one_month`をday1〜30へ拡張済み(Arcadia/Elfin側のday1・day30欠落を
+    // 解消)、独立プロセス3回でいずれの新値も再現することを確認済み(決定的)。
     #[test]
     fn test_f_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 1846.952),
+            (ELFIN, 1785.448052),
             (DWARF, 1487.059),
-            (OCEANIC, 565.705),
+            (OCEANIC, 579.803051),
             (PASSGUARD, 3325.079),
             (FERROWYN, 1089.859),
         ];

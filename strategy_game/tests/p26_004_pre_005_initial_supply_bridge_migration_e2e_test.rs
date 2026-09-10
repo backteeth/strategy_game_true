@@ -638,7 +638,7 @@ fn test_f2_arcadia_deterministic_production_values_are_protected_after_the_initi
     let mut m12 = 0.0;
     let mut m18 = 0.0;
     for m in 1..=18u8 {
-        for day in 2..=28u8 {
+        for day in 1..=30u8 {
             let before = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);
             tick_day(&mut app, 1800, m, day);
             let after = stockpile_of(&app, ARCADIA, ResourceType::MilitarySupplies);

@@ -163,10 +163,19 @@ fn tick_month(app: &mut App, year: i32, month: u8) {
     app.update();
 }
 
-/// P26-004-PRE-002/PRE-003と同じ簡略暦(1か月=27日[day2〜28]+月境界tick)で、
+/// P26-004-PRE-002/PRE-003と同じ簡略暦(1か月=30日[day1〜30]+月境界tick)で、
 /// `month_index`か月分(1始まり)を進める。
+///
+/// P26-008-PRE-002: 旧`day2〜28`はday1を含まなかった。`process_daily_country_ai`の
+/// 月次stagger判定`current_day % 30 == country_id % 30`はこの暦では`day % 30`と
+/// 等価になり、Elfin(CountryId(1))は`day==1`でしか成立しないため、day1を欠く暦では
+/// New Game直後の初回評価(`dirty`初期値`true`)以降、建設AIが二度と定期評価されなく
+/// なる(`tests/p26_004_pre_002_deposit_aware_mine_construction_ai_e2e_test.rs`で
+/// 同一原因を確認済み)。実ゲームプレイでは`DayChangedMessage`はday1を含む全暦日で
+/// 発行されるため、これはテストの暦簡略化だけに存在した欠落であり、day1を含めて
+/// 実ゲームプレイの日次網羅性に合わせる。
 fn advance_one_month(app: &mut App, current_month_index: u8) {
-    for day in 2..=28u8 {
+    for day in 1..=30u8 {
         tick_day(app, 1800, current_month_index, day);
     }
     tick_month(app, 1800, current_month_index.wrapping_add(1));
@@ -708,7 +717,9 @@ fn advance_one_month_tracking_supply_consumption(
     tracked: &[CountryId],
     consumed: &mut std::collections::HashMap<CountryId, f64>,
 ) {
-    for day in 2..=28u8 {
+    // P26-008-PRE-002: `advance_one_month`と同じ理由でday1・day30を含める(同じファイル内で
+    // 「1か月」の長さを揃える)。
+    for day in 1..=30u8 {
         let before: std::collections::HashMap<CountryId, f64> = tracked
             .iter()
             .map(|&c| (c, stockpile_of(app, c, ResourceType::MilitarySupplies)))

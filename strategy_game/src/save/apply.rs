@@ -145,6 +145,12 @@ pub(crate) struct PreparedLoadGameV1 {
     army_registry: ArmyRegistry,
     frontline_registry: FrontlineRegistry,
     game_paused: GamePaused,
+    // P26-008-PRE-002: `AiChangeSnapshot`はSaveへ含めない(前日終値との差分検出専用の
+    // 再計算キャッシュ、P26-006の首都連結性と同じ方針)。ロード直後は必ず未初期化
+    // (`AiChangeSnapshot::default()`)から始め、ロード直後1日目の比較を「まだ観測して
+    // いない」扱いにする――これによりロード直後に無関係な全国家が誤ってdirty化される
+    // ことを防ぐ(`war::ai_change_tracking`のブートストラップ規則、モジュールdoc参照)。
+    ai_change_snapshot: crate::war::ai_change_tracking::AiChangeSnapshot,
     // ── 一時状態の初期化(セーブに含まれないため、既定値を事前に確定させておく) ──
     selected_division: SelectedDivision,
     drag_select_state: DragSelectState,
@@ -203,6 +209,10 @@ pub(crate) fn prepare_load(
     require_resource::<BattleRegistry>(world, "BattleRegistry")?;
     require_resource::<ArmyRegistry>(world, "ArmyRegistry")?;
     require_resource::<FrontlineRegistry>(world, "FrontlineRegistry")?;
+    require_resource::<crate::war::ai_change_tracking::AiChangeSnapshot>(
+        world,
+        "AiChangeSnapshot",
+    )?;
     require_resource::<GamePaused>(world, "GamePaused")?;
     let building_registry = require_resource::<BuildingRegistry>(world, "BuildingRegistry")?;
     let technology_registry = require_resource::<TechnologyRegistry>(world, "TechnologyRegistry")?;
@@ -350,6 +360,13 @@ pub(crate) fn prepare_load(
         save.date.month,
     );
 
+    // P26-008-PRE-002: `dirty`はもはや無意味な派生状態ではない
+    // (`war::ai_change_tracking`によるイベント駆動化で、無条件の日次dirty上書きが
+    // 廃止されたため)。継続プレイと同じ次回評価タイミングになるよう、保存された
+    // 実際の値をそのまま復元する(`#[serde(default = "default_dirty_true")]`により、
+    // このフィールドを持たない旧Saveは安全側のtrue=初回即時再評価から復元される、
+    // `save/dto.rs`のdoc参照)。レジストリ直下の`dirty: bool`は未使用のブックキーピング
+    // 状態のため(P21-SAVE-002A1)、従来通りtrueで初期化するだけで実害はない。
     let country_ai_registry = CountryAiRegistry {
         ai_states: save
             .country_ai
@@ -366,8 +383,7 @@ pub(crate) fn prepare_load(
                         last_weekly_evaluation_day: s.last_weekly_evaluation_day,
                         last_monthly_evaluation_day: s.last_monthly_evaluation_day,
                         cooldown_until_day: s.cooldown_until_day,
-                        // P21-SAVE-002A1の方針通り、ロード直後は常にdirty=trueから再開する。
-                        dirty: true,
+                        dirty: s.dirty,
                     },
                 )
             })
@@ -389,7 +405,7 @@ pub(crate) fn prepare_load(
                         last_decision_reason: s.last_decision_reason,
                         estimated_own_power: s.estimated_own_power,
                         estimated_enemy_power: s.estimated_enemy_power,
-                        dirty: true,
+                        dirty: s.dirty,
                     },
                 )
             })
@@ -453,6 +469,7 @@ pub(crate) fn prepare_load(
             army_frontline_map: save.frontlines.army_frontline_map,
         },
         game_paused: GamePaused(true),
+        ai_change_snapshot: crate::war::ai_change_tracking::AiChangeSnapshot::default(),
         selected_division: SelectedDivision::default(),
         drag_select_state: DragSelectState::default(),
         selected_army: SelectedArmy::default(),
@@ -494,6 +511,7 @@ pub(crate) fn commit_load(world: &mut World, prepared: PreparedLoadGameV1) {
     world.insert_resource(prepared.army_registry);
     world.insert_resource(prepared.frontline_registry);
     world.insert_resource(prepared.game_paused);
+    world.insert_resource(prepared.ai_change_snapshot);
     world.insert_resource(prepared.selected_division);
     world.insert_resource(prepared.drag_select_state);
     world.insert_resource(prepared.selected_army);
@@ -747,6 +765,7 @@ mod tests {
         world.insert_resource(BattleRegistry::default());
         world.insert_resource(ArmyRegistry::default());
         world.insert_resource(FrontlineRegistry::default());
+        world.insert_resource(crate::war::ai_change_tracking::AiChangeSnapshot::default());
         world.insert_resource(GamePaused(false));
         world.insert_resource(BuildingRegistry {
             definitions: s.buildings.clone(),
@@ -984,6 +1003,7 @@ mod tests {
                 last_weekly_evaluation_day: 7,
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 0,
+                dirty: false,
             },
         );
 
@@ -996,6 +1016,7 @@ mod tests {
                 last_decision_reason: MilitaryAiDecisionReason::EnemyStronger,
                 estimated_own_power: 4000,
                 estimated_enemy_power: 6000,
+                dirty: false,
             },
         );
 
@@ -2177,17 +2198,76 @@ mod tests {
         assert_eq!(mstate.estimated_own_power, 4000);
     }
 
+    /// P21-SAVE-002A1由来、変更なし: レジストリ直下の`dirty: bool`
+    /// (`CountryAiRegistry.dirty`/`MilitaryAiRegistry.dirty`)は読み取り箇所が一切ない
+    /// 未使用のブックキーピング状態のため、ロード時は常に`true`で初期化するだけで
+    /// 実害がない(意味を持つ状態ではないため、旧Save/現行Save問わず一律`true`)。
     #[test]
-    fn all_four_ai_dirty_flags_are_true_after_apply() {
+    fn registry_level_ai_dirty_bookkeeping_flags_remain_true_after_apply() {
         let s = static_data();
         let mut world = build_old_world(&s);
         apply_validated_save(&mut world, validated_save(&s));
         let cai = world.resource::<CountryAiRegistry>();
         assert!(cai.dirty);
-        assert!(cai.ai_states.get(&CountryId(1)).unwrap().dirty);
         let mai = world.resource::<MilitaryAiRegistry>();
         assert!(mai.dirty);
-        assert!(mai.ai_states.get(&CountryId(1)).unwrap().dirty);
+    }
+
+    /// P26-008-PRE-002: `CountryAiState.dirty`/`MilitaryAiState.dirty`は
+    /// (旧P21-SAVE-002A1方針の「ロード後は常にtrue」から)実際に保存された値を
+    /// そのまま忠実に復元するよう変更した――`war::ai_change_tracking`による
+    /// イベント駆動dirty化のもとでは、ロード直後だけ余分にtrueへ上書きすると
+    /// 継続プレイと異なる次回評価タイミングになってしまうため。
+    /// `representative_save()`はCountryId(1)を`dirty: false`で保存しており、
+    /// ロード後もこの値がそのまま復元されることを確認する(常にtrueへ戻す挙動への
+    /// 逆戻りを検知する)。
+    #[test]
+    fn state_level_ai_dirty_round_trips_the_saved_value_instead_of_always_becoming_true() {
+        let s = static_data();
+        let mut world = build_old_world(&s);
+        apply_validated_save(&mut world, validated_save(&s));
+        let cai = world.resource::<CountryAiRegistry>();
+        assert!(
+            !cai.ai_states.get(&CountryId(1)).unwrap().dirty,
+            "representative_save() saved dirty=false for CountryId(1); it must round-trip, not \
+             become true"
+        );
+        let mai = world.resource::<MilitaryAiRegistry>();
+        assert!(!mai.ai_states.get(&CountryId(1)).unwrap().dirty);
+    }
+
+    /// 旧Save(`dirty`フィールド欠落)は、RON文字列上で当該フィールドが存在しない
+    /// 状態を`SavedCountryAiState`/`SavedMilitaryAiState`へ直接デシリアライズすることで
+    /// 模擬する(`ron::from_str`によるDTOレベルの単体テスト、Worldを介さない)。
+    /// `#[serde(default = "default_dirty_true")]`により、安全側の`true`
+    /// (=ロード後最初の評価機会で必ず1回再評価する)から復元されることを確認する。
+    #[test]
+    fn saved_country_ai_state_without_the_dirty_field_deserializes_as_dirty_true() {
+        let ron_str = r#"(
+            country_id: (0),
+            mode: Developing,
+            decision_reason: FoodShortageFarmPriority,
+            last_daily_evaluation_day: 5,
+            last_weekly_evaluation_day: 0,
+            last_monthly_evaluation_day: 0,
+            cooldown_until_day: 0,
+        )"#;
+        let state: SavedCountryAiState = ron::from_str(ron_str).expect("old-format RON must parse");
+        assert!(state.dirty, "a SavedCountryAiState missing the dirty field must default to true");
+    }
+
+    #[test]
+    fn saved_military_ai_state_without_the_dirty_field_deserializes_as_dirty_true() {
+        let ron_str = r#"(
+            country_id: (0),
+            last_evaluated_day: 5,
+            last_decision_reason: NoActiveWar,
+            estimated_own_power: 0,
+            estimated_enemy_power: 0,
+        )"#;
+        let state: SavedMilitaryAiState =
+            ron::from_str(ron_str).expect("old-format RON must parse");
+        assert!(state.dirty, "a SavedMilitaryAiState missing the dirty field must default to true");
     }
 
     #[test]

@@ -781,7 +781,7 @@ mod real_app {
     }
 
     fn advance_one_month(app: &mut App, current_month_index: u8) {
-        for day in 2..=28u8 {
+        for day in 1..=30u8 {
             tick_day(app, 1800, current_month_index, day);
         }
         tick_month(app, 1800, current_month_index.wrapping_add(1));
@@ -801,7 +801,7 @@ mod real_app {
         tracked: &[CountryId],
         consumed: &mut HashMap<CountryId, f64>,
     ) {
-        for day in 2..=28u8 {
+        for day in 1..=30u8 {
             let before: HashMap<CountryId, f64> = tracked
                 .iter()
                 .map(|&c| (c, stockpile_of(app, c, ResourceType::MilitarySupplies)))
@@ -892,13 +892,22 @@ mod real_app {
     // 再現性を確認する。独立プロセス5回の実測は報告書に記録)。P26-004-PRE-005導入後は
     // 実測した初期grant量(全6か国とも31.0)を差し引いた"生産分のみ"を、この表の正規値
     // (初期grant導入前の記録値)と突き合わせる(test_hと同じ理由)。
+    //
+    // P26-008-PRE-002: Elfin/Oceanicの正規値を更新した(理由は
+    // `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名テストの
+    // コメントと同一――Elfinは建設AI月次stagger残余`day%30==1`が旧`day2〜28`
+    // レンジで到達不能だったため、イベント駆動dirty化後は月1回評価に伴い
+    // Iron/IndustrialGoodsの事前開発判定解消に2か月かかるようになった。Oceanicは
+    // 残余`day%30==3`自体は到達可能だが、月1回評価という解像度低下そのものによる
+    // 建設タイミングの変化。`advance_one_month`をday1〜30へ拡張し、独立プロセス
+    // 3回で新値の再現を確認済み(決定的)。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 1846.952),
+            (ELFIN, 1785.448052),
             (DWARF, 1487.059),
-            (OCEANIC, 565.705),
+            (OCEANIC, 579.803051),
             (PASSGUARD, 3325.079),
             (FERROWYN, 1089.859),
         ];
