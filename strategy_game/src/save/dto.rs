@@ -721,6 +721,7 @@ mod tests {
             assigned_division_ids: vec![DivisionId(7)],
             assigned_army_ids: vec![ArmyId(2)],
             offensive_line_region_ids: Some(vec![StateId(3)]),
+            offensive_supply_blocked: false,
         };
         original
             .frontlines
@@ -789,6 +790,7 @@ mod tests {
             assigned_division_ids: vec![DivisionId(7)],
             assigned_army_ids: vec![ArmyId(2)],
             offensive_line_region_ids: None,
+            offensive_supply_blocked: false,
         };
         let plan_ron = ron::to_string(&plan).unwrap();
         assert!(plan_ron.contains("assigned_army_ids"));
@@ -833,6 +835,7 @@ mod tests {
             assigned_division_ids: vec![DivisionId(7)],
             assigned_army_ids: vec![ArmyId(2)],
             offensive_line_region_ids: Some(vec![StateId(3)]),
+            offensive_supply_blocked: false,
         };
         let plan_ron = ron::to_string(&plan).unwrap();
         assert!(plan_ron.contains("offensive_line_region_ids"));

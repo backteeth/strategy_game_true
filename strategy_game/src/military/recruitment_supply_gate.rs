@@ -189,10 +189,25 @@ pub fn min_fulfillment_of_positive_demand_divisions(
         .map(|d| d.id)
         .collect();
     ids.sort_by_key(|id| id.0);
+    min_fulfillment_over_division_ids(&ids, military_registry)
+}
 
+/// 需要が正の生存Division群(呼び出し側が対象範囲を確定した`DivisionId`の
+/// 昇順スライス)について、`MilitaryRegistry::supply_fulfillment_of`の最小値を求める
+/// 共通ヘルパー(spec: P26-008-A国家全体版・P26-008-B前線範囲版のいずれからも、
+/// 需要式・最小値計算そのものを複製せずに再利用できるよう抽出)。需要0の
+/// Divisionは母集合から除外し、対象が1件もなければ`None`(「配送不足signalなし」)。
+/// 生存判定・対象範囲の絞り込みは呼び出し側の責務(このヘルパーは受け取った
+/// `division_ids`をそのまま信頼する)。
+pub fn min_fulfillment_over_division_ids(
+    division_ids: &[crate::common::DivisionId],
+    military_registry: &MilitaryRegistry,
+) -> Result<Option<f64>, SupplyDemandError> {
     let mut min_fulfillment: Option<f64> = None;
-    for id in ids {
-        let division = &military_registry.divisions[&id];
+    for &id in division_ids {
+        let Some(division) = military_registry.divisions.get(&id) else {
+            continue;
+        };
         let demand = division_daily_demand_units(division, &military_registry.definitions)?;
         if demand == 0 {
             continue;

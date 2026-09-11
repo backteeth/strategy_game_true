@@ -638,6 +638,7 @@ mod tests {
             // ArmyId(0)はrepresentative_resources()自体がCountryId(1)所有として用意する既存Army。
             assigned_army_ids: vec![ArmyId(0)],
             offensive_line_region_ids: None,
+            offensive_supply_blocked: false,
         };
         resources
             .frontline_registry

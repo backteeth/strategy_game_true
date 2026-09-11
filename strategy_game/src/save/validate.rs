@@ -5376,6 +5376,7 @@ mod tests {
                 // ArmyId(0)はbaseline_save()自体がCountryId(0)所有として用意する既存Army。
                 assigned_army_ids: vec![ArmyId(0)],
                 offensive_line_region_ids: None,
+                offensive_supply_blocked: false,
             },
         );
         save.frontlines
@@ -5568,6 +5569,7 @@ mod tests {
                     // ArmyId(0)はFrontlineId(0)の方にも既に割り当てられている(二重登録)。
                     assigned_army_ids: vec![ArmyId(0)],
                     offensive_line_region_ids: None,
+                    offensive_supply_blocked: false,
                 },
             );
             save.frontlines.next_frontline_id = 2;

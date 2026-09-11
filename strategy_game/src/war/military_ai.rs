@@ -1,6 +1,6 @@
 use crate::app::time::DayChangedMessage;
 use crate::common::{CountryId, DivisionId, FrontlineId, StateId};
-use crate::country::{CountryRegistry, PlayerCountry};
+use crate::country::{CountryData, CountryRegistry, PlayerCountry};
 use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
 use crate::military::pathfinding::find_path;
 use crate::state::data::StateRegistry;
@@ -26,6 +26,11 @@ pub enum MilitaryAiDecisionReason {
     ComparableStrength,
     SufficientAdvantage,
     TargetCaptured,
+    /// P26-008-B: MilitarySupplies補給不足(国家備蓄の停止水準未達、または前線
+    /// 配送率が0.34未満)により、戦力比条件を満たしていても攻勢を開始・継続
+    /// しなかった(既存の`ComparableStrength`/`EnemyStronger`へ偽装しない、
+    /// P26-008-Aの`SkippedSupplyShortage`と同じ設計判断)。
+    SupplyShortage,
 }
 
 impl MilitaryAiDecisionReason {
@@ -50,6 +55,7 @@ impl MilitaryAiDecisionReason {
                 "military_ai_reason.sufficient_advantage"
             }
             MilitaryAiDecisionReason::TargetCaptured => "military_ai_reason.target_captured",
+            MilitaryAiDecisionReason::SupplyShortage => "military_ai_reason.supply_shortage",
         }
     }
 }
@@ -284,7 +290,14 @@ pub fn evaluate_powers(
     (own_power, enemy_power)
 }
 
-/// 前線に対するAI命令スタンスと理由の決定（ヒステリシス考慮）
+/// 前線に対するAI命令スタンスと理由の決定（ヒステリシス考慮）。
+///
+/// P26-008-B: 戻り値の第3要素は、更新後の`FrontlinePlan.offensive_supply_blocked`
+/// (新規攻勢の開始待ち状態、真のヒステリシス)。呼び出し側がPlanへ書き戻す責務を
+/// 持つ(この関数自体は`plan`を変更しない、既存の純粋関数という契約を維持)。
+/// 早期returnの理由に関わらず毎回この値を計算・返却する(spec §8.2: 現在の
+/// スタンスに関わらず、国家備蓄・前線配送の観測自体は常に行う)。
+#[allow(clippy::too_many_arguments)]
 pub fn evaluate_military_ai_decision(
     frontline: &Frontline,
     plan: &FrontlinePlan,
@@ -292,11 +305,37 @@ pub fn evaluate_military_ai_decision(
     enemy_power: u64,
     has_objective: bool,
     military_registry: &MilitaryRegistry,
-) -> (FrontlineStance, MilitaryAiDecisionReason) {
+    country: &CountryData,
+    war_registry: &WarRegistry,
+) -> (FrontlineStance, MilitaryAiDecisionReason, bool) {
+    // P26-008-B: 補給観測。評価自体が失敗する防御的なケース(通常到達しない)では、
+    // 既存のblocked状態を変えず、配送は健全とみなして既存ロジックへフォールバックする
+    // (安全側は「新規攻勢を増やさない」であって「進行中攻勢を無条件停止する」ではない
+    // ため、delivery_fully_healthy=trueをフォールバック値にする)。
+    let (offensive_supply_blocked, delivery_fully_healthy) =
+        match crate::war::offensive_supply_gate::evaluate_offensive_supply_status(
+            country,
+            war_registry,
+            military_registry,
+            &plan.assigned_division_ids,
+            plan.offensive_supply_blocked,
+        ) {
+            Ok(eval) => (eval.blocked_after, eval.delivery_fully_healthy),
+            Err(_) => {
+                debug!(
+                    "[MilitaryAi] country {:?}: offensive supply gate evaluation failed, \
+                     keeping prior blocked state and treating delivery as healthy this evaluation",
+                    country.id
+                );
+                (plan.offensive_supply_blocked, true)
+            }
+        };
+
     if frontline.border_region_pairs.is_empty() {
         return (
             FrontlineStance::Stopped,
             MilitaryAiDecisionReason::NoValidFrontline,
+            offensive_supply_blocked,
         );
     }
 
@@ -304,6 +343,7 @@ pub fn evaluate_military_ai_decision(
         return (
             FrontlineStance::Stopped,
             MilitaryAiDecisionReason::NoAvailableDivision,
+            offensive_supply_blocked,
         );
     }
 
@@ -320,6 +360,7 @@ pub fn evaluate_military_ai_decision(
         return (
             FrontlineStance::Defend,
             MilitaryAiDecisionReason::Recovering,
+            offensive_supply_blocked,
         );
     }
 
@@ -327,6 +368,7 @@ pub fn evaluate_military_ai_decision(
         return (
             FrontlineStance::Defend,
             MilitaryAiDecisionReason::NoValidTarget,
+            offensive_supply_blocked,
         );
     }
 
@@ -346,34 +388,33 @@ pub fn evaluate_military_ai_decision(
         (own_power as u128) * 1000 >= (enemy_power as u128) * 900
     };
 
-    if current_stance == FrontlineStance::Offensive {
-        if can_continue_offensive {
-            (
-                FrontlineStance::Offensive,
-                MilitaryAiDecisionReason::SufficientAdvantage,
-            )
+    let (stance, reason) = if current_stance == FrontlineStance::Offensive {
+        // P26-008-B spec §7: 進行中の攻勢は、国家備蓄の一時低下(offensive_supply_
+        // blocked)だけでは止めない――前線配送健全性(delivery_fully_healthy)を
+        // 直接判定する。既存90%条件はそのまま維持する。
+        if !delivery_fully_healthy {
+            (FrontlineStance::Defend, MilitaryAiDecisionReason::SupplyShortage)
+        } else if can_continue_offensive {
+            (FrontlineStance::Offensive, MilitaryAiDecisionReason::SufficientAdvantage)
         } else {
-            (
-                FrontlineStance::Defend,
-                MilitaryAiDecisionReason::ComparableStrength,
-            )
+            (FrontlineStance::Defend, MilitaryAiDecisionReason::ComparableStrength)
         }
     } else if can_start_offensive {
-        (
-            FrontlineStance::Offensive,
-            MilitaryAiDecisionReason::SufficientAdvantage,
-        )
+        // P26-008-B spec §6: 新規攻勢は既存110%条件に加え、補給回復待ちでないこと
+        // (offensive_supply_blocked==false、国家備蓄stop以上・前線配送0.34以上の
+        // 両方を内包する)を要求する。
+        if offensive_supply_blocked {
+            (FrontlineStance::Defend, MilitaryAiDecisionReason::SupplyShortage)
+        } else {
+            (FrontlineStance::Offensive, MilitaryAiDecisionReason::SufficientAdvantage)
+        }
     } else if enemy_power > own_power {
-        (
-            FrontlineStance::Defend,
-            MilitaryAiDecisionReason::EnemyStronger,
-        )
+        (FrontlineStance::Defend, MilitaryAiDecisionReason::EnemyStronger)
     } else {
-        (
-            FrontlineStance::Defend,
-            MilitaryAiDecisionReason::ComparableStrength,
-        )
-    }
+        (FrontlineStance::Defend, MilitaryAiDecisionReason::ComparableStrength)
+    };
+
+    (stance, reason, offensive_supply_blocked)
 }
 
 /// 未割り当ての有効陸軍を評価し、適切な前線へ自動割り当てする
@@ -631,22 +672,31 @@ pub fn process_daily_military_ai(
                 );
                 plan.objective_region_id = objective;
 
-                let (new_stance, reason) = evaluate_military_ai_decision(
-                    &fl,
-                    &plan,
-                    own_p,
-                    enemy_p,
-                    objective.is_some(),
-                    military_registry,
-                );
+                let Some(country) = country_registry.get(country_id) else {
+                    continue;
+                };
+
+                let (new_stance, reason, new_offensive_supply_blocked) =
+                    evaluate_military_ai_decision(
+                        &fl,
+                        &plan,
+                        own_p,
+                        enemy_p,
+                        objective.is_some(),
+                        military_registry,
+                        country,
+                        war_registry,
+                    );
 
                 last_reason = reason;
                 plan.stance = new_stance;
+                plan.offensive_supply_blocked = new_offensive_supply_blocked;
 
                 // 前線レジストリへ更新を書き戻す
                 if let Some(p_mut) = frontline_registry.get_plan_mut(fl.frontline_id, country_id) {
                     p_mut.stance = plan.stance;
                     p_mut.objective_region_id = plan.objective_region_id;
+                    p_mut.offensive_supply_blocked = plan.offensive_supply_blocked;
                 }
             }
         }
@@ -720,12 +770,21 @@ mod tests {
             capital_state_id: StateId(1),
             ..default()
         };
-        let c2 = CountryData {
+        let mut c2 = CountryData {
             id: CountryId(2),
             name: "AI C2".to_string(),
             capital_state_id: StateId(4),
             ..default()
         };
+        // P26-008-B: `CountryData::default()`のMilitarySupplies備蓄は0であり、
+        // このテスト環境が追加するDivision(需要>0)と組み合わせると、本タスクが
+        // 追加した攻勢補給ゲートが即座にblockedと判定してしまう(この環境自体は
+        // 補給を検証対象にしていない、旧来の「補給は無限」という暗黙の前提)。
+        // 既存の戦力比ヒステリシス検証を妨げないよう、十分な備蓄を明示的に与える。
+        c2.stockpile.set(
+            crate::economy::resources::ResourceType::MilitarySupplies,
+            1_000_000.0,
+        );
         let c3 = CountryData {
             id: CountryId(3),
             name: "Neutral C3".to_string(),

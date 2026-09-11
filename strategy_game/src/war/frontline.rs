@@ -67,6 +67,18 @@ pub struct FrontlinePlan {
     /// 自体が存在しない場合は`#[serde(default)]`によりNoneとして復元する。
     #[serde(default)]
     pub offensive_line_region_ids: Option<Vec<StateId>>,
+    /// P26-008-B: この(前線, 指揮国)ペアがMilitarySupplies補給不足により
+    /// 「新規攻勢の開始待ち」状態にあるかどうか。真のヒステリシス(spec §8)の
+    /// 中間帯で直前状態を保持するために必要な、世界状態から再導出できないAI決定
+    /// メモリであり、`military::recruitment_supply_gate`(P26-008-A)の
+    /// `CountryAiState.recruitment_supply_blocked`と同種の設計だが、意味も
+    /// 保存単位も完全に独立している(募兵停止と攻勢停止は互いに流用しない)。
+    /// 既存攻勢の**継続**可否はこのフィールドを参照せず、その時点の前線配送
+    /// 健全性を直接評価する(spec §7、国家備蓄の一時低下だけでは進行中攻勢を
+    /// 止めないため)。旧セーブに存在しない場合は`#[serde(default)]`により
+    /// `false`(未停止)として復元する。
+    #[serde(default)]
+    pub offensive_supply_blocked: bool,
 }
 
 impl FrontlinePlan {
@@ -79,6 +91,7 @@ impl FrontlinePlan {
             assigned_division_ids: Vec::new(),
             assigned_army_ids: Vec::new(),
             offensive_line_region_ids: None,
+            offensive_supply_blocked: false,
         }
     }
 }

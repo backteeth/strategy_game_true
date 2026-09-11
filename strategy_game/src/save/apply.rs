@@ -2053,6 +2053,7 @@ mod tests {
             // 用意している既存Army(save.armies.armies参照)。
             assigned_army_ids: vec![ArmyId(2)],
             offensive_line_region_ids: None,
+            offensive_supply_blocked: false,
         };
         save.frontlines = SavedFrontlineRegistry {
             frontlines: [(FrontlineId(0), frontline)].into_iter().collect(),

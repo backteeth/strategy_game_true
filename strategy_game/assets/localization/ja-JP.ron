@@ -575,6 +575,7 @@
     ("military_ai_reason.comparable_strength", "戦力拮抗 (防御)"),
     ("military_ai_reason.sufficient_advantage", "十分な優位 (攻勢)"),
     ("military_ai_reason.target_captured", "目標を占領済み (再評価中)"),
+    ("military_ai_reason.supply_shortage", "補給不足 (防御)"),
 
     // ── treaty.* (TreatyType) ────────────────────────────────
     ("treaty.non_aggression_pact", "不可侵条約"),

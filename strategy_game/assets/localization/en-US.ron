@@ -576,6 +576,7 @@
     ("military_ai_reason.comparable_strength", "Comparable Strength (Defend)"),
     ("military_ai_reason.sufficient_advantage", "Sufficient Advantage (Offensive)"),
     ("military_ai_reason.target_captured", "Target Captured (Re-evaluating)"),
+    ("military_ai_reason.supply_shortage", "Insufficient Supply (Defend)"),
 
     // ── treaty.* (TreatyType) ────────────────────────────────
     ("treaty.non_aggression_pact", "Non-Aggression Pact"),

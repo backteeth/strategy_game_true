@@ -1794,6 +1794,21 @@ fn test_d_next_day_military_action() {
         }
     }
 
+    // P26-008-B: New Game既定のMilitarySupplies初期付与(31.0、P26-004-PRE-005)だけでは、
+    // 開戦直後の戦時stopしきい値(40日)を満たせず、本タスクが追加した攻勢補給ゲートに
+    // よってSufficientAdvantageの代わりにSupplyShortageと判定されてしまう
+    // (このテスト自体は補給状態を検証対象にしていない、旧来の「補給は無限」という
+    // 暗黙の前提)。既存の戦力比ヒステリシス検証を妨げないよう、十分な備蓄を明示的に
+    // 与える。
+    {
+        let mut country_registry = app.world_mut().resource_mut::<CountryRegistry>();
+        if let Some(country) = country_registry.get_mut(CountryId(1)) {
+            country
+                .stockpile
+                .set(ResourceType::MilitarySupplies, 1_000_000.0);
+        }
+    }
+
     // 日N: 宣戦布告・前線生成
     advance_day_by_system(&mut app);
 
