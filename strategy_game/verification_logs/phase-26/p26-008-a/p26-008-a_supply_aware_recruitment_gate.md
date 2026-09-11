@@ -376,4 +376,4 @@ E2E `test_p_existing_conditions_are_preserved`で、以下いずれも既存ど�
 ## 27. 最終確認
 
 - `git status --short`は§25の11ファイルのみ(意図した変更以外なし、非決定的PNG・ユーザーSaveは含まれない)。
-- 本レポートはこの時点で実在するコミット(`4999f1e`以前)のみを参照しており、未作成のコミットハッシュへの言及はない。次のコミットで本タスクの変更一式(§25)をまとめてコミットする。
+- 本タスクの変更一式(§25)は`63095ee`(`feat: gate AI recruitment on military supplies`)としてコミット済み。コミット後の`git status --short`はクリーン。
