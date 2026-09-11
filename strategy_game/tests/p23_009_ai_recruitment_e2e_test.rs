@@ -227,6 +227,22 @@ fn ensure_large_military_equipment_stockpile(app: &mut App, country: CountryId) 
         );
 }
 
+/// P26-008-A: 募兵AIが新規募兵補給ゲート(`military::recruitment_supply_gate`)の
+/// 対象になったため、キュー・目標Division数の挙動だけを検証したいテストは、
+/// MilitarySuppliesが理由でスキップされないよう十分な備蓄を明示的に用意する必要が
+/// ある(上記`ensure_large_military_equipment_stockpile`と同じ理由、別資源)。
+fn ensure_large_military_supplies_stockpile(app: &mut App, country: CountryId) {
+    app.world_mut()
+        .resource_mut::<CountryRegistry>()
+        .get_mut(country)
+        .unwrap()
+        .stockpile
+        .set(
+            strategy_game::economy::resources::ResourceType::MilitarySupplies,
+            1_000_000.0,
+        );
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // §14.6 月次System実経路
 // ─────────────────────────────────────────────────────────────────────────
@@ -859,6 +875,7 @@ fn after_completion_a_country_still_below_target_recruits_its_next_division_the_
     ensure_large_treasury(&mut app, ai);
     ensure_large_available_manpower(&mut app, ai);
     ensure_large_military_equipment_stockpile(&mut app, ai);
+    ensure_large_military_supplies_stockpile(&mut app, ai);
 
     send_month_changed(&mut app, 1800, 2);
     assert_eq!(queue_len(&app, ai), 1);

@@ -209,6 +209,22 @@ fn clear_all_divisions(app: &mut App) {
     app.world_mut().resource_mut::<MilitaryRegistry>().divisions.clear();
 }
 
+/// P26-008-A: AI月次募兵が新規のMilitarySupplies補給ゲートの対象になったため、
+/// `clear_all_divisions`だけでは「production only」の分離が不完全になった――
+/// 両アプリのMilitarySupplies初期値(31.0 vs 0.0)そのものがゲートの停止/再開
+/// 判定に影響し、片方だけが先に新規Divisionを完成させて即座に日次消費を始める
+/// ことで、単純な固定オフセット比較が再び崩れる(このファイル冒頭のtest_b1の
+/// コメントが警告する交絡と同根、原因がDaily消費からAI募兵タイミングへ移っただけ)。
+/// 全6か国の`available_manpower`を0にすることで、補給ゲート自体の判定結果に
+/// 関わらず既存の人的資源チェックで募兵が確実に見送られるようにし、
+/// 「production only」の分離を維持する。
+fn zero_out_available_manpower_for_all_countries(app: &mut App) {
+    let mut country_registry = app.world_mut().resource_mut::<CountryRegistry>();
+    for country in country_registry.countries.iter_mut() {
+        country.available_manpower = 0;
+    }
+}
+
 /// セーブファイルを`SaveGameV1`として読み込み、渡した関数で編集した上で書き戻す
 /// (P26-004-PRE-004と同じ手法: 実際のRONラウンドトリップを通した「合成された旧Save」を
 /// 構築する。実ユーザーセーブ[`saves/savegame_v1.ron`]は一切使用しない)。
@@ -344,10 +360,12 @@ fn test_b1_first_monthly_production_adds_normally_without_double_counting_the_br
     let dir_a = TempTestDir::new("b1_with_grant");
     let mut app_with_grant = setup_app_in_playing(DWARF, dir_a.save_file_config());
     clear_all_divisions(&mut app_with_grant);
+    zero_out_available_manpower_for_all_countries(&mut app_with_grant);
 
     let dir_b = TempTestDir::new("b1_without_grant");
     let mut app_without_grant = setup_app_in_playing(DWARF, dir_b.save_file_config());
     clear_all_divisions(&mut app_without_grant);
+    zero_out_available_manpower_for_all_countries(&mut app_without_grant);
     for cid in ALL_SIX {
         set_military_supplies_stockpile(&mut app_without_grant, cid, 0.0);
     }

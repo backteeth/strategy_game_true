@@ -167,6 +167,7 @@ fn export_country_ai_state(state: &CountryAiState) -> SavedCountryAiState {
         last_monthly_evaluation_day: state.last_monthly_evaluation_day,
         cooldown_until_day: state.cooldown_until_day,
         dirty: state.dirty,
+        recruitment_supply_blocked: state.recruitment_supply_blocked,
     }
 }
 
@@ -366,6 +367,7 @@ mod tests {
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 15,
                 dirty: true,
+                recruitment_supply_blocked: false,
             },
         );
 

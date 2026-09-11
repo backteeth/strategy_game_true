@@ -3211,6 +3211,7 @@ mod tests {
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 0,
                 dirty: false,
+                recruitment_supply_blocked: false,
             },
         );
         let mut military_ai_states = HashMap::new();

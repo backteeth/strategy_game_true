@@ -186,6 +186,12 @@ pub struct SavedCountryAiState {
     pub cooldown_until_day: u32,
     #[serde(default = "default_dirty_true")]
     pub dirty: bool,
+    /// P26-008-A: 募兵AI補給ゲートの現在状態。`#[serde(default)]`(=`false`)により、
+    /// このフィールドを持たない旧Saveは「未停止」から復元される――次回の正規月次
+    /// 募兵評価で、その時点の実際の備蓄・需要・配送状態から改めて判定される
+    /// (ロード直後に月次cadenceを無視した臨時判定は行わない、spec §18)。
+    #[serde(default)]
+    pub recruitment_supply_blocked: bool,
 }
 
 /// `war::military_ai::MilitaryAiState`の正規状態DTO。`dirty`往復の理由は
@@ -406,6 +412,7 @@ mod tests {
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 15,
                 dirty: false,
+                recruitment_supply_blocked: false,
             },
         );
 
@@ -905,6 +912,7 @@ mod tests {
             last_monthly_evaluation_day: 0,
             cooldown_until_day: 0,
             dirty: true,
+            recruitment_supply_blocked: false,
         };
         let country_state_settled = SavedCountryAiState { dirty: false, ..country_state_dirty.clone() };
         let military_state_dirty = SavedMilitaryAiState {

@@ -10,13 +10,17 @@
 //! 募兵後も基準上限の25%を`available_manpower`として残せる場合だけ実行する
 //! (§5/§6の定数はいずれも「平時・戦時共通の保守的な軍備水準」という意図のみで、
 //! 戦争状態や国力による補正は行わない)。
+use crate::app::time::GameDate;
 use crate::common::{CountryId, StateId};
+use crate::country::country_ai::CountryAiRegistry;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::military::data::{DivisionStatus, MilitaryRegistry, STANDARD_INFANTRY_DEFINITION_ID};
 use crate::military::manpower::compute_manpower_ledger;
 use crate::military::recruitment::request_recruitment;
+use crate::military::recruitment_supply_gate::evaluate_recruitment_supply_gate;
 use crate::population::growth::{compute_manpower_cap, compute_population_by_owner};
 use crate::state::data::{StateData, StateRegistry};
+use crate::war::data::WarRegistry;
 use bevy::log::debug;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -32,6 +36,13 @@ pub enum AiRecruitmentOutcome {
     SkippedNoControlledState,
     SkippedLedgerInvalid,
     SkippedMissingDefinition,
+    /// P26-008-A: MilitarySupplies補給ゲートにより新規募兵を見送った
+    /// (`SkippedInsufficientManpower`等の既存理由へ偽装しない、専用の観測可能な
+    /// 理由)。国家備蓄不足・bridge不足・既存Divisionの配送不全・補給ゲート自体の
+    /// 評価失敗(防御的な分岐、安全側として見送る)のいずれかが原因――
+    /// `SkippedLedgerInvalid`が複数の帳簿不整合原因を1種類にまとめているのと
+    /// 同じ設計判断であり、公開enumを不必要に細分化しない。
+    SkippedSupplyShortage,
     /// 呼び出し時点で対象国家が`CountryRegistry`に見当たらない防御的なケース
     /// (通常の呼び出し経路[`evaluate_ai_monthly_recruitment`]では起こり得ない)。
     SkippedCountryNotFound,
@@ -115,12 +126,16 @@ pub fn select_ai_recruitment_state(
 /// 1国家分のAI月次募兵判断を行い、条件を満たす場合のみ`request_recruitment`を
 /// 呼び出す。この関数自身は`available_manpower`・`mobilized_manpower`・
 /// `treasury`・`recruitment_queue`・Divisionを一切直接変更しない。
+#[allow(clippy::too_many_arguments)]
 fn decide_and_recruit_for_country(
     country_registry: &mut CountryRegistry,
     military_registry: &MilitaryRegistry,
     state_registry: &StateRegistry,
+    war_registry: &WarRegistry,
+    game_date: &GameDate,
     population_by_owner: &HashMap<CountryId, u64>,
     living_by_owner: &HashMap<CountryId, u64>,
+    ai_state: &mut crate::country::country_ai::CountryAiState,
     country_id: CountryId,
 ) -> AiRecruitmentOutcome {
     let Some(def) = military_registry
@@ -168,6 +183,40 @@ fn decide_and_recruit_for_country(
         return AiRecruitmentOutcome::SkippedTargetMet;
     }
 
+    // P26-008-A: 補給ゲート。既存の目標未達判定(直前)が確定し、募兵候補
+    // Definition(`def`、この関数冒頭で取得済み)も確定した後、既存の人的資源条件
+    // (直後)より前に評価する(spec §14の推奨順序)。`ai_state.recruitment_supply_
+    // blocked`は「今月、新規募兵候補があるすべてのAI国家」について毎回更新するため、
+    // 状態が古いまま放置されることはない(この関数はキュー非空・目標達成済みの
+    // 国家では既に上のreturnで抜けており、そこでは更新しない――「新規募兵を
+    // 検討する条件が整った月だけ更新する」という一貫した基準)。
+    match evaluate_recruitment_supply_gate(
+        country,
+        military_registry,
+        war_registry,
+        def,
+        game_date,
+        ai_state.recruitment_supply_blocked,
+    ) {
+        Ok(new_blocked) => {
+            ai_state.recruitment_supply_blocked = new_blocked;
+            if new_blocked {
+                return AiRecruitmentOutcome::SkippedSupplyShortage;
+            }
+        }
+        Err(_) => {
+            // 防御的な分岐(通常のゲーム状態では到達しない、spec §17に列挙された
+            // Equipment不足によるqueue停滞とは無関係)。安全側としてこの月の新規
+            // 募兵を見送るが、ゲート状態自体は変更しない(不完全な評価結果で
+            // 中間帯のヒステリシス状態を書き換えない)。
+            debug!(
+                "[AiRecruitment] country {country_id:?}: supply gate evaluation failed, \
+                 skipping this month as a safe default"
+            );
+            return AiRecruitmentOutcome::SkippedSupplyShortage;
+        }
+    }
+
     let reserve = calculate_ai_manpower_reserve(cap);
     let Some(needed) = required.checked_add(reserve) else {
         return AiRecruitmentOutcome::SkippedInsufficientManpower;
@@ -205,6 +254,9 @@ pub fn evaluate_ai_monthly_recruitment(
     country_registry: &mut CountryRegistry,
     military_registry: &MilitaryRegistry,
     state_registry: &StateRegistry,
+    war_registry: &WarRegistry,
+    game_date: &GameDate,
+    country_ai_registry: &mut CountryAiRegistry,
     player_country: Option<CountryId>,
 ) {
     let population_by_owner = compute_population_by_owner(state_registry);
@@ -219,12 +271,16 @@ pub fn evaluate_ai_monthly_recruitment(
     candidates.sort_by_key(|id| id.0);
 
     for country_id in candidates {
+        let ai_state = country_ai_registry.get_or_create_mut(country_id);
         decide_and_recruit_for_country(
             country_registry,
             military_registry,
             state_registry,
+            war_registry,
+            game_date,
             &population_by_owner,
             &living_by_owner,
+            ai_state,
             country_id,
         );
     }
@@ -234,11 +290,15 @@ pub fn evaluate_ai_monthly_recruitment(
 /// `evaluate_ai_monthly_recruitment`を実行する(`diplomacy::ai_claim_generation::
 /// handle_monthly_ai_claim_generation`と同じ二重処理防止パターン)。
 /// `DailySimulationSet::CountryAi`(Economyより後、UiUpdateより前)に配置する。
+#[allow(clippy::too_many_arguments)]
 pub fn handle_monthly_ai_recruitment(
     mut month_events: MessageReader<crate::app::time::MonthChangedMessage>,
     mut country_registry: ResMut<CountryRegistry>,
     military_registry: Res<MilitaryRegistry>,
     state_registry: Res<StateRegistry>,
+    war_registry: Res<WarRegistry>,
+    game_date: Res<GameDate>,
+    mut country_ai_registry: ResMut<CountryAiRegistry>,
     player_country: Res<PlayerCountry>,
 ) {
     let mut evaluated_this_frame = false;
@@ -252,6 +312,9 @@ pub fn handle_monthly_ai_recruitment(
             &mut country_registry,
             &military_registry,
             &state_registry,
+            &war_registry,
+            &game_date,
+            &mut country_ai_registry,
             player_country.0,
         );
     }
@@ -261,7 +324,9 @@ pub fn handle_monthly_ai_recruitment(
 mod tests {
     use super::*;
     use crate::common::{CountryId, DivisionDefinitionId, DivisionId};
+    use crate::country::country_ai::CountryAiRegistry;
     use crate::country::{CountryData, CountryStatus};
+    use crate::economy::resources::ResourceType;
     use crate::military::data::{Division, DivisionDefinition, DivisionSize, DivisionType};
     use crate::military::recruitment::RecruitmentQueueItem;
 
@@ -437,14 +502,22 @@ mod tests {
     }
 
     fn test_country(id: usize, available: u64, mobilized: u64, treasury: f64) -> CountryData {
-        CountryData {
+        let mut country = CountryData {
             id: CountryId(id),
             capital_state_id: StateId(id),
             available_manpower: available,
             mobilized_manpower: mobilized,
             treasury,
             ..CountryData::default()
-        }
+        };
+        // P26-008-A: このモジュールの既存テストはいずれも募兵補給ゲート自体を
+        // 検証する対象ではない(既存の目標Division数・人的資源予備・州選択等を
+        // 検証する)。十分なMilitarySupplies備蓄(1個師団需要1.0/日に対し10,000日分)
+        // を与え、新規ゲートが意図せずこれらを`SkippedSupplyShortage`へ変えない
+        // ようにする――補給ゲート自体の境界値は`recruitment_supply_gate`モジュールの
+        // 単体テストと、専用のE2Eテストファイルで検証する。
+        country.stockpile.set(ResourceType::MilitarySupplies, 10_000.0);
+        country
     }
 
     fn test_division(id: usize, owner: usize, manpower: u64, status: DivisionStatus) -> Division {
@@ -480,6 +553,9 @@ mod tests {
         countries: CountryRegistry,
         military: MilitaryRegistry,
         states: StateRegistry,
+        war: WarRegistry,
+        country_ai: CountryAiRegistry,
+        game_date: GameDate,
     }
 
     fn harness(
@@ -500,18 +576,28 @@ mod tests {
             countries: CountryRegistry { countries },
             military,
             states: StateRegistry::build(states),
+            war: WarRegistry::default(),
+            country_ai: CountryAiRegistry::default(),
+            // 月半ば(境界日ではない)の任意の日付。既存テストはbridge計算の
+            // 暦境界そのものを検証する対象ではない――境界値は
+            // `recruitment_supply_gate`モジュールの単体テストで検証する。
+            game_date: GameDate::new(1800, 6, 15),
         }
     }
 
     fn decide(h: &mut Harness, country_id: CountryId) -> AiRecruitmentOutcome {
         let population_by_owner = compute_population_by_owner(&h.states);
         let living_by_owner = count_living_divisions_by_owner(&h.military);
+        let ai_state = h.country_ai.get_or_create_mut(country_id);
         decide_and_recruit_for_country(
             &mut h.countries,
             &h.military,
             &h.states,
+            &h.war,
+            &h.game_date,
             &population_by_owner,
             &living_by_owner,
+            ai_state,
             country_id,
         )
     }
@@ -667,7 +753,15 @@ mod tests {
         );
         // is_active()==falseのためevaluate_ai_monthly_recruitmentの候補集合から
         // 除外されることを、実際の公開エントリーポイント経由で確認する。
-        evaluate_ai_monthly_recruitment(&mut h.countries, &h.military, &h.states, None);
+        evaluate_ai_monthly_recruitment(
+            &mut h.countries,
+            &h.military,
+            &h.states,
+            &h.war,
+            &h.game_date,
+            &mut h.country_ai,
+            None,
+        );
         assert_eq!(
             h.countries
                 .get(CountryId(1))
@@ -808,7 +902,15 @@ mod tests {
             ],
             10_000,
         );
-        evaluate_ai_monthly_recruitment(&mut h.countries, &h.military, &h.states, None);
+        evaluate_ai_monthly_recruitment(
+            &mut h.countries,
+            &h.military,
+            &h.states,
+            &h.war,
+            &h.game_date,
+            &mut h.country_ai,
+            None,
+        );
         assert_eq!(
             h.countries
                 .get(CountryId(1))
@@ -839,6 +941,9 @@ mod tests {
             &mut h.countries,
             &h.military,
             &h.states,
+            &h.war,
+            &h.game_date,
+            &mut h.country_ai,
             Some(CountryId(1)),
         );
         assert_eq!(

@@ -14,6 +14,7 @@ pub mod manpower;
 pub mod movement;
 pub mod pathfinding;
 pub mod recruitment;
+pub mod recruitment_supply_gate;
 pub mod reinforcement;
 pub mod supply;
 pub mod supply_initialization;

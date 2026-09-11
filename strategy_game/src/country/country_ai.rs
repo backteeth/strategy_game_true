@@ -130,6 +130,14 @@ pub struct CountryAiState {
     pub last_monthly_evaluation_day: u32,
     pub cooldown_until_day: u32,
     pub dirty: bool,
+    /// P26-008-A: 募兵AI補給ゲートの現在状態(true=新規募兵を停止中)。
+    /// `national_reserve_days`だけからは中間帯(停止未満・再開未満)の状態を
+    /// 再導出できないため(真のヒステリシス、P26-008-PRE-001 §12の論理監査)、
+    /// `cooldown_until_day`と同種の「世界状態から再導出できないAI決定メモリ」
+    /// として保持する。既存の`decision_reason`(建設AI等、他サブシステムの
+    /// 最新判断理由)やMilitary AI状態を意味の異なる代替ストレージとして
+    /// 流用してはいない。
+    pub recruitment_supply_blocked: bool,
 }
 
 impl CountryAiState {
@@ -143,6 +151,7 @@ impl CountryAiState {
             last_monthly_evaluation_day: 0,
             cooldown_until_day: 0,
             dirty: true,
+            recruitment_supply_blocked: false,
         }
     }
 }

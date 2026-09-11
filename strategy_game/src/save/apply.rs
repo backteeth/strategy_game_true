@@ -384,6 +384,7 @@ pub(crate) fn prepare_load(
                         last_monthly_evaluation_day: s.last_monthly_evaluation_day,
                         cooldown_until_day: s.cooldown_until_day,
                         dirty: s.dirty,
+                        recruitment_supply_blocked: s.recruitment_supply_blocked,
                     },
                 )
             })
@@ -1004,6 +1005,7 @@ mod tests {
                 last_monthly_evaluation_day: 0,
                 cooldown_until_day: 0,
                 dirty: false,
+                recruitment_supply_blocked: false,
             },
         );
 
