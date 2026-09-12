@@ -313,7 +313,7 @@ MilitaryFactory建設AI・交易・輸送・港・鉄道・鉱床発見AI・財�
 
 ## 48. 最終`git status --short`
 
-コミット前は上記§47の4ファイルのみ(意図した変更以外なし、非決定的PNG・ユーザーSaveは含まれない)。
+上記§47の5ファイル(報告書自身を含む)は`6ca69be`(`feat: extend AI construction for supply chains`)としてコミット済み。コミット後の`git status --short`はクリーン。
 
 ## 49. P26-008全体の完了判定
 
