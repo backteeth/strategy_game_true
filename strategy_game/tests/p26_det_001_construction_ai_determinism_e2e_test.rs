@@ -752,11 +752,22 @@ mod real_app {
     //
     // `advance_one_month`をday1〜30へ拡張済み(Arcadia/Elfin側のday1・day30欠落を
     // 解消)、独立プロセス3回でいずれの新値も再現することを確認済み(決定的)。
+    //
+    // P26-008-C: Elfin(旧`1785.448052`→`1804.029982`)。本タスクが追加した建設AIの
+    // IndustrialGoods事前開発規則(`SteelShortageSteelMillPriority`)により、Elfinの
+    // Factory建設タイミングが変化した。上のコメントが説明する「Iron(Mine)と
+    // IndustrialGoods(Factory)を別々の月次評価で順に解消する必要があり2か月かかる」
+    // という制約は、Elfinの既存Mine(StateId 16、P26-004-PRE-004でIron/Coal鉱床を
+    // 追加済み)が既にIron側を満たしているため、本タスク以降は初回の月次評価
+    // (month 1)で直接IndustrialGoods(Factory)へ到達し、以前より早くFactoryが
+    // 完成するようになったために解消された。36か月間の追加生産期間により、
+    // 月36時点のMilitarySupplies生産分がわずかに増加する(実測・決定的、独立
+    // プロセスで再現確認済み)。
     #[test]
     fn test_f_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 1785.448052),
+            (ELFIN, 1804.029982),
             (DWARF, 1487.059),
             (OCEANIC, 579.803051),
             (PASSGUARD, 3325.079),

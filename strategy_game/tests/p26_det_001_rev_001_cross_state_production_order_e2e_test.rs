@@ -901,11 +901,17 @@ mod real_app {
     // 残余`day%30==3`自体は到達可能だが、月1回評価という解像度低下そのものによる
     // 建設タイミングの変化。`advance_one_month`をday1〜30へ拡張し、独立プロセス
     // 3回で新値の再現を確認済み(決定的)。
+    //
+    // P26-008-C: Elfin(旧`1785.448052`→`1804.029982`)。理由は
+    // `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名テストのコメントと
+    // 同一――新規のIndustrialGoods事前開発規則により、Elfinの既存Mine(StateId 16、
+    // 既にIron/Coal鉱床あり)がIron側を即座に満たすため、初回月次評価で直接
+    // Factory建設へ到達するようになり、以前より早く生産が始まる。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 1785.448052),
+            (ELFIN, 1804.029982),
             (DWARF, 1487.059),
             (OCEANIC, 579.803051),
             (PASSGUARD, 3325.079),

@@ -450,18 +450,61 @@ fn find_undeveloped_deposit_state(
     })
 }
 
-/// P26-004-PRE-002: 保有する生産建物の入力資源のうち、稼働中Mineがまだ存在しない
-/// 資源について、対応する未活用/増設可能な領内鉱床を持つ州を1件だけ決定的に選ぶ。
-/// 複数の資源が該当する場合は`ResourceType::ALL`の宣言順(Food,Wood,Iron,Coal,...)を
-/// tie-breakとして用い、同一資源内ではStateId昇順を用いる(spec §5.5)。
-/// MagicCrystalは通常Mineの対象外(CrystalRefinery系統の管轄)のため候補にしない。
-fn find_proactive_mine_state(
+/// 領内の有効な州にFactory(level>0)が1つでも存在するか(=IndustrialGoods生産経路が
+/// 構造的に存在するか、P26-008-C spec §7)。当月の実生産量(Coal入力不足・
+/// workforce不足・財政破綻による稼働率低下等)とは無関係に判定する――既に存在する
+/// Factoryを「稼働していないから存在しない」と誤認して重複建設しないための、
+/// `has_active_mine_for_resource`と対になる構造的判定。
+///
+/// 完成済み(level>0)のFactoryに加え、**建設queue内に未完成のFactoryが1件でも
+/// あれば**同様に「対応済み」とみなす(spec §7・§16.D: Factory建設中に同じ目的で
+/// 別州へもう1件発注しない)。`find_candidate_state`自体は州単位の重複(同じ州へ
+/// 同じ建物種別を二重に積む)しか排除しないため、複数州が候補になり得る場合の
+/// 国家単位の重複はこの関数側で防ぐ。
+fn has_active_factory_for_industrial_goods(
+    country: &CountryData,
+    state_registry: &StateRegistry,
+    owned_states: &[StateId],
+) -> bool {
+    let already_built = owned_states
+        .iter()
+        .any(|&sid| state_registry.get(sid).is_some_and(|s| s.building_level(BuildingType::Factory) > 0));
+    if already_built {
+        return true;
+    }
+    country
+        .construction_queue
+        .iter()
+        .any(|item| item.building_type == BuildingType::Factory)
+}
+
+/// P26-004-PRE-002が確立した「事前開発」対象を、鉱床由来の資源(Mine)だけでなく
+/// IndustrialGoods(Factory)へ拡張したもの(P26-008-C)。
+enum ProactiveDevelopmentTarget {
+    Mine(StateId),
+    Factory(StateId),
+}
+
+/// 保有する生産建物の入力資源のうち、対応する構造的生産経路がまだ存在しない資源に
+/// ついて、事前開発すべき建物種別と建設候補州を1件だけ決定的に選ぶ。
+/// 複数の資源が該当する場合は`ResourceType::ALL`の宣言順(Food,Wood,Iron,Coal,
+/// MagicCrystal,IndustrialGoods,...)をtie-breakとして用いる(P26-004-PRE-002
+/// spec §5.5、P26-008-C spec §9で維持)。
+///
+/// 鉱床由来の資源(Wood/Iron/Coal等)は既存どおりMine+未活用鉱床州で扱う。
+/// `ResourceType::IndustrialGoods`だけは特別扱いし(鉱床を持たないため
+/// `find_undeveloped_deposit_state`は使えない)、既存の汎用候補選択API
+/// `find_candidate_state`をFactory向けにそのまま再利用する(P26-008-C spec §10:
+/// 新しい生産グラフ探索を実装しない、既存APIの再利用に留める)。
+/// MagicCrystalは対象外(CrystalRefinery系統の管轄)のまま。
+fn find_proactive_development_target(
     country: &CountryData,
     state_registry: &StateRegistry,
     building_registry: &crate::building::data::BuildingRegistry,
     owned_states: &[StateId],
     mine_max_level: u32,
-) -> Option<StateId> {
+    factory_max_level: u32,
+) -> Option<ProactiveDevelopmentTarget> {
     let needed = resource_types_required_by_owned_buildings(state_registry, building_registry, owned_states);
     if needed.is_empty() {
         return None;
@@ -470,13 +513,28 @@ fn find_proactive_mine_state(
         if resource == ResourceType::MagicCrystal || !needed.contains(&resource) {
             continue;
         }
+        if resource == ResourceType::IndustrialGoods {
+            if has_active_factory_for_industrial_goods(country, state_registry, owned_states) {
+                continue;
+            }
+            if let Some(sid) = find_candidate_state(
+                country,
+                state_registry,
+                owned_states,
+                BuildingType::Factory,
+                factory_max_level,
+            ) {
+                return Some(ProactiveDevelopmentTarget::Factory(sid));
+            }
+            continue;
+        }
         if has_active_mine_for_resource(state_registry, owned_states, resource) {
             continue;
         }
         if let Some(sid) =
             find_undeveloped_deposit_state(country, state_registry, owned_states, mine_max_level, resource)
         {
-            return Some(sid);
+            return Some(ProactiveDevelopmentTarget::Mine(sid));
         }
     }
     None
@@ -530,35 +588,50 @@ pub fn process_construction_ai(
         return;
     }
 
-    // 優先度2 (P26-004-PRE-002): 未活用鉱床の事前開発。既存の資源不足トリガー
-    // (Wood/Iron/Coal<30)より先に評価する。建設費を支払えない場合はこの規則を
-    // 発火させず(spec §5.3の前提条件)、優先度3へフォールスルーする。
-    if let Some(mine_def) = building_registry.get(BuildingType::Mine)
-        && country.treasury >= mine_def.construction_cost
-    {
-        let mine_max_level = mine_def.max_level;
-        let mine_construction_cost = mine_def.construction_cost;
-        let mine_required_progress = mine_def.required_progress;
-        if let Some(state_id) = find_proactive_mine_state(
-            country,
-            state_registry,
-            building_registry,
-            &owned_states,
-            mine_max_level,
-        ) {
-            ai_state.decision_reason = CountryAiDecisionReason::RawMaterialMinePriority;
+    // 優先度2 (P26-004-PRE-002、P26-008-CでIndustrialGoods/Factoryへ拡張):
+    // 保有建物が要求する入力資源のうち、構造的な生産経路(鉱床由来はMine、
+    // IndustrialGoodsはFactory)がまだ存在しないものを1件だけ事前開発する。
+    // 既存の資源不足トリガー(Wood/Iron/Coal<30)より先に評価する。候補州が
+    // 見つかっても、対応する建物の建設費を支払えない場合はこの規則を発火させず
+    // (spec §5.3の前提条件を維持)、優先度3へフォールスルーする。
+    let mine_max_level = building_registry.get(BuildingType::Mine).map(|d| d.max_level).unwrap_or(0);
+    let factory_max_level = building_registry.get(BuildingType::Factory).map(|d| d.max_level).unwrap_or(0);
+    if let Some(target) = find_proactive_development_target(
+        country,
+        state_registry,
+        building_registry,
+        &owned_states,
+        mine_max_level,
+        factory_max_level,
+    ) {
+        let (target_building, state_id, decision_reason) = match target {
+            ProactiveDevelopmentTarget::Mine(sid) => {
+                (BuildingType::Mine, sid, CountryAiDecisionReason::RawMaterialMinePriority)
+            }
+            // P26-008-C: 既存のSteelShortageSteelMillPriority(定義済み・
+            // localization済みだが、これまで一度も生成側で使われていなかった)を
+            // IndustrialGoods不足によるFactory優先の理由として再利用する――
+            // 新しいOutcome/reasonを不必要に追加しない(spec §13)。
+            ProactiveDevelopmentTarget::Factory(sid) => {
+                (BuildingType::Factory, sid, CountryAiDecisionReason::SteelShortageSteelMillPriority)
+            }
+        };
+        if let Some(def) = building_registry.get(target_building)
+            && country.treasury >= def.construction_cost
+        {
+            ai_state.decision_reason = decision_reason;
             let current_level = state_registry
                 .get(state_id)
-                .map(|s| s.building_level(BuildingType::Mine))
+                .map(|s| s.building_level(target_building))
                 .unwrap_or(0);
-            country.treasury -= mine_construction_cost;
+            country.treasury -= def.construction_cost;
             country.construction_queue.push(ConstructionQueueItem {
                 state_id,
-                building_type: BuildingType::Mine,
+                building_type: target_building,
                 target_level: current_level + 1,
                 progress: 0.0,
-                required_progress: mine_required_progress,
-                paid_cost: mine_construction_cost,
+                required_progress: def.required_progress,
+                paid_cost: def.construction_cost,
                 status: ConstructionStatus::InQueue,
             });
             return;
@@ -2379,5 +2452,481 @@ mod tests {
             "未解決の自国開始Crisisがある間は、戦力優位・到達可能な隣国が\
              存在してもprocess_war_preparation_aiは競合する正当化を開始しないこと"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P26-008-C: IndustrialGoods不足検出とFactory事前開発
+    // ─────────────────────────────────────────────────────────────────────
+
+    fn p26_008_c_building_registry() -> crate::building::data::BuildingRegistry {
+        let mut reg = crate::building::data::BuildingRegistry::default();
+        reg.definitions.insert(
+            BuildingType::Farm,
+            crate::building::data::BuildingDefinition {
+                building_type: BuildingType::Farm,
+                name: "Farm".to_string(),
+                construction_cost: 100.0,
+                required_progress: 10.0,
+                required_workforce: 100.0,
+                logistics_cost: 0.0,
+                input_resources: HashMap::new(),
+                output_resources: HashMap::new(),
+                maintenance_cost: 1.0,
+                max_level: 5,
+                science_output: 0.0,
+                magic_output: 0.0,
+                railway_capacity_bonus: 0.0,
+            },
+        );
+        reg.definitions.insert(
+            BuildingType::Mine,
+            crate::building::data::BuildingDefinition {
+                building_type: BuildingType::Mine,
+                name: "Mine".to_string(),
+                construction_cost: 500.0,
+                required_progress: 60.0,
+                required_workforce: 10_000.0,
+                logistics_cost: 10.0,
+                input_resources: HashMap::new(),
+                output_resources: HashMap::new(),
+                maintenance_cost: 15.0,
+                max_level: 10,
+                science_output: 0.0,
+                magic_output: 0.0,
+                railway_capacity_bonus: 0.0,
+            },
+        );
+        reg.definitions.insert(
+            BuildingType::Factory,
+            crate::building::data::BuildingDefinition {
+                building_type: BuildingType::Factory,
+                name: "Civilian Factory".to_string(),
+                construction_cost: 1000.0,
+                required_progress: 90.0,
+                required_workforce: 20_000.0,
+                logistics_cost: 15.0,
+                input_resources: [(ResourceType::Iron, 20.0), (ResourceType::Coal, 20.0)]
+                    .into_iter()
+                    .collect(),
+                output_resources: [(ResourceType::IndustrialGoods, 30.0)].into_iter().collect(),
+                maintenance_cost: 30.0,
+                max_level: 10,
+                science_output: 0.0,
+                magic_output: 0.0,
+                railway_capacity_bonus: 0.0,
+            },
+        );
+        reg.definitions.insert(
+            BuildingType::MilitaryFactory,
+            crate::building::data::BuildingDefinition {
+                building_type: BuildingType::MilitaryFactory,
+                name: "Military Factory".to_string(),
+                construction_cost: 1200.0,
+                required_progress: 90.0,
+                required_workforce: 25_000.0,
+                logistics_cost: 20.0,
+                input_resources: [(ResourceType::Iron, 30.0), (ResourceType::IndustrialGoods, 15.0)]
+                    .into_iter()
+                    .collect(),
+                output_resources: [
+                    (ResourceType::MilitaryEquipment, 20.0),
+                    (ResourceType::MilitarySupplies, 100.0),
+                ]
+                .into_iter()
+                .collect(),
+                maintenance_cost: 40.0,
+                max_level: 10,
+                science_output: 0.0,
+                magic_output: 0.0,
+                railway_capacity_bonus: 0.0,
+            },
+        );
+        reg
+    }
+
+    /// 優先度1(Food緊急)・優先度3の鉱床資源トリガー(Wood/Iron/Coal<30)のいずれも
+    /// 発火しない、十分な備蓄を持つ国家(P26-008-Cのテストがpriority 2の
+    /// IndustrialGoods分岐だけを単離して検証できるようにする)。
+    fn p26_008_c_ample_country(id: CountryId, capital: StateId, treasury: f64) -> CountryData {
+        let mut c = CountryData { id, capital_state_id: capital, treasury, ..CountryData::default() };
+        c.stockpile.set(ResourceType::Food, 1000.0);
+        c.stockpile.set(ResourceType::Wood, 1000.0);
+        c.stockpile.set(ResourceType::Iron, 1000.0);
+        c.stockpile.set(ResourceType::Coal, 1000.0);
+        c
+    }
+
+    fn p26_008_c_owned_state(id: usize, owner: CountryId) -> StateData {
+        StateData {
+            id: StateId(id),
+            name: format!("State {id}"),
+            owner_country_id: owner,
+            world_position: [id as f32 * 100.0, 0.0],
+            size: [100.0, 100.0],
+            ..StateData::default()
+        }
+    }
+
+    fn p26_008_c_deposit(resource: ResourceType, discovered: bool) -> crate::economy::resources::StateResourceDeposit {
+        crate::economy::resources::StateResourceDeposit {
+            resource_type: resource,
+            base_output: 10.0,
+            discovered,
+            development_level: 0,
+        }
+    }
+
+    #[test]
+    fn industrial_goods_gap_is_detected_when_a_militaryfactory_needs_it_and_no_factory_exists() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mine_state = p26_008_c_owned_state(2, country_id);
+        mine_state.resource_deposits = vec![p26_008_c_deposit(ResourceType::Coal, true)];
+        let mut mf_state = p26_008_c_owned_state(3, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, mine_state, mf_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(
+            country_id,
+            &mut country_registry,
+            &state_registry,
+            &building_registry,
+            &mut ai_state,
+        );
+
+        let country = country_registry.get(country_id).unwrap();
+        assert_eq!(country.construction_queue.len(), 1);
+        assert_eq!(country.construction_queue[0].building_type, BuildingType::Factory);
+        assert_eq!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::SteelShortageSteelMillPriority
+        );
+    }
+
+    #[test]
+    fn no_industrial_goods_requiring_building_means_no_gap_is_detected() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        // MilitaryFactoryなし、Farmだけ所有(IndustrialGoodsを要求しない)。
+        let mut farm_state = p26_008_c_owned_state(2, country_id);
+        farm_state.buildings.insert(BuildingType::Farm, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, farm_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let country = country_registry.get(country_id).unwrap();
+        assert_ne!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::SteelShortageSteelMillPriority,
+            "IndustrialGoodsを要求する所有建物がなければFactory優先分岐に入らないはず"
+        );
+        // 通常判断(優先度3)ではFactoryが選ばれ得るが、それはIndustrialGoods不足
+        // 検出とは無関係な既存経路であることを理由コードで確認済み。
+        let _ = country;
+    }
+
+    #[test]
+    fn factory_level_one_means_the_structural_path_already_exists() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let mut factory_state = p26_008_c_owned_state(3, country_id);
+        factory_state.buildings.insert(BuildingType::Factory, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state, factory_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        assert_ne!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::SteelShortageSteelMillPriority,
+            "Factory level>0が既に存在するなら、当月生産量に関わらずFactory優先を再発火しないはず"
+        );
+    }
+
+    #[test]
+    fn another_countrys_factory_does_not_satisfy_this_countrys_gap() {
+        let self_id = CountryId(1);
+        let other_id = CountryId(2);
+        let capital = p26_008_c_owned_state(1, self_id);
+        let mut mf_state = p26_008_c_owned_state(2, self_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let mut mine_state = p26_008_c_owned_state(3, self_id);
+        mine_state.resource_deposits = vec![p26_008_c_deposit(ResourceType::Coal, true)];
+        // 他国の州にFactoryがあっても、自国の判定には影響しないはず。
+        let mut other_factory_state = p26_008_c_owned_state(4, other_id);
+        other_factory_state.buildings.insert(BuildingType::Factory, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state, mine_state, other_factory_state]);
+        let mut country = p26_008_c_ample_country(self_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(self_id);
+
+        process_construction_ai(self_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let country = country_registry.get(self_id).unwrap();
+        assert_eq!(
+            country.construction_queue.len(),
+            1,
+            "他国のFactoryは自国のIndustrialGoods不足判定を満たさないはず"
+        );
+        assert_eq!(country.construction_queue[0].building_type, BuildingType::Factory);
+    }
+
+    #[test]
+    fn food_emergency_takes_priority_over_the_industrial_goods_gap() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.stockpile.set(ResourceType::Food, 10.0); // 既存の緊急しきい値(50)未満
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        assert_eq!(ai_state.decision_reason, CountryAiDecisionReason::FoodShortageFarmPriority);
+        let country = country_registry.get(country_id).unwrap();
+        if let Some(item) = country.construction_queue.first() {
+            assert_eq!(item.building_type, BuildingType::Farm);
+        }
+    }
+
+    #[test]
+    fn deposit_resource_priority_order_is_preserved_ahead_of_industrial_goods() {
+        // MilitaryFactoryはIron・IndustrialGoodsの両方を要求する。ResourceType::ALLの
+        // 宣言順(Food,Wood,Iron,Coal,MagicCrystal,IndustrialGoods,...)により、Iron鉱床の
+        // 事前開発(Mine)がIndustrialGoods事前開発(Factory)より先に評価されるはず
+        // (両方の資源が同時に不足している場合の既存tie-break、spec §9)。
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let mut iron_state = p26_008_c_owned_state(3, country_id);
+        iron_state.resource_deposits = vec![p26_008_c_deposit(ResourceType::Iron, true)];
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state, iron_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let country = country_registry.get(country_id).unwrap();
+        assert_eq!(country.construction_queue.len(), 1);
+        assert_eq!(
+            country.construction_queue[0].building_type,
+            BuildingType::Mine,
+            "Iron鉱床の事前開発はIndustrialGoods(Factory)より先に評価されるはず"
+        );
+    }
+
+    #[test]
+    fn factory_candidate_state_excludes_other_countries_and_invalid_states() {
+        let self_id = CountryId(1);
+        let other_id = CountryId(2);
+        let capital = p26_008_c_owned_state(1, self_id);
+        let mut mf_state = p26_008_c_owned_state(2, self_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let foreign_state = p26_008_c_owned_state(3, other_id);
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state, foreign_state]);
+        let mut country = p26_008_c_ample_country(self_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(self_id);
+
+        process_construction_ai(self_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let country = country_registry.get(self_id).unwrap();
+        assert_eq!(country.construction_queue.len(), 1);
+        let target_state = country.construction_queue[0].state_id;
+        assert_ne!(target_state, StateId(3), "他国の州へ建設してはいけない");
+        assert!(
+            state_registry.get(target_state).is_some_and(|s| s.owner_country_id == self_id),
+            "建設候補州は必ず自国州でなければならない"
+        );
+    }
+
+    #[test]
+    fn no_candidate_state_falls_through_without_panicking() {
+        // 自国が所有する州がFactory候補として使える州(この国が所有する唯一の他州)
+        // をIron鉱床のMineが既に埋めており、Factory自体は既存どおりcapitalへ
+        // 建設可能なため、本来は候補が見つかる――ここでは意図的に州を1つ(capital)
+        // だけにして、Mineの事前開発州がなくても既存の通常判断へ安全にフォール
+        // スルーする(panicしない)ことを確認する。
+        let country_id = CountryId(1);
+        let mut capital = p26_008_c_owned_state(1, country_id);
+        capital.buildings.insert(BuildingType::MilitaryFactory, 1);
+        capital.buildings.insert(BuildingType::Factory, 10); // 既にmax levelまで建設済み
+
+        let state_registry = StateRegistry::build(vec![capital]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        // パニックしないことそのものがこのテストの主張。
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+    }
+
+    #[test]
+    fn insufficient_funds_for_factory_falls_through_to_priority_three() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state]);
+        // Factory建設費(1000)未満、Mine建設費(500)以上。
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 600.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        assert_ne!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::SteelShortageSteelMillPriority,
+            "Factory建設費を賄えない場合はこの規則を発火させず、優先度3へフォールスルーするはず"
+        );
+    }
+
+    #[test]
+    fn duplicate_factory_is_not_queued_while_one_is_already_under_construction() {
+        // 注意: 優先度3(既存の通常判断、無変更)は原材料が十分なら独立に
+        // 「経済成長のためFactoryを建設する」という既存の一般判断を行い得る――
+        // これは本タスクのIndustrialGoods事前開発規則(優先度2)とは無関係な、
+        // 既存の正当なAI挙動であり「重複」ではない。本テストが検証したいのは
+        // あくまで優先度2自身が、既にFactoryが建設中の間は同じ理由
+        // (`SteelShortageSteelMillPriority`)で再発火しないことである。
+        let self_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, self_id);
+        let mut mf_state = p26_008_c_owned_state(2, self_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state]);
+        let mut country = p26_008_c_ample_country(self_id, StateId(1), 100_000.0);
+        // 既にFactoryが(別の州で)建設中であることを模擬する。
+        country.construction_queue.clear();
+        country.construction_queue.push(crate::building::construction::ConstructionQueueItem {
+            state_id: StateId(1),
+            building_type: BuildingType::Factory,
+            target_level: 1,
+            progress: 0.0,
+            required_progress: 90.0,
+            paid_cost: 1000.0,
+            status: crate::building::construction::ConstructionStatus::InQueue,
+        });
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(self_id);
+
+        process_construction_ai(self_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        assert_ne!(
+            ai_state.decision_reason,
+            CountryAiDecisionReason::SteelShortageSteelMillPriority,
+            "既にFactoryが建設中(未完成)なら、IndustrialGoods事前開発規則(優先度2)は\
+             再発火してはいけない"
+        );
+    }
+
+    #[test]
+    fn staged_repair_moves_from_factory_to_coal_mine_once_factory_exists() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+        // Factoryは既に完成済み(level>0)、CoalとIronの鉱床が両方ある州を用意。
+        let mut factory_state = p26_008_c_owned_state(3, country_id);
+        factory_state.buildings.insert(BuildingType::Factory, 1);
+        let mut coal_state = p26_008_c_owned_state(4, country_id);
+        coal_state.resource_deposits = vec![p26_008_c_deposit(ResourceType::Coal, true)];
+
+        let state_registry =
+            StateRegistry::build(vec![capital, mf_state, factory_state, coal_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        // Coal事前開発規則を発火させるため、あえてCoal備蓄を閾値未満にはしない
+        // (事前開発はP26-004-PRE-002どおり閾値到達前の予防的発火のため、備蓄量とは無関係)。
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let country = country_registry.get(country_id).unwrap();
+        assert_eq!(country.construction_queue.len(), 1);
+        assert_eq!(
+            country.construction_queue[0].building_type,
+            BuildingType::Mine,
+            "Factory完成後は、Factory自身が要求するCoalの鉱床事前開発(Mine)へ\
+             既存規則が接続されるはず"
+        );
+        assert_eq!(country.construction_queue[0].state_id, StateId(4));
+    }
+
+    #[test]
+    fn no_coal_deposit_does_not_fabricate_a_mine() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1);
+        let mut factory_state = p26_008_c_owned_state(3, country_id);
+        factory_state.buildings.insert(BuildingType::Factory, 1);
+        // Coal鉱床を持つ州は一切ない。
+
+        let state_registry = StateRegistry::build(vec![capital, mf_state, factory_state]);
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), 100_000.0);
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let country = country_registry.get(country_id).unwrap();
+        // Coal鉱床が皆無なので事前開発Mineは候補にならず、既存どおり優先度3
+        // (原材料は十分なのでFactory)へフォールスルーするはず。不正なMineは
+        // 生成されない。
+        for item in &country.construction_queue {
+            assert_ne!(
+                item.building_type,
+                BuildingType::Mine,
+                "Coal鉱床が皆無の州へMineを建設してはいけない"
+            );
+        }
     }
 }
