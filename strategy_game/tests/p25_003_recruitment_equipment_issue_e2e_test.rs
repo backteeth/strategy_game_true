@@ -151,11 +151,17 @@ fn test_b_stockpile_exactly_matching_requirement_succeeds_and_empties_the_stockp
     );
 }
 
-// ─── Test C: 装備不足 ────────────────────────────────────────────────────
+// ─── Test C: 装備不足(P27-001: 完成を遅延させず0装備で完成する) ─────────
+//
+// P27-001以前は、備蓄不足(0.0 < 必要100.0)の場合、`try_spawn_division`が
+// 常に必要量の全額を要求(all-or-nothing)していたため訓練完了後もqueueに
+// 無期限滞留していた(旧テスト名: `_delays_completion_...`)。P27-001は
+// 候補C(P27-001-PRE-001)を採用し、利用可能な範囲(この場合は0)だけを支給して
+// 即座に完成させる——これは意図的な契約の反転であり、以下は新しい正規挙動を
+// 固定する。
 
 #[test]
-fn test_c_insufficient_equipment_delays_completion_without_altering_manpower_treasury_or_stockpile()
-{
+fn test_c_zero_equipment_stockpile_completes_immediately_with_a_zero_equipped_division() {
     let mut military_registry = setup_registry();
     let mut country_registry = CountryRegistry::default();
     let mut country = fresh_country(1, 20_000);
@@ -173,15 +179,26 @@ fn test_c_insufficient_equipment_delays_completion_without_altering_manpower_tre
     let mobilized_after_request = country.mobilized_manpower;
     country_registry.countries.push(country);
 
-    run_days(&mut country_registry, &mut military_registry, 40);
+    run_days(&mut country_registry, &mut military_registry, 30);
 
     let c = &country_registry.countries[0];
-    assert_eq!(military_registry.divisions.len(), 0);
-    assert_eq!(c.available_manpower, manpower_after_request);
-    assert_eq!(c.mobilized_manpower, mobilized_after_request);
-    assert_eq!(c.stockpile.get(ResourceType::MilitaryEquipment), 0.0);
+    assert_eq!(
+        military_registry.divisions.len(),
+        1,
+        "P27-001: equipment shortage must no longer delay completion"
+    );
+    let division = military_registry.divisions.values().next().unwrap();
+    assert_eq!(division.equipment, 0.0, "issued equipment must be exactly what was available (0)");
+    assert_eq!(
+        division.max_equipment, 100.0,
+        "max_equipment must stay at the full required_equipment, not the issued amount \
+         (otherwise later daily equipment reinforcement would never top this division up)"
+    );
+    assert_eq!(c.available_manpower, manpower_after_request, "manpower accounting is unaffected");
+    assert_eq!(c.mobilized_manpower, mobilized_after_request, "manpower accounting is unaffected");
+    assert_eq!(c.stockpile.get(ResourceType::MilitaryEquipment), 0.0, "nothing was available to issue");
     assert_eq!(c.treasury, 500.0);
-    assert_eq!(c.recruitment_queue.len(), 1);
+    assert_eq!(c.recruitment_queue.len(), 0, "the item must be removed from the queue on completion");
 }
 
 // ─── Test D: manpower不足 ────────────────────────────────────────────────
@@ -373,10 +390,19 @@ fn test_i_invalid_required_equipment_is_rejected_atomically_at_request_time() {
     }
 }
 
-// ─── Test J: 複数queue item ──────────────────────────────────────────────
+// ─── Test J: 複数queue item(P27-001: 両方とも同日に完成する) ────────────
+//
+// P27-001以前は、備蓄150.0(必要100.0×2件分には不足)に対して2件同時投入すると、
+// 1件目(item A)がall-or-nothingで全額100.0を消費し、2件目(item B)は完成できず
+// 待機し続けた。P27-001の候補Cでは、`process_recruitment`が`recruitment_queue`
+// をVecの順序どおり逐次処理し、各項目の完成時点でその時点の備蓄を都度読み直す
+// ため、item Aが100.0(満額)を消費した"後"にitem Bが評価され、残り50.0を
+// 部分支給で受け取って**同日に両方とも完成する**。これは新しいHamilton配分等を
+// 導入したものではなく、既存のVec順逐次処理がそのまま自然に決定的なFIFO配分を
+// 実現している(P27-001報告書§7参照)。
 
 #[test]
-fn test_j_multiple_queue_items_only_the_first_in_order_consumes_available_equipment() {
+fn test_j_multiple_queue_items_both_complete_same_day_first_full_then_remainder() {
     let mut military_registry = setup_registry(); // required_equipment=100.0
     let mut country_registry = CountryRegistry::default();
     let mut country = fresh_country(1, 200_000);
@@ -404,20 +430,34 @@ fn test_j_multiple_queue_items_only_the_first_in_order_consumes_available_equipm
 
     assert_eq!(
         military_registry.divisions.len(),
-        1,
-        "only one division's worth of equipment is available"
+        2,
+        "P27-001: both queue items complete the same day, the second with the remainder"
     );
     assert_eq!(
         country_registry.countries[0]
             .stockpile
             .get(ResourceType::MilitaryEquipment),
-        50.0
+        0.0,
+        "all 150.0 must have been distributed across the two completions"
     );
     assert_eq!(
         country_registry.countries[0].recruitment_queue.len(),
-        1,
-        "the second item must remain waiting"
+        0,
+        "no item remains waiting"
     );
+    let mut equipments: Vec<f64> = military_registry.divisions.values().map(|d| d.equipment).collect();
+    equipments.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        equipments,
+        vec![50.0, 100.0],
+        "the first item in queue order receives the full amount, the second the remainder"
+    );
+    for division in military_registry.divisions.values() {
+        assert_eq!(
+            division.max_equipment, 100.0,
+            "max_equipment stays at the full requirement regardless of how much was issued"
+        );
+    }
 }
 
 // ─── Test K: 複数国家 ────────────────────────────────────────────────────
@@ -452,21 +492,34 @@ fn test_k_multiple_countries_do_not_share_equipment_or_manpower() {
 
     run_days(&mut country_registry, &mut military_registry, 30);
 
-    assert_eq!(military_registry.divisions.len(), 1);
-    let division = military_registry.divisions.values().next().unwrap();
+    // P27-001: country Aも(装備0のまま)同日に完成する——country間のEquipment・
+    // manpower分離自体は変わらず維持される(それぞれ独立に0/100を支給される)。
     assert_eq!(
-        division.owner,
-        CountryId(2),
-        "only country B had sufficient equipment"
+        military_registry.divisions.len(),
+        2,
+        "P27-001: country A's shortage no longer blocks its own completion"
     );
+    let division_a = military_registry
+        .divisions
+        .values()
+        .find(|d| d.owner == CountryId(1))
+        .unwrap();
+    assert_eq!(division_a.equipment, 0.0, "country A had nothing to issue");
+    assert_eq!(division_a.max_equipment, 100.0);
+    let division_b = military_registry
+        .divisions
+        .values()
+        .find(|d| d.owner == CountryId(2))
+        .unwrap();
+    assert_eq!(division_b.equipment, 100.0, "country B had the full amount");
     assert_eq!(
         country_registry
             .get(CountryId(1))
             .unwrap()
             .recruitment_queue
             .len(),
-        1,
-        "country A must still be waiting"
+        0,
+        "country A's queue is also empty now"
     );
     assert_eq!(
         country_registry
@@ -474,7 +527,8 @@ fn test_k_multiple_countries_do_not_share_equipment_or_manpower() {
             .unwrap()
             .stockpile
             .get(ResourceType::MilitaryEquipment),
-        0.0
+        0.0,
+        "country A's stockpile was already 0 and stays 0 (no cross-country leakage)"
     );
     assert_eq!(
         country_registry
@@ -578,11 +632,18 @@ fn test_s_unresolved_definition_leaves_all_accounting_values_unchanged() {
     );
 }
 
-// ─── Test U: 失敗時ビット原子性 ──────────────────────────────────────────
+// ─── Test U: 完成日を境にした備蓄のビット精度な変化(P27-001で更新) ──────
+//
+// P27-001以前は42.5 < 必要100.0が「完成させない」ことを意味したため、40日間
+// stockpileがビット単位で不変であることを検証していた。P27-001では、
+// `recruitment_days`(このfixtureでは30日)に到達した時点で42.5全額が部分支給
+// され、stockpileは0.0へ変化する。「完成日より前は完全に不変」「完成日に
+// ちょうど1回だけ変化」「完成日より後は(queueが空なので)再び不変」という
+// 3段階を、ビット精度で検証する。
 
 #[test]
-fn test_u_stockpile_bits_are_unchanged_across_every_equipment_failure_path() {
-    let mut military_registry = setup_registry();
+fn test_u_stockpile_changes_exactly_once_on_the_completion_day_then_stays_bit_stable() {
+    let mut military_registry = setup_registry(); // required_equipment=100.0, recruitment_days=30
     let mut country_registry = CountryRegistry::default();
     let mut country = fresh_country(1, 20_000);
     country.stockpile.set(ResourceType::MilitaryEquipment, 42.5);
@@ -597,15 +658,44 @@ fn test_u_stockpile_bits_are_unchanged_across_every_equipment_failure_path() {
     .unwrap();
     country_registry.countries.push(country);
 
-    // 42.5 < 必要100.0のため、何日進めてもstockpileはビット単位で不変。
-    for _ in 0..40 {
+    // 完成日(30日目)より前(1〜29日目)は、queueがまだdays_remaining>0のため
+    // stockpileはビット単位で不変。
+    for day in 1..30 {
         process_recruitment(&mut country_registry, &mut military_registry);
         assert_eq!(
             country_registry.countries[0]
                 .stockpile
                 .get(ResourceType::MilitaryEquipment)
                 .to_bits(),
-            stockpile_bits_before
+            stockpile_bits_before,
+            "stockpile must be bit-identical before the completion day (day {day})"
+        );
+    }
+
+    // 30日目(完成日): 42.5全額が部分支給され、stockpileは0.0になる。
+    process_recruitment(&mut country_registry, &mut military_registry);
+    assert_eq!(
+        country_registry.countries[0]
+            .stockpile
+            .get(ResourceType::MilitaryEquipment),
+        0.0,
+        "P27-001: the full 42.5 must be issued on the completion day, not withheld"
+    );
+    assert_eq!(military_registry.divisions.len(), 1);
+    let division = military_registry.divisions.values().next().unwrap();
+    assert_eq!(division.equipment, 42.5);
+    assert_eq!(division.max_equipment, 100.0);
+
+    // 完成後(queueが空)は、再びビット単位で不変(0.0のまま)。
+    let stockpile_bits_after_completion = 0.0f64.to_bits();
+    for _ in 0..10 {
+        process_recruitment(&mut country_registry, &mut military_registry);
+        assert_eq!(
+            country_registry.countries[0]
+                .stockpile
+                .get(ResourceType::MilitaryEquipment)
+                .to_bits(),
+            stockpile_bits_after_completion
         );
     }
 }
@@ -888,15 +978,28 @@ fn test_o_loaded_game_divisions_do_not_redebit_the_stockpile() {
     );
 }
 
-// ─── Test P: pending save/load ───────────────────────────────────────────
+// ─── Test P: 0装備完成のsave/load往復(P27-001で全面刷新) ────────────────
+//
+// P27-001以前はここで備蓄0のqueueが完成せずに待機し続けることを検証していたが、
+// P27-001の候補C採用によりこのシナリオ自体が「即座に0装備で完成する」に変わった
+// (旧テストの前提が成立しなくなった、意図的な契約の反転)。本テストは新しい
+// 正規挙動——0装備Divisionが実App経由で即座に完成し、save→loadを跨いでも
+// 再生成・再消費されずに1件のまま安定する——を検証する。
 
 #[test]
-fn test_p_pending_equipment_shortage_queue_survives_save_load_and_completes_once_equipped() {
+fn test_p_zero_equipment_division_completes_immediately_and_round_trips_through_save_load() {
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("test_p");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
 
     set_military_equipment_stockpile(&mut app, player, 0.0);
+    let division_count_before_request = app
+        .world()
+        .resource::<MilitaryRegistry>()
+        .divisions
+        .values()
+        .filter(|d| d.owner == player)
+        .count();
     call_request_recruitment(
         &mut app,
         player,
@@ -917,7 +1020,37 @@ fn test_p_pending_equipment_shortage_queue_survives_save_load_and_completes_once
         send_day_changed(&mut app, 1800, 1, (day % 28 + 1) as u8);
     }
 
-    let division_count_pending = app.world().resource::<MilitaryRegistry>().divisions.len();
+    let division_count_after_training = app
+        .world()
+        .resource::<MilitaryRegistry>()
+        .divisions
+        .values()
+        .filter(|d| d.owner == player)
+        .count();
+    assert_eq!(
+        division_count_after_training,
+        division_count_before_request + 1,
+        "P27-001: training completion must not be delayed by an empty equipment stockpile"
+    );
+    assert!(
+        app.world()
+            .resource::<CountryRegistry>()
+            .get(player)
+            .unwrap()
+            .recruitment_queue
+            .is_empty(),
+        "the completed item must be removed from the queue"
+    );
+    let new_division = app
+        .world()
+        .resource::<MilitaryRegistry>()
+        .divisions
+        .values()
+        .find(|d| d.owner == player && d.equipment == 0.0)
+        .expect("a zero-equipped division must exist")
+        .clone();
+    assert!(new_division.max_equipment > 0.0, "max_equipment must retain the full requirement");
+    let total_division_count_before_save = app.world().resource::<MilitaryRegistry>().divisions.len();
 
     send_save_request(&mut app);
     app.update();
@@ -927,27 +1060,17 @@ fn test_p_pending_equipment_shortage_queue_survives_save_load_and_completes_once
 
     assert_eq!(
         app.world().resource::<MilitaryRegistry>().divisions.len(),
-        division_count_pending,
-        "no division should have been created from the pending item across save/load"
+        total_division_count_before_save,
+        "save/load must not duplicate or drop the zero-equipped division"
     );
-
-    // 装備を追加し、次の日次処理で1回だけ生成される。
-    let required_equipment = {
-        let military_registry = app.world().resource::<MilitaryRegistry>();
-        military_registry
-            .definitions
-            .get(&strategy_game::military::data::STANDARD_INFANTRY_DEFINITION_ID)
-            .unwrap()
-            .required_equipment
-    };
-    set_military_equipment_stockpile(&mut app, player, required_equipment);
-    send_day_changed(&mut app, 1800, 2, 1);
-
-    assert_eq!(
-        app.world().resource::<MilitaryRegistry>().divisions.len(),
-        division_count_pending + 1,
-        "exactly one division must be created once equipment becomes available"
-    );
+    let reloaded = app
+        .world()
+        .resource::<MilitaryRegistry>()
+        .divisions
+        .get(&new_division.id)
+        .expect("the same division id must survive the round trip");
+    assert_eq!(reloaded.equipment, 0.0);
+    assert_eq!(reloaded.max_equipment, new_division.max_equipment);
     assert_eq!(military_equipment_stockpile(&app, player), 0.0);
 }
 
@@ -1016,10 +1139,16 @@ fn test_q_completed_recruitment_round_trips_through_save_and_load() {
     assert_eq!(military_equipment_stockpile(&app, player), stockpile_before);
 }
 
-// ─── Test T: AI経路 ──────────────────────────────────────────────────────
+// ─── Test T: AI経路(P27-001: 「同じゲート」から「同じ完成規則」へ) ─────
+//
+// P27-001以前は、AIが備蓄不足のまま募兵をqueueへ入れても完成しない(=同じ
+// all-or-nothingゲートをプレイヤーと共有する)ことを検証していた。P27-001は
+// この完成規則自体を変更した(候補C)ため、本テストはAIも新しい正規挙動——
+// 備蓄0でも即座に(0装備で)完成する——をプレイヤーと全く同じ関数経由で
+// 受け取ることを検証する形へ更新する。
 
 #[test]
-fn test_t_ai_recruitment_receives_the_same_equipment_gating_as_the_player() {
+fn test_t_ai_recruitment_receives_the_same_equipment_completion_rule_as_the_player() {
     let player = CountryId(0);
     let ai_country = CountryId(1);
     let temp_dir = TempTestDir::new("test_t");
@@ -1047,8 +1176,8 @@ fn test_t_ai_recruitment_receives_the_same_equipment_gating_as_the_player() {
     state.apply(app.world_mut());
     app.update();
 
-    // AIが募兵を判断してキューへ投入した場合(装備不足でも投入自体は成功するはず)、
-    // 装備が揃うまでDivisionは生成されない。
+    // AIが募兵を判断してキューへ投入した場合(装備不足でも投入自体は成功する)、
+    // P27-001以降は0装備のままでも訓練完了と同時に完成する。
     let ai_queue_is_non_empty = !app
         .world()
         .resource::<CountryRegistry>()
@@ -1076,8 +1205,23 @@ fn test_t_ai_recruitment_receives_the_same_equipment_gating_as_the_player() {
             .filter(|d| d.owner == ai_country)
             .count();
         assert_eq!(
-            division_count_before, division_count_after,
-            "AI must not spawn a division while its equipment stockpile is insufficient"
+            division_count_before + 1,
+            division_count_after,
+            "P27-001: AI must complete recruitment with whatever equipment is available, \
+             the same completion rule the player receives"
+        );
+        let new_division = military_registry
+            .divisions
+            .values()
+            .find(|d| d.owner == ai_country)
+            .expect("the AI's new division must exist");
+        assert_eq!(
+            new_division.equipment, 0.0,
+            "the AI's stockpile was insufficient, so the division must be issued zero equipment"
+        );
+        assert!(
+            new_division.max_equipment > 0.0,
+            "max_equipment must retain the full requirement for later reinforcement"
         );
     }
 }

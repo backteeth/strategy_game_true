@@ -94,10 +94,14 @@ fn test_recruitment_manpower_shortage() {
 /// P25-003: `required_equipment`はもはやtreasuryから差し引かれる通貨ではないため、
 /// `MilitaryEquipment`備蓄が不足していても`request_recruitment`(キュー投入)自体は
 /// 成功する——装備充足が判定されるのは`process_recruitment`でのDivision生成時
-/// のみである(§8)。備蓄が揃うまでキュー項目は`days_remaining=0`のまま待機し続け、
-/// 揃った時点で初めてDivisionが生成される。
+/// のみである(§8)。
+///
+/// P27-001: 以前はここで「備蓄が揃うまでキュー項目は待機し続け、揃った時点で
+/// 初めてDivisionが生成される」ことを検証していたが、P27-001-PRE-001が確定した
+/// 候補C(利用可能な範囲でだけ支給して完成させる)の採用により、この契約は
+/// 意図的に反転した——備蓄0でも訓練完了と同時に0装備でDivisionが生成される。
 #[test]
-fn test_recruitment_equipment_shortage_delays_division_spawn_until_stockpile_is_sufficient() {
+fn test_recruitment_equipment_shortage_completes_immediately_with_zero_equipped_division() {
     let mut military_registry = setup_registry();
     let mut country_registry = CountryRegistry::default();
 
@@ -120,33 +124,45 @@ fn test_recruitment_equipment_shortage_delays_division_spawn_until_stockpile_is_
     );
     country_registry.countries.push(country);
 
-    // recruitment_days(30日)を超えて進めても、装備不足のためDivisionは生成されない。
-    for _ in 0..35 {
+    // recruitment_days(30日)ちょうどで、装備不足のままDivisionが生成される。
+    for _ in 0..30 {
         process_recruitment(&mut country_registry, &mut military_registry);
     }
-    assert_eq!(military_registry.divisions.len(), 0);
+    assert_eq!(
+        military_registry.divisions.len(),
+        1,
+        "P27-001: equipment shortage must no longer delay completion"
+    );
+    let division = military_registry.divisions.values().next().unwrap();
+    assert_eq!(division.equipment, 0.0, "nothing was available to issue");
+    assert_eq!(
+        division.max_equipment, 100.0,
+        "max_equipment must stay at the full requirement, not the issued amount"
+    );
     assert_eq!(
         country_registry.countries[0].recruitment_queue.len(),
-        1,
-        "the queue item must remain, waiting for equipment"
+        0,
+        "the item must be removed from the queue on completion"
     );
-    assert_eq!(
-        country_registry.countries[0].recruitment_queue[0].days_remaining,
-        0
-    );
-
-    // 装備が揃うと、次の日次処理で1回だけ生成される。
-    country_registry.countries[0]
-        .stockpile
-        .set(ResourceType::MilitaryEquipment, 100.0);
-    process_recruitment(&mut country_registry, &mut military_registry);
-    assert_eq!(military_registry.divisions.len(), 1);
-    assert_eq!(country_registry.countries[0].recruitment_queue.len(), 0);
     assert_eq!(
         country_registry.countries[0]
             .stockpile
             .get(ResourceType::MilitaryEquipment),
         0.0
+    );
+
+    // 生成後、備蓄を追加しても再生成されない(1回きりの完成)。
+    country_registry.countries[0]
+        .stockpile
+        .set(ResourceType::MilitaryEquipment, 100.0);
+    process_recruitment(&mut country_registry, &mut military_registry);
+    assert_eq!(military_registry.divisions.len(), 1, "no queue item remains to spawn a second division");
+    assert_eq!(
+        country_registry.countries[0]
+            .stockpile
+            .get(ResourceType::MilitaryEquipment),
+        100.0,
+        "with an empty queue, the stockpile is untouched by process_recruitment"
     );
 }
 

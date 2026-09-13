@@ -15,27 +15,39 @@ pub struct RecruitmentQueueItem {
     pub total_days: u32,
 }
 
-/// キュー項目からDivisionを生成する。`try_issue_equipment`を、
-/// 装備0・上限`def.required_equipment`のDivisionへ`def.required_equipment`を
-/// 全額支給する呼び出しとして使うことで、支給と同時に「新規Divisionの装備上限」
-/// (P25-003 §10: `max_equipment = canonical(required_equipment)`,
-/// `equipment = max_equipment`)を導出する——正規APIの支給結果をそのまま
-/// 両フィールドへ使うため、rawな`required_equipment`とcanonical値が食い違う
-/// ことはない。国家備蓄(`MilitaryEquipment`)が不足している場合は`Err`を返し、
-/// 呼び出し元(`process_recruitment`)は当日のこの項目を未完了のまま(`days_
-/// remaining`を0に留めたまま)キューに残す。
+/// キュー項目からDivisionを生成する。
+///
+/// P27-001: `try_issue_equipment`へ渡す`requested`は、もはや`def.required_
+/// equipment`固定(全額一括、all-or-nothing)ではなく、`def.required_equipment.
+/// min(現在のMilitaryEquipment備蓄)`——**利用可能な範囲でだけ支給する**
+/// (P27-001-PRE-001が確定した設計、候補C)。これにより、備蓄が必要量に届かない
+/// 国家でも訓練完了(`days_remaining==0`)と同時にDivisionが生成される。
+/// `requested`を事前にこの備蓄以下へ切り詰めるため、`try_issue_equipment`は
+/// (備蓄自体が不正[NaN・負値等]でない限り)通常のパスでは失敗しない
+/// ——`Err(InsufficientStockpile)`は理論上到達しない防御的分岐になる
+/// (呼び出し元の`process_recruitment`はそれでも安全に処理する)。
+///
+/// `max_equipment`は`result.equipment_after`(実際に支給できた量)ではなく、
+/// **常に`def.required_equipment`(満編制上限)をそのまま使う**——支給量を
+/// 上限としてしまうと、後日`equipment_reinforcement`(P25-005)が「不足0」と
+/// 誤判定し、このDivisionが二度と満編制まで補充されなくなる(P27-001-PRE-001
+/// §15で確認した既存の装備補充契約を壊さないための必須の区別)。`equipment`は
+/// 実際に支給できた量(`result.equipment_after`、備蓄0なら0.0)のまま。
 fn try_spawn_division(
     stockpile: &mut crate::economy::resources::CountryStockpile,
     owner: CountryId,
     item: &RecruitmentQueueItem,
     def: &crate::military::data::DivisionDefinition,
 ) -> Result<Division, crate::military::equipment::EquipmentAccountingError> {
+    let available = stockpile.get(crate::economy::resources::ResourceType::MilitaryEquipment);
+    let issued_request = def.required_equipment.min(available);
+
     let mut equipment = 0.0;
     let result = try_issue_equipment(
         stockpile,
         &mut equipment,
         def.required_equipment,
-        def.required_equipment,
+        issued_request,
     )?;
 
     Ok(Division {
@@ -50,7 +62,7 @@ fn try_spawn_division(
         manpower: def.required_manpower,
         max_manpower: def.required_manpower,
         equipment: result.equipment_after,
-        max_equipment: result.equipment_after,
+        max_equipment: def.required_equipment,
         organization: def.organization * 0.1, // Start with low organization
         max_organization: def.organization,
         morale: def.morale * 0.5,
@@ -66,22 +78,26 @@ fn try_spawn_division(
     })
 }
 
-/// P25-003: `days_remaining`が0に達したキュー項目を、人的資源(既に`request_
-/// recruitment`時点で`available_manpower`/`mobilized_manpower`へ確定済み)に加え、
-/// 国家備蓄(`MilitaryEquipment`)からの装備支給も完了した場合にのみDivisionへ
-/// 変換する。装備不足の場合は項目を完了させず(`completed_indices`へ追加しない)、
-/// `days_remaining`を0に留めたままキューに残す——翌日以降、備蓄が回復すれば
-/// 自動的に再判定される(既存の日次呼び出し構造がそのまま「毎日再試行」を実現する)。
-/// DivisionDefinition自体が解決できない場合は、既存の(P23-009で確認済みの)
-/// 挙動どおり項目を静かに完了させて破棄する(本タスクの対象外、§16)。
+/// P25-003/P27-001: `days_remaining`が0に達したキュー項目を、人的資源(既に
+/// `request_recruitment`時点で`available_manpower`/`mobilized_manpower`へ確定済み)
+/// に加え、国家備蓄(`MilitaryEquipment`)からの装備支給によりDivisionへ変換する。
 ///
-/// P25-005: ある国の完了済みキュー項目が純粋な`EquipmentAccountingError::
-/// InsufficientStockpile`(=備蓄不足そのもの。不正なdefinitionや不正数量による
-/// 他のエラー種別は含まない、§6.2)によって生成失敗した場合、そのCountryIdを
-/// 戻り値へ含める。呼び出し元(`handle_daily_military`)はこれを使って、当日の
-/// 既存Division向け装備補充予算をその国だけ0にし、翌日以降に備蓄を持ち越して
-/// 待機中のキューが必要量へ到達できるようにする(新しい永続予約フィールドは
-/// 追加しない、当日の処理結果から都度決定する一時的な判定)。
+/// P27-001: `try_spawn_division`が`def.required_equipment`を国家備蓄以下へ
+/// 事前に切り詰めて要求するため(P27-001-PRE-001の候補C)、**装備が0でも
+/// 完成する**——訓練完了(`days_remaining==0`)は常にその日のうちにDivision生成
+/// まで進む。不足分は既存の日次装備補充(`equipment_reinforcement`、P25-005)が
+/// 翌日以降、通常のDivisionと同列に補う。DivisionDefinition自体が解決できない
+/// 場合は、既存の(P23-009で確認済みの)挙動どおり項目を静かに完了させて破棄する
+/// (本タスクの対象外)。
+///
+/// `blocked_by_equipment_shortage`(P25-005由来)は、`try_spawn_division`が
+/// `Err(InsufficientStockpile)`を返した場合にのみそのCountryIdを含める。
+/// P27-001以降、この分岐は備蓄が正の値である限り理論上到達しない(要求量を
+/// 事前に備蓄以下へ切り詰めているため)——備蓄自体が不正(NaN・負値等)で
+/// `try_spawn_division`が他のエラー種別を返す場合は、この保護対象に含めない
+/// 既存の方針(§6.2相当)をそのまま維持する。呼び出し元(`handle_daily_military`)
+/// は引き続きこの戻り値を`apply_daily_equipment_reinforcement`へそのまま渡す
+/// (`equipment_reinforcement.rs`自体は無変更)。
 pub fn process_recruitment(
     country_registry: &mut CountryRegistry,
     military_registry: &mut MilitaryRegistry,
@@ -110,8 +126,12 @@ pub fn process_recruitment(
                         new_divisions.push(division);
                     }
                     Err(EquipmentAccountingError::InsufficientStockpile) => {
-                        // 純粋な備蓄不足。項目を完了させずキューに残し、当日の
-                        // 既存Division向け装備補充を止めて備蓄を保護する(§6)。
+                        // P27-001以降、`try_spawn_division`は要求量を備蓄以下へ
+                        // 事前に切り詰めるため、備蓄が有効な非負値である限りこの
+                        // 分岐へは到達しない(理論上の防御的分岐)。万一到達した
+                        // 場合は、項目を完了させずキューに残し、当日の既存
+                        // Division向け装備補充を止めて備蓄を保護する既存の方針
+                        // (P25-005)をそのまま維持する。
                         blocked_by_equipment_shortage.insert(country.id);
                     }
                     Err(_) => {

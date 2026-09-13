@@ -28,7 +28,7 @@ use strategy_game::economy::EconomyPlugin;
 use strategy_game::economy::resources::{ResourceType, military_supplies_units_to_value};
 use strategy_game::military::MilitaryPlugin;
 use strategy_game::military::data::{Division, DivisionSize, DivisionStatus, DivisionType, MilitaryRegistry, STANDARD_INFANTRY_DEFINITION_ID};
-use strategy_game::military::recruitment::request_recruitment;
+use strategy_game::military::recruitment::{cancel_recruitment, request_recruitment};
 use strategy_game::politics::PoliticsPlugin;
 use strategy_game::population::PopulationPlugin;
 use strategy_game::research::ResearchPlugin;
@@ -810,6 +810,17 @@ fn test_90_day_all_six_countries_real_app_verification() {
 
 /// 36か月、初期Division構成を固定したまま(追加の募兵を行わない)、日次消費だけの
 /// 影響を6か国について記録する。
+///
+/// P27-001注記: この「募兵を一切行わない」という制御は、以前は
+/// MilitaryEquipment不足による募兵queueの完成停滞(P26-008-PRE-001が記録し、
+/// P27-001で解消した既存事象)に偶然支えられていた——AIがqueueへ投入しても
+/// 装備不足で永久に完成しなかったため、結果的にDivision数が1のまま固定されて
+/// いた。P27-001はこの停滞そのものを解消したため、AIの正常な人口成長に伴う
+/// 募兵判断が実際に完成し得るようになった(意図した挙動、[[project_phase27_status]]
+/// 参照)。本テストの目的(MilitarySupplies日次消費だけを他の変数から切り離して
+/// 観測する制御された基準)自体は今も有効なため、以後は各月次tick直後に
+/// `recruitment_queue`を明示的に空にし、この「募兵なし」制御を偶然の副作用では
+/// なく明示的な前提として維持する。
 #[test]
 fn test_36_month_fixed_initial_divisions_real_app_verification() {
     let dir = TempTestDir::new("thirtysix_fixed");
@@ -848,6 +859,28 @@ fn test_36_month_fixed_initial_divisions_real_app_verification() {
             }
         }
         tick_month_only(&mut app, 1800, m.wrapping_add(1));
+        // P27-001: AIが月次評価でqueueへ投入した項目を、完成する前に明示的に
+        // `cancel_recruitment`で取り消す(「募兵なし」をこのテスト自身の明示的な
+        // 制御にする)。直接`recruitment_queue.clear()`すると予約済み人的資源
+        // [`available_manpower`/`mobilized_manpower`]が返却されず、このテストが
+        // 意図しない副作用[manpowerの空費]を新たに持ち込んでしまうため、必ず
+        // 正規APIを経由する。
+        {
+            let mut state: bevy::ecs::system::SystemState<(
+                ResMut<CountryRegistry>,
+                Res<MilitaryRegistry>,
+            )> = bevy::ecs::system::SystemState::new(app.world_mut());
+            let (mut country_registry, military_registry) =
+                state.get_mut(app.world_mut()).expect("system params");
+            for &c in &ALL_SIX {
+                if let Some(country) = country_registry.get_mut(c) {
+                    while !country.recruitment_queue.is_empty() {
+                        let _ = cancel_recruitment(country, &military_registry, 0);
+                    }
+                }
+            }
+            state.apply(app.world_mut());
+        }
     }
 
     eprintln!("[P26-004 36-month fixed-division report]");

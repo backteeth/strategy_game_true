@@ -380,10 +380,20 @@ fn completed_recruitment_leftover_stockpile_reinforces_existing_divisions_the_sa
     assert_eq!(equipment_stockpile(&app, player), 0.0);
 }
 
-// ─── §12.5: 完了済み募兵キューの保護(飢餓防止) ─────────────────────────
+// ─── §12.5: 募兵完成の同日優先度と既存Divisionへの引き渡し(P27-001で更新) ──
+//
+// P27-001以前は、備蓄が新規募兵の必要量に届かない場合キュー全体が完了せず
+// (all-or-nothing)、その日の既存Division向け補充予算を0にして備蓄を翌日へ
+// 持ち越す`blocked_by_equipment_shortage`保護が働いていた。P27-001の候補C
+// 採用により、募兵は利用可能な範囲でその日のうちに部分完成するため、この
+// 具体的シナリオ(新規1件+既存1件、シナリオ次第で新規が優先的に備蓄を使い切る)
+// はもはや「保護」ではなく、既存のSystem順序(募兵完成が装備補充より先に実行
+// される、P25-001監査済み)がそのまま自然に同じ優先度を実現する——備蓄が
+// 尽きれば既存Divisionは単に補充対象が残っていないだけになる。本テストは
+// この新しい2日間の挙動を検証する。
 
 #[test]
-fn blocked_completed_queue_protects_stockpile_and_resolves_the_next_day() {
+fn recruitment_completion_takes_priority_over_existing_division_reinforcement_the_same_day() {
     let player = CountryId(0);
     let temp_dir = TempTestDir::new("queue_protection");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
@@ -397,14 +407,34 @@ fn blocked_completed_queue_protects_stockpile_and_resolves_the_next_day() {
             .required_equipment
     };
 
+    // New Game自体が player(Arcadia)へ満編制の初期Divisionを既に1体spawnして
+    // いるため(`app/loader.rs::spawn_debug_divisions`)、「新規完成Division」を
+    // `id != existing`だけで特定すると、この初期Divisionを誤って拾ってしまう
+    // (HashMap反復順序に依存して結果が非決定的になる、実際に本テスト作成時に
+    // 踏んだ罠)。既存の`a_newly_completed_recruit_is_not_double_supplied_on_
+    // its_completion_day`と同じ、確実な「事前ID集合との差分」方式を使う。
+    let division_ids_before: std::collections::HashSet<DivisionId> = app
+        .world()
+        .resource::<MilitaryRegistry>()
+        .divisions
+        .keys()
+        .copied()
+        .collect();
+
+    // 既存Divisionは自身のmax_equipmentを100.0に固定する(STANDARD_INFANTRY実
+    // データのrequired_equipmentとは無関係な、この既存Division自身の編制上限)。
+    // 不足分は100.0 - 40.0 = 60.0。
+    let existing_max_equipment = 100.0;
+    let existing_equipment_before = 40.0;
+    let existing_shortfall = existing_max_equipment - existing_equipment_before;
     let existing = spawn_division(
         &mut app,
         player,
         home,
         5_000,
         10_000,
-        40.0,
-        100.0, // shortfall 60
+        existing_equipment_before,
+        existing_max_equipment,
         DivisionStatus::Idle,
     );
 
@@ -422,8 +452,10 @@ fn blocked_completed_queue_protects_stockpile_and_resolves_the_next_day() {
     let division_count_before_completion =
         app.world().resource::<MilitaryRegistry>().divisions.len();
 
-    // 完了当日、必要量に60(=既存Division不足分)しか届かない備蓄しか与えない。
-    let short_stockpile = required_equipment - 40.0;
+    // 完了当日、新規募兵の必要量(required_equipment)には届かないが、既存
+    // Divisionの不足分(existing_shortfall)は上回る備蓄を与える——新規募兵の
+    // 部分完成後に既存Divisionへ回せる余剰があるかどうかを検証する境界値。
+    let short_stockpile = required_equipment - existing_equipment_before;
     assert!(
         short_stockpile > 0.0 && short_stockpile < required_equipment,
         "この例が意味を持つための前提条件"
@@ -432,40 +464,72 @@ fn blocked_completed_queue_protects_stockpile_and_resolves_the_next_day() {
     let last_day = recruitment_days.saturating_sub(1);
     send_day_changed(&mut app, 1800, 1, (last_day % 28 + 1) as u8);
 
+    // P27-001: 募兵は利用可能な範囲で即座に完成する——完了を遅延させない。
     assert_eq!(
         app.world().resource::<MilitaryRegistry>().divisions.len(),
-        division_count_before_completion,
-        "装備不足のため募兵キューは完了しないはず"
+        division_count_before_completion + 1,
+        "P27-001: recruitment completion must not be delayed by equipment shortage"
     );
+    let new_division = app
+        .world()
+        .resource::<MilitaryRegistry>()
+        .divisions
+        .values()
+        .find(|d| d.owner == player && !division_ids_before.contains(&d.id) && d.id != existing)
+        .expect("the new division must exist")
+        .clone();
+    assert_eq!(
+        new_division.equipment, short_stockpile,
+        "the new division receives whatever was available, not the full requirement"
+    );
+    assert_eq!(new_division.max_equipment, required_equipment, "max_equipment stays at the full requirement");
     assert_eq!(
         get_division(&app, existing).unwrap().equipment,
-        40.0,
-        "備蓄不足でキューが待機した日は、既存Divisionへの補充予算が0になるはず"
+        existing_equipment_before,
+        "recruitment (which runs before equipment_reinforcement, P25-001-audited System order) \
+         consumed the entire stockpile first, leaving nothing for the existing division that day"
     );
     assert_eq!(
         equipment_stockpile(&app, player),
-        short_stockpile,
-        "備蓄は翌日以降へ持ち越されるはず"
+        0.0,
+        "P27-001: the recruitment completion consumed the entire stockpile, not just a fixed amount"
     );
 
-    // 翌日、不足分を追加生産して必要量へ到達させる。
-    set_equipment_stockpile(&mut app, player, required_equipment);
+    // 翌日、両Divisionの不足分合計ちょうどを供給する。今度は募兵queueが空なので、
+    // 既存Division(不足existing_shortfall、自身のmax_equipmentはspawn_divisionで
+    // 固定したexisting_max_equipment)と新規Division(不足new_division_shortfall、
+    // max_equipmentはrequired_equipment)の両方が既存の日次装備補充Systemの対象に
+    // なり、合計需要==供給のため両方とも満編制まで補充される。
+    let new_division_shortfall = required_equipment - short_stockpile;
+    let combined_shortfall = existing_shortfall + new_division_shortfall;
+    set_equipment_stockpile(&mut app, player, combined_shortfall);
     send_day_changed(&mut app, 1800, 2, 1);
 
     assert_eq!(
         app.world().resource::<MilitaryRegistry>().divisions.len(),
         division_count_before_completion + 1,
-        "備蓄が必要量へ届けば翌日にキューが完了するはず"
+        "no further division is created (the queue is already empty)"
     );
     assert_eq!(
         equipment_stockpile(&app, player),
         0.0,
-        "募兵完了で全額消費され、既存Divisionへの余剰は残らないはず"
+        "the existing daily equipment reinforcement System consumes exactly the combined shortfall"
     );
     assert_eq!(
         get_division(&app, existing).unwrap().equipment,
-        40.0,
-        "翌日も募兵が装備を全額使い切るため、既存Divisionは引き続き0補充のはず"
+        existing_max_equipment,
+        "the existing division's shortfall is fully covered the next day, reaching its own max_equipment"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<MilitaryRegistry>()
+            .divisions
+            .get(&new_division.id)
+            .unwrap()
+            .equipment,
+        required_equipment,
+        "the newly-completed division's own shortfall is fully covered the next day, \
+         by the same existing reinforcement System, with no special-casing"
     );
 }
 
