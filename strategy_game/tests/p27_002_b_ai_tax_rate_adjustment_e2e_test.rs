@@ -294,15 +294,27 @@ fn test_02_deficit_ai_country_raises_tax_rate_by_one_step_in_real_app() {
 }
 
 #[test]
-fn test_03_healthy_ai_country_at_baseline_is_unchanged_in_real_app() {
-    let dir = TempTestDir::new("t03_healthy_unchanged");
+fn test_03_healthy_ai_country_at_baseline_decreases_by_one_step_under_the_predictive_gate_in_real_app()
+{
+    // P27-002-Cにより0.15は絶対下限ではなくなった(§2)。この国は黒字
+    // (monthly_balance=500を直接注入)であり、Dwarfの実際の人口・生活水準・
+    // 月次経常支出に対して1段階(0.14)への引下げ後も予測税収が経常支出を上回る
+    // (実測により確認済み)ため、正しく引き下げられる。day1のみに進めて
+    // (test_02と同じ理由でDwarfのcadence日である2日目の二重評価を避ける)、
+    // 単一評価での正しい判定を検証する。
+    let dir = TempTestDir::new("t03_healthy_decreases");
     let mut app = setup_app(None, dir.save_file_config());
     set_monthly_balance(&mut app, DWARF, 500.0);
     set_tax_rate(&mut app, DWARF, DEFAULT_TAX_RATE);
 
-    advance_one_month(&mut app, 1);
+    tick_dwarf_to_evaluation_day(&mut app, 1);
 
-    assert_eq!(tax_rate_of(&app, DWARF), DEFAULT_TAX_RATE, "黒字かつ既定税率の国は不変のはず");
+    assert!(
+        (tax_rate_of(&app, DWARF) - (DEFAULT_TAX_RATE - strategy_game::economy::finance::TAX_RATE_STEP)).abs()
+            < 1e-6,
+        "P27-002-C: 予測税収が経常支出を上回るため0.15から1段階(0.14)へ安全に引下げるはず: {}",
+        tax_rate_of(&app, DWARF)
+    );
 }
 
 #[test]
@@ -318,15 +330,31 @@ fn test_04_deficit_ai_country_does_not_exceed_upper_bound_in_real_app() {
 }
 
 #[test]
-fn test_05_surplus_ai_country_does_not_decrease_below_baseline_in_real_app() {
-    let dir = TempTestDir::new("t05_lower_bound");
+fn test_05_surplus_ai_country_can_decrease_below_the_old_0_15_baseline_when_safe_in_real_app() {
+    // P27-002-Cの核心要件(§2): 0.15は絶対下限として扱わない。1か月(=day1と
+    // Dwarfの正規cadence日であるday2の2回評価、P26-008-Cのdirty+cadence
+    // 二重評価仕様、本タスクの不具合ではない)を通しで進め、黒字が続く限り
+    // 予測ゲートが安全と判定するたびに引下げが連続することを実App経由で証明する。
+    // 旧P27-002-Bでは0.15の絶対下限がこの二重評価を吸収して見えなくしていたが、
+    // 候補4ではその下限自体が撤廃されたため、0.14→0.13という2段階の引下げが
+    // 現実に観測される。
+    let dir = TempTestDir::new("t05_below_old_baseline");
     let mut app = setup_app(None, dir.save_file_config());
     set_monthly_balance(&mut app, DWARF, 500.0);
     set_tax_rate(&mut app, DWARF, DEFAULT_TAX_RATE);
 
     advance_one_month(&mut app, 1);
 
-    assert_eq!(tax_rate_of(&app, DWARF), DEFAULT_TAX_RATE, "基準値未満へは引き下げないはず");
+    assert!(
+        tax_rate_of(&app, DWARF) < DEFAULT_TAX_RATE,
+        "旧基準値0.15より下がるはず(絶対下限は撤廃済み): {}",
+        tax_rate_of(&app, DWARF)
+    );
+    assert!(
+        (tax_rate_of(&app, DWARF) - 0.13).abs() < 1e-6,
+        "day1+day2の2回評価それぞれで安全な引下げが成立し0.15→0.14→0.13となるはず: {}",
+        tax_rate_of(&app, DWARF)
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -458,6 +486,14 @@ fn test_10_player_ui_tax_change_still_works_and_reflects_next_month() {
 
 #[test]
 fn test_11_country_isolation_one_countrys_deficit_does_not_affect_another_in_real_app() {
+    // P27-002-C: Ferrowynは極端な黒字(monthly_balance=999_999への直接注入)であり、
+    // Ferrowyn自身の実際の人口・生活水準・月次経常支出に対する予測ゲートは
+    // 1段階(0.14)への引下げを安全と判定する(実測により確認済み)。もし
+    // Dwarfの赤字設定がFerrowynの判定に漏れ込む分離バグがあれば、Ferrowynの
+    // 引下げが妨げられるか異なる値になるはずなので、「0.15→0.14への正しい
+    // 引下げがDwarfの状態と無関係に成立すること」の方が「変化なし」を
+    // 期待するより厳密な分離テストになる(旧P27-002-Bの絶対下限0.15は
+    // P27-002-Cで撤廃済み)。
     let dir = TempTestDir::new("t11_isolation");
     let mut app = setup_app(None, dir.save_file_config());
     set_monthly_balance(&mut app, DWARF, -100.0);
@@ -469,10 +505,12 @@ fn test_11_country_isolation_one_countrys_deficit_does_not_affect_another_in_rea
     tick_dwarf_to_evaluation_day(&mut app, 1);
 
     assert!((tax_rate_of(&app, DWARF) - (DEFAULT_TAX_RATE + 0.01)).abs() < 1e-6);
-    assert_eq!(
-        tax_rate_of(&app, FERROWYN),
-        DEFAULT_TAX_RATE,
-        "他国(Ferrowyn)の極端な黒字設定がDwarfの判定や自身の据置に影響してはいけない"
+    assert!(
+        (tax_rate_of(&app, FERROWYN) - (DEFAULT_TAX_RATE - strategy_game::economy::finance::TAX_RATE_STEP))
+            .abs()
+            < 1e-6,
+        "他国(Dwarf)の赤字設定がFerrowyn自身の(安全な)引下げ判定を妨げてはいけない: {}",
+        tax_rate_of(&app, FERROWYN)
     );
 }
 

@@ -929,15 +929,27 @@ mod real_app {
     // 同一(Arcadia増加=税率自己調整によるMine完成のさらなる前倒し、Dwarfはこの
     // シナリオではプレイヤー国家のため不変、Ferrowyn微増、Elfin/Oceanic/Passguardは
     // 不変)。独立プロセスで再現確認済み。
+    //
+    // 【P27-002-Cにより正規値を再更新】: 理由・新値は
+    // `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名テストのコメントと
+    // 同一(行政費係数の較正0.001→0.0008がプレイヤー国家Dwarfにも一律適用され、
+    // `calculate_operation_ratio`の国庫赤字時0.8倍ペナルティを受ける機会が
+    // 減った結果、Dwarfの36か月累計MilitarySupplies生産分が1487.059→
+    // 1647.0588400000001へ増加。Oceanicは予測安全な税率引下げゲートにより
+    // 474.336300→459.577314へ減少[過剰な富の蓄積を防ぐという候補4の意図通り]。
+    // Passguardは行政費削減による国庫赤字ペナルティ回避で3325.079→
+    // 3672.5984340000005へ増加。Ferrowynも同根の効果でさらに大きく1097.532100→
+    // 1333.5205999999996へ増加[いずれも監査が確認した長期回復と同根]。Arcadia/
+    // Elfinは不変)。独立プロセス3回で新値の再現を確認済み(決定的)。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
             (ELFIN, 499.874123),
-            (DWARF, 1487.059),
-            (OCEANIC, 474.336300),
-            (PASSGUARD, 3325.079),
-            (FERROWYN, 1097.532100),
+            (DWARF, 1647.0588400000001),
+            (OCEANIC, 459.577314),
+            (PASSGUARD, 3672.5984340000005),
+            (FERROWYN, 1333.5205999999996),
         ];
         let tracked: Vec<CountryId> = countries.iter().map(|(cid, _)| *cid).collect();
 

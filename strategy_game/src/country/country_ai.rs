@@ -602,31 +602,58 @@ fn find_proactive_development_target(
     None
 }
 
-/// 財政AI(候補A、月次評価: game_day % 30 == country_id % 30 または dirty、
+/// 財政AI(P27-002-C候補4、月次評価: game_day % 30 == country_id % 30 または dirty、
 /// 建設AIより先に評価する)。
 ///
-/// P27-002-B-PRE-001が確認した構造的財政赤字(4/6か国が`living_standard × tax_rate
-/// >= 10`という損益分岐条件を満たせず、AIには`tax_rate`を変更する手段が一切なかった)
-/// への対処。プレイヤーが`ui::economy_panel`の税率±ボタンで既に持つのと全く同じ
-/// 範囲・刻み・検証(`economy::finance::apply_tax_rate_delta`)を、AI国家にも月次で与える。
+/// P27-002-B-PRE-001が確認した構造的財政赤字への対処として月次tax_rate自己調整を
+/// 導入したが(P27-002-B)、P27-002-C-PRE-001の120か月監査により、単純な
+/// 「黒字なら基準値0.15まで戻す」規則は長期的に不安定(Ferrowynの生活水準が
+/// 0.00へ到達し税収が恒久的に消失、Arcadia/Dwarf/Oceanicも遅延して再崩壊)である
+/// ことが判明した。本関数は、黒字時の引下げを「1段階下げても現在の経常支出を
+/// 賄えると予測できる場合だけ」に限定する予測安全ゲート(`economy::finance::
+/// decide_ai_tax_rate_delta`)へ置き換える。
 ///
-/// 意思決定そのものは`economy::finance::decide_ai_tax_rate_delta`(純粋関数、当月の
-/// 確定済み`monthly_balance`だけを参照し、税収/行政費の式を複製しない)に委譲し、
-/// ここでは対象国家の取得と適用だけを行う。新しいAI状態・ヒステリシス・目標黒字額は
-/// 一切持たない(毎回`monthly_balance`と`tax_rate`だけから再導出するステートレスな
-/// 規則)。
+/// 意思決定そのものは`decide_ai_tax_rate_delta`(純粋関数、当月の確定済み
+/// `monthly_balance`・`monthly_expenses`と、当月の人口・人口加重平均生活水準だけを
+/// 参照し、税収/行政費の式を複製しない)に委譲し、ここでは対象国家・州の取得と
+/// 適用だけを行う。新しいAI状態・ヒステリシス・目標黒字額・将来予測シミュレーターは
+/// 一切持たない(毎回既存の確定値だけから再導出するステートレスな規則)。
 ///
 /// 既存の`tax_rate > 0.25`での生活水準低下ペナルティ(`economy::finance::
-/// update_state_welfare_and_unrest`)は無変更のまま自然なブレーキとして働く。
-/// Passguard/Ferrowynのように、この規則単体では黒字化しきれない国家が残ることは
-/// P27-002-B-PRE-001が実測済みの既知の限界であり、本関数の不具合ではない。
-pub fn process_tax_rate_ai(country_id: CountryId, country_registry: &mut CountryRegistry) {
+/// update_state_welfare_and_unrest`、無変更)は高税率のゲーム上の代償として
+/// 引き続き機能する——本関数は税率を安全な範囲でしか下げないことでこのペナルティ
+/// 圏内に長期間留まることを避けるが、ペナルティ自体を無効化するものではない。
+pub fn process_tax_rate_ai(
+    country_id: CountryId,
+    country_registry: &mut CountryRegistry,
+    state_registry: &StateRegistry,
+) {
     let Some(country) = country_registry.get_mut(country_id) else {
         return;
     };
-    if let Some(delta) =
-        crate::economy::finance::decide_ai_tax_rate_delta(country.monthly_balance, country.tax_rate)
-    {
+
+    // 人口加重平均生活水準(この加重平均を使う理由は`decide_ai_tax_rate_delta`の
+    // doc参照: candidate_rate==tax_rateのとき予測値が実際のmonthly_incomeと
+    // 数学的に完全一致するようにするため)。
+    let mut total_population = 0u64;
+    let mut weighted_living_standard = 0.0f64;
+    for state in state_registry.states.iter().filter(|s| s.owner_country_id == country_id) {
+        total_population += state.population;
+        weighted_living_standard += state.population as f64 * state.living_standard as f64;
+    }
+    let average_living_standard = if total_population == 0 {
+        0.0
+    } else {
+        (weighted_living_standard / total_population as f64) as f32
+    };
+
+    if let Some(delta) = crate::economy::finance::decide_ai_tax_rate_delta(
+        country.monthly_balance,
+        country.tax_rate,
+        total_population,
+        average_living_standard,
+        country.monthly_expenses,
+    ) {
         country.tax_rate = crate::economy::finance::apply_tax_rate_delta(country.tax_rate, delta);
     }
 }
@@ -1177,7 +1204,7 @@ pub fn process_daily_country_ai(
             // このSystem自体は既にDailySimulationSet::Economyの後(CountryAi)で
             // 動くため、当月分のtax_rate変更が同月の税収へ遡及することはなく、
             // 次回の月次財政計算(Economy Set)から新税率が使われる。
-            process_tax_rate_ai(country_id, country_registry);
+            process_tax_rate_ai(country_id, country_registry, state_registry);
 
             process_construction_ai(
                 country_id,
@@ -3282,93 +3309,86 @@ mod tests {
         assert_eq!(b.treasury, required_treasury - 0.01, "他国の判定は自国のtreasuryへ影響しないはず");
     }
 
-    // ─── P27-002-B: AI国家の月次tax_rate自己調整 ────────────────────────────
+    // ─── P27-002-C: 行政費較正 + 予測安全なAI税率引下げ ──────────────────────
 
-    fn tax_ai_country(id: usize, tax_rate: f32, monthly_balance: f64) -> CountryData {
-        CountryData { id: CountryId(id), tax_rate, monthly_balance, ..CountryData::default() }
+    fn tax_ai_country(id: usize, tax_rate: f32, monthly_balance: f64, monthly_expenses: f64) -> CountryData {
+        CountryData { id: CountryId(id), tax_rate, monthly_balance, monthly_expenses, ..CountryData::default() }
     }
 
-    /// Test A: 赤字AI国家は正規刻み(+0.01)で1回だけ引き上げられる。
+    fn tax_ai_state(state_id: usize, country_id: usize, population: u64, living_standard: f32) -> StateData {
+        StateData {
+            id: StateId(state_id),
+            owner_country_id: CountryId(country_id),
+            population,
+            living_standard,
+            ..StateData::default()
+        }
+    }
+
+    /// 赤字AI国家は正規刻み(+0.01)で1回だけ引き上げられる(予測に関わらず)。
     #[test]
-    fn p27_002_b_deficit_ai_country_raises_tax_rate_by_one_step() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, -10.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        let c = registry.get(CountryId(1)).unwrap();
+    fn p27_002_c_deficit_ai_country_raises_tax_rate_by_one_step() {
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, -10.0, 1_000_000.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, 50.0)]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        let c = country_registry.get(CountryId(1)).unwrap();
         assert!((c.tax_rate - 0.16).abs() < 1e-6, "赤字国は+0.01で引き上げられるはず: {}", c.tax_rate);
     }
 
-    /// Test B: 黒字かつ既に基準値(0.15)のAI国家は据え置く。
+    /// 黒字かつ1段階引下げ後の予測税収が経常支出を上回るAI国家は、0.15未満へも
+    /// 安全に引き下げられる(P27-002-Cで0.15の絶対下限を撤廃)。
     #[test]
-    fn p27_002_b_healthy_ai_country_at_baseline_does_not_change_tax_rate() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, 50.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        assert_eq!(registry.get(CountryId(1)).unwrap().tax_rate, 0.15);
+    fn p27_002_c_surplus_ai_country_with_safe_projection_decreases_below_0_15() {
+        // pop=1,000,000 ls=50.0 candidate=0.14 → projected=700.0 >= expenses=600.0
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, 50.0, 600.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, 50.0)]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert!((c.tax_rate - 0.14).abs() < 1e-6, "0.15未満へ安全に引き下げられるはず: {}", c.tax_rate);
     }
 
-    /// 黒字かつ基準値超過のAI国家は正規刻み(-0.01)で1回だけ引き下げられる
-    /// (候補Aの確定仕様: 基準値まで戻す引下げ規則、P27-002-B-PRE-001参照)。
+    /// 黒字でも予測税収が経常支出を下回るなら据え置く。
     #[test]
-    fn p27_002_b_surplus_ai_country_above_baseline_decreases_tax_rate_by_one_step() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, 50.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        let c = registry.get(CountryId(1)).unwrap();
-        assert!((c.tax_rate - 0.19).abs() < 1e-6, "黒字国は-0.01で引き下げられるはず: {}", c.tax_rate);
+    fn p27_002_c_surplus_ai_country_with_unsafe_projection_holds() {
+        // candidate=0.19 → projected=950.0 < expenses=10000.0
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, 50.0, 10_000.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, 50.0)]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        assert_eq!(country_registry.get(CountryId(1)).unwrap().tax_rate, 0.20, "不安全な引下げは据置くはず");
     }
 
-    /// Test C: 月次収支ちょうど0は据え置く(候補Aの規則は`< 0`/`> 0`の両側とも
-    /// 厳密不等号であり、0は暗黙にどちらの分岐にも該当しない)。
+    /// 月次収支ちょうど0は据え置く。
     #[test]
-    fn p27_002_b_zero_monthly_balance_holds_tax_rate() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, 0.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        assert_eq!(registry.get(CountryId(1)).unwrap().tax_rate, 0.20, "収支ちょうど0では据え置くはず");
+    fn p27_002_c_zero_monthly_balance_holds_tax_rate() {
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, 0.0, 100.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, 50.0)]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        assert_eq!(country_registry.get(CountryId(1)).unwrap().tax_rate, 0.20, "収支ちょうど0では据え置くはず");
     }
 
-    /// Test D: 既存の税率上限(1.0)を超えない。
+    /// 既存の税率上限(1.0)を超えない。
     #[test]
-    fn p27_002_b_deficit_ai_country_does_not_exceed_the_existing_upper_bound() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 1.0, -10.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        assert_eq!(registry.get(CountryId(1)).unwrap().tax_rate, 1.0, "既存の上限1.0を超えないはず");
+    fn p27_002_c_deficit_ai_country_clamps_at_the_existing_upper_bound() {
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.995, -10.0, 100.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, 50.0)]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        assert_eq!(country_registry.get(CountryId(1)).unwrap().tax_rate, 1.0);
     }
 
+    /// `process_tax_rate_ai`はtax_rate以外のフィールド(当月の確定済み財政結果・
+    /// 国庫)を一切変更しない——税率変更は次回の月次財政計算からしか反映されない、
+    /// という非遡及性を直接保証する。
     #[test]
-    fn p27_002_b_deficit_ai_country_clamps_at_the_existing_upper_bound() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.995, -10.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        assert_eq!(registry.get(CountryId(1)).unwrap().tax_rate, 1.0);
-    }
+    fn p27_002_c_tax_rate_change_does_not_retroactively_alter_the_already_finalized_month() {
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, -10.0, 1_000_000.0)] };
+        country_registry.get_mut(CountryId(1)).unwrap().monthly_income = 123.0;
+        country_registry.get_mut(CountryId(1)).unwrap().treasury = 999.0;
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, 50.0)]);
+        let before = country_registry.get(CountryId(1)).unwrap().clone();
 
-    /// Test E: 引下げ規則は基準値(0.15)未満へは進まない。
-    #[test]
-    fn p27_002_b_surplus_ai_country_at_baseline_does_not_decrease_below_it() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, 50.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        assert_eq!(registry.get(CountryId(1)).unwrap().tax_rate, 0.15);
-    }
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
 
-    #[test]
-    fn p27_002_b_surplus_ai_country_decreases_to_exactly_the_baseline_floor() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.16, 50.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        let c = registry.get(CountryId(1)).unwrap();
-        assert!((c.tax_rate - 0.15).abs() < 1e-6);
-    }
-
-    /// Test I: `process_tax_rate_ai`はtax_rate以外のフィールド(当月の確定済み
-    /// 財政結果・国庫)を一切変更しない——税率変更は次回の月次財政計算からしか
-    /// 反映されない、という非遡及性を直接保証する。
-    #[test]
-    fn p27_002_b_tax_rate_change_does_not_retroactively_alter_the_already_finalized_month() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.15, -10.0)] };
-        registry.get_mut(CountryId(1)).unwrap().monthly_income = 123.0;
-        registry.get_mut(CountryId(1)).unwrap().monthly_expenses = 133.0;
-        registry.get_mut(CountryId(1)).unwrap().treasury = 999.0;
-        let before = registry.get(CountryId(1)).unwrap().clone();
-
-        process_tax_rate_ai(CountryId(1), &mut registry);
-
-        let after = registry.get(CountryId(1)).unwrap();
+        let after = country_registry.get(CountryId(1)).unwrap();
         assert_ne!(after.tax_rate, before.tax_rate, "tax_rateは変更されるはず");
         assert_eq!(after.monthly_income, before.monthly_income);
         assert_eq!(after.monthly_expenses, before.monthly_expenses);
@@ -3376,70 +3396,96 @@ mod tests {
         assert_eq!(after.treasury, before.treasury, "当月の確定済み国庫を遡及して変更してはいけない");
     }
 
-    /// Test J: 既存の`tax_rate > 0.25`生活水準ペナルティ契約(`economy::finance::
-    /// update_state_welfare_and_unrest`、無変更)が、AIが押し上げた税率に対しても
-    /// そのまま機能することを確認する(0.25ちょうどは対象外、0.26は対象)。
+    /// 非有限な州のliving_standardは既存validationにより安全に拒否され、税率を
+    /// 破壊しない(0コアーションではなく据置)。
     #[test]
-    fn p27_002_b_existing_0_25_living_standard_penalty_boundary_is_unchanged() {
-        use crate::state::data::StateData;
-        let mut at_boundary = StateData { living_standard: 50.0, ..StateData::default() };
-        let mut just_above = StateData { living_standard: 50.0, ..StateData::default() };
-        crate::economy::finance::update_state_welfare_and_unrest(&mut at_boundary, 0.25, true, false);
-        crate::economy::finance::update_state_welfare_and_unrest(&mut just_above, 0.26, true, false);
-        assert!(
-            just_above.living_standard < at_boundary.living_standard,
-            "0.25を1刻み超えると既存の税率ペナルティにより0.25ちょうどより低くなるはず \
-             (at_boundary={}, just_above={})",
-            at_boundary.living_standard,
-            just_above.living_standard
-        );
+    fn p27_002_c_rejects_non_finite_state_living_standard_without_mutation() {
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, 50.0, 1.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 1, 1_000_000, f32::NAN)]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        assert_eq!(country_registry.get(CountryId(1)).unwrap().tax_rate, 0.20);
     }
 
-    /// Test K: 非有限値は既存validationにより安全に拒否され、税率を破壊しない。
+    /// 一国の人口・生活水準・経常支出が、他国の税率判断へ混入しない。
     #[test]
-    fn p27_002_b_rejects_non_finite_monthly_balance_without_mutation() {
-        for bad_balance in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, bad_balance)] };
-            process_tax_rate_ai(CountryId(1), &mut registry);
-            let c = registry.get(CountryId(1)).unwrap();
-            assert_eq!(c.tax_rate, 0.20, "非有限なmonthly_balanceでは税率を変更してはいけない: {bad_balance}");
-        }
-    }
-
-    #[test]
-    fn p27_002_b_rejects_when_current_tax_rate_is_non_finite() {
-        let mut registry = CountryRegistry { countries: vec![tax_ai_country(1, f32::NAN, -10.0)] };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        assert!(registry.get(CountryId(1)).unwrap().tax_rate.is_nan(), "非有限なtax_rateは変更しない(0コアーションもしない)");
-    }
-
-    /// Test L: 一国の赤字判定が他国のtax_rateへ影響しない。
-    #[test]
-    fn p27_002_b_country_isolation_one_countrys_deficit_does_not_affect_another() {
-        let mut registry = CountryRegistry {
-            countries: vec![tax_ai_country(1, 0.15, -10.0), tax_ai_country(2, 0.15, 50.0)],
+    fn p27_002_c_country_isolation_population_and_living_standard_do_not_cross_contaminate() {
+        let mut country_registry = CountryRegistry {
+            countries: vec![
+                tax_ai_country(1, 0.15, -10.0, 1_000_000.0), // 赤字 → 引き上げ
+                tax_ai_country(2, 0.20, 50.0, 10_000.0),     // 黒字だが不安全 → 据置
+            ],
         };
-        process_tax_rate_ai(CountryId(1), &mut registry);
-        process_tax_rate_ai(CountryId(2), &mut registry);
-        assert!((registry.get(CountryId(1)).unwrap().tax_rate - 0.16).abs() < 1e-6);
+        let state_registry = StateRegistry::build(vec![
+            tax_ai_state(1, 1, 1_000_000, 50.0),
+            tax_ai_state(2, 2, 1_000_000, 50.0),
+        ]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        process_tax_rate_ai(CountryId(2), &mut country_registry, &state_registry);
+        assert!((country_registry.get(CountryId(1)).unwrap().tax_rate - 0.16).abs() < 1e-6);
         assert_eq!(
-            registry.get(CountryId(2)).unwrap().tax_rate,
-            0.15,
-            "黒字かつ基準値の国は他国の赤字判定に影響されないはず"
+            country_registry.get(CountryId(2)).unwrap().tax_rate,
+            0.20,
+            "他国の赤字判定・州データが混入してはいけない"
         );
+    }
+
+    /// 平均生活水準は人口加重平均でなければならない——単純平均を使うと、人口の
+    /// 大きい州の実態を過小評価し、本会計の税収と乖離してしまう。
+    #[test]
+    fn p27_002_c_average_living_standard_used_for_projection_is_population_weighted() {
+        // 州1: 人口9,000,000・ls=10.0(大多数)。州2: 人口1,000,000・ls=90.0(少数)。
+        // 単純平均は(10+90)/2=50.0だが、人口加重平均は
+        // (9,000,000*10+1,000,000*90)/10,000,000=18.0。
+        // candidate=0.19のとき:
+        //   人口加重平均(18.0)での予測 = 10,000,000*18.0*0.19*0.0001 = 3420.0
+        //   単純平均(50.0)での予測(誤り)  = 10,000,000*50.0*0.19*0.0001 = 9500.0
+        // expenses=5000.0はこの2値の間にあるため、正しい実装(加重平均)なら
+        // 3420.0 < 5000.0で据置き、誤って単純平均を使えば9500.0 >= 5000.0で
+        // 引下げてしまう——両者を明確に区別できる境界値である。
+        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(1, 0.20, 50.0, 5000.0)] };
+        let state_registry = StateRegistry::build(vec![
+            tax_ai_state(1, 1, 9_000_000, 10.0),
+            tax_ai_state(2, 1, 1_000_000, 90.0),
+        ]);
+        process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+        assert_eq!(
+            country_registry.get(CountryId(1)).unwrap().tax_rate,
+            0.20,
+            "人口加重平均(18.0→予測3420.0<5000.0)なら不安全と正しく判定され据置くはず \
+             (単純平均50.0→予測9500.0だと誤って引下げてしまう)"
+        );
+    }
+
+    /// 国家登録順・州登録順を反転しても結果が変わらない。
+    #[test]
+    fn p27_002_c_result_does_not_depend_on_country_or_state_registration_order() {
+        fn run(reverse: bool) -> f32 {
+            let mut countries =
+                vec![tax_ai_country(1, 0.15, 50.0, 600.0), tax_ai_country(2, 0.20, -10.0, 100.0)];
+            let mut states =
+                vec![tax_ai_state(1, 1, 1_000_000, 50.0), tax_ai_state(2, 2, 1_000_000, 50.0)];
+            if reverse {
+                countries.reverse();
+                states.reverse();
+            }
+            let mut country_registry = CountryRegistry { countries };
+            let state_registry = StateRegistry::build(states);
+            process_tax_rate_ai(CountryId(1), &mut country_registry, &state_registry);
+            country_registry.get(CountryId(1)).unwrap().tax_rate
+        }
+        assert_eq!(run(false), run(true));
     }
 
     /// `process_daily_country_ai`経由(プレイヤー/消滅国家フィルタ・cadenceを含む
-    /// 実際の日次AIループ)でのテスト用最小ヘルパー。状態(State)・戦争・外交・
-    /// 研究関連は空/既定値のままとし、税率評価そのものへの影響を排除する。
+    /// 実際の日次AIループ)でのテスト用最小ヘルパー。
     #[allow(clippy::type_complexity)]
     fn run_daily_country_ai_minimal(
         current_day: u32,
         player_country: &PlayerCountry,
         country_registry: &mut CountryRegistry,
+        state_registry: &StateRegistry,
         country_ai_registry: &mut CountryAiRegistry,
     ) {
-        let state_registry = StateRegistry::build(vec![]);
         let building_registry = crate::building::data::BuildingRegistry::default();
         let military_registry = MilitaryRegistry::default();
         let mut war_registry = WarRegistry::default();
@@ -3456,7 +3502,7 @@ mod tests {
             "1800/01/01",
             player_country,
             country_registry,
-            &state_registry,
+            state_registry,
             &building_registry,
             &military_registry,
             &mut war_registry,
@@ -3472,17 +3518,24 @@ mod tests {
         );
     }
 
-    /// Test F: プレイヤー国家は同じ赤字状態でも税率を自動変更されない。同じ日に
-    /// 評価される他のAI国家は正規どおり調整される(プレイヤー保護がAI全体を
-    /// 止めてしまわないことも同時に確認する)。
+    /// プレイヤー国家は同じ赤字状態でも税率を自動変更されない。同じ日に評価される
+    /// 他のAI国家は正規どおり調整される(プレイヤー保護がAI全体を止めてしまわない
+    /// ことも同時に確認する)。
     #[test]
-    fn p27_002_b_player_country_tax_rate_is_never_auto_adjusted() {
+    fn p27_002_c_player_country_tax_rate_is_never_auto_adjusted() {
         let player_country = PlayerCountry(Some(CountryId(1)));
         let mut country_registry = CountryRegistry {
-            countries: vec![tax_ai_country(1, 0.15, -10.0), tax_ai_country(2, 0.15, -10.0)],
+            countries: vec![
+                tax_ai_country(1, 0.15, -10.0, 1_000_000.0),
+                tax_ai_country(2, 0.15, -10.0, 1_000_000.0),
+            ],
         };
+        let state_registry = StateRegistry::build(vec![
+            tax_ai_state(1, 1, 1_000_000, 50.0),
+            tax_ai_state(2, 2, 1_000_000, 50.0),
+        ]);
         let mut country_ai_registry = CountryAiRegistry::default();
-        run_daily_country_ai_minimal(1, &player_country, &mut country_registry, &mut country_ai_registry);
+        run_daily_country_ai_minimal(1, &player_country, &mut country_registry, &state_registry, &mut country_ai_registry);
         assert_eq!(
             country_registry.get(CountryId(1)).unwrap().tax_rate,
             0.15,
@@ -3494,19 +3547,23 @@ mod tests {
         );
     }
 
-    /// Test G: 消滅国家(Eliminated)は税率を変更されない。
+    /// 消滅国家(Eliminated)は税率を変更されない。
     #[test]
-    fn p27_002_b_eliminated_country_tax_rate_is_never_adjusted() {
+    fn p27_002_c_eliminated_country_tax_rate_is_never_adjusted() {
         let player_country = PlayerCountry(None);
-        let mut eliminated = tax_ai_country(2, 0.15, -10.0);
+        let mut eliminated = tax_ai_country(2, 0.15, -10.0, 1_000_000.0);
         eliminated.status = crate::country::CountryStatus::Eliminated {
             eliminated_date: "1800/01/01".to_string(),
             annexed_by: CountryId(1),
         };
         let mut country_registry =
-            CountryRegistry { countries: vec![tax_ai_country(1, 0.15, -10.0), eliminated] };
+            CountryRegistry { countries: vec![tax_ai_country(1, 0.15, -10.0, 1_000_000.0), eliminated] };
+        let state_registry = StateRegistry::build(vec![
+            tax_ai_state(1, 1, 1_000_000, 50.0),
+            tax_ai_state(2, 2, 1_000_000, 50.0),
+        ]);
         let mut country_ai_registry = CountryAiRegistry::default();
-        run_daily_country_ai_minimal(1, &player_country, &mut country_registry, &mut country_ai_registry);
+        run_daily_country_ai_minimal(1, &player_country, &mut country_registry, &state_registry, &mut country_ai_registry);
         assert_eq!(
             country_registry.get(CountryId(2)).unwrap().tax_rate,
             0.15,
@@ -3514,22 +3571,24 @@ mod tests {
         );
     }
 
-    /// Test H: 同月中に複数回Systemが呼ばれても、正規cadence(月1回)以上には
-    /// 変更されない。New Game直後の`dirty=true`によりday1で初回評価が起こる点は
-    /// 既存の仕様(P26-008-PRE-002が復元)であり、day2(CountryId(2)の正規月次
-    /// cadence`day%30==2`)での2回目の評価と合わせて、30日間で正確に2回
-    /// (dirty初回+cadence1回)だけ評価されることを確認する。
+    /// 同月中に複数回Systemが呼ばれても、正規cadence(月1回)以上には変更されない。
+    /// New Game直後の`dirty=true`によりday1で初回評価が起こる点は既存の仕様
+    /// (P26-008-PRE-002が復元)であり、day2(CountryId(2)の正規月次cadence
+    /// `day%30==2`)での2回目の評価と合わせて、30日間で正確に2回(dirty初回+
+    /// cadence1回)だけ評価されることを確認する。
     #[test]
-    fn p27_002_b_tax_rate_changes_at_most_once_per_monthly_evaluation_cycle() {
+    fn p27_002_c_tax_rate_changes_at_most_once_per_monthly_evaluation_cycle() {
         let player_country = PlayerCountry(None);
-        let mut country_registry = CountryRegistry { countries: vec![tax_ai_country(2, 0.15, -10.0)] };
+        let mut country_registry =
+            CountryRegistry { countries: vec![tax_ai_country(2, 0.15, -10.0, 1_000_000.0)] };
+        let state_registry = StateRegistry::build(vec![tax_ai_state(1, 2, 1_000_000, 50.0)]);
         let mut country_ai_registry = CountryAiRegistry::default();
 
-        run_daily_country_ai_minimal(1, &player_country, &mut country_registry, &mut country_ai_registry);
+        run_daily_country_ai_minimal(1, &player_country, &mut country_registry, &state_registry, &mut country_ai_registry);
         assert!((country_registry.get(CountryId(2)).unwrap().tax_rate - 0.16).abs() < 1e-6);
 
         for day in 2..=30u32 {
-            run_daily_country_ai_minimal(day, &player_country, &mut country_registry, &mut country_ai_registry);
+            run_daily_country_ai_minimal(day, &player_country, &mut country_registry, &state_registry, &mut country_ai_registry);
         }
         let after_month = country_registry.get(CountryId(2)).unwrap().tax_rate;
         assert!(
