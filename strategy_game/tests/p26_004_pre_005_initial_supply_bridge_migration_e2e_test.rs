@@ -640,10 +640,20 @@ fn test_f1_world_total_after_new_game_grant_equals_sum_of_six_grants() {
 /// 含めない(31.0を含めた比較にすると既存の決定性テストの意味を変えてしまうため、
 /// 生の生産累積値だけを取り出して比較する: 実測値から31.0を引いた値を正規値と
 /// 突き合わせる)。
+///
+/// 【P27-002-Aにより正規値を更新】: AI建設への3か月経常支出予備判定の導入により、
+/// Arcadiaの優先度3(任意的な平時開発、原材料十分なら経済成長のためFactoryを選ぶ
+/// 既存の無関係な判断)が資金不足で見送られるようになり、その分の国庫が優先度2
+/// (P26-004-PRE-002の事前開発Mine建設、予備判定の対象外)へより早く回るようになった
+/// 結果、Arcadiaの月12/18時点の生産分のみ(production_only)がP27-002-A適用前より
+/// 実際に増加した(421.2265230000→462.5130180000、592.5978000000→684.7896940000、
+/// `verification_logs/phase-27/p27-002-a/`実測)。これは決定的生産順序修正そのものが
+/// 壊れたのではなく、建設AIの資金配分が変わったことによる正当な数値変化であり、
+/// 新しい正規値としてここに固定する。
 #[test]
 fn test_f2_arcadia_deterministic_production_values_are_protected_after_the_initial_grant() {
-    const ARCADIA_CANONICAL_M12: f64 = 421.2265230000;
-    const ARCADIA_CANONICAL_M18: f64 = 592.5978000000;
+    const ARCADIA_CANONICAL_M12: f64 = 462.5130180000;
+    const ARCADIA_CANONICAL_M18: f64 = 684.7896940000;
 
     let dir = TempTestDir::new("f2");
     let mut app = setup_app_in_playing(DWARF, dir.save_file_config());

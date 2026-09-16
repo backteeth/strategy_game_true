@@ -373,6 +373,68 @@ fn try_construct(
     }
 }
 
+/// P27-002-A: 優先度3(任意的な平時開発)が、建設費支払い後に国家の運転資金
+/// (直近の月次経常支出の何か月分)を侵食しないよう要求する予備月数。優先度1
+/// (Food緊急)・優先度2(P26-008-Cの供給網修復)には適用しない(spec §6)。
+/// 正規定数は本モジュール内のここ1か所だけに定義する(spec §3)。
+pub const PEACETIME_CONSTRUCTION_RESERVE_MONTHS: f64 = 3.0;
+
+/// `try_construct`(優先度1・2が今も直接使う既存の共有関数、シグネチャ変更なし)を
+/// 変更せず、優先度3専用のラッパーとして予備資金判定を追加する(spec §3・§6)。
+///
+/// 判定式(spec §3):
+/// ```text
+/// required_treasury = construction_cost + monthly_recurring_expenses × 3
+/// allowed = treasury >= required_treasury
+/// ```
+///
+/// `country.monthly_expenses`(`economy::finance::process_country_finance`が
+/// 月次で確定させる既存の正規経常支出値、spec §4——建設費・軍事費・募兵費の
+/// いずれも含まない)をそのまま再利用し、新しい式を複製しない。
+///
+/// 数値安全性(spec §5): `treasury`・`construction_cost`・`monthly_expenses`の
+/// いずれかが非有限(NaN/Infinity)または負の場合、あるいは`required_treasury`
+/// 自体の計算が非有限になる場合は、無効な財政値を0へ丸めて建設可能とはせず、
+/// 安全側(`InsufficientFunds`、mutationなし)へ倒す。`def`が存在しない場合は
+/// 財務判定を行わずそのまま`try_construct`へ委譲する(既存の`NoCandidate`挙動を
+/// 変更しない)。
+///
+/// 予備判定に落ちた場合、`try_construct`自体は一切呼び出さない——候補探索・
+/// 国庫・建設キューへの変更は発生しない(spec §7: 予備不足時に安価な代替候補を
+/// 新たに探索しない、原子性を維持する)。
+fn try_construct_peacetime(
+    country: &mut CountryData,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+    target_building: BuildingType,
+) -> ConstructOutcome {
+    if let Some(def) = building_registry.get(target_building) {
+        let treasury = country.treasury;
+        let construction_cost = def.construction_cost;
+        let monthly_expenses = country.monthly_expenses;
+
+        let values_valid = treasury.is_finite()
+            && construction_cost.is_finite()
+            && construction_cost >= 0.0
+            && monthly_expenses.is_finite()
+            && monthly_expenses >= 0.0;
+
+        if !values_valid {
+            return ConstructOutcome::InsufficientFunds;
+        }
+
+        let reserve = monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
+        let required_treasury = construction_cost + reserve;
+
+        if !required_treasury.is_finite() || treasury < required_treasury {
+            return ConstructOutcome::InsufficientFunds;
+        }
+    }
+
+    try_construct(country, state_registry, building_registry, owned_states, target_building)
+}
+
 /// 国家が現在保有する生産建物(level>0)が入力資源として要求する`ResourceType`集合を
 /// 求める(`BuildingDefinition.input_resources`を汎用的に参照し、特定資源名を
 /// 列挙しない、P26-004-PRE-002 spec §5.3)。HashMap/HashSetの反復順には最終結果が
@@ -650,7 +712,7 @@ pub fn process_construction_ai(
         BuildingType::Factory
     };
 
-    match try_construct(country, state_registry, building_registry, &owned_states, target_building) {
+    match try_construct_peacetime(country, state_registry, building_registry, &owned_states, target_building) {
         ConstructOutcome::Built => {}
         ConstructOutcome::InsufficientFunds => {
             ai_state.decision_reason = CountryAiDecisionReason::FundsShortage;
@@ -660,8 +722,10 @@ pub fn process_construction_ai(
                 // P26-004-PRE-002 spec §5.2: 鉱床皆無国家ではMine候補が存在しない。
                 // 同じ月の建設判断を無駄にしないよう、次候補(Factory)へフォールバック
                 // する(架空の採掘能力は作らず、既存Factory建設ルールをそのまま再利用)。
+                // P27-002-A: このフォールバックも優先度3の一部であり、同じ予備資金
+                // 判定(`try_construct_peacetime`)を適用する。
                 ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
-                if let ConstructOutcome::InsufficientFunds = try_construct(
+                if let ConstructOutcome::InsufficientFunds = try_construct_peacetime(
                     country,
                     state_registry,
                     building_registry,
@@ -2928,5 +2992,258 @@ mod tests {
                 "Coal鉱床が皆無の州へMineを建設してはいけない"
             );
         }
+    }
+
+    // ─── P27-002-A: 優先度3への3か月経常支出予備判定 ─────────────────────
+
+    /// 優先度1(Food緊急)・優先度2(事前開発)のいずれも発火せず、優先度3の
+    /// Mine分岐(Wood/Iron/Coal<30)だけを発火させる、鉱床ありの国家。
+    fn p27_002_a_priority3_mine_country(treasury: f64, monthly_expenses: f64) -> (CountryData, StateData) {
+        let mut country = CountryData {
+            id: CountryId(1),
+            capital_state_id: StateId(1),
+            treasury,
+            monthly_expenses,
+            ..CountryData::default()
+        };
+        country.stockpile.set(Res::Food, 100.0); // 優先度1を回避
+        country.stockpile.set(Res::Wood, 0.0);
+        country.stockpile.set(Res::Iron, 0.0);
+        country.stockpile.set(Res::Coal, 0.0); // 優先度3のMine分岐を発火
+        let state = iron_coal_deposit_state(StateId(1), CountryId(1));
+        (country, state)
+    }
+
+    fn p27_002_a_registry_with_mine_def() -> crate::building::data::BuildingRegistry {
+        let mut reg = crate::building::data::BuildingRegistry::default();
+        reg.definitions.insert(BuildingType::Mine, mine_def());
+        reg
+    }
+
+    #[test]
+    fn p27_002_a_boundary_exact_allows_priority_3_construction() {
+        let monthly_expenses = 100.0;
+        let construction_cost = mine_def().construction_cost;
+        let required_treasury = construction_cost + monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
+        let (country, state) = p27_002_a_priority3_mine_country(required_treasury, monthly_expenses);
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let state_registry = StateRegistry::build(vec![state]);
+        let building_registry = p27_002_a_registry_with_mine_def();
+        let mut ai_state = CountryAiState::new(CountryId(1));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c.construction_queue.len(), 1, "境界ちょうどでは建設が成立するはず");
+        assert_eq!(c.construction_queue[0].building_type, BuildingType::Mine);
+        assert_eq!(
+            c.treasury,
+            monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS,
+            "建設後、国庫は経常支出3か月分ちょうどまで減るはず"
+        );
+    }
+
+    #[test]
+    fn p27_002_a_boundary_under_defers_priority_3_construction_without_mutation() {
+        let monthly_expenses = 100.0;
+        let construction_cost = mine_def().construction_cost;
+        let required_treasury = construction_cost + monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
+        let treasury_before = required_treasury - 0.01;
+        let (country, state) = p27_002_a_priority3_mine_country(treasury_before, monthly_expenses);
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let state_registry = StateRegistry::build(vec![state]);
+        let building_registry = p27_002_a_registry_with_mine_def();
+        let mut ai_state = CountryAiState::new(CountryId(1));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert!(c.construction_queue.is_empty(), "境界未満では優先度3建設を見送るはず");
+        assert_eq!(c.treasury, treasury_before, "見送り時は国庫を一切変更しないはず");
+        assert_eq!(ai_state.decision_reason, CountryAiDecisionReason::FundsShortage);
+    }
+
+    #[test]
+    fn p27_002_a_cost_itself_unaffordable_is_unchanged_from_existing_behavior() {
+        let construction_cost = mine_def().construction_cost;
+        let treasury_before = construction_cost - 1.0; // 建設費そのものにも満たない
+        let (country, state) = p27_002_a_priority3_mine_country(treasury_before, 0.0);
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let state_registry = StateRegistry::build(vec![state]);
+        let building_registry = p27_002_a_registry_with_mine_def();
+        let mut ai_state = CountryAiState::new(CountryId(1));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert!(c.construction_queue.is_empty());
+        assert_eq!(c.treasury, treasury_before);
+        assert_eq!(ai_state.decision_reason, CountryAiDecisionReason::FundsShortage);
+    }
+
+    #[test]
+    fn p27_002_a_zero_recurring_expenses_matches_pre_existing_cost_only_boundary() {
+        let construction_cost = mine_def().construction_cost;
+        // monthly_expenses=0.0(New Game初月の未初期化値も含む)では、予備要件は
+        // 常に0となり、既存(P27-002-A以前)のcost-onlyの境界と完全に一致するはず。
+        let (country, state) = p27_002_a_priority3_mine_country(construction_cost, 0.0);
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let state_registry = StateRegistry::build(vec![state]);
+        let building_registry = p27_002_a_registry_with_mine_def();
+        let mut ai_state = CountryAiState::new(CountryId(1));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c.construction_queue.len(), 1, "経常支出0なら従来どおりcostちょうどで建設できるはず");
+        assert_eq!(c.treasury, 0.0);
+    }
+
+    #[test]
+    fn p27_002_a_food_emergency_bypasses_the_reserve_gate() {
+        let mut country = CountryData {
+            id: CountryId(1),
+            capital_state_id: StateId(1),
+            treasury: 150.0, // Farm(100)は払えるが、3か月予備(100+1000*3=3100)には遠く及ばない
+            monthly_expenses: 1000.0,
+            ..CountryData::default()
+        };
+        country.stockpile.set(Res::Food, 10.0); // <50、優先度1発火
+        let state = no_deposit_state(StateId(1), CountryId(1));
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let state_registry = StateRegistry::build(vec![state]);
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry.definitions.insert(BuildingType::Farm, {
+            let mut def = mine_def();
+            def.building_type = BuildingType::Farm;
+            def.construction_cost = 100.0;
+            def
+        });
+        let mut ai_state = CountryAiState::new(CountryId(1));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c.construction_queue.len(), 1, "Food緊急は予備資金判定の対象外のはず");
+        assert_eq!(c.construction_queue[0].building_type, BuildingType::Farm);
+        assert_eq!(ai_state.decision_reason, CountryAiDecisionReason::FoodShortageFarmPriority);
+    }
+
+    #[test]
+    fn p27_002_a_proactive_mine_development_bypasses_the_reserve_gate() {
+        let mut c1 = CountryData {
+            id: CountryId(1),
+            capital_state_id: StateId(1),
+            treasury: 500.0, // Mine(500)は払えるが、3か月予備(500+1000*3=3500)には遠く及ばない
+            monthly_expenses: 1000.0,
+            ..CountryData::default()
+        };
+        healthy_stockpile(&mut c1); // 既存閾値(30)は上回っている
+        let mut s1 = iron_coal_deposit_state(StateId(1), CountryId(1));
+        s1.buildings.insert(BuildingType::MilitaryFactory, 1); // Iron需要はあるが稼働中Mineなし
+        let state_registry = StateRegistry::build(vec![s1]);
+
+        let mut building_registry = crate::building::data::BuildingRegistry::default();
+        building_registry.definitions.insert(BuildingType::Mine, mine_def());
+        building_registry.definitions.insert(BuildingType::Factory, factory_def());
+        building_registry.definitions.insert(BuildingType::MilitaryFactory, military_factory_def());
+
+        let mut country_registry = CountryRegistry { countries: vec![c1] };
+        let mut ai_state = CountryAiState::new(CountryId(1));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(CountryId(1)).unwrap();
+        assert_eq!(c.construction_queue.len(), 1, "供給網修復のMine事前開発は予備資金判定の対象外のはず");
+        assert_eq!(c.construction_queue[0].building_type, BuildingType::Mine);
+        assert_eq!(ai_state.decision_reason, CountryAiDecisionReason::RawMaterialMinePriority);
+    }
+
+    #[test]
+    fn p27_002_a_proactive_factory_development_bypasses_the_reserve_gate() {
+        let country_id = CountryId(1);
+        let capital = p26_008_c_owned_state(1, country_id);
+        let mut mf_state = p26_008_c_owned_state(2, country_id);
+        mf_state.buildings.insert(BuildingType::MilitaryFactory, 1); // IndustrialGoods需要はあるがFactoryなし
+        let state_registry = StateRegistry::build(vec![capital, mf_state]);
+
+        let mut country = p26_008_c_ample_country(country_id, StateId(1), factory_def().construction_cost);
+        // Factory(1000)は払えるが、3か月予備(1000+1000*3=4000)には遠く及ばない。
+        country.monthly_expenses = 1000.0;
+        country.construction_queue.clear();
+        let mut country_registry = CountryRegistry { countries: vec![country] };
+        let building_registry = p26_008_c_building_registry();
+        let mut ai_state = CountryAiState::new(country_id);
+
+        process_construction_ai(country_id, &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+        let c = country_registry.get(country_id).unwrap();
+        assert_eq!(c.construction_queue.len(), 1, "供給網修復のFactory事前開発は予備資金判定の対象外のはず");
+        assert_eq!(c.construction_queue[0].building_type, BuildingType::Factory);
+        assert_eq!(ai_state.decision_reason, CountryAiDecisionReason::SteelShortageSteelMillPriority);
+    }
+
+    #[test]
+    fn p27_002_a_rejects_non_finite_or_negative_financial_values_without_mutation() {
+        let construction_cost = mine_def().construction_cost;
+        let scenarios: [(&str, f64, f64); 4] = [
+            ("treasury NaN", f64::NAN, 100.0),
+            ("treasury Infinity", f64::INFINITY, 100.0),
+            ("expenses NaN", construction_cost + 1000.0, f64::NAN),
+            ("expenses negative", construction_cost + 1000.0, -50.0),
+        ];
+        for (label, treasury, monthly_expenses) in scenarios {
+            let (country, state) = p27_002_a_priority3_mine_country(treasury, monthly_expenses);
+            let mut country_registry = CountryRegistry { countries: vec![country] };
+            let state_registry = StateRegistry::build(vec![state]);
+            let building_registry = p27_002_a_registry_with_mine_def();
+            let mut ai_state = CountryAiState::new(CountryId(1));
+
+            process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state);
+
+            let c = country_registry.get(CountryId(1)).unwrap();
+            assert!(
+                c.construction_queue.is_empty(),
+                "[{label}] 非有限・負の財政値は安全側(見送り)へ倒すはず、mutationなし"
+            );
+            assert_eq!(
+                c.treasury.to_bits(),
+                treasury.to_bits(),
+                "[{label}] 国庫はビット単位で不変のはず(NaN比較の罠を避けるためto_bits比較)"
+            );
+        }
+    }
+
+    #[test]
+    fn p27_002_a_country_isolation_reserve_gate_does_not_cross_contaminate() {
+        let monthly_expenses = 100.0;
+        let construction_cost = mine_def().construction_cost;
+        let required_treasury = construction_cost + monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
+
+        let (mut country_a, mut state_a) = p27_002_a_priority3_mine_country(required_treasury, monthly_expenses);
+        country_a.id = CountryId(1);
+        state_a.owner_country_id = CountryId(1);
+        state_a.resource_deposits.iter_mut().for_each(|_| {});
+
+        let (mut country_b, mut state_b) =
+            p27_002_a_priority3_mine_country(required_treasury - 0.01, monthly_expenses);
+        country_b.id = CountryId(2);
+        state_b.id = StateId(2);
+        state_b.owner_country_id = CountryId(2);
+
+        let mut country_registry = CountryRegistry { countries: vec![country_a, country_b] };
+        let state_registry = StateRegistry::build(vec![state_a, state_b]);
+        let building_registry = p27_002_a_registry_with_mine_def();
+        let mut ai_state_a = CountryAiState::new(CountryId(1));
+        let mut ai_state_b = CountryAiState::new(CountryId(2));
+
+        process_construction_ai(CountryId(1), &mut country_registry, &state_registry, &building_registry, &mut ai_state_a);
+        process_construction_ai(CountryId(2), &mut country_registry, &state_registry, &building_registry, &mut ai_state_b);
+
+        let a = country_registry.get(CountryId(1)).unwrap();
+        let b = country_registry.get(CountryId(2)).unwrap();
+        assert_eq!(a.construction_queue.len(), 1, "境界ちょうどの国家は建設が成立するはず");
+        assert!(b.construction_queue.is_empty(), "境界未満の国家は見送るはず、他国の結果に影響されない");
+        assert_eq!(b.treasury, required_treasury - 0.01, "他国の判定は自国のtreasuryへ影響しないはず");
     }
 }

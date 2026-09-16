@@ -680,10 +680,17 @@ mod real_app {
     /// 順序は当時の`states`スライス順のまま)の値から変化した(月12・18は不変)。
     /// これは意図した修正の結果であり退行ではない(REV-001報告書§16・§19で
     /// 独立プロセス5回一致を確認済み)。
-    const ARCADIA_CANONICAL_M12: f64 = 421.2265230000;
-    const ARCADIA_CANONICAL_M18: f64 = 592.5978000000;
-    const ARCADIA_CANONICAL_M24: f64 = 667.8538710000;
-    const ARCADIA_CANONICAL_M36: f64 = 822.4577790000;
+    ///
+    /// 【P27-002-Aにより正規値を再更新】: AI建設への3か月経常支出予備判定の導入により、
+    /// Arcadiaの優先度3(任意的な平時開発)による建設が資金不足で見送られるように
+    /// なった結果、その分の国庫がP26-004-PRE-002の事前開発Mine建設(優先度2、予備
+    /// 判定の対象外)へより早く回るようになり、月12/18/24/36いずれの時点でも生産分
+    /// のみ(production_only)が以前より増加した(`verification_logs/phase-27/
+    /// p27-002-a/`実測、独立プロセス3回で再現確認済み・決定的)。
+    const ARCADIA_CANONICAL_M12: f64 = 462.5130180000;
+    const ARCADIA_CANONICAL_M18: f64 = 684.7896940000;
+    const ARCADIA_CANONICAL_M24: f64 = 793.7114320000;
+    const ARCADIA_CANONICAL_M36: f64 = 955.4338270000;
 
     // Test E: Arcadia単独36か月の正規値。
     //
@@ -763,13 +770,37 @@ mod real_app {
     // 完成するようになったために解消された。36か月間の追加生産期間により、
     // 月36時点のMilitarySupplies生産分がわずかに増加する(実測・決定的、独立
     // プロセスで再現確認済み)。
+    //
+    // 【P27-002-Aにより正規値を再更新】: AI建設への3か月経常支出予備判定の導入後:
+    // - Arcadia: 上記ARCADIA_CANONICAL_M36の更新理由と同じ(国庫の再配分により
+    //   Mine完成が早まり、生産が増加)。
+    // - Elfin(旧`1804.029982`→`499.874123`、大幅減少): Elfinは既にMine lv1を保有する
+    //   ため優先度2(初回建設)が不発火となり、追加Mineレベルは予備判定つきの
+    //   優先度3を経由するようになった。Elfinの経常支出規模(月あたり約2100)では
+    //   36か月以内に3か月分の予備を満たせず、追加Mineレベルの建設が正しく見送られる
+    //   (`p26_004_pre_002_deposit_aware_mine_construction_ai_e2e_test.rs`の
+    //   test_k1で`FundsShortage`を直接確認済み)。既存Mine lv1自体の産出は妨げられて
+    //   おらず、正のMilitarySupplies到達自体は維持される(0にはならない)が、
+    //   36か月間の追加成長機会を失った分だけ生産分が大きく減少する。これは国庫の
+    //   健全化(Elfinの月36国庫が710.88→5226.53へ改善)と引き換えの正当な
+    //   トレードオフである。
+    // - Oceanic(旧`579.803051`→`474.336300`、減少): Oceanicの優先度3による過剰な
+    //   Factory/Mine建設が抑制された結果、生産能力の伸びが緩やかになった
+    //   (`p26_006_capital_connectivity_supply_e2e_test.rs`のOceanic供給不足日数
+    //   増加[493→544]と同根)。Oceanicの月36国庫は406.86→12788.06へ大幅改善して
+    //   おり、これも国庫健全化との正当なトレードオフである。
+    // - Dwarf/Passguard/Ferrowynは変更なし(Dwarfは優先度3自体があまり発火せず、
+    //   Passguard/Ferrowynは元々予備を満たせるほどの治療でないため既にFundsShortage
+    //   寄りで優先度3の建設機会自体が乏しく、本タスク前後で挙動がほぼ変化しない)。
+    // 独立プロセス3回で全値が再現することを確認済み(決定的、
+    // `verification_logs/phase-27/p27-002-a/`参照)。
     #[test]
     fn test_f_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 1804.029982),
+            (ELFIN, 499.874123),
             (DWARF, 1487.059),
-            (OCEANIC, 579.803051),
+            (OCEANIC, 474.336300),
             (PASSGUARD, 3325.079),
             (FERROWYN, 1089.859),
         ];

@@ -839,10 +839,15 @@ mod real_app {
     /// 州をまたぐ`consume`/`add`呼び出しの実時間順序を変えたため、月12・18は
     /// P26-DET-001と一致するが、月24以降で新しい値(667.8538710000 /
     /// 822.4577790000)に変化した——これは意図した修正の結果であり、退行ではない。
-    const ARCADIA_CANONICAL_M12: f64 = 421.2265230000;
-    const ARCADIA_CANONICAL_M18: f64 = 592.5978000000;
-    const ARCADIA_CANONICAL_M24: f64 = 667.8538710000;
-    const ARCADIA_CANONICAL_M36: f64 = 822.4577790000;
+    ///
+    /// 【P27-002-Aにより正規値を再更新】: 理由・新値は
+    /// `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名定数のコメントと
+    /// 同一(AI建設への3か月経常支出予備判定により、Arcadiaの優先度3建設が抑制され、
+    /// その分の国庫がMine建設[優先度2]へ早く回るようになった結果)。
+    const ARCADIA_CANONICAL_M12: f64 = 462.5130180000;
+    const ARCADIA_CANONICAL_M18: f64 = 684.7896940000;
+    const ARCADIA_CANONICAL_M24: f64 = 793.7114320000;
+    const ARCADIA_CANONICAL_M36: f64 = 955.4338270000;
 
     // Test H: Arcadia単独36か月の正規値(本タスクの国家内順序変更後も、
     // Arcadiaは州0内にFactory/MilitaryFactoryが同居するため、州間ではなく
@@ -907,13 +912,19 @@ mod real_app {
     // 同一――新規のIndustrialGoods事前開発規則により、Elfinの既存Mine(StateId 16、
     // 既にIron/Coal鉱床あり)がIron側を即座に満たすため、初回月次評価で直接
     // Factory建設へ到達するようになり、以前より早く生産が始まる。
+    //
+    // 【P27-002-Aにより正規値を再更新】: 理由・新値は
+    // `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名テストのコメントと
+    // 同一(Arcadia増加=Mine完成の前倒し、Elfin大幅減少=既存Mineの追加レベルが
+    // 予備資金判定で正しく見送られるため、Oceanic減少=過剰建設の抑制、
+    // Dwarf/Passguard/Ferrowynは変更なし)。独立プロセス3回で再現確認済み。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 1804.029982),
+            (ELFIN, 499.874123),
             (DWARF, 1487.059),
-            (OCEANIC, 579.803051),
+            (OCEANIC, 474.336300),
             (PASSGUARD, 3325.079),
             (FERROWYN, 1089.859),
         ];

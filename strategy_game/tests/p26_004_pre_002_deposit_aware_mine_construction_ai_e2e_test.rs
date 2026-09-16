@@ -379,13 +379,21 @@ fn test_j2_arcadia_mine_completes_and_iron_production_improves_over_36_months() 
 // メカニズム自体には手を入れていない。
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Test K-1(更新): Elfin Republicは、P26-004-PRE-004でStateId(16、既存Mine lv1が
-/// 配置されていた州)へIron50/Coal40鉱床を得た。事前開発規則がこの新しい鉱床を検出し、
-/// 既存Mineのレベルを実際に伸ばして、36か月以内に正のMilitarySupplies生産へ到達する
-/// ことを確認する(`verification_logs/phase-26/p26-004-pre-004/`実測: 月36で
-/// 1846.952)。
+/// Test K-1(P27-002-Aにより再更新): Elfin Republicは、P26-004-PRE-004でStateId(16、
+/// 既存Mine lv1が配置されていた州)へIron50/Coal40鉱床を得ており、既にMine lv1を
+/// 保有しているため優先度2(事前開発、初回Mine建設)の`has_active_mine_for_resource`
+/// 判定に阻まれて再発火せず、追加レベルは既存の優先度3(原材料不足時のMine反応判断)を
+/// 経由する。P27-002-Aはこの優先度3へ3か月分の経常支出予備判定を追加したため、
+/// Elfinの経常支出規模(月あたり約2100)に対する3か月分の予備を国庫が満たすには
+/// 実測で60か月前後を要し、36か月以内はまだ満たさない
+/// (`verification_logs/phase-27/p27-002-a/`実測: 月36でtreasury=5226.53 <
+/// required(建設費500+予備分)=6963.15)。これはAIが壊れているのではなく、新しい
+/// 予備判定が意図通り`FundsShortage`として正しく見送っていることを直接確認する。
+/// 既存Mine lv1自体の産出は本タスクで一切妨げられないため、正のMilitarySupplies
+/// 到達(P26-004-PRE-004が確立、`verification_logs/phase-26/p26-004-pre-004/`実測:
+/// 月36で1846.952)自体は引き続き維持されることも併せて確認する。
 #[test]
-fn test_k1_elfin_mine_now_grows_from_its_new_deposit_and_reaches_positive_production() {
+fn test_k1_elfin_mine_growth_is_correctly_reserve_gated_while_existing_supply_stays_positive() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("k1");
     let mut app = setup_app_in_playing(player, temp_dir.save_file_config());
@@ -397,19 +405,33 @@ fn test_k1_elfin_mine_now_grows_from_its_new_deposit_and_reaches_positive_produc
          (StateId 16), now co-located with the P26-004-PRE-004 deposit"
     );
 
-    advance_months(&mut app, 36);
+    advance_months(&mut app, 35);
+    // 36か月目の建設AI評価日(Elfin=CountryId(1)、day % 30 == 1)の時点で、
+    // 予備判定が実際に`FundsShortage`を選んでいることを直接確認してから月を締める。
+    tick_day(&mut app, 1800, 36, 1);
+    let reason_at_month_36_eval = decision_reason_of(&app, ELFIN);
+    for day in 2..=30u8 {
+        tick_day(&mut app, 1800, 36, day);
+    }
+    tick_month(&mut app, 1800, 37);
 
-    assert!(
-        total_mine_level_owned_by(&app, ELFIN) > initial_mine_level,
-        "Elfin's State 16 now has a real Iron/Coal deposit (P26-004-PRE-004); the proactive \
-         construction rule must grow the pre-existing Mine there over 36 months, not leave it \
-         frozen at the initial level"
+    assert_eq!(
+        reason_at_month_36_eval,
+        Some(CountryAiDecisionReason::FundsShortage),
+        "P27-002-A適用後、Elfinの36か月目時点の準備金はまだ3か月分の経常支出+建設費を \
+         満たさないため、追加Mineレベルの建設は`FundsShortage`として正しく見送られるはず"
+    );
+    assert_eq!(
+        total_mine_level_owned_by(&app, ELFIN),
+        initial_mine_level,
+        "上記の予備判定により、36か月以内はElfinの追加Mineレベルが正しく見送られ、\
+         初期値のまま据え置かれるはず"
     );
     let supplies = stockpile_of(&app, ELFIN, ResourceType::MilitarySupplies);
     assert!(
         supplies > 0.0,
-        "with a real deposit now in place, Elfin must reach positive MilitarySupplies \
-         production within 36 months (measured: {supplies})"
+        "追加Mineレベルが見送られても、既存Mine lv1の産出によりP26-004-PRE-004が確立した \
+         正のMilitarySupplies到達自体は損なわれていないはず(measured: {supplies})"
     );
 }
 
@@ -709,6 +731,13 @@ fn test_g2_save_load_after_construction_starts_preserves_state_exactly() {
 // 消費分の一時的な非ゼロ)」のままであることを検証していた。P26-004-PRE-004は
 // この4か国全てに実際の供給網を与えたため、この期待値表を「4か国とも解決される」
 // 形に更新する(`verification_logs/phase-26/p26-004-pre-004/`実測値と整合)。
+//
+// 【P27-002-Aにより再更新】: ElfinのみMine追加レベルの期待値を変更する。Elfinは
+// 唯一、鉱床上に既にMine lv1を保有しているため優先度2(初回建設)が不発火となり、
+// 追加レベルは予備資金判定つきの優先度3を経由する。Elfinの経常支出規模では
+// 36か月以内に3か月分の予備を満たせないため、正しく見送られる(test_k1参照)。
+// Arcadia/Oceanic/Passguardは初回Mine建設(優先度2、予備判定の対象外)のままなので
+// 期待値は変更しない。
 fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes() {
     let player = DWARF;
     let temp_dir = TempTestDir::new("m1");
@@ -776,14 +805,21 @@ fn test_m1_six_country_36_month_snapshot_matches_expected_deposit_aware_outcomes
                 );
             }
             "Elfin" => {
-                assert!(
-                    mine_total > initial_mine_total,
-                    "Elfin's State 16 now has a real deposit (P26-004-PRE-004); its Mine must \
-                     grow beyond the pre-existing initial value ({initial_mine_total})"
+                // P27-002-A: Elfinは既にMine lv1を保有するため優先度2(初回建設、予備
+                // 判定の対象外)は不発火となり、追加レベルは予備判定つきの優先度3を
+                // 経由する。Elfinの経常支出規模では36か月以内に3か月分の予備を満た
+                // せないため、追加レベルは正しく見送られる(test_k1で`FundsShortage`
+                // を直接確認済み)。
+                assert_eq!(
+                    mine_total, initial_mine_total,
+                    "P27-002-A適用後、Elfinの追加Mineレベルは36か月以内はまだ予備資金 \
+                     不足で正しく見送られるはず(initial={initial_mine_total}, \
+                     final={mine_total})"
                 );
                 assert!(
                     supplies > 0.0,
-                    "Elfin's supply problem is now resolved by P26-004-PRE-004 (measured: {supplies})"
+                    "Elfin's supply problem remains resolved by P26-004-PRE-004 even though \
+                     further Mine growth is now reserve-gated by P27-002-A (measured: {supplies})"
                 );
             }
             "Oceanic" => {
