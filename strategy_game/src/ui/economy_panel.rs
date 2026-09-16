@@ -289,12 +289,18 @@ fn handle_tax_buttons(
 
     for interaction in up_q.iter() {
         if *interaction == Interaction::Pressed {
-            country.tax_rate = (country.tax_rate + 0.01).clamp(0.0, 1.0);
+            country.tax_rate = crate::economy::finance::apply_tax_rate_delta(
+                country.tax_rate,
+                crate::economy::finance::TAX_RATE_STEP,
+            );
         }
     }
     for interaction in down_q.iter() {
         if *interaction == Interaction::Pressed {
-            country.tax_rate = (country.tax_rate - 0.01).clamp(0.0, 1.0);
+            country.tax_rate = crate::economy::finance::apply_tax_rate_delta(
+                country.tax_rate,
+                -crate::economy::finance::TAX_RATE_STEP,
+            );
         }
     }
 }

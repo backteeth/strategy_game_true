@@ -687,10 +687,16 @@ mod real_app {
     /// 判定の対象外)へより早く回るようになり、月12/18/24/36いずれの時点でも生産分
     /// のみ(production_only)が以前より増加した(`verification_logs/phase-27/
     /// p27-002-a/`実測、独立プロセス3回で再現確認済み・決定的)。
-    const ARCADIA_CANONICAL_M12: f64 = 462.5130180000;
-    const ARCADIA_CANONICAL_M18: f64 = 684.7896940000;
-    const ARCADIA_CANONICAL_M24: f64 = 793.7114320000;
-    const ARCADIA_CANONICAL_M36: f64 = 955.4338270000;
+    ///
+    /// 【P27-002-Bにより正規値を再更新】: AI国家の月次tax_rate自己調整(候補A)の導入
+    /// により、Arcadiaは月次収支が赤字の間tax_rateを引き上げるようになり、税収増加分
+    /// だけ国庫の立ち上がりが早まった結果、優先度2のMine建設がさらに前倒しされ、
+    /// 月12/18/24/36いずれの時点でもproduction_onlyが再び増加した(`verification_logs/
+    /// phase-27/p27-002-b/`実測、独立プロセスで再現確認済み)。
+    const ARCADIA_CANONICAL_M12: f64 = 471.7906510000;
+    const ARCADIA_CANONICAL_M18: f64 = 749.6364860000;
+    const ARCADIA_CANONICAL_M24: f64 = 876.6945270000;
+    const ARCADIA_CANONICAL_M36: f64 = 1112.3573450000;
 
     // Test E: Arcadia単独36か月の正規値。
     //
@@ -794,6 +800,16 @@ mod real_app {
     //   寄りで優先度3の建設機会自体が乏しく、本タスク前後で挙動がほぼ変化しない)。
     // 独立プロセス3回で全値が再現することを確認済み(決定的、
     // `verification_logs/phase-27/p27-002-a/`参照)。
+    //
+    // 【P27-002-Bにより正規値を再更新】: AI国家の月次tax_rate自己調整の導入後:
+    // - Arcadia: 上記ARCADIA_CANONICAL_M36の更新理由と同じ。
+    // - Dwarf: 本テストではDwarfがプレイヤー国家(`setup_app_in_playing(DWARF, ...)`)
+    //   のため、AIによる税率自動調整の対象外であり不変(プレイヤー保護の直接的な帰結)。
+    // - Ferrowyn(旧`1089.859`→`1097.532100`、微増): tax_rate自己調整によるわずかな
+    //   国庫改善で建設タイミングがわずかに前倒しされた。
+    // - Elfin/Oceanic/Passguardは変更なし(Elfin/Oceanicはtax_rateが黒字のため元々
+    //   不変、Passguardはこのシナリオでは生産timelineがtax_rateの変化に対して非感応)。
+    // 独立プロセスで再現確認済み(決定的)。
     #[test]
     fn test_f_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
@@ -802,7 +818,7 @@ mod real_app {
             (DWARF, 1487.059),
             (OCEANIC, 474.336300),
             (PASSGUARD, 3325.079),
-            (FERROWYN, 1089.859),
+            (FERROWYN, 1097.532100),
         ];
         let tracked: Vec<CountryId> = countries.iter().map(|(cid, _)| *cid).collect();
 

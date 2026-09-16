@@ -66,8 +66,13 @@ impl EconomicSystem {
 
 // ─── 国家データ ──────────────────────────────────────────────────────────────
 
+/// New Gameの既定税率であり、P27-002-Bで追加するAI税率自己調整(`country_ai::
+/// process_tax_rate_ai`)が黒字国の税率を引き下げる際に戻す下限(基準値)としても
+/// 再利用する唯一の定義箇所(値の重複を避ける)。
+pub const DEFAULT_TAX_RATE: f32 = 0.15;
+
 fn default_tax_rate() -> f32 {
-    0.15
+    DEFAULT_TAX_RATE
 }
 
 /// P21-001: `assets/data/countries.ron`は`available_manpower`を明示しないため、
@@ -219,7 +224,7 @@ impl Default for CountryData {
             government_type: GovernmentType::Monarchy,
             economic_system: EconomicSystem::FreeMarket,
             stockpile: CountryStockpile::default(),
-            tax_rate: 0.15,
+            tax_rate: DEFAULT_TAX_RATE,
             monthly_income: 0.0,
             monthly_expenses: 0.0,
             monthly_balance: 0.0,

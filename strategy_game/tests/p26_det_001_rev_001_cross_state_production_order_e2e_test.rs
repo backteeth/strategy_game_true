@@ -844,10 +844,15 @@ mod real_app {
     /// `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名定数のコメントと
     /// 同一(AI建設への3か月経常支出予備判定により、Arcadiaの優先度3建設が抑制され、
     /// その分の国庫がMine建設[優先度2]へ早く回るようになった結果)。
-    const ARCADIA_CANONICAL_M12: f64 = 462.5130180000;
-    const ARCADIA_CANONICAL_M18: f64 = 684.7896940000;
-    const ARCADIA_CANONICAL_M24: f64 = 793.7114320000;
-    const ARCADIA_CANONICAL_M36: f64 = 955.4338270000;
+    ///
+    /// 【P27-002-Bにより正規値を再更新】: 理由・新値は
+    /// `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名定数のコメントと
+    /// 同一(AI国家の月次tax_rate自己調整により、Arcadiaの税収増加分だけMine完成が
+    /// さらに前倒しされた結果)。
+    const ARCADIA_CANONICAL_M12: f64 = 471.7906510000;
+    const ARCADIA_CANONICAL_M18: f64 = 749.6364860000;
+    const ARCADIA_CANONICAL_M24: f64 = 876.6945270000;
+    const ARCADIA_CANONICAL_M36: f64 = 1112.3573450000;
 
     // Test H: Arcadia単独36か月の正規値(本タスクの国家内順序変更後も、
     // Arcadiaは州0内にFactory/MilitaryFactoryが同居するため、州間ではなく
@@ -918,6 +923,12 @@ mod real_app {
     // 同一(Arcadia増加=Mine完成の前倒し、Elfin大幅減少=既存Mineの追加レベルが
     // 予備資金判定で正しく見送られるため、Oceanic減少=過剰建設の抑制、
     // Dwarf/Passguard/Ferrowynは変更なし)。独立プロセス3回で再現確認済み。
+    //
+    // 【P27-002-Bにより正規値を再更新】: 理由・新値は
+    // `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名テストのコメントと
+    // 同一(Arcadia増加=税率自己調整によるMine完成のさらなる前倒し、Dwarfはこの
+    // シナリオではプレイヤー国家のため不変、Ferrowyn微増、Elfin/Oceanic/Passguardは
+    // 不変)。独立プロセスで再現確認済み。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
@@ -926,7 +937,7 @@ mod real_app {
             (DWARF, 1487.059),
             (OCEANIC, 474.336300),
             (PASSGUARD, 3325.079),
-            (FERROWYN, 1089.859),
+            (FERROWYN, 1097.532100),
         ];
         let tracked: Vec<CountryId> = countries.iter().map(|(cid, _)| *cid).collect();
 

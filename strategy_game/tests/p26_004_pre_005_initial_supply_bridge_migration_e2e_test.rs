@@ -650,10 +650,17 @@ fn test_f1_world_total_after_new_game_grant_equals_sum_of_six_grants() {
 /// `verification_logs/phase-27/p27-002-a/`実測)。これは決定的生産順序修正そのものが
 /// 壊れたのではなく、建設AIの資金配分が変わったことによる正当な数値変化であり、
 /// 新しい正規値としてここに固定する。
+///
+/// 【P27-002-Bにより正規値を再更新】: AI国家の月次tax_rate自己調整(候補A)の導入により、
+/// Arcadiaは月次収支が赤字の間tax_rateを引き上げるようになり、税収増加分だけ国庫の
+/// 立ち上がりが早まった結果、優先度2のMine建設がさらに前倒しされ、Arcadiaの月12/18
+/// 時点production_onlyが再び増加した(462.5130180000→471.7906510000、
+/// 684.7896940000→749.6364860000、`verification_logs/phase-27/p27-002-b/`実測、
+/// 独立プロセスで再現確認済み)。
 #[test]
 fn test_f2_arcadia_deterministic_production_values_are_protected_after_the_initial_grant() {
-    const ARCADIA_CANONICAL_M12: f64 = 462.5130180000;
-    const ARCADIA_CANONICAL_M18: f64 = 684.7896940000;
+    const ARCADIA_CANONICAL_M12: f64 = 471.7906510000;
+    const ARCADIA_CANONICAL_M18: f64 = 749.6364860000;
 
     let dir = TempTestDir::new("f2");
     let mut app = setup_app_in_playing(DWARF, dir.save_file_config());
