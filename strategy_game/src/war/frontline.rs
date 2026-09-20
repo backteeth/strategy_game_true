@@ -1141,25 +1141,26 @@ pub fn process_defensive_plan(
         if let Some((best_region, _, _)) = candidates.first().copied() {
             *region_counts.entry(best_region).or_default() += 1;
 
+            // P27-004: 移動の開始・維持を冪等API(`military::movement::
+            // start_or_maintain_movement`)へ委譲する。既にこの`best_region`
+            // へ向けて移動中(前日と同じ判定結果)なら、`movement_progress`等は
+            // 一切変更されない——これがP27-004-PRE-001の根本原因(同一目的地への
+            // 毎日の再割当によるprogressリセット)の修正そのものである。
             if division.current_state != best_region
-                && let Some(path) = find_path(
-                    division.current_state,
+                && let Some(a_mut) = military_registry.divisions.get_mut(&division_id)
+            {
+                let moving = crate::military::movement::start_or_maintain_movement(
+                    a_mut,
                     best_region,
                     state_registry,
                     &own_side,
                     &enemy_side,
-                )
-                && !path.is_empty()
-                && let Some(a_mut) = military_registry.divisions.get_mut(&division_id)
-            {
-                a_mut.destination = Some(best_region);
-                a_mut.current_path = path;
-                a_mut.target_state = None;
-                a_mut.status = DivisionStatus::Moving;
-                a_mut.movement_progress = 0.0;
-                frontline_registry
-                    .frontline_generated_movements
-                    .insert(division_id);
+                );
+                if moving {
+                    frontline_registry
+                        .frontline_generated_movements
+                        .insert(division_id);
+                }
             }
         }
     }
@@ -1354,15 +1355,23 @@ pub fn process_offensive_plan(
         if let Some(&best_target) = candidates.first() {
             *daily_target_counts.entry(best_target).or_default() += 1;
 
+            // P27-004: 移動の開始を冪等API(`military::movement::
+            // start_or_maintain_movement`)へ委譲する(この関数は既にIdleの
+            // Divisionだけを対象とするため冪等性の実害は薄いが、`destination`等の
+            // インライン重複実装をなくし唯一の経路へ統一する)。
             if let Some(a_mut) = military_registry.divisions.get_mut(&division_id) {
-                a_mut.destination = Some(best_target);
-                a_mut.current_path = vec![best_target];
-                a_mut.target_state = None;
-                a_mut.status = DivisionStatus::Moving;
-                a_mut.movement_progress = 0.0;
-                frontline_registry
-                    .frontline_generated_movements
-                    .insert(division_id);
+                let moving = crate::military::movement::start_or_maintain_movement(
+                    a_mut,
+                    best_target,
+                    state_registry,
+                    &own_side,
+                    &enemy_side,
+                );
+                if moving {
+                    frontline_registry
+                        .frontline_generated_movements
+                        .insert(division_id);
+                }
             }
         }
     }
@@ -1466,24 +1475,27 @@ fn process_offensive_line_attack(
             continue;
         }
 
-        if let Some(path) = find_path(
-            division.current_state,
-            best_target,
-            state_registry,
-            own_side,
-            enemy_side,
-        ) && !path.is_empty()
-        {
-            *daily_target_counts.entry(best_target).or_default() += 1;
-            if let Some(a_mut) = military_registry.divisions.get_mut(&division_id) {
-                a_mut.destination = Some(best_target);
-                a_mut.current_path = path;
-                a_mut.target_state = None;
-                a_mut.status = DivisionStatus::Moving;
-                a_mut.movement_progress = 0.0;
+        // P27-004: 移動の開始を冪等API(`military::movement::
+        // start_or_maintain_movement`)へ委譲する。
+        *daily_target_counts.entry(best_target).or_default() += 1;
+        if let Some(a_mut) = military_registry.divisions.get_mut(&division_id) {
+            let moving = crate::military::movement::start_or_maintain_movement(
+                a_mut,
+                best_target,
+                state_registry,
+                own_side,
+                enemy_side,
+            );
+            if moving {
                 frontline_registry
                     .frontline_generated_movements
                     .insert(division_id);
+            } else {
+                // 経路が見つからなかった場合はカウントを差し戻す(既存の
+                // find_path成功時のみカウントする契約を維持)。
+                if let Some(count) = daily_target_counts.get_mut(&best_target) {
+                    *count = count.saturating_sub(1);
+                }
             }
         }
     }

@@ -1,7 +1,77 @@
+use crate::common::{CountryId, StateId};
 use crate::military::battle::BattleRegistry;
-use crate::military::data::{DivisionStatus, MilitaryRegistry};
+use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
+use crate::military::pathfinding::find_path;
 use crate::state::data::StateRegistry;
 use crate::war::data::WarRegistry;
+
+/// P27-004: 移動の開始・維持を扱う唯一の冪等API。プレイヤー手動移動
+/// (`map::division_selection`)・Defend AI(`war::frontline::process_defensive_plan`)・
+/// Offensive AI(`war::frontline::process_offensive_plan`)の3経路が、それぞれ
+/// `destination`/`current_path`/`target_state`/`movement_progress`/`status`を
+/// 個別にインライン設定していたことがP27-004-PRE-001の根本原因だった——特に
+/// Defend AIが「前日と全く同じ目的地」への命令を毎日再発行し、`movement_progress`を
+/// 無条件に`0.0`へリセットしていたため、`FrontlineOrders`(リセット)→
+/// `MilitaryAction`(1日分加算)の日次サイクルにより進捗が恒久的に1日分の値へ
+/// 固定される(P27-004-PRE-001 §14で動的に再現・確認済み)。
+///
+/// 冪等性契約(P27-004 spec §4・§5・§6):
+/// - 既に`requested_destination`へ到達済み(`current_state == requested_destination`)、
+///   または既に`requested_destination`へ向けて`Moving`中(`status == Moving &&
+///   destination == Some(requested_destination)`)の場合は**no-op**——
+///   `status`・`current_state`・`destination`・`current_path`・`target_state`・
+///   `movement_progress`のいずれも変更しない(bit-for-bit維持)。`find_path`も
+///   再実行しない。
+/// - それ以外(異なる目的地、または現在Moving中でない)の場合は、既存どおり
+///   `find_path`を実行し、成功時のみ`destination`/`current_path`/
+///   `target_state=None`/`movement_progress=0.0`/`status=Moving`を原子的に
+///   一括更新する。経路探索失敗時は既存状態を一切変更しない(部分更新なし)。
+///
+/// 経路探索アルゴリズム・通行判定・tie-break・地形コストは`find_path`
+/// (`military::pathfinding`、無変更)をそのまま呼ぶだけであり、本関数はこれらを
+/// 複製しない。州到着処理・経路無効化(`validate_and_stop_invalid_movements`)・
+/// save/load適用は本関数の責務外のまま(呼び出し元・既存の別関数が引き続き担当)。
+///
+/// 戻り値: `requested_destination`へ向けた移動が(既存維持または新規開始により)
+/// 成立していれば`true`、経路が見つからず何もしなかった場合は`false`。
+pub fn start_or_maintain_movement(
+    division: &mut Division,
+    requested_destination: StateId,
+    state_registry: &StateRegistry,
+    own_side: &[CountryId],
+    enemy_side: &[CountryId],
+) -> bool {
+    if division.status == DivisionStatus::Moving {
+        if division.destination == Some(requested_destination) {
+            // 既に同じ目的地へ移動中 → no-op(P27-004の中核契約)。current_stateが
+            // たまたま要求先と一致する[出発直後で未離脱]場合でも、Moving中に別の
+            // destinationへ切り替える正規命令(spec §5)まで巻き込んで無視しては
+            // いけないため、current_stateではなくdestinationの一致だけで判定する。
+            return true;
+        }
+    } else if division.current_state == requested_destination {
+        // Idle状態で既に目的地にいる → no-op(旧`division_selection.rs`の
+        // 到着済みガードの一般化)。
+        return true;
+    }
+
+    let Some(path) = find_path(
+        division.current_state,
+        requested_destination,
+        state_registry,
+        own_side,
+        enemy_side,
+    ) else {
+        return false;
+    };
+
+    division.destination = Some(requested_destination);
+    division.current_path = path;
+    division.target_state = None;
+    division.movement_progress = 0.0;
+    division.status = DivisionStatus::Moving;
+    true
+}
 
 pub fn process_movement(
     military_registry: &mut MilitaryRegistry,
@@ -412,5 +482,268 @@ mod tests {
         assert_eq!(loser.current_state, origin, "既にcountry_bへ占領された州とは交戦していないため、移動完了処理前に停止し出発州のままのはず");
         assert!(loser.target_state.is_none());
         assert!(loser.destination.is_none());
+    }
+
+    // ─── P27-004: start_or_maintain_movement(移動命令の冪等化) ─────────────
+
+    fn idle_division(id: usize, owner: CountryId, at: StateId) -> Division {
+        Division {
+            id: DivisionId(id),
+            owner,
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: at,
+            destination: None,
+            current_path: Vec::new(),
+            target_state: None,
+            manpower: 10_000,
+            max_manpower: 10_000,
+            equipment: 100.0,
+            max_equipment: 100.0,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 100.0,
+            max_morale: 100.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(0),
+            attack_power: 10,
+            defense_power: 10,
+            combat_id: None,
+        }
+    }
+
+    /// P27-004 spec §9・§18: State1↔State2↔State3(全て同一国家owner、隣接)。
+    fn linear_three_state_registry(owner: CountryId) -> StateRegistry {
+        StateRegistry::build(vec![
+            StateData { id: StateId(1), owner_country_id: owner, neighbors: vec![StateId(2)], ..Default::default() },
+            StateData {
+                id: StateId(2),
+                owner_country_id: owner,
+                neighbors: vec![StateId(1), StateId(3)],
+                ..Default::default()
+            },
+            StateData { id: StateId(3), owner_country_id: owner, neighbors: vec![StateId(2)], ..Default::default() },
+        ])
+    }
+
+    #[test]
+    fn start_or_maintain_movement_begins_movement_from_idle() {
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+
+        let started = start_or_maintain_movement(&mut division, StateId(2), &state_reg, &[owner], &[]);
+
+        assert!(started);
+        assert_eq!(division.status, DivisionStatus::Moving);
+        assert_eq!(division.destination, Some(StateId(2)));
+        assert_eq!(division.current_path, vec![StateId(2)]);
+        assert_eq!(division.movement_progress, 0.0);
+        assert!(division.target_state.is_none());
+    }
+
+    #[test]
+    fn start_or_maintain_movement_is_a_no_op_when_already_moving_to_the_same_destination() {
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+        assert!(start_or_maintain_movement(&mut division, StateId(3), &state_reg, &[owner], &[]));
+
+        // 1日分の移動が進行した状態を模擬する(実際にはprocess_movementが行う)。
+        division.movement_progress = 0.4;
+        let path_before = division.current_path.clone();
+        let target_before = division.target_state;
+
+        // P27-004の核心: 全く同じ目的地への命令が再発行されても、進捗・経路・
+        // target_stateはbit-for-bitで維持される(process_defensive_plan由来の
+        // 日次再発行によるリセットを防ぐ)。
+        let started = start_or_maintain_movement(&mut division, StateId(3), &state_reg, &[owner], &[]);
+
+        assert!(started);
+        assert_eq!(division.status, DivisionStatus::Moving);
+        assert_eq!(division.destination, Some(StateId(3)));
+        assert_eq!(division.movement_progress, 0.4, "同一目的地の再命令はprogressを維持するはず");
+        assert_eq!(division.current_path, path_before, "同一目的地の再命令はrouteを維持するはず");
+        assert_eq!(division.target_state, target_before, "同一目的地の再命令はtarget_stateを維持するはず");
+    }
+
+    #[test]
+    fn start_or_maintain_movement_applies_a_redirect_to_the_current_position_while_still_departing() {
+        // 境界ケース: current_stateが要求先とたまたま一致していても(例: 出発直後で
+        // まだ物理的に出発州を離れていない)、Moving中に別のdestinationへの正規な
+        // 切替命令(spec §5)まで「既に到着済み」とno-op判定して無視してはいけない。
+        // 判定の真実源はcurrent_stateではなくdestinationの一致であるべき。
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(2)); // StateId(2)へ向けて出発直後
+        division.current_path = vec![StateId(2)];
+        division.movement_progress = 0.1;
+        // current_stateはまだStateId(1)(出発州)のまま。
+
+        let started = start_or_maintain_movement(&mut division, StateId(1), &state_reg, &[owner], &[]);
+
+        assert!(started);
+        assert_eq!(
+            division.destination,
+            Some(StateId(1)),
+            "destinationがrequested先と異なる(Some(2)≠1)ため、current_state一致に\
+             関わらず正規の切替命令として適用されるはず"
+        );
+        assert_eq!(division.movement_progress, 0.0, "正規の切替はprogressを0から開始するはず");
+    }
+
+    #[test]
+    fn start_or_maintain_movement_preserves_equipment_and_manpower_on_no_op() {
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(2));
+        division.current_path = vec![StateId(2)];
+        division.movement_progress = 0.6;
+        division.equipment = 42.5;
+        division.manpower = 7_777;
+
+        start_or_maintain_movement(&mut division, StateId(2), &state_reg, &[owner], &[]);
+
+        assert_eq!(division.equipment, 42.5);
+        assert_eq!(division.manpower, 7_777);
+    }
+
+    #[test]
+    fn start_or_maintain_movement_progress_accumulates_across_repeated_identical_daily_orders() {
+        // spec §4: 毎日同じ命令が再発行されても、実際の移動進行(process_movement)と
+        // 交互に実行すればprogressは単調に累積し、有限日数で到着する。
+        let owner = CountryId(1);
+        let mut state_reg = linear_three_state_registry(owner);
+        let mut mil = MilitaryRegistry::default();
+        let division = idle_division(0, owner, StateId(1));
+        let division_id = mil.add_division(division);
+        let war_registry = WarRegistry::default();
+        let mut battle_registry = BattleRegistry::default();
+
+        let mut days = 0u32;
+        loop {
+            days += 1;
+            assert!(days <= 100, "現行式から導出される有限日数内に到着するはず(暴走検出)");
+            {
+                let d = mil.divisions.get_mut(&division_id).unwrap();
+                start_or_maintain_movement(d, StateId(2), &state_reg, &[owner], &[]);
+            }
+            process_movement(&mut mil, &mut state_reg, &war_registry, &mut battle_registry, "1800/01/02");
+            let d = mil.divisions.get(&division_id).unwrap();
+            if d.status == DivisionStatus::Idle && d.current_state == StateId(2) {
+                break;
+            }
+        }
+        assert!(days < 100, "到着したはず");
+        let d = mil.divisions.get(&division_id).unwrap();
+        assert_eq!(d.destination, None);
+        assert_eq!(d.movement_progress, 0.0);
+    }
+
+    #[test]
+    fn start_or_maintain_movement_overwrites_when_destination_changes() {
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(2));
+        division.current_path = vec![StateId(2)];
+        division.movement_progress = 0.7;
+
+        let started = start_or_maintain_movement(&mut division, StateId(3), &state_reg, &[owner], &[]);
+
+        assert!(started);
+        assert_eq!(division.destination, Some(StateId(3)), "異なる目的地は正規に上書きされるはず");
+        assert_eq!(division.current_path, vec![StateId(2), StateId(3)]);
+        assert_eq!(division.movement_progress, 0.0, "異なる目的地への上書きはprogressを0から開始するはず");
+        assert_eq!(division.current_state, StateId(1), "current_stateは命令時点の実位置のまま変化しないはず");
+    }
+
+    #[test]
+    fn start_or_maintain_movement_does_nothing_when_no_path_exists() {
+        // State3は隣接していない孤立州(neighbors未設定)を用意し、到達不能にする。
+        let owner = CountryId(1);
+        let hostile = CountryId(2);
+        let state_reg = StateRegistry::build(vec![
+            StateData { id: StateId(1), owner_country_id: owner, neighbors: vec![], ..Default::default() },
+            StateData { id: StateId(2), owner_country_id: hostile, neighbors: vec![], ..Default::default() },
+        ]);
+        let mut division = idle_division(0, owner, StateId(1));
+
+        let started = start_or_maintain_movement(&mut division, StateId(2), &state_reg, &[owner], &[]);
+
+        assert!(!started, "到達不能な目的地には経路が見つからないはず");
+        assert_eq!(division.status, DivisionStatus::Idle, "経路なしなら既存状態(Idle)を維持するはず");
+        assert!(division.destination.is_none());
+        assert!(division.current_path.is_empty());
+        assert_eq!(division.movement_progress, 0.0);
+    }
+
+    #[test]
+    fn start_or_maintain_movement_preserves_existing_movement_when_a_different_destination_has_no_path() {
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(2));
+        division.current_path = vec![StateId(2)];
+        division.movement_progress = 0.3;
+
+        // StateId(99)は存在しない(経路探索は失敗する)。
+        let started =
+            start_or_maintain_movement(&mut division, StateId(99), &state_reg, &[owner], &[]);
+
+        assert!(!started);
+        assert_eq!(
+            division.destination,
+            Some(StateId(2)),
+            "経路探索失敗時は既存の進行中移動を一切変更しないはず(部分更新なし)"
+        );
+        assert_eq!(division.movement_progress, 0.3);
+        assert_eq!(division.status, DivisionStatus::Moving);
+    }
+
+    #[test]
+    fn start_or_maintain_movement_is_a_no_op_when_already_at_the_destination() {
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(2));
+
+        let started = start_or_maintain_movement(&mut division, StateId(2), &state_reg, &[owner], &[]);
+
+        assert!(started);
+        assert_eq!(division.status, DivisionStatus::Idle, "既に到達済みならMovingへ入らないはず");
+        assert!(division.destination.is_none());
+        assert!(division.current_path.is_empty());
+    }
+
+    #[test]
+    fn start_or_maintain_movement_does_not_re_run_bfs_for_an_identical_in_progress_order() {
+        // 冪等パスではfind_pathを再実行しない(同一経路オブジェクトを再構築しない)
+        // ことを、意図的に「もう存在しない」経路条件下でも既存の有効な進行中移動が
+        // 壊れないことによって間接的に確認する: hostile国のCountryIdを空にして
+        // 本来なら再探索が失敗するはずの状況でも、同一目的地への再命令はno-opの
+        // ままprogressを維持する。
+        let owner = CountryId(1);
+        let state_reg = linear_three_state_registry(owner);
+        let mut division = idle_division(0, owner, StateId(1));
+        division.status = DivisionStatus::Moving;
+        division.destination = Some(StateId(3));
+        division.current_path = vec![StateId(2), StateId(3)];
+        division.movement_progress = 0.55;
+
+        // own_side/enemy_sideを両方空にする(通常ならfind_pathが失敗する条件)。
+        let started = start_or_maintain_movement(&mut division, StateId(3), &state_reg, &[], &[]);
+
+        assert!(started, "同一目的地への再命令はfind_pathを再実行しないためown_side/enemy_sideに依存しないはず");
+        assert_eq!(division.movement_progress, 0.55);
+        assert_eq!(division.current_path, vec![StateId(2), StateId(3)]);
     }
 }

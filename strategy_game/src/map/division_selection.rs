@@ -457,8 +457,16 @@ fn try_issue_move_order(
 
     let division_current = division.current_state;
     let division_owner = division.owner;
+    let division_status = division.status;
+    let division_destination = division.destination;
 
-    if division_current == target && division.destination == Some(target) {
+    // P27-004: 既に目的地へ到達済み、または既に同じ目的地へ移動中なら、既存の
+    // 移動状態(進捗・経路含む)を完全に維持してno-opする——territory/battle
+    // 再検証や`find_path`の再実行を避ける早期returnであり、実際の冪等性契約の
+    // 真実源は`military::movement::start_or_maintain_movement`自身にある。
+    if division_current == target
+        || (division_status == DivisionStatus::Moving && division_destination == Some(target))
+    {
         return;
     }
 
@@ -512,34 +520,30 @@ fn try_issue_move_order(
         })
         .collect();
 
-    // 経路探索（自国 + 交戦中の敵国を通過可能）
-    let path = crate::military::pathfinding::find_path(
-        division_current,
+    // P27-004: 移動の開始をAI(Defend/Offensive)と共通の冪等APIへ委譲する。
+    // 経路探索(自国 + 交戦中の敵国を通過可能)自体は`start_or_maintain_movement`
+    // 内部で`find_path`を呼ぶだけであり、ここでは複製しない。
+    let Some(division) = military_registry.divisions.get_mut(&division_id) else {
+        return;
+    };
+    let started = crate::military::movement::start_or_maintain_movement(
+        division,
         target,
         state_registry,
         &[division_owner],
         &hostile_countries,
     );
-
-    if let Some(path) = path {
-        let Some(division) = military_registry.divisions.get_mut(&division_id) else {
-            return;
-        };
-        division.destination = Some(target);
-        division.current_path = path;
-        division.target_state = None;
-        division.movement_progress = 0.0;
-        division.status = DivisionStatus::Moving;
+    if started {
         info!(
             "[DivisionMovement] Division {} path set to {:?} ({} steps)",
-            division.id.0,
+            division_id.0,
             target,
             division.current_path.len()
         );
     } else {
         warn!(
             "[DivisionMovement] Division {} cannot reach state {:?}: No valid path",
-            division.id.0, target
+            division_id.0, target
         );
     }
 }
