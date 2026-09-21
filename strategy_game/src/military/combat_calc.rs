@@ -241,6 +241,29 @@ fn combat_readiness_1000_with_supply(
         .unwrap_or(0)
 }
 
+/// 実効戦力(`power × readiness_1000 × org_ratio_1000 / 1_000_000`、整数)を算出する。
+///
+/// P27-006(T): power・readiness・組織率がすべて正なのに整数除算の切り捨てだけで
+/// 0になる場合は1にする(真の0 = いずれかの入力が0のときは0のまま。
+/// readiness等へ最低値は与えない)。
+fn effective_power_with_floor(power: i32, readiness_1000: i64, org_ratio_1000: i64) -> i64 {
+    let calculated = (power as i64 * readiness_1000 * org_ratio_1000) / 1_000_000;
+    if calculated == 0 && power > 0 && readiness_1000 > 0 && org_ratio_1000 > 0 {
+        1
+    } else {
+        calculated
+    }
+}
+
+/// 対象側が受けるmanpower損失の総量(`attacker_effective × DAMAGE_SCALE / max(target, 1)`)。
+///
+/// P27-006(M): 分母は常に`max(target_effective, 1)`。旧実装は対象の実効戦力が1未満の
+/// ときだけ分母を1000にしており、実効戦力が1になる境界で損害が約1000倍跳ぶ不連続が
+/// あった(攻撃側の実効戦力が0なら損害は0のまま)。
+fn damage_from(attacker_effective: i64, target_effective: i64) -> u64 {
+    (attacker_effective * DAMAGE_SCALE as i64 / target_effective.max(1)).max(0) as u64
+}
+
 /// 1日分の戦闘計算を行う（乱数なし・決定的）
 ///
 /// # 計算式
@@ -307,7 +330,7 @@ pub fn resolve_combat_day_with_supply(
     );
     let atk_org_ratio_1000 = (attacker.organization * 1000.0 / attacker.max_organization) as i64;
     let atk_effective_1000 =
-        (attacker.attack_power as i64 * atk_readiness_1000 * atk_org_ratio_1000) / 1_000_000;
+        effective_power_with_floor(attacker.attack_power, atk_readiness_1000, atk_org_ratio_1000);
 
     let def_readiness_1000 = combat_readiness_1000_with_supply(
         defender.manpower,
@@ -318,24 +341,16 @@ pub fn resolve_combat_day_with_supply(
     );
     let def_org_ratio_1000 = (defender.organization * 1000.0 / defender.max_organization) as i64;
     let def_effective_1000 =
-        (defender.defense_power as i64 * def_readiness_1000 * def_org_ratio_1000) / 1_000_000;
+        effective_power_with_floor(defender.defense_power, def_readiness_1000, def_org_ratio_1000);
 
     // 地形補正を防御側の実効値に加算（固定小数点×1000）
     let def_effective_with_terrain = def_effective_1000 + terrain_defense_bonus as i64;
 
     // 防御側が受けるmanpowerダメージ
-    let def_manpower_loss = if def_effective_with_terrain < 1 {
-        (atk_effective_1000 * DAMAGE_SCALE as i64 / 1000).max(0) as u64
-    } else {
-        (atk_effective_1000 * DAMAGE_SCALE as i64 / def_effective_with_terrain.max(1)).max(0) as u64
-    };
+    let def_manpower_loss = damage_from(atk_effective_1000, def_effective_with_terrain);
 
     // 攻撃側が受けるmanpowerダメージ
-    let atk_manpower_loss = if atk_effective_1000 < 1 {
-        (def_effective_with_terrain * DAMAGE_SCALE as i64 / 1000).max(0) as u64
-    } else {
-        (def_effective_with_terrain * DAMAGE_SCALE as i64 / atk_effective_1000.max(1)).max(0) as u64
-    };
+    let atk_manpower_loss = damage_from(def_effective_with_terrain, atk_effective_1000);
 
     // 組織率ダメージ（manpower_loss の 1/ORG_DAMAGE_DENOMINATOR）
     let atk_org_loss =
@@ -400,7 +415,7 @@ fn effective_power_1000_with_supply(
         supply_fulfillment,
     );
     let org_ratio_1000 = (organization * 1000.0 / max_organization) as i64;
-    (power as i64 * readiness_1000 * org_ratio_1000) / 1_000_000
+    effective_power_with_floor(power, readiness_1000, org_ratio_1000)
 }
 
 /// 複数師団が参加する戦闘の1日分を計算する(P21-siege: 複数師団の共同参戦対応)。
@@ -469,22 +484,14 @@ pub fn resolve_combat_day_multi(
     let def_total_with_terrain = def_total + terrain_defense_bonus as i64;
 
     // 防御側全体が受けるmanpower損失合計
-    let def_total_loss = if def_total_with_terrain < 1 {
-        (atk_total * DAMAGE_SCALE as i64 / 1000).max(0)
-    } else {
-        (atk_total * DAMAGE_SCALE as i64 / def_total_with_terrain.max(1)).max(0)
-    } as u64;
+    let def_total_loss = damage_from(atk_total, def_total_with_terrain);
 
     // 攻撃側全体が受けるmanpower損失合計
-    let atk_total_loss = if atk_total < 1 {
-        (def_total_with_terrain * DAMAGE_SCALE as i64 / 1000).max(0)
-    } else {
-        (def_total_with_terrain * DAMAGE_SCALE as i64 / atk_total.max(1)).max(0)
-    } as u64;
+    let atk_total_loss = damage_from(def_total_with_terrain, atk_total);
 
     (
-        distribute_damage(&atk_effectives, atk_total, atk_total_loss),
-        distribute_damage(&def_effectives, def_total, def_total_loss),
+        distribute_damage(&atk_effectives, atk_total, atk_total_loss, &manpowers_of(attackers)),
+        distribute_damage(&def_effectives, def_total, def_total_loss, &manpowers_of(defenders)),
     )
 }
 
@@ -558,22 +565,14 @@ pub fn resolve_combat_day_multi_with_supply(
     let def_total_with_terrain = def_total + terrain_defense_bonus as i64;
 
     // 防御側全体が受けるmanpower損失合計
-    let def_total_loss = if def_total_with_terrain < 1 {
-        (atk_total * DAMAGE_SCALE as i64 / 1000).max(0)
-    } else {
-        (atk_total * DAMAGE_SCALE as i64 / def_total_with_terrain.max(1)).max(0)
-    } as u64;
+    let def_total_loss = damage_from(atk_total, def_total_with_terrain);
 
     // 攻撃側全体が受けるmanpower損失合計
-    let atk_total_loss = if atk_total < 1 {
-        (def_total_with_terrain * DAMAGE_SCALE as i64 / 1000).max(0)
-    } else {
-        (def_total_with_terrain * DAMAGE_SCALE as i64 / atk_total.max(1)).max(0)
-    } as u64;
+    let atk_total_loss = damage_from(def_total_with_terrain, atk_total);
 
     (
-        distribute_damage(&atk_effectives, atk_total, atk_total_loss),
-        distribute_damage(&def_effectives, def_total, def_total_loss),
+        distribute_damage(&atk_effectives, atk_total, atk_total_loss, &manpowers_of(attackers)),
+        distribute_damage(&def_effectives, def_total, def_total_loss, &manpowers_of(defenders)),
     )
 }
 
@@ -583,41 +582,73 @@ pub type CombatDamageByDivision = HashMap<DivisionId, (u64, f32)>;
 
 /// 陣営全体の損失合計を、各師団の実効戦力の貢献度に応じて配分する。
 /// 端数はIDの大きい参加者(決定的な順序の末尾)にまとめて渡し、配分合計が
-/// `total_loss`と一致するようにする。実効戦力の合計が0(陣営全滅済み)の場合は
-/// 誰にも被害を配分しない。
+/// `total_loss`と一致するようにする。
+///
+/// P27-006: 実効戦力の合計が0以下(陣営全員が真に戦闘不能)の場合だけ、
+/// 正の現在manpowerをweightとして配分する(`manpowers`は当該陣営の参加師団の
+/// `(DivisionId, current manpower)`)。実効戦力の合計が正のあいだは従来どおり
+/// 実効戦力比で配分し、一部だけ実効戦力0の師団は通常の配分規則のまま
+/// (常時manpower比への変更はしない)。manpowerの合計も0なら、架空のweightを
+/// 作らず誰にも配分しない(該当師団は既存の消滅処理に委ねる)。
 fn distribute_damage(
     effectives: &[(DivisionId, i64)],
     total_effective: i64,
     total_loss: u64,
+    manpowers: &[(DivisionId, u64)],
 ) -> CombatDamageByDivision {
     let mut result = HashMap::new();
     if effectives.is_empty() {
         return result;
     }
-    if total_effective <= 0 {
-        for (id, _) in effectives {
-            result.insert(*id, (0, 0.0));
-        }
+    if total_effective > 0 {
+        allocate_by_weight(effectives, total_effective, total_loss, &mut result);
         return result;
     }
 
-    let mut sorted = effectives.to_vec();
+    for (id, _) in effectives {
+        result.insert(*id, (0, 0.0));
+    }
+    let weights: Vec<(DivisionId, i64)> = manpowers
+        .iter()
+        .filter(|(id, m)| *m > 0 && effectives.iter().any(|(e, _)| e == id))
+        .map(|(id, m)| (*id, i64::try_from(*m).unwrap_or(i64::MAX)))
+        .collect();
+    let total_weight: i64 = weights.iter().fold(0i64, |acc, (_, w)| acc.saturating_add(*w));
+    if total_weight > 0 {
+        allocate_by_weight(&weights, total_weight, total_loss, &mut result);
+    }
+    result
+}
+
+/// `weights`(重み>=0、合計`total_weight`>0)に比例して`total_loss`をIDの昇順に
+/// 配分する。端数は末尾(最大ID)の参加者が受け取り、配分合計は`total_loss`と一致する。
+fn allocate_by_weight(
+    weights: &[(DivisionId, i64)],
+    total_weight: i64,
+    total_loss: u64,
+    result: &mut CombatDamageByDivision,
+) {
+    let mut sorted = weights.to_vec();
     sorted.sort_by_key(|(id, _)| id.0);
 
     let mut distributed = 0u64;
     let last_index = sorted.len() - 1;
-    for (i, (id, eff)) in sorted.iter().enumerate() {
+    for (i, (id, weight)) in sorted.iter().enumerate() {
         let share = if i == last_index {
             total_loss.saturating_sub(distributed)
         } else {
-            let s = ((total_loss as i64 * eff) / total_effective).max(0) as u64;
+            let s = ((i128::from(total_loss) * i128::from(*weight)) / i128::from(total_weight)).max(0) as u64;
             distributed += s;
             s
         };
         let org_loss = share as f32 * ORG_DAMAGE_NUMERATOR as f32 / ORG_DAMAGE_DENOMINATOR as f32;
         result.insert(*id, (share, org_loss));
     }
-    result
+}
+
+/// 参加師団の`(DivisionId, current manpower)`一覧(`distribute_damage`のフォールバック用)。
+fn manpowers_of(divisions: &[&Division]) -> Vec<(DivisionId, u64)> {
+    divisions.iter().map(|d| (d.id, d.manpower)).collect()
 }
 
 #[cfg(test)]
@@ -1299,5 +1330,337 @@ mod tests {
         let loss_b = def_result[&defender_b.id].0;
         assert!(loss_a > 0 && loss_b > 0);
         assert!(loss_a.abs_diff(loss_b) <= 1);
+    }
+}
+
+/// P27-006: 損害の連続性(M: 分母下限1、T: 正の入力の実効戦力下限1、C: 全weight 0時の
+/// manpower配分)の単体テスト。
+#[cfg(test)]
+mod p27_006_tests {
+    use super::*;
+    use crate::common::{BattleId, CountryId, DivisionDefinitionId, StateId};
+    use crate::military::data::{DivisionSize, DivisionStatus, DivisionType};
+
+    fn div(id: usize, mp: u64, eq: f64, org: f32, atk: i32, def: i32) -> Division {
+        Division {
+            id: DivisionId(id),
+            owner: CountryId(id),
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: StateId(1),
+            destination: None,
+            current_path: vec![],
+            target_state: None,
+            manpower: mp,
+            max_manpower: 10000,
+            equipment: eq,
+            max_equipment: 100.0,
+            organization: org,
+            max_organization: 50.0,
+            morale: 100.0,
+            max_morale: 100.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: DivisionStatus::Fighting,
+            def_id: DivisionDefinitionId(0),
+            attack_power: atk,
+            defense_power: def,
+            combat_id: Some(BattleId(0)),
+        }
+    }
+
+    fn full(id: usize, atk: i32, def: i32) -> Division {
+        div(id, 10000, 100.0, 50.0, atk, def)
+    }
+
+    fn registry(supplies: &[(usize, f64)]) -> MilitaryRegistry {
+        let mut reg = MilitaryRegistry::default();
+        for (id, f) in supplies {
+            reg.division_supply_fulfillment.insert(DivisionId(*id), *f);
+        }
+        reg
+    }
+
+    /// 1対1の(攻撃側損失, 防御側損失)。
+    fn duel(a: &Division, d: &Division, atk_sup: f64, def_sup: f64) -> (u64, u64) {
+        let (al, _, dl, _) = resolve_combat_day_with_supply(a, d, 0, atk_sup, def_sup);
+        (al, dl)
+    }
+
+    // ── M ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn m_positive_target_effective_power_is_used_as_the_denominator() {
+        // 攻撃力20 vs 防御力15(満編制): 防御側 20*100/15=133、攻撃側 15*100/20=75(旧と同一)。
+        assert_eq!(duel(&full(0, 20, 10), &full(1, 10, 15), 1.0, 1.0), (75, 133));
+    }
+
+    #[test]
+    fn m_zero_target_effective_power_uses_denominator_one_not_one_thousand() {
+        // 防御側の補給0(実効戦力0): 防御側損失 = 20*100/1 = 2000(旧: 20*100/1000 = 2)。
+        let (al, dl) = duel(&full(0, 20, 10), &full(1, 10, 15), 1.0, 0.0);
+        assert_eq!((al, dl), (0, 2000));
+    }
+
+    #[test]
+    fn m_damage_from_floors_the_denominator_at_one_and_never_goes_negative() {
+        assert_eq!(damage_from(10, 5), 200);
+        assert_eq!(damage_from(10, 1), 1000);
+        assert_eq!(damage_from(10, 0), 1000);
+        assert_eq!(damage_from(10, -7), 1000, "負値は下限1へ");
+        assert_eq!(damage_from(0, 0), 0, "攻撃側の実効戦力0なら損害0");
+        assert_eq!(damage_from(-3, 5), 0, "負の分子は0");
+    }
+
+    #[test]
+    fn m_attacker_with_zero_power_deals_no_damage_but_positive_attacker_hurts_a_zero_target() {
+        // 攻撃側の補給0: 攻撃側は損害を与えず、防御側の実効戦力15分の損失(15*100/1)を受ける。
+        assert_eq!(duel(&full(0, 20, 10), &full(1, 10, 15), 0.0, 1.0), (1500, 0));
+        // 双方0: 損害なし(架空のdamageを作らない、M-2の既知状態)。
+        assert_eq!(duel(&full(0, 20, 10), &full(1, 10, 15), 0.0, 0.0), (0, 0));
+    }
+
+    #[test]
+    fn m_extreme_inputs_do_not_overflow() {
+        let a = div(0, 10000, 100.0, 50.0, i32::MAX, i32::MAX);
+        let d = div(1, 10000, 100.0, 50.0, i32::MAX, i32::MAX);
+        let (al, dl) = duel(&a, &d, 1.0, 1.0);
+        assert_eq!(al, dl);
+        assert!(al > 0);
+        let (_, dl0) = duel(&a, &d, 1.0, 0.0);
+        assert_eq!(dl0, i32::MAX as u64 * 100);
+    }
+
+    #[test]
+    fn m_supply_boundary_066_067_has_no_thousandfold_jump() {
+        // 旧: 補給0.066までは損失2、0.067から2000(1000倍のジャンプ)。新: 0〜0.1は一定で連続。
+        let a = full(0, 20, 10);
+        let d = full(1, 10, 15);
+        let mut losses = Vec::new();
+        for s in [0.0, 0.000001, 0.05, 0.065, 0.066, 0.067, 0.0671, 0.1] {
+            losses.push(duel(&a, &d, 1.0, s).1);
+        }
+        assert!(losses.iter().all(|l| *l == 2000), "0〜0.1で一定: {losses:?}");
+        assert_eq!(duel(&a, &d, 1.0, 0.3).1, 500);
+        assert_eq!(duel(&a, &d, 1.0, 1.0).1, 133);
+    }
+
+    // ── T ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn t_all_positive_inputs_never_truncate_to_zero() {
+        // 10*300*200/1_000_000 = 0.6 → 0 だったものが1になる。
+        assert_eq!(effective_power_with_floor(10, 300, 200), 1);
+        assert_eq!(effective_power_with_floor(1, 1, 1), 1);
+    }
+
+    #[test]
+    fn t_true_zero_inputs_stay_zero() {
+        assert_eq!(effective_power_with_floor(0, 1000, 1000), 0, "power 0");
+        assert_eq!(effective_power_with_floor(10, 0, 1000), 0, "readiness 0");
+        assert_eq!(effective_power_with_floor(10, 1000, 0), 0, "org 0");
+        assert!(effective_power_with_floor(-5, 1000, 1000) < 0, "負のpowerは切り上げない");
+    }
+
+    #[test]
+    fn t_values_of_one_or_more_are_unchanged() {
+        assert_eq!(effective_power_with_floor(10, 1000, 1000), 10);
+        assert_eq!(effective_power_with_floor(15, 500, 1000), 7);
+        assert_eq!(effective_power_with_floor(10, 100, 1000), 1, "計算結果がちょうど1");
+    }
+
+    #[test]
+    fn t_maximum_inputs_do_not_overflow() {
+        assert_eq!(effective_power_with_floor(i32::MAX, 1000, 1000), i32::MAX as i64);
+    }
+
+    #[test]
+    fn t_supply_066_and_067_are_both_positive_effective_power() {
+        // 防御力15×補給0.066(readiness 66/1000): 15*66*1000/1e6 = 0.99 → 旧0 → 新1。
+        let eff = |sup: f64| {
+            effective_power_1000_with_supply(15, 10000, 10000, 100.0, 100.0, 50.0, 50.0, sup)
+        };
+        assert_eq!(eff(0.066), 1);
+        assert_eq!(eff(0.067), 1);
+    }
+
+    #[test]
+    fn t_true_zero_readiness_from_equipment_manpower_or_supply_stays_zero() {
+        let eff = |mp: u64, eq: f64, sup: f64| {
+            effective_power_1000_with_supply(15, mp, 10000, eq, 100.0, 50.0, 50.0, sup)
+        };
+        assert_eq!(eff(10000, 0.0, 1.0), 0, "Equipment 0");
+        assert_eq!(eff(0, 100.0, 1.0), 0, "manpower 0");
+        assert_eq!(eff(10000, 100.0, 0.0), 0, "supply 0");
+        assert_eq!(eff(10000, 100.0, 1.0), 15, "全て満額なら不変");
+    }
+
+    // ── C ────────────────────────────────────────────────────────────────
+
+    fn ids(v: &[(usize, i64)]) -> Vec<(DivisionId, i64)> {
+        v.iter().map(|(i, e)| (DivisionId(*i), *e)).collect()
+    }
+
+    fn mps(v: &[(usize, u64)]) -> Vec<(DivisionId, u64)> {
+        v.iter().map(|(i, m)| (DivisionId(*i), *m)).collect()
+    }
+
+    fn shares(r: &CombatDamageByDivision) -> Vec<(usize, u64)> {
+        let mut v: Vec<_> = r.iter().map(|(k, v)| (k.0, v.0)).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn c_positive_total_effective_uses_the_existing_effective_weights() {
+        let r = distribute_damage(&ids(&[(1, 10), (2, 20)]), 30, 30, &mps(&[(1, 9999), (2, 1)]));
+        assert_eq!(shares(&r), vec![(1, 10), (2, 20)]);
+    }
+
+    #[test]
+    fn c_all_zero_effective_falls_back_to_manpower_ratio() {
+        let r = distribute_damage(&ids(&[(1, 0), (2, 0)]), 0, 400, &mps(&[(1, 3000), (2, 1000)]));
+        assert_eq!(shares(&r), vec![(1, 300), (2, 100)]);
+    }
+
+    #[test]
+    fn c_single_zero_target_receives_all_damage() {
+        let r = distribute_damage(&ids(&[(1, 0)]), 0, 77, &mps(&[(1, 5000)]));
+        assert_eq!(shares(&r), vec![(1, 77)]);
+    }
+
+    #[test]
+    fn c_tie_break_gives_the_remainder_to_the_highest_id() {
+        let r = distribute_damage(&ids(&[(1, 0), (2, 0)]), 0, 5, &mps(&[(1, 100), (2, 100)]));
+        assert_eq!(shares(&r), vec![(1, 2), (2, 3)]);
+    }
+
+    #[test]
+    fn c_partial_zero_with_positive_total_keeps_the_normal_allocation_not_manpower_ratio() {
+        // 現行(66, 0)を維持する。常時manpower比なら(33, 33)になってしまう(不採用の候補2)。
+        let r = distribute_damage(&ids(&[(1, 15), (2, 0)]), 15, 66, &mps(&[(1, 10000), (2, 10000)]));
+        assert_eq!(shares(&r), vec![(1, 66), (2, 0)]);
+    }
+
+    #[test]
+    fn c_all_manpower_zero_allocates_nothing_without_panicking() {
+        let r = distribute_damage(&ids(&[(1, 0), (2, 0)]), 0, 100, &mps(&[(1, 0), (2, 0)]));
+        assert_eq!(shares(&r), vec![(1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn c_manpower_zero_division_is_excluded_from_the_fallback() {
+        let r = distribute_damage(&ids(&[(1, 0), (2, 0)]), 0, 100, &mps(&[(1, 0), (2, 800)]));
+        assert_eq!(shares(&r), vec![(1, 0), (2, 100)]);
+    }
+
+    #[test]
+    fn c_empty_targets_and_zero_damage_are_safe() {
+        assert!(distribute_damage(&[], 0, 100, &[]).is_empty());
+        let r = distribute_damage(&ids(&[(1, 0), (2, 0)]), 0, 0, &mps(&[(1, 10), (2, 20)]));
+        assert_eq!(shares(&r), vec![(1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn c_damage_is_conserved_and_independent_of_input_order() {
+        for loss in [1u64, 7, 99, 1000, 123_457] {
+            let eff = ids(&[(3, 0), (1, 0), (2, 0), (9, 0)]);
+            let m = mps(&[(3, 1234), (1, 77), (2, 9000), (9, 5)]);
+            let a = distribute_damage(&eff, 0, loss, &m);
+            let mut eff_r = eff.clone();
+            eff_r.reverse();
+            let mut m_r = m.clone();
+            m_r.reverse();
+            let b = distribute_damage(&eff_r, 0, loss, &m_r);
+            assert_eq!(shares(&a), shares(&b), "登録順反転で同一");
+            assert_eq!(shares(&a).iter().map(|(_, s)| s).sum::<u64>(), loss, "保存則");
+        }
+    }
+
+    #[test]
+    fn c_manpowers_of_unrelated_divisions_are_ignored() {
+        let r = distribute_damage(&ids(&[(1, 0)]), 0, 50, &mps(&[(1, 10), (7, 999_999)]));
+        assert_eq!(shares(&r), vec![(1, 50)]);
+    }
+
+    // ── C を通した複数Division戦闘(実際の呼び出し経路) ─────────────────────
+
+    #[test]
+    fn multi_partial_zero_defender_keeps_the_audited_canonical_split() {
+        let reg = registry(&[(0, 1.0), (1, 1.0), (2, 0.0)]);
+        let a = full(0, 10, 10);
+        let (d1, d2) = (full(1, 10, 15), full(2, 10, 15));
+        let (_, dr) = resolve_combat_day_multi_with_supply(&[&a], &[&d1, &d2], 0, &reg);
+        assert_eq!(shares(&dr), vec![(1, 66), (2, 0)]);
+    }
+
+    #[test]
+    fn multi_all_zero_defenders_take_the_damage_by_manpower_ratio() {
+        let reg = registry(&[(0, 1.0), (1, 0.0), (2, 0.0)]);
+        let a = full(0, 10, 10);
+        let (d1, d2) = (full(1, 10, 15), full(2, 10, 15));
+        let (_, dr) = resolve_combat_day_multi_with_supply(&[&a], &[&d1, &d2], 0, &reg);
+        // 攻撃力10・防御側総実効戦力0: 総損失 10*100/1 = 1000 を等manpowerで500ずつ。
+        assert_eq!(shares(&dr), vec![(1, 500), (2, 500)]);
+    }
+
+    #[test]
+    fn multi_both_sides_truly_zero_deal_and_take_no_damage_known_followup() {
+        // Known follow-up: 両陣営の真の実効戦力0の終了・撤退契約はP27-007-PRE-001で決定する。
+        // P27-006では現行どおり戦闘を維持し、架空のdamageも勝者も作らない。
+        let reg = registry(&[(0, 0.0), (3, 0.0), (1, 0.0), (2, 0.0)]);
+        let (a1, a2) = (full(0, 10, 10), full(3, 10, 10));
+        let (d1, d2) = (full(1, 10, 15), full(2, 10, 15));
+        let (ar, dr) = resolve_combat_day_multi_with_supply(&[&a1, &a2], &[&d1, &d2], 0, &reg);
+        assert_eq!(shares(&ar), vec![(0, 0), (3, 0)]);
+        assert_eq!(shares(&dr), vec![(1, 0), (2, 0)]);
+    }
+
+    // ── 256件グリッド(P27-006-PRE-001の監査値) ─────────────────────────────
+
+    /// 旧実装(P27-006前)の1対1損害式。分母1000特例と、切り捨てのままの実効戦力を持つ。
+    fn old_duel(a: &Division, d: &Division) -> ((u64, u64), (i64, i64)) {
+        let ready = |m: u64| (m * 1000 / 10000) as i64;
+        let org = |o: f32| (o * 1000.0 / 50.0) as i64;
+        let ae = (a.attack_power as i64 * ready(a.manpower) * org(a.organization)) / 1_000_000;
+        let de = (d.defense_power as i64 * ready(d.manpower) * org(d.organization)) / 1_000_000;
+        let dl = if de < 1 { ae * 100 / 1000 } else { ae * 100 / de.max(1) };
+        let al = if ae < 1 { de * 100 / 1000 } else { de * 100 / ae.max(1) };
+        ((al as u64, dl as u64), (ae, de))
+    }
+
+    #[test]
+    fn grid_256_only_truncation_to_zero_cases_change() {
+        let mps = [10000u64, 8000, 5000, 3000];
+        let orgs = [50.0f32, 35.0, 20.0, 10.0];
+        let (mut total, mut changed, mut unchanged) = (0, 0, 0);
+        for amp in mps {
+            for aorg in orgs {
+                for dmp in mps {
+                    for dorg in orgs {
+                        // 装備はmanpowerと同じ比率(readiness = manpower比)。
+                        let a = div(0, amp, amp as f64 / 100.0, aorg, 10, 10);
+                        let d = div(1, dmp, dmp as f64 / 100.0, dorg, 10, 15);
+                        let new = duel(&a, &d, 1.0, 1.0);
+                        let (old, (ae, de)) = old_duel(&a, &d);
+                        total += 1;
+                        if new == old {
+                            unchanged += 1;
+                        } else {
+                            changed += 1;
+                            assert!(
+                                ae == 0 || de == 0,
+                                "差分は旧実装で片側の実効戦力が切り捨てで0になる領域だけ: \
+                                 amp={amp} aorg={aorg} dmp={dmp} dorg={dorg} old={old:?} new={new:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(total, 256);
+        assert_eq!(changed, 31, "監査値(P27-006-PRE-001)どおり差分は31件");
+        assert_eq!(unchanged, 225, "通常領域225件は完全一致");
     }
 }

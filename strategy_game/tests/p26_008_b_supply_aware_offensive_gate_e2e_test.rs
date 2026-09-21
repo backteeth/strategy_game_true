@@ -995,7 +995,55 @@ fn test_90_day_controlled_war_offensive_supply_gate_real_app_verification() {
 
     // 備蓄をresume水準まで回復させ、再開を確認する。
     set_app_supplies(&mut app, CountryId(0), 1_000_000.0);
-    advance_days(&mut app, 1800, 1, 17, 60);
+    // 最終60日は1日ずつ進め、戦闘の再開・決着・州の占領を日単位で直接観測する
+    // (日付は`advance_days`と同じ28日/月の暦。offset 0 = 1800-01-17)。
+    let mut fight_offsets: Vec<u32> = Vec::new();
+    let mut capture_offset: Option<u32> = None;
+    let mut defender_gone_offset: Option<u32> = None;
+    let mut defender_min_manpower = u64::MAX;
+    let mut defender_fulfillment_seen: Option<f64> = None;
+    let mut attacker_fulfillment_while_fighting_min = f64::MAX;
+    for offset in 0..60u32 {
+        let idx = 16 + offset;
+        let month_index = idx / 28;
+        let year = 1800 + (month_index / 12) as i32;
+        let month = (month_index % 12 + 1) as u8;
+        let day = (idx % 28 + 1) as u8;
+        set_game_date(&mut app, year, month, day);
+        tick_day(&mut app, year, month, day);
+
+        let capture_now = app
+            .world()
+            .resource::<StateRegistry>()
+            .get(StateId(3))
+            .is_some_and(|s| s.controller() == CountryId(0));
+        let mil = app.world().resource::<MilitaryRegistry>();
+        if let Some(a) = mil.divisions.get(&DivisionId(0))
+            && a.status == DivisionStatus::Fighting
+        {
+            fight_offsets.push(offset);
+            attacker_fulfillment_while_fighting_min =
+                attacker_fulfillment_while_fighting_min.min(mil.supply_fulfillment_of(a.id));
+        }
+        if capture_offset.is_none() && capture_now {
+            capture_offset = Some(offset);
+        }
+        if defender_gone_offset.is_none() {
+            match mil.divisions.get(&DivisionId(1)) {
+                Some(d) => {
+                    defender_min_manpower = defender_min_manpower.min(d.manpower);
+                    defender_fulfillment_seen = Some(mil.supply_fulfillment_of(d.id));
+                }
+                None => defender_gone_offset = Some(offset),
+            }
+        }
+    }
+    eprintln!(
+        "[P26-008-B 90-day] P27-006: fight_offsets={fight_offsets:?} capture={capture_offset:?} \
+         gone={defender_gone_offset:?} def_min_mp={defender_min_manpower} \
+         atk_ful_min_while_fighting={attacker_fulfillment_while_fighting_min} \
+         defender_ful_seen={defender_fulfillment_seen:?}"
+    );
 
     let final_stance = app
         .world()
@@ -1016,46 +1064,44 @@ fn test_90_day_controlled_war_offensive_supply_gate_real_app_verification() {
         "回廊遮断中はOffensiveを維持できないはず"
     );
 
-    // 【P27-005により正規値を再更新】: P27-005(攻撃側前線補給ブリッジ)により、
-    // 進行中の戦闘の攻撃側であり、首都連結済みの自国州に隣接する敵支配州の師団は
-    // 1ホップだけ補給を受ける。よって以下の新正規値になる:
-    //  - 攻撃師団は敵州へ到達し(Fighting)、supply_fulfillment > 0(実測1.00)
-    //  - 前線配送は健全なので offensive_supply_blocked == false
-    //  - それでもstanceはDefendのまま。原因はsupplyではなく、割当師団が全員
-    //    Fightingで `has_ready_divisions == false`(Idle/Moving無し)となり、
-    //    military_ai が Defend/Recovering を返すため(supply判定より前の既存分岐)。
-    //  - 州3の戦闘自体は未決着。防御側が実効戦力0のまま損害を受けない
-    //    `distribute_damage`の別件(P27-006-PRE-001)で、本タスクの対象外。
-    let (attacker_state, attacker_status, attacker_ful, defender_ful) = {
-        let mil = app.world().resource::<MilitaryRegistry>();
-        let a = mil.divisions.get(&DivisionId(0)).expect("attacker exists");
-        let d = mil.divisions.get(&DivisionId(1)).expect("defender exists");
-        (
-            a.current_state,
-            a.status,
-            mil.supply_fulfillment_of(a.id),
-            mil.supply_fulfillment_of(d.id),
-        )
-    };
-    assert_eq!(attacker_state, StateId(3), "攻撃師団は敵州(戦争目標)へ到達している");
-    assert_eq!(attacker_status, DivisionStatus::Fighting, "到達後は交戦中");
+    // 【P27-006により正規値を再更新】: P27-005で攻撃側は前線補給を受けるようになったが、
+    // 防御側(補給0=readiness 0)へ実際には損害が入らず、戦闘が130日以上膠着していた
+    // (旧: 攻撃側の実効戦力が整数の切り捨てで小さく、対象の実効戦力<1の分岐が損害を
+    // 約1000分の1にしていた)。P27-006(損害の分母下限1・正の入力の実効戦力下限1)により
+    // 損害が連続的に入り、以下の新正規値で戦闘が決着する。補給・損害・戦闘終了・
+    // stance・blockedを別々に検証する。
+    //
+    // 1) 補給: 攻撃側は戦闘中ずっと正(P27-005前線補給)、防御側は0のまま(防御契約は無変更)。
     assert!(
-        attacker_ful > 0.0,
-        "P27-005: 攻撃側前線師団は1ホップ補給ブリッジで補給を受ける(実測{attacker_ful})"
+        attacker_fulfillment_while_fighting_min > 0.0,
+        "P27-005: 攻撃側は戦闘中も1ホップ補給を受ける(実測最小{attacker_fulfillment_while_fighting_min})"
     );
+    assert_eq!(defender_fulfillment_seen, Some(0.0), "防御側の補給契約は無変更(0のまま)");
+    // 2) 到達・戦闘再開: 戦闘はoffset 19(1800-01-17起点)に再開する。
     assert_eq!(
-        defender_ful, 0.0,
-        "防御側の契約は無変更(首都連結外なので補給0のまま)"
+        fight_offsets.iter().copied().filter(|o| *o >= 3).min(),
+        Some(19),
+        "遮断・回復後の戦闘再開日(実測)"
     );
+    // 3) 損害: 防御側(readiness 0)が実際に損害を受ける(旧: 130日間mp=10000のまま)。
+    assert!(
+        defender_min_manpower < 10_000,
+        "防御側にも損害が入る(実測最小manpower={defender_min_manpower})"
+    );
+    // 4) 戦闘終了・controller変更: 再開翌日(offset 20)に戦闘が決着し州3をArcadiaが占領する。
+    assert_eq!(capture_offset, Some(20), "州3(戦争目標)は再開の翌日に占領される");
     assert_eq!(
-        final_blocked,
-        Some(false),
-        "前線配送が健全に回復したのでoffensive_supply_blockedは解除される"
+        app.world().resource::<StateRegistry>().get(StateId(3)).map(|s| s.controller()),
+        Some(CountryId(0))
     );
+    // 5) 防御側は撤退を繰り返した後、offset 30に消滅する(追撃で州4・16へ進む)。
+    assert_eq!(defender_gone_offset, Some(30), "追撃後の防御師団消滅日(実測)");
+    // 6) blocked・stance(実測値): 前線配送は健全でblockedは解除される。stanceは
+    //    防御師団が消滅し追撃が完了した後の状態でStopped(supplyが原因ではない)。
+    assert_eq!(final_blocked, Some(false), "前線配送が健全なのでblockedは解除される");
     assert_eq!(
         final_stance,
-        Some(FrontlineStance::Defend),
-        "割当師団が全員Fightingで待機・移動中が無いためDefend(Recovering)。\
-         supply起因ではない"
+        Some(FrontlineStance::Stopped),
+        "防御師団の消滅後(追撃完了後)の実測stance"
     );
 }

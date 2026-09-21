@@ -199,6 +199,8 @@ struct Cfg {
     with_war: bool,
     attackers: usize,
     extra_defenders: usize,
+    /// P27-006: 戦闘を保持するため、攻撃側の攻撃力と防御側の防御力を0にする(下記`test_03`参照)。
+    neutral_power: bool,
     remove_defenders: bool,
     cut: Option<(u32, u32)>,
     capital_falls: Option<u32>,
@@ -212,6 +214,7 @@ impl Cfg {
             with_war: true,
             attackers: 4,
             extra_defenders: 0,
+            neutral_power: false,
             remove_defenders: false,
             cut: None,
             capital_falls: None,
@@ -282,6 +285,15 @@ fn run(c: &Cfg) -> Summary {
                 .collect();
             for id in ids {
                 m.divisions.remove(&id);
+            }
+        }
+        if c.neutral_power {
+            for d in m.divisions.values_mut() {
+                if d.owner == ARCADIA {
+                    d.attack_power = 0;
+                } else if d.owner == ELFIN {
+                    d.defense_power = 0;
+                }
             }
         }
     }
@@ -428,17 +440,44 @@ fn test_02_without_the_war_nothing_changes_for_bystanders_and_national_reserve_i
     assert!(with_war.final_arcadia_supplies_units > 0);
 }
 
+/// 【P27-006により固定fixtureを調整】遮断・首都陥落の契約(P27-005の補給資格)は不変。
+/// P27-006(損害の分母下限1・実効戦力下限1)以降、通常の戦闘は数日(実測で高々数日)で
+/// 決着し、遮断開始(d20)より前に終わる。以前は防御側の損害がほぼ0で戦闘が
+/// 25日以上「膠着」していたため、この膠着に依存してこの検証が成立していた。
+/// そこで**攻撃側の攻撃力と防御側の防御力を0**にする(`Cfg::neutral_power`)ことで、
+/// 戦闘そのものを損害の生じない状態で保持し、補給契約だけを直接検証する
+/// (調整したのは攻撃力・防御力のみ。戦闘開始日・遮断日・防御側manpowerは不変)。
+/// 双方のoutgoingが0のこの状態は「両陣営の真の実効戦力0」で、P27-006では現行どおり
+/// 戦闘を維持する既知の状態である。
+/// Known follow-up: P27-007-PRE-001で終了・撤退契約を決定する(決定次第このfixtureを再評価する)。
 #[test]
 fn test_03_corridor_cut_stops_bridge_supply_for_exactly_the_cut_days_then_recovers() {
     let s = run(&Cfg {
+        neutral_power: true,
         cut: Some((20, 45)),
         days: 80,
         ..Cfg::base()
     });
+    // 遮断前(d11〜d19)は前線補給で正、d20〜d44の25日間は補給0、d45以降は自然回復。
+    let before: Vec<f64> = s
+        .fight_min_ful
+        .iter()
+        .filter(|(d, _)| (11..20).contains(d))
+        .map(|(_, f)| *f)
+        .collect();
+    assert_eq!(before.len(), 9, "d11〜d19は戦闘が継続している");
+    assert!(before.iter().all(|f| *f > 0.99), "遮断前は前線補給で満額");
     assert_eq!(
         s.ful0_fight_days, 25,
         "d20〜d44の遮断期間ちょうど25日だけ補給0"
     );
+    let during: Vec<u32> = s
+        .fight_min_ful
+        .iter()
+        .filter(|(_, f)| *f < 0.001)
+        .map(|(d, _)| *d)
+        .collect();
+    assert_eq!(during, (20..45).collect::<Vec<u32>>(), "補給0の日は遮断期間と完全に一致");
     let after: Vec<f64> = s
         .fight_min_ful
         .iter()
@@ -451,16 +490,19 @@ fn test_03_corridor_cut_stops_bridge_supply_for_exactly_the_cut_days_then_recove
     );
 }
 
+/// 【P27-006により固定fixtureを調整】理由は`test_03`と同じ(`neutral_power`)。
 #[test]
 fn test_04_capital_fall_keeps_the_siege_supply_at_zero() {
     let s = run(&Cfg {
+        neutral_power: true,
         capital_falls: Some(20),
         days: 60,
         ..Cfg::base()
     });
     assert!(
         s.ful0_fight_days >= 40,
-        "首都陥落後は投射されず補給0が維持される(実測41日)"
+        "首都陥落後は投射されず補給0が維持される(実測{}日)",
+        s.ful0_fight_days
     );
     let before_fall: Vec<f64> = s
         .fight_min_ful
@@ -468,7 +510,7 @@ fn test_04_capital_fall_keeps_the_siege_supply_at_zero() {
         .filter(|(d, _)| *d < 20)
         .map(|(_, f)| *f)
         .collect();
-    assert!(before_fall.iter().all(|f| *f > 0.0));
+    assert!(!before_fall.is_empty() && before_fall.iter().all(|f| *f > 0.0));
 }
 
 #[test]
