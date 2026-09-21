@@ -1016,41 +1016,46 @@ fn test_90_day_controlled_war_offensive_supply_gate_real_app_verification() {
         "回廊遮断中はOffensiveを維持できないはず"
     );
 
-    // 【P27-004により正規値を再更新】: P27-004(移動命令の冪等化)により、
-    // Arcadiaの攻勢Divisionが実際に敵州(戦争目標の州)へ到達し、実際の戦闘へ
-    // 突入するようになった(旧: 移動命令の毎日再発行によりmovement_progressが
-    // 恒久的にリセットされ、この師団は一度も目的地へ到達せず、したがって
-    // 一度も戦闘に入らなかった——本テストが検証する「攻勢ゲート」自体は常に
-    // 「supply不足で停止」の分岐しか実際には通っていなかった)。実際に前線が
-    // 未確保の敵州(=自国の首都連結性[P26-006、無変更]が及ばない州)で交戦する
-    // ようになった結果、`supply_fulfillment_of`が0.000に固定される
-    // (占領完了までその州は自国supply網に接続されないため、国家全体の備蓄を
-    // どれだけ豊富[1,000,000]にしても届かない)。`calculate_combat_readiness_
-    // with_supply`(`src/military/combat_calc.rs`、無変更)は
-    // `combat_readiness = min(manpower_readiness, equipment_readiness,
-    // supply_readiness)`という既存の`min()`式を使うため、supply_readiness=0の
-    // 師団は圧倒的な兵力比(110%要件を満たすため manpower を大幅増強済み)を
-    // 持っていても実効戦闘力が0になり、この会戦は恒久的に膠着する
-    // (独立プロセス2回・125日超の追加観測でも戦闘は一切終結しないことを確認済み)。
-    // これはP27-004が導入した新しい欠陥ではなく、Phase 25(装備0の師団と同じ
-    // `min()`哲学)・Phase 26(首都連結性)の既存かつ意図された契約であり、
-    // 「国家全体の備蓄さえ豊富なら攻勢は必ず再開できる」という本テストの旧来の
-    // 前提が、実際に移動が機能して初めて反証された(旧実装では師団が絶対に
-    // 到達しなかったため、この前提が誤りであること自体が検証不可能だった)。
-    // したがって`final_stance`は`Defend`のまま(`offensive_supply_blocked`も
-    // `true`のまま)が正しい——攻勢供給ゲート(P26-008-B、無変更)は「配送が
-    // 完全に健全でない限りblocked」という契約どおり、正しく動作し続けている。
+    // 【P27-005により正規値を再更新】: P27-005(攻撃側前線補給ブリッジ)により、
+    // 進行中の戦闘の攻撃側であり、首都連結済みの自国州に隣接する敵支配州の師団は
+    // 1ホップだけ補給を受ける。よって以下の新正規値になる:
+    //  - 攻撃師団は敵州へ到達し(Fighting)、supply_fulfillment > 0(実測1.00)
+    //  - 前線配送は健全なので offensive_supply_blocked == false
+    //  - それでもstanceはDefendのまま。原因はsupplyではなく、割当師団が全員
+    //    Fightingで `has_ready_divisions == false`(Idle/Moving無し)となり、
+    //    military_ai が Defend/Recovering を返すため(supply判定より前の既存分岐)。
+    //  - 州3の戦闘自体は未決着。防御側が実効戦力0のまま損害を受けない
+    //    `distribute_damage`の別件(P27-006-PRE-001)で、本タスクの対象外。
+    let (attacker_state, attacker_status, attacker_ful, defender_ful) = {
+        let mil = app.world().resource::<MilitaryRegistry>();
+        let a = mil.divisions.get(&DivisionId(0)).expect("attacker exists");
+        let d = mil.divisions.get(&DivisionId(1)).expect("defender exists");
+        (
+            a.current_state,
+            a.status,
+            mil.supply_fulfillment_of(a.id),
+            mil.supply_fulfillment_of(d.id),
+        )
+    };
+    assert_eq!(attacker_state, StateId(3), "攻撃師団は敵州(戦争目標)へ到達している");
+    assert_eq!(attacker_status, DivisionStatus::Fighting, "到達後は交戦中");
+    assert!(
+        attacker_ful > 0.0,
+        "P27-005: 攻撃側前線師団は1ホップ補給ブリッジで補給を受ける(実測{attacker_ful})"
+    );
     assert_eq!(
-        final_stance,
-        Some(FrontlineStance::Defend),
-        "P27-004適用後: 前線が未確保の敵州にあるため首都連結性経由のsupplyが\
-         届かず(0.000固定)、国家備蓄がどれだけ豊富でもOffensiveへは戻れないはず\
-         (攻勢供給ゲート自体は無変更で正しく機能している)"
+        defender_ful, 0.0,
+        "防御側の契約は無変更(首都連結外なので補給0のまま)"
     );
     assert_eq!(
         final_blocked,
-        Some(true),
-        "supply_fulfillmentが0.000のまま(前線が首都supply網に未接続)なので、\
-         offensive_supply_blockedはtrueのまま維持されるはず"
+        Some(false),
+        "前線配送が健全に回復したのでoffensive_supply_blockedは解除される"
+    );
+    assert_eq!(
+        final_stance,
+        Some(FrontlineStance::Defend),
+        "割当師団が全員Fightingで待機・移動中が無いためDefend(Recovering)。\
+         supply起因ではない"
     );
 }
