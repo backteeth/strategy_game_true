@@ -1,8 +1,8 @@
 //! P27-006: 低実効戦力の損害連続性(M: 損害分母の下限1、T: 正の入力の実効戦力下限1、
 //! C: 全対象weight 0時のmanpower配分)の実App統合テスト。
 //!
-//! 両陣営の真の実効戦力0(readiness 0)の終了・撤退契約は本タスクの範囲外で、
-//! P27-007-PRE-001で決定する既知の未解決事項(`test_08`が現行の維持挙動を固定する)。
+//! 両陣営の真の実効戦力0(readiness 0)の終了・撤退契約はP27-007で実装した
+//! (`test_08`が即日終了・防御側勝利・攻撃側撤退の契約を固定する)。
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
@@ -221,6 +221,13 @@ struct Spec {
     save_at: Option<u32>,
     save_twice: bool,
     reverse_insert_order: bool,
+    /// P27-007: `attackers`と同じ長さ・同じ順序の出撃元州上書き(`None`=既定の州1、
+    /// `Some(x)`=州x、空なら全員既定)。`attacker_origins`から意図的に欠落させたい
+    /// (退路なし)場合は別途`omit_origin_for`を使う。
+    attacker_origin_overrides: Vec<Option<StateId>>,
+    /// P27-007: このインデックス(`attackers`内の0始まり)の攻撃師団を
+    /// `attacker_origins`から意図的に除外する(退路なしのDivision消滅を検証する)。
+    omit_origin_for: Vec<usize>,
 }
 
 impl Spec {
@@ -234,6 +241,8 @@ impl Spec {
             save_at: None,
             save_twice: false,
             reverse_insert_order: false,
+            attacker_origin_overrides: Vec::new(),
+            omit_origin_for: Vec::new(),
         }
     }
 }
@@ -356,7 +365,22 @@ fn run_scenario(spec: &Spec) -> Run {
             defender_country: ELFIN,
             attacker_division_ids: attacker_ids.clone(),
             defender_division_ids: defender_ids.clone(),
-            attacker_origins: attacker_ids.iter().map(|id| (*id, StateId(1))).collect(),
+            // P27-007: overrides/omitはspec.attackersと同じ(=reverse_insert_order=falseの)
+            // 順序を前提とする(このテストファイルの新規テストは全てreverse_insert_order=false)。
+            attacker_origins: attacker_ids
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !spec.omit_origin_for.contains(i))
+                .map(|(i, id)| {
+                    let origin = spec
+                        .attacker_origin_overrides
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .unwrap_or(StateId(1));
+                    (*id, origin)
+                })
+                .collect(),
             start_date: "1800/01/01".to_string(),
             elapsed_days: 0,
             status: strategy_game::military::battle::BattleStatus::Ongoing,
@@ -680,25 +704,34 @@ fn test_07_manpower_zero_division_gets_no_invented_weight_and_is_removed() {
     assert!(day1.battle_ongoing);
 }
 
-// ── 14.8 両陣営の真の0(既知の未解決: P27-007-PRE-001) ─────────────────────
+// ── 14.8 両陣営の真の0(P27-007: 即日終了・攻撃側撤退) ─────────────────────
 
-/// Known follow-up: P27-007-PRE-001で終了・撤退契約を決定する。
-/// P27-006では、双方のreadinessが真に0のとき現行どおり戦闘を維持し、架空のdamageも
-/// 勝者も作らず、controllerも変えない。
+/// P27-007により、双方のreadinessが真に0(=その日どちらの陣営も損害を与えられない)の
+/// 戦闘は、初日のうちに防御側勝利として終了し、攻撃側は出撃元(`attacker_origins`)へ
+/// 撤退する。架空のdamageは生成せず、controllerも変えない(防御側勝利と同じ契約)。
 #[test]
-fn test_08_both_sides_truly_zero_keeps_the_battle_without_fictional_damage() {
+fn test_08_both_sides_truly_zero_ends_same_day_with_defender_victory_and_attacker_retreat() {
     let r = run_scenario(&both_zero_spec());
     assert_eq!(r.snaps.len(), 40);
-    for (i, day) in r.snaps.iter().enumerate() {
-        assert!(day.battle_ongoing, "day {}: 戦闘は維持される", i + 1);
-        assert_eq!(day.controller3, ELFIN.0, "controllerは変わらない");
-        assert_eq!(day.divisions.len(), 2, "Divisionは消滅しない");
-        for div in &day.divisions {
-            assert_eq!(div.status, DivisionStatus::Fighting);
-            assert_eq!(div.manpower, 10_000, "架空のdamageを生成しない");
-            assert_eq!(div.organization_x10, 500);
-            assert_eq!(div.fulfillment, 0.0, "真のreadiness 0(補給0)");
-        }
+    let day1 = &r.snaps[0];
+    assert!(!day1.battle_ongoing, "day1: 両陣営ゼロ損害のため即日終了する");
+    assert_eq!(day1.controller3, ELFIN.0, "防御側勝利と同じ契約でcontrollerは変わらない");
+    let attacker = snap_of(day1, r.attackers[0]);
+    let defender = snap_of(day1, r.defenders[0]);
+    assert_eq!(attacker.status, DivisionStatus::Idle, "撤退後はIdle");
+    assert_eq!(attacker.state, 1, "既存のattacker_origins(state1)へ撤退する");
+    assert_eq!(
+        attacker.manpower,
+        10_000 - 1_000,
+        "撤退ペナルティ(最大manpowerの10%)以外の架空damageは生成しない"
+    );
+    assert_eq!(defender.status, DivisionStatus::Idle, "防御側勝利後の既存状態");
+    assert_eq!(defender.state, 3, "防御側は自陣に留まる");
+    assert_eq!(defender.manpower, 10_000, "防御側は無傷(架空のdamageを生成しない)");
+    // 以後の日は既に戦闘が存在しないため、双方とも状態は変化しない。
+    for (i, day) in r.snaps.iter().enumerate().skip(1) {
+        assert!(!day.battle_ongoing, "day {}: 戦闘は既に終了している", i + 1);
+        assert_eq!(day.controller3, ELFIN.0);
     }
 }
 
@@ -791,6 +824,78 @@ fn test_10_save_load_matches_the_continuous_run_at_every_critical_point() {
     assert_save_load_matches(one_v_two_all_zero_spec(), &[1, 2]);
     // 一部weight 0の継続戦闘(Division消滅・撤退の直前を含む)。
     assert_save_load_matches(partial_zero_spec(), &[1, 2, 3]);
-    // 両陣営の真の0(維持される戦闘)の途中分岐。
+    // 両陣営の真の0(P27-007により即日終了・攻撃側撤退): 終了当日(1)・終了後(20)。
     assert_save_load_matches(both_zero_spec(), &[1, 20]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// P27-007: 両陣営ゼロ損害終了の退却先・退路なし・決定性
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_11_multiple_attackers_with_distinct_origins_retreat_to_their_own_origin() {
+    let mut spec = Spec::new(
+        vec![Unit::full(), Unit::full()],
+        vec![Unit::full()],
+    );
+    spec.arcadia_supplies = 0.0;
+    spec.elfin_supplies = 0.0;
+    spec.attacker_origin_overrides = vec![Some(StateId(1)), Some(StateId(4))];
+    let r = run_scenario(&spec);
+    let day1 = &r.snaps[0];
+    assert!(!day1.battle_ongoing, "両陣営ゼロ損害のため即日終了する");
+    let a0 = snap_of(day1, r.attackers[0]);
+    let a1 = snap_of(day1, r.attackers[1]);
+    assert_eq!(a0.state, 1, "師団ごとの出撃元(州1)へ撤退する");
+    assert_eq!(a1.state, 4, "師団ごとの出撃元(州4)へ撤退する");
+    assert_eq!(a0.status, DivisionStatus::Idle);
+    assert_eq!(a1.status, DivisionStatus::Idle);
+    assert_eq!(a0.manpower, 10_000 - 1_000);
+    assert_eq!(a1.manpower, 10_000 - 1_000);
+}
+
+/// Known: 攻撃側撤退先の安全性(出撃元が既に敵に占領されている等)は本タスクの
+/// スコープ外で、既存の組織率0撤退と同じ挙動(検証しない)を維持する(P27-007-PRE-001
+/// §27・§30)。ここでは`attacker_origins`に記録自体が無い(データ上通常あり得ない)
+/// 場合の安全側の挙動、すなわち既存の消滅処理が使われ、panicしないことだけを確認する。
+#[test]
+fn test_12_missing_origin_destroys_the_attacker_without_panicking() {
+    let mut spec = Spec::new(vec![Unit::full()], vec![Unit::full()]);
+    spec.arcadia_supplies = 0.0;
+    spec.elfin_supplies = 0.0;
+    spec.omit_origin_for = vec![0];
+    let r = run_scenario(&spec);
+    let day1 = &r.snaps[0];
+    assert!(!day1.battle_ongoing);
+    assert!(
+        find(day1, r.attackers[0]).is_none(),
+        "退路なしの攻撃師団は既存の消滅処理で除去される"
+    );
+    assert_eq!(day1.controller3, ELFIN.0, "controllerは変わらない");
+}
+
+#[test]
+fn test_13_zero_damage_termination_is_independent_of_registration_order() {
+    let mut spec = Spec::new(
+        vec![Unit::full(), Unit::full()],
+        vec![Unit::full(), Unit::full()],
+    );
+    spec.arcadia_supplies = 0.0;
+    spec.elfin_supplies = 0.0;
+    let forward = run_scenario(&spec);
+    spec.reverse_insert_order = true;
+    let reversed = run_scenario(&spec);
+    let normalize = |run: &Run| -> Vec<(usize, String, u64, i64)> {
+        let day1 = &run.snaps[0];
+        let mut v: Vec<_> = day1
+            .divisions
+            .iter()
+            .map(|d| (d.owner, format!("{:?}", d.status), d.manpower, d.organization_x10))
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(normalize(&forward), normalize(&reversed), "登録順反転で結果が同一");
+    assert!(!forward.snaps[0].battle_ongoing);
+    assert!(!reversed.snaps[0].battle_ongoing);
 }

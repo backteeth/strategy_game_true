@@ -3,11 +3,13 @@
 //!
 //! 資格判定・需要1回計上・Hamilton按分の単体テストは`src/military/daily_supply.rs`にあるため、
 //! 本ファイルはP27-005-PRE-001が再現した制御シナリオ(Arcadia対Elfin、実データ)を
-//! 実App・実Systemで再現し、監査時に一時パッチで実測した正規値(d10戦闘開始・d11勝利、
-//! 回廊遮断の補給0がちょうど25日、等)と一致することを確認する。
+//! 実App・実Systemで再現し、監査時に一時パッチで実測した正規値(d10戦闘開始・d11勝利、等)と
+//! 一致することを確認する。
 //!
-//! 複数Division戦闘の`distribute_damage`(実効戦力0の側が被害を受けない別件、
-//! P27-006-PRE-001候補)による戦闘の非終結は、本ファイルの合否条件から分離している。
+//! `test_03`・`test_04`(回廊遮断・首都陥落)は、P27-006(損害の連続化)・P27-007
+//! (両陣営ゼロ損害戦闘の即日終了)により、実戦闘を数十日間人為的に膠着させる旧来の
+//! fixtureが成立しなくなったため、戦闘解決を一切呼ばず日次補給計算だけを進める
+//! `run_supply_only`(テスト案C)へ再設計されている。詳細は各テストのコメントを参照。
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
@@ -199,8 +201,6 @@ struct Cfg {
     with_war: bool,
     attackers: usize,
     extra_defenders: usize,
-    /// P27-006: 戦闘を保持するため、攻撃側の攻撃力と防御側の防御力を0にする(下記`test_03`参照)。
-    neutral_power: bool,
     remove_defenders: bool,
     cut: Option<(u32, u32)>,
     capital_falls: Option<u32>,
@@ -214,7 +214,6 @@ impl Cfg {
             with_war: true,
             attackers: 4,
             extra_defenders: 0,
-            neutral_power: false,
             remove_defenders: false,
             cut: None,
             capital_falls: None,
@@ -285,15 +284,6 @@ fn run(c: &Cfg) -> Summary {
                 .collect();
             for id in ids {
                 m.divisions.remove(&id);
-            }
-        }
-        if c.neutral_power {
-            for d in m.divisions.values_mut() {
-                if d.owner == ARCADIA {
-                    d.attack_power = 0;
-                } else if d.owner == ELFIN {
-                    d.defense_power = 0;
-                }
             }
         }
     }
@@ -440,77 +430,114 @@ fn test_02_without_the_war_nothing_changes_for_bystanders_and_national_reserve_i
     assert!(with_war.final_arcadia_supplies_units > 0);
 }
 
-/// 【P27-006により固定fixtureを調整】遮断・首都陥落の契約(P27-005の補給資格)は不変。
-/// P27-006(損害の分母下限1・実効戦力下限1)以降、通常の戦闘は数日(実測で高々数日)で
-/// 決着し、遮断開始(d20)より前に終わる。以前は防御側の損害がほぼ0で戦闘が
-/// 25日以上「膠着」していたため、この膠着に依存してこの検証が成立していた。
-/// そこで**攻撃側の攻撃力と防御側の防御力を0**にする(`Cfg::neutral_power`)ことで、
-/// 戦闘そのものを損害の生じない状態で保持し、補給契約だけを直接検証する
-/// (調整したのは攻撃力・防御力のみ。戦闘開始日・遮断日・防御側manpowerは不変)。
-/// 双方のoutgoingが0のこの状態は「両陣営の真の実効戦力0」で、P27-006では現行どおり
-/// 戦闘を維持する既知の状態である。
-/// Known follow-up: P27-007-PRE-001で終了・撤退契約を決定する(決定次第このfixtureを再評価する)。
-#[test]
-fn test_03_corridor_cut_stops_bridge_supply_for_exactly_the_cut_days_then_recovers() {
-    let s = run(&Cfg {
-        neutral_power: true,
-        cut: Some((20, 45)),
-        days: 80,
-        ..Cfg::base()
-    });
-    // 遮断前(d11〜d19)は前線補給で正、d20〜d44の25日間は補給0、d45以降は自然回復。
-    let before: Vec<f64> = s
-        .fight_min_ful
-        .iter()
-        .filter(|(d, _)| (11..20).contains(d))
-        .map(|(_, f)| *f)
-        .collect();
-    assert_eq!(before.len(), 9, "d11〜d19は戦闘が継続している");
-    assert!(before.iter().all(|f| *f > 0.99), "遮断前は前線補給で満額");
-    assert_eq!(
-        s.ful0_fight_days, 25,
-        "d20〜d44の遮断期間ちょうど25日だけ補給0"
+/// 【P27-007により補給専用テストへ再設計(テスト案C)】遮断・首都陥落の契約
+/// (P27-005の補給資格)は不変。P27-006(損害の分母下限1・実効戦力下限1)以降、通常の
+/// 戦闘は数日で決着し、遮断開始(d20)より前に終わる。以前はこれを避けるため
+/// `Cfg::neutral_power`(攻撃力・防御力を双方0にして恒久的にゼロ損害を維持する)を
+/// 使っていたが、P27-007(両陣営ゼロ損害の戦闘を即日・防御側勝利で終了する)により、
+/// この状態は初日で即終了してしまい、25日間の交戦を維持できなくなった
+/// (実測: 開始直後に終了、`ful0_fight_days`は0のまま)。
+///
+/// そこで本テストは、戦闘終了ポリシー(P27-006・P27-007)から完全に独立させ、
+/// `process_daily_battles`/`resolve_finished_battles`(戦闘解決)を一切呼ばず、
+/// 日次補給計算(`run_daily_military_supply_consumption_with_battles`、
+/// P26-004/P27-005)だけを日次ループさせる(`run_supply_only`)。実データ
+/// (Arcadia州0/1/3/4)・実際のBattleRegistry登録済みattackerという条件は維持し、
+/// 補給資格契約(1ホップ・回廊遮断・再接続)だけを直接検証する。
+fn run_supply_only(cut: Option<(u32, u32)>, capital_falls: Option<u32>, days: u32) -> Vec<(u32, f64)> {
+    let dir = TempTestDir::new("supply_only");
+    let mut app = setup_app(dir.save_file_config());
+    app.world_mut().resource_mut::<WarRegistry>().add_war(no_goal_war());
+
+    let attacker_id = {
+        let mut m = app.world_mut().resource_mut::<MilitaryRegistry>();
+        let base = m.divisions.values().find(|d| d.owner == ARCADIA).unwrap().clone();
+        let mut a = base;
+        a.current_state = StateId(3);
+        a.status = DivisionStatus::Fighting;
+        m.add_division(a)
+    };
+    {
+        let mut br = app
+            .world_mut()
+            .resource_mut::<strategy_game::military::battle::BattleRegistry>();
+        br.start_battle(strategy_game::military::battle::Battle {
+            id: strategy_game::common::BattleId(0),
+            war_id: strategy_game::common::WarId(0),
+            state_id: StateId(3),
+            attacker_country: ARCADIA,
+            defender_country: ELFIN,
+            attacker_division_ids: vec![attacker_id],
+            defender_division_ids: vec![],
+            attacker_origins: [(attacker_id, StateId(1))].into_iter().collect(),
+            start_date: "1800/01/01".to_string(),
+            elapsed_days: 0,
+            status: strategy_game::military::battle::BattleStatus::Ongoing,
+        })
+        .unwrap();
+    }
+
+    type SupplyOnlyParams<'w> = (
+        ResMut<'w, CountryRegistry>,
+        ResMut<'w, MilitaryRegistry>,
+        Res<'w, StateRegistry>,
+        Res<'w, strategy_game::military::battle::BattleRegistry>,
     );
-    let during: Vec<u32> = s
-        .fight_min_ful
-        .iter()
-        .filter(|(_, f)| *f < 0.001)
-        .map(|(d, _)| *d)
-        .collect();
-    assert_eq!(during, (20..45).collect::<Vec<u32>>(), "補給0の日は遮断期間と完全に一致");
-    let after: Vec<f64> = s
-        .fight_min_ful
-        .iter()
-        .filter(|(d, _)| *d >= 45)
-        .map(|(_, f)| *f)
-        .collect();
-    assert!(
-        !after.is_empty() && after.iter().all(|f| *f > 0.99),
-        "再接続後は自然に回復"
-    );
+    let mut supply_state: SystemState<SupplyOnlyParams> = SystemState::new(app.world_mut());
+
+    let mut fulfillments = Vec::new();
+    for n in 1..=days {
+        if let Some((cut, recon)) = cut {
+            if n == cut {
+                let mut sr = app.world_mut().resource_mut::<StateRegistry>();
+                occupy_state(StateId(1), ELFIN, &mut sr);
+                occupy_state(StateId(4), ELFIN, &mut sr);
+            }
+            if n == recon {
+                let mut sr = app.world_mut().resource_mut::<StateRegistry>();
+                occupy_state(StateId(1), ARCADIA, &mut sr);
+                occupy_state(StateId(4), ARCADIA, &mut sr);
+            }
+        }
+        if capital_falls == Some(n) {
+            let mut sr = app.world_mut().resource_mut::<StateRegistry>();
+            occupy_state(StateId(0), ELFIN, &mut sr);
+        }
+        // 国家備蓄を毎日固定し、他のArcadia Divisionの需要による枯渇を排除する
+        // (`run()`と同じ方針: 検証したいのは回廊遮断・首都陥落の効果だけ)。
+        set_supplies(&mut app, ARCADIA, 1_000_000.0);
+        let (mut cr, mut mr, sr, br) = supply_state.get_mut(app.world_mut()).unwrap();
+        strategy_game::military::daily_supply::run_daily_military_supply_consumption_with_battles(
+            &mut cr, &mut mr, &sr, &br,
+        );
+        fulfillments.push((n, mr.supply_fulfillment_of(attacker_id)));
+    }
+    fulfillments
 }
 
-/// 【P27-006により固定fixtureを調整】理由は`test_03`と同じ(`neutral_power`)。
+#[test]
+fn test_03_corridor_cut_stops_bridge_supply_for_exactly_the_cut_days_then_recovers() {
+    let fulfillments = run_supply_only(Some((20, 45)), None, 80);
+    // 遮断前(d1〜d19)は前線補給で満額、d20〜d44の25日間は補給0、d45以降は自然回復。
+    let before: Vec<f64> = fulfillments.iter().filter(|(d, _)| *d < 20).map(|(_, f)| *f).collect();
+    assert!(!before.is_empty() && before.iter().all(|f| *f > 0.99), "遮断前は前線補給で満額");
+    let zero_days: Vec<u32> = fulfillments.iter().filter(|(_, f)| *f == 0.0).map(|(d, _)| *d).collect();
+    assert_eq!(zero_days, (20..45).collect::<Vec<u32>>(), "d20〜d44の遮断期間ちょうど25日だけ補給0");
+    let after: Vec<f64> = fulfillments.iter().filter(|(d, _)| *d >= 45).map(|(_, f)| *f).collect();
+    assert!(!after.is_empty() && after.iter().all(|f| *f > 0.99), "再接続後は自然に回復");
+}
+
+/// 【P27-007により補給専用テストへ再設計(テスト案C)】理由は`test_03`と同じ。
 #[test]
 fn test_04_capital_fall_keeps_the_siege_supply_at_zero() {
-    let s = run(&Cfg {
-        neutral_power: true,
-        capital_falls: Some(20),
-        days: 60,
-        ..Cfg::base()
-    });
+    let fulfillments = run_supply_only(None, Some(20), 60);
+    let before_fall: Vec<f64> = fulfillments.iter().filter(|(d, _)| *d < 20).map(|(_, f)| *f).collect();
+    assert!(!before_fall.is_empty() && before_fall.iter().all(|f| *f > 0.99), "陥落前は前線補給で満額");
+    let after_fall: Vec<f64> = fulfillments.iter().filter(|(d, _)| *d >= 20).map(|(_, f)| *f).collect();
     assert!(
-        s.ful0_fight_days >= 40,
-        "首都陥落後は投射されず補給0が維持される(実測{}日)",
-        s.ful0_fight_days
+        !after_fall.is_empty() && after_fall.iter().all(|f| *f == 0.0),
+        "首都陥落後は投射されず補給0が維持される"
     );
-    let before_fall: Vec<f64> = s
-        .fight_min_ful
-        .iter()
-        .filter(|(d, _)| *d < 20)
-        .map(|(_, f)| *f)
-        .collect();
-    assert!(!before_fall.is_empty() && before_fall.iter().all(|f| *f > 0.0));
 }
 
 #[test]

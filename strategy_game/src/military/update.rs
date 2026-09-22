@@ -67,8 +67,9 @@ pub fn handle_daily_military(
             &current_date,
         );
 
-        // 4. 日次戦闘計算（戦闘IDの昇順で処理）
-        process_daily_battles(
+        // 4. 日次戦闘計算（戦闘IDの昇順で処理）。その日どちらの陣営も損害を
+        // 与えられなかった戦闘のIDを、状態変更前に確定した当日結果から返す(P27-007)。
+        let zero_damage_battles_today = process_daily_battles(
             &mut military_registry,
             &mut battle_registry,
             &state_registry,
@@ -81,6 +82,7 @@ pub fn handle_daily_military(
             &mut state_registry,
             &mut battle_registry,
             &war_registry,
+            &zero_damage_battles_today,
         );
 
         // 6. 終了・キャンセル済み戦闘のクリーンアップ
@@ -95,12 +97,20 @@ pub fn handle_daily_military(
 /// P21-siege: 攻撃側・防御側とも複数師団が参加できるため、各陣営の実効戦力を
 /// 参加師団の合計として計算し(`resolve_combat_day_multi`)、生じた被害を
 /// 貢献度に応じて個々の師団へ配分する。
+/// P27-007: 当日の戦闘計算で攻撃側・防御側のどちらも1点もmanpower損害を与え
+/// られなかった戦闘のID集合を返す型。Bevy Resourceにも永続フィールドにもせず、
+/// `handle_daily_military`内で`process_daily_battles`から`resolve_finished_battles`へ
+/// 同一tick内の関数引数として直接受け渡すだけの、非永続なローカル値である。
+type ZeroDamageBattles = std::collections::HashSet<BattleId>;
+
 fn process_daily_battles(
     military_registry: &mut MilitaryRegistry,
     battle_registry: &mut BattleRegistry,
     state_registry: &StateRegistry,
     war_registry: &WarRegistry,
-) {
+) -> ZeroDamageBattles {
+    let mut zero_damage_battles: ZeroDamageBattles = ZeroDamageBattles::new();
+
     // 戦闘IDの安定した処理順序（昇順）
     let mut battle_ids: Vec<BattleId> = battle_registry.battles.keys().copied().collect();
     battle_ids.sort_by_key(|id| id.0);
@@ -212,6 +222,21 @@ fn process_daily_battles(
         let (atk_results, def_results) =
             resolve_combat_day_multi_with_supply(&attacker_refs, &defender_refs, terrain_bonus, military_registry);
 
+        // P27-007(§3.1): 状態を一切変更する前に、今日attacker側・defender側が
+        // 実際に受け取った損害(manpower_loss)だけを見て「両陣営ともゼロ損害」を
+        // 判定する。`defender`が受ける損害は攻撃側の合計実効戦力に、`attacker`が
+        // 受ける損害は防御側の合計実効戦力に、それぞれ比例する(P27-006の
+        // `damage_from`)ため、この判定は「双方の合計実効戦力が0」と数学的に同値
+        // であり、実効戦力を別途再計算する必要はない。`resolve_finished_battles`側で
+        // 適用後のorganizationから事後的に再判定すると、今日の戦闘で両者が同時に
+        // 組織率0まで削り合った正常な相討ちを誤って両陣営ゼロ損害と混同する
+        // (P27-007-PRE-001で実際に踏んで特定した罠)。
+        let attacker_received_damage = atk_results.values().any(|(manpower_loss, _)| *manpower_loss > 0);
+        let defender_received_damage = def_results.values().any(|(manpower_loss, _)| *manpower_loss > 0);
+        if !attacker_received_damage && !defender_received_damage {
+            zero_damage_battles.insert(battle_id);
+        }
+
         for (division_id, (manpower_loss, org_loss)) in atk_results {
             apply_combat_casualty(military_registry, division_id, manpower_loss, org_loss);
         }
@@ -224,6 +249,7 @@ fn process_daily_battles(
             b.elapsed_days += 1;
         }
     }
+    zero_damage_battles
 }
 
 /// 1体のDivisionへ、戦闘計算が要求したmanpower/organization損失を原子的に適用する
@@ -286,6 +312,7 @@ fn resolve_finished_battles(
     state_registry: &mut StateRegistry,
     battle_registry: &mut BattleRegistry,
     war_registry: &WarRegistry,
+    zero_damage_battles_today: &ZeroDamageBattles,
 ) {
     let battle_ids: Vec<BattleId> = battle_registry.battles.keys().copied().collect();
 
@@ -296,6 +323,32 @@ fn resolve_finished_battles(
         };
 
         if battle.status != BattleStatus::Ongoing {
+            continue;
+        }
+
+        // P27-007: 今日どちらの陣営も損害を与えられなかった戦闘は、防御側勝利
+        // として即日終了し、攻撃側全員を出撃元(`attacker_origins`)へ撤退させる
+        // (既存の組織率0撤退・10%ペナルティ・比例装備損失をそのまま再利用する)。
+        // 防御側は既存の「攻撃側全滅→防御側勝利」分岐と同じ状態変更を受ける。
+        if zero_damage_battles_today.contains(&battle_id) {
+            if let Some(b) = battle_registry.battles.get_mut(&battle_id) {
+                b.status = BattleStatus::DefenderWon;
+            }
+            for &division_id in &battle.attacker_division_ids {
+                let origin = battle.attacker_origins.get(&division_id).copied();
+                force_retreat_or_destroy(division_id, origin, military_registry);
+            }
+            for &division_id in &battle.defender_division_ids {
+                if let Some(division) = military_registry.divisions.get_mut(&division_id) {
+                    division.status = DivisionStatus::Idle;
+                    division.combat_id = None;
+                }
+            }
+            info!(
+                "[Battle] {:?} both sides dealt zero damage today in state {:?}; \
+                 defender holds, attacker retreats",
+                battle_id, battle.state_id
+            );
             continue;
         }
 
@@ -436,8 +489,30 @@ fn resolve_participant_outcome(
         return true; // まだ戦闘継続可能
     }
 
-    // 組織率0 → 撤退を試みる。撤退時にも追加のmanpower損失を与え、
-    // 同じ師団が「撤退→組織率回復→再戦」を無限に繰り返せないようにする
+    // 組織率0 → 撤退または撃破(P27-007で`force_retreat_or_destroy`として
+    // 独立させ、両陣営ゼロ損害による強制撤退とも共有する)。
+    force_retreat_or_destroy(division_id, retreat_destination, military_registry)
+}
+
+/// 脱落した参加師団を、指定した退路(Some、かつ撤退後manpower>0)なら撤退、
+/// それ以外(退路なし、または撤退追加casualtyでmanpowerが尽きる)なら撃破する。
+/// 撤退時には追加でmanpower損失(`RETREAT_MANPOWER_LOSS_RATIO`)を与え、
+/// 同じ師団が「撤退→組織率回復→再戦」を無限に繰り返せないようにする。
+///
+/// 組織率0による脱落(`resolve_participant_outcome`)と、P27-007の両陣営
+/// ゼロ損害による強制撤退(`resolve_finished_battles`)の両方から呼ばれる
+/// 共通処理。一時的なエラー(装備破壊失敗)で処理を見送る場合だけ`true`
+/// (戦闘継続扱い、次のtickで再試行)を返し、それ以外は常に`false`
+/// (この師団は戦闘参加者ではなくなった)を返す。
+fn force_retreat_or_destroy(
+    division_id: DivisionId,
+    retreat_destination: Option<StateId>,
+    military_registry: &mut MilitaryRegistry,
+) -> bool {
+    let Some(division) = military_registry.divisions.get(&division_id).cloned() else {
+        return false; // 既に消滅済み
+    };
+
     let manpower_before = division.manpower;
     let retreat_loss = (division.max_manpower as f32 * RETREAT_MANPOWER_LOSS_RATIO) as u64;
     let remaining_manpower = manpower_before.saturating_sub(retreat_loss);
@@ -721,7 +796,7 @@ mod tests {
         battle_registry: &mut BattleRegistry,
         war_registry: &WarRegistry,
     ) {
-        process_daily_battles(
+        let zero_damage_battles_today = process_daily_battles(
             military_registry,
             battle_registry,
             state_registry,
@@ -732,6 +807,7 @@ mod tests {
             state_registry,
             battle_registry,
             war_registry,
+            &zero_damage_battles_today,
         );
     }
 
@@ -995,7 +1071,7 @@ mod tests {
             ))
             .unwrap();
 
-        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+        let zero_damage_battles_today = process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
 
         let defender_after = mil.divisions.get(&defender.id).unwrap();
         assert_eq!(
@@ -1008,7 +1084,13 @@ mod tests {
         );
 
         let mut state_reg = state_reg;
-        resolve_finished_battles(&mut mil, &mut state_reg, &mut battle_reg, &war_reg);
+        resolve_finished_battles(
+            &mut mil,
+            &mut state_reg,
+            &mut battle_reg,
+            &war_reg,
+            &zero_damage_battles_today,
+        );
         assert!(
             !mil.divisions.contains_key(&defender.id),
             "manpower=0のDivisionはresolve_finished_battlesで除去されるはず"
@@ -1910,7 +1992,8 @@ mod tests {
             .unwrap();
 
         // 1. 通常戦闘のみ適用(まだ撤退は処理していない)。
-        process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
+        let zero_damage_battles_today =
+            process_daily_battles(&mut mil, &mut battle_reg, &state_reg, &war_reg);
         let after_combat = mil.divisions.get(&attacker.id).cloned();
         let Some(after_combat) = after_combat else {
             panic!("攻撃側は通常戦闘だけでは全滅しないはずの設定");
@@ -1933,7 +2016,13 @@ mod tests {
         );
 
         // 2. 撤退追加損失を適用(通常戦闘後のmanpower/equipmentを基準にするはず)。
-        resolve_finished_battles(&mut mil, &mut state_reg, &mut battle_reg, &war_reg);
+        resolve_finished_battles(
+            &mut mil,
+            &mut state_reg,
+            &mut battle_reg,
+            &war_reg,
+            &zero_damage_battles_today,
+        );
         let after_retreat = mil.divisions.get(&attacker.id);
 
         if let Some(after_retreat) = after_retreat {
