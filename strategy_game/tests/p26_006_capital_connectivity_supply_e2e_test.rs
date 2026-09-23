@@ -241,6 +241,7 @@ fn create_war(app: &mut App, attacker: CountryId, defender: CountryId) -> WarId 
     app.world_mut().resource_mut::<WarRegistry>().add_war(war)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_battle(
     app: &mut App,
     war_id: WarId,
@@ -250,7 +251,13 @@ fn create_battle(
     attacker_ids: Vec<DivisionId>,
     defender_ids: Vec<DivisionId>,
 ) -> BattleId {
-    let attacker_origins = attacker_ids.iter().map(|id| (*id, state_id)).collect();
+    // P27-FU-001: originはBattleの場所(`state_id`)ではなく、攻撃側Divisionが
+    // 実際に出撃した実州でなければならない。同一値だと新しい出撃元検証で
+    // 「originに競合中のBattleがある(=自分自身)」と判定され、代替探索も
+    // 遮断された前線州発だと失敗し、Divisionが誤って消滅する。
+    // 本ファイルの攻撃側は常にARCADIAであり、首都は常にARCADIA自国支配かつ
+    // 戦闘の起きない州なので、常に有効なoriginとして使える。
+    let attacker_origins = attacker_ids.iter().map(|id| (*id, ARCADIA_CAPITAL)).collect();
     let battle = Battle {
         id: BattleId(0),
         war_id,

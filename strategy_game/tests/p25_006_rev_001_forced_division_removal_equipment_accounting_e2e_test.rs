@@ -236,6 +236,7 @@ fn create_war(app: &mut App, attacker: CountryId, defender: CountryId) -> WarId 
     app.world_mut().resource_mut::<WarRegistry>().add_war(war)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_battle(
     app: &mut App,
     war_id: WarId,
@@ -244,8 +245,13 @@ fn create_battle(
     defender_country: CountryId,
     attacker_ids: Vec<DivisionId>,
     defender_ids: Vec<DivisionId>,
+    attacker_origin: StateId,
 ) -> BattleId {
-    let attacker_origins = attacker_ids.iter().map(|id| (*id, state_id)).collect();
+    // P27-FU-001: originはBattleの場所(`state_id`、本ファイルでは実在しない
+    // `TEST_STATE_ID`)ではなく、攻撃側Divisionが実際に出撃した実州でなければ
+    // ならない。同一値を使うと新しい出撃元検証で「無効なorigin」と判定され、
+    // 代替探索も`state_id`不在で即失敗し、Divisionが誤って消滅する。
+    let attacker_origins = attacker_ids.iter().map(|id| (*id, attacker_origin)).collect();
     let battle = Battle {
         id: BattleId(0),
         war_id,
@@ -344,6 +350,7 @@ fn setup_retreating_battle(app: &mut App, attacker_equipment: f64) -> (DivisionI
         ai_country,
         vec![attacker_id],
         vec![defender_id],
+        player_home,
     );
 
     (attacker_id, defender_id)

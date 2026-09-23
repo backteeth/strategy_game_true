@@ -44,6 +44,7 @@ use strategy_game::save::write::SavePathConfig;
 use strategy_game::save::{LoadGamePlugin, SaveGamePlugin, SaveRequestMessage};
 use strategy_game::state::SelectedState;
 use strategy_game::state::StatePlugin;
+use strategy_game::state::data::StateRegistry;
 use strategy_game::war::WarPlugin;
 use strategy_game::war::data::{War, WarRegistry, WarStatus};
 
@@ -305,6 +306,23 @@ fn create_war(app: &mut App, attacker: CountryId, defender: CountryId) -> WarId 
     app.world_mut().resource_mut::<WarRegistry>().add_war(war)
 }
 
+/// P26-005の攻撃側Divisionは全て`TEST_STATE_ID`(実在しない合成州)上に直接
+/// 生成されるため、そのまま出撃元(origin)としては使えない――新しい出撃元
+/// 検証は実在しない州を無効と判定し、代替探索も`TEST_STATE_ID`に隣接州が
+/// 存在しないため即失敗し、Divisionが誤って消滅する。本ファイルの戦闘結果
+/// (与ダメージ・組織率・Save一致性)検証は出撃元の地理と無関係なので、実マップ
+/// 上で当該国が実際に支配する州を出撃元として渡す。
+fn state_owned_by(app: &App, owner: CountryId) -> StateId {
+    app.world()
+        .resource::<StateRegistry>()
+        .states
+        .iter()
+        .find(|s| s.owner_country_id == owner)
+        .map(|s| s.id)
+        .expect("real map must have at least one state owned by this country")
+}
+
+#[allow(clippy::too_many_arguments)]
 fn create_battle(
     app: &mut App,
     war_id: WarId,
@@ -314,7 +332,8 @@ fn create_battle(
     attacker_ids: Vec<DivisionId>,
     defender_ids: Vec<DivisionId>,
 ) -> BattleId {
-    let attacker_origins = attacker_ids.iter().map(|id| (*id, state_id)).collect();
+    let attacker_origin = state_owned_by(app, attacker_country);
+    let attacker_origins = attacker_ids.iter().map(|id| (*id, attacker_origin)).collect();
     let battle = Battle {
         id: BattleId(0),
         war_id,

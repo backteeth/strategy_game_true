@@ -548,7 +548,14 @@ fn create_battle(
     attacker_ids: Vec<DivisionId>,
     defender_ids: Vec<DivisionId>,
 ) -> BattleId {
-    let attacker_origins = attacker_ids.iter().map(|id| (*id, TEST_STATE_ID)).collect();
+    // P27-FU-001: originはBattleの場所(`TEST_STATE_ID`、実在しない合成州)ではなく、
+    // 攻撃側Divisionが実際に出撃した実州でなければならない。同一値のままだと
+    // 新しい出撃元検証で「無効なorigin」と判定され、代替探索も`TEST_STATE_ID`に
+    // 隣接州が存在しないため即失敗し、Divisionが誤って消滅する。本ファイルの
+    // 検証対象(装備充足率が戦闘力へ与える影響)は出撃元の地理と無関係なので、
+    // 実マップ上で攻撃側国家が実際に支配する州を出撃元として使う。
+    let attacker_origin = state_owned_by(app, attacker_country);
+    let attacker_origins = attacker_ids.iter().map(|id| (*id, attacker_origin)).collect();
     let battle = Battle {
         id: BattleId(0),
         war_id,

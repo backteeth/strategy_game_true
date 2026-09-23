@@ -228,6 +228,15 @@ struct Spec {
     /// P27-007: このインデックス(`attackers`内の0始まり)の攻撃師団を
     /// `attacker_origins`から意図的に除外する(退路なしのDivision消滅を検証する)。
     omit_origin_for: Vec<usize>,
+    /// P27-FU-001: Battle登録より前に適用する`(州, controller)`の上書き一覧。
+    /// origin無効化時の代替退却先の有無を、実データのデフォルトcontrollerに
+    /// 依存せず明示的に構成するために使う(例: 州1を敵支配にして退路なしを作る、
+    /// 州4を自国支配にしてそこを正規の出撃元として使う)。
+    pre_battle_controller_overrides: Vec<(StateId, CountryId)>,
+    /// P27-FU-001: Battle登録の**後**(=`attacker_origins`記録済みの後)に適用する
+    /// `(州, controller)`の上書き一覧。「戦闘開始時点では有効だった出撃元が、
+    /// 戦闘継続中に敵へ再占領される」(P27-008で確認した実際の状況)を再現する。
+    post_battle_controller_overrides: Vec<(StateId, CountryId)>,
 }
 
 impl Spec {
@@ -243,6 +252,8 @@ impl Spec {
             reverse_insert_order: false,
             attacker_origin_overrides: Vec::new(),
             omit_origin_for: Vec::new(),
+            pre_battle_controller_overrides: Vec::new(),
+            post_battle_controller_overrides: Vec::new(),
         }
     }
 }
@@ -352,6 +363,12 @@ fn run_scenario(spec: &Spec) -> Run {
         (atk_ids, def_ids)
     };
 
+    // P27-FU-001: Battle登録より前に、指定された州のcontrollerを明示的に設定する。
+    for &(state, controller) in &spec.pre_battle_controller_overrides {
+        let mut sr = app.world_mut().resource_mut::<StateRegistry>();
+        strategy_game::military::invasion::occupy_state(state, controller, &mut sr);
+    }
+
     // 実際の戦闘登録(進行中のBattle)。両陣営の師団はFighting・州3。攻撃側の出撃元は州1。
     {
         let mut br = app
@@ -390,6 +407,12 @@ fn run_scenario(spec: &Spec) -> Run {
         for id in attacker_ids.iter().chain(defender_ids.iter()) {
             m.divisions.get_mut(id).unwrap().combat_id = Some(battle_id);
         }
+    }
+
+    // P27-FU-001: `attacker_origins`記録済みの後で、出撃元の再占領を模擬する。
+    for &(state, controller) in &spec.post_battle_controller_overrides {
+        let mut sr = app.world_mut().resource_mut::<StateRegistry>();
+        strategy_game::military::invasion::occupy_state(state, controller, &mut sr);
     }
 
     let (mut year, mut month, mut day) = (1800, 1u8, 2u8);
@@ -832,6 +855,15 @@ fn test_10_save_load_matches_the_continuous_run_at_every_critical_point() {
 // P27-007: 両陣営ゼロ損害終了の退却先・退路なし・決定性
 // ─────────────────────────────────────────────────────────────────────────
 
+/// 【P27-FU-001により修正(分類D: fixtureの過去の誤り)】実データ上、州3の隣接州で
+/// デフォルトから自国(Arcadia)支配なのは州1だけで、州4はElfin(敵)の領土である
+/// (P27-FU-001-PRE-001 §10で判明)。P27-007時点の実装(originを無条件に信頼する)では
+/// この誤りが表面化しなかったが、P27-FU-001(originのcontrollerを検証する)では
+/// 州4を出撃元に指定しても無効と判定され、代替探索(州3の隣接州のうち他に有効な
+/// 自国州がない)の結果、2機目の攻撃師団は退路なしとして消滅してしまう。
+/// 本来の検証目的(複数の攻撃師団がそれぞれ個別の出撃元へ撤退する)を保つため、
+/// `pre_battle_controller_overrides`で州4を戦闘開始前に明示的にArcadia支配へ
+/// 変更し、州4が「正規の出撃元」として成立する状態を作る。
 #[test]
 fn test_11_multiple_attackers_with_distinct_origins_retreat_to_their_own_origin() {
     let mut spec = Spec::new(
@@ -840,6 +872,7 @@ fn test_11_multiple_attackers_with_distinct_origins_retreat_to_their_own_origin(
     );
     spec.arcadia_supplies = 0.0;
     spec.elfin_supplies = 0.0;
+    spec.pre_battle_controller_overrides = vec![(StateId(4), ARCADIA)];
     spec.attacker_origin_overrides = vec![Some(StateId(1)), Some(StateId(4))];
     let r = run_scenario(&spec);
     let day1 = &r.snaps[0];
@@ -847,29 +880,35 @@ fn test_11_multiple_attackers_with_distinct_origins_retreat_to_their_own_origin(
     let a0 = snap_of(day1, r.attackers[0]);
     let a1 = snap_of(day1, r.attackers[1]);
     assert_eq!(a0.state, 1, "師団ごとの出撃元(州1)へ撤退する");
-    assert_eq!(a1.state, 4, "師団ごとの出撃元(州4)へ撤退する");
+    assert_eq!(a1.state, 4, "師団ごとの出撃元(州4、事前にArcadia支配へ変更済み)へ撤退する");
     assert_eq!(a0.status, DivisionStatus::Idle);
     assert_eq!(a1.status, DivisionStatus::Idle);
     assert_eq!(a0.manpower, 10_000 - 1_000);
     assert_eq!(a1.manpower, 10_000 - 1_000);
 }
 
-/// Known: 攻撃側撤退先の安全性(出撃元が既に敵に占領されている等)は本タスクの
-/// スコープ外で、既存の組織率0撤退と同じ挙動(検証しない)を維持する(P27-007-PRE-001
-/// §27・§30)。ここでは`attacker_origins`に記録自体が無い(データ上通常あり得ない)
-/// 場合の安全側の挙動、すなわち既存の消滅処理が使われ、panicしないことだけを確認する。
+/// 【P27-FU-001により再設計(分類B: 退路なし・消滅を検証するテスト)】P27-FU-001以降、
+/// originが無効・欠落でも、戦闘州(州3)に隣接する他の自国州(既定では州1)への
+/// 代替撤退が試みられる。そのため単に出撃元を欠落させるだけでは、州1という
+/// 有効な代替先が既に存在し、退路なしにならない(実測で師団が州1へ生存撤退する)。
+/// 真に退路なしを検証するには、州1も無効化(敵支配へ変更)し、州3の他の隣接州も
+/// 元々自国支配ではない(実データのデフォルト)ことを利用して、代替先も存在しない
+/// 状態を明示的に作る。
 #[test]
-fn test_12_missing_origin_destroys_the_attacker_without_panicking() {
+fn test_12_missing_origin_and_no_alternative_destroys_the_attacker_without_panicking() {
     let mut spec = Spec::new(vec![Unit::full()], vec![Unit::full()]);
     spec.arcadia_supplies = 0.0;
     spec.elfin_supplies = 0.0;
     spec.omit_origin_for = vec![0];
+    // 州3の隣接州のうちデフォルトで自国(Arcadia)支配なのは州1だけ(§実データ確認済み)。
+    // それも敵支配へ変更し、代替撤退先が本当に存在しない状態を作る。
+    spec.pre_battle_controller_overrides = vec![(StateId(1), ELFIN)];
     let r = run_scenario(&spec);
     let day1 = &r.snaps[0];
     assert!(!day1.battle_ongoing);
     assert!(
         find(day1, r.attackers[0]).is_none(),
-        "退路なしの攻撃師団は既存の消滅処理で除去される"
+        "originが無効・欠落かつ代替先も存在しない攻撃師団は既存の消滅処理で除去される"
     );
     assert_eq!(day1.controller3, ELFIN.0, "controllerは変わらない");
 }
@@ -898,4 +937,102 @@ fn test_13_zero_damage_termination_is_independent_of_registration_order() {
     assert_eq!(normalize(&forward), normalize(&reversed), "登録順反転で結果が同一");
     assert!(!forward.snaps[0].battle_ongoing);
     assert!(!reversed.snaps[0].battle_ongoing);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// P27-FU-001: 撤退先の検証・代替探索(実App・実System経由)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// P27-008で確認した実際の状況(戦闘開始時点では有効だった出撃元が、戦闘継続中に
+/// 敵へ再占領される)を再現する。攻撃側の補給0により通常の組織率撤退経路
+/// (P27-007のゼロ損害経路ではない)で撤退が発生し、出撃元(州1)が既に敵支配へ
+/// 変わっているため、州4(事前にArcadia支配へ変更した代替候補)へ撤退する。
+/// P27-008で確認された「敵支配州で`Idle`になる」不整合が解消されることを確認する。
+#[test]
+fn test_14_attacker_retreats_to_an_alternative_when_the_origin_is_recaptured_mid_battle() {
+    let mut spec = Spec::new(vec![Unit::full()], vec![Unit::full()]);
+    spec.arcadia_supplies = 0.0; // 攻撃側(Arcadia)の国家備蓄0 → 攻撃側の実効戦力0。
+    spec.pre_battle_controller_overrides = vec![(StateId(4), ARCADIA)];
+    spec.attacker_origin_overrides = vec![Some(StateId(1))];
+    // 戦闘開始(=attacker_origins記録)の後に、出撃元(州1)を敵が再占領する。
+    spec.post_battle_controller_overrides = vec![(StateId(1), ELFIN)];
+    let r = run_scenario(&spec);
+    let day1 = &r.snaps[0];
+    assert!(!day1.battle_ongoing, "攻撃側の組織率0により通常経路で戦闘が終わる");
+    let attacker = snap_of(day1, r.attackers[0]);
+    assert_eq!(attacker.status, DivisionStatus::Idle);
+    assert_eq!(attacker.state, 4, "出撃元(州1)は無効化されたため代替先(州4)へ撤退する");
+    assert_ne!(attacker.state, 1, "敵支配化した出撃元へは戻らない");
+    assert_eq!(day1.controller3, ELFIN.0, "controllerは変わらない");
+}
+
+/// 同一Battle内で、正常originの攻撃師団と、origin欠落だが代替先(州4)がある攻撃師団が
+/// それぞれ独立して正しい結果になることを確認する。
+///
+/// 退路なしの師団を同じBattle内へさらに混在させることはできない: 代替探索は
+/// `owner`と`battle_state`だけで決まり、同じBattleの攻撃側は全員同じownerを
+/// 共有するため、「あるorigin無効師団は代替先へ撤退できるが、別のorigin無効師団は
+/// 退路なしになる」状況は構造的に作れない(退路なし単体の検証はtest_12で行う)。
+#[test]
+fn test_15_mixed_attackers_each_resolve_independently_in_the_same_battle() {
+    let mut spec = Spec::new(vec![Unit::full(), Unit::full()], vec![Unit::full()]);
+    spec.arcadia_supplies = 0.0;
+    spec.elfin_supplies = 0.0;
+    spec.pre_battle_controller_overrides = vec![(StateId(4), ARCADIA)];
+    // 0番目: 正常originを州4に設定(origin優先はStateId順によらずそのまま使う)。
+    // 1番目: origin欠落 → 代替探索は州1・州4のうちStateId昇順で州1を選ぶ。
+    // 両者が異なる州になることで、origin優先と代替探索が別々の経路であることを示す。
+    spec.attacker_origin_overrides = vec![Some(StateId(4))];
+    spec.omit_origin_for = vec![1];
+    let r = run_scenario(&spec);
+    let day1 = &r.snaps[0];
+    assert!(!day1.battle_ongoing);
+    let a0 = snap_of(day1, r.attackers[0]);
+    assert_eq!(a0.state, 4, "0番目は正常origin(州4)へ、StateId順に関わらずそのまま撤退する");
+    let a1 = snap_of(day1, r.attackers[1]);
+    assert_eq!(a1.state, 1, "1番目はorigin欠落のため代替探索(StateId昇順で州1)を使う");
+}
+
+/// 複数の攻撃師団が同じ代替先へ撤退しても、欠落・重複が生じないことを確認する。
+#[test]
+fn test_16_multiple_divisions_retreating_to_the_same_alternative_are_not_lost_or_duplicated() {
+    let mut spec = Spec::new(vec![Unit::full(), Unit::full()], vec![Unit::full()]);
+    spec.arcadia_supplies = 0.0;
+    spec.elfin_supplies = 0.0;
+    // 両方ともorigin欠落 → 両方とも同じ代替先(州1)へ撤退する。
+    spec.omit_origin_for = vec![0, 1];
+    let r = run_scenario(&spec);
+    let day1 = &r.snaps[0];
+    assert!(!day1.battle_ongoing);
+    let a0 = snap_of(day1, r.attackers[0]);
+    let a1 = snap_of(day1, r.attackers[1]);
+    assert_eq!(a0.state, 1);
+    assert_eq!(a1.state, 1);
+    assert_ne!(a0.id, a1.id, "2個の異なるDivisionが両方とも生存している(重複・欠落なし)");
+    assert_eq!(a0.manpower, 10_000 - 1_000);
+    assert_eq!(a1.manpower, 10_000 - 1_000);
+}
+
+/// origin無効化(代替撤退)・退路なし消滅の各分岐点で、save→loadが連続実行と一致する
+/// ことを確認する(§8.7)。
+#[test]
+fn test_17_save_load_matches_across_the_retreat_destination_branches() {
+    // origin有効な戦闘中(day1にはまだ両陣営正の実効戦力があり戦闘継続、後段のtest_10と
+    // 同じ`stuck_state_spec`的な非ゼロ損害シナリオを使う代わりに、ここでは撤退先
+    // 分岐そのものを対象にするため、両陣営ゼロ損害の分岐点(day1=即日終了)を使う)。
+    let mut recapture_spec = Spec::new(vec![Unit::full()], vec![Unit::full()]);
+    recapture_spec.arcadia_supplies = 0.0;
+    recapture_spec.pre_battle_controller_overrides = vec![(StateId(4), ARCADIA)];
+    recapture_spec.attacker_origin_overrides = vec![Some(StateId(1))];
+    recapture_spec.post_battle_controller_overrides = vec![(StateId(1), ELFIN)];
+    assert_save_load_matches(recapture_spec, &[1]);
+
+    // 退路なし消滅後。
+    let mut no_retreat_spec = Spec::new(vec![Unit::full()], vec![Unit::full()]);
+    no_retreat_spec.arcadia_supplies = 0.0;
+    no_retreat_spec.elfin_supplies = 0.0;
+    no_retreat_spec.omit_origin_for = vec![0];
+    no_retreat_spec.pre_battle_controller_overrides = vec![(StateId(1), ELFIN)];
+    no_retreat_spec.days = 5;
+    assert_save_load_matches(no_retreat_spec, &[1, 3]);
 }

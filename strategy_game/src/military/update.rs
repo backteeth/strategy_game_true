@@ -8,7 +8,7 @@ use crate::military::combat_calc::{
 };
 use crate::military::data::{Division, DivisionStatus, MilitaryRegistry};
 use crate::military::equipment::{calculate_proportional_equipment_loss, try_destroy_equipment};
-use crate::military::invasion::{find_retreat_destination, occupy_state};
+use crate::military::invasion::{attacker_retreat_destination, find_retreat_destination, occupy_state};
 use crate::military::movement::{process_movement, validate_and_stop_invalid_movements};
 use crate::state::data::StateRegistry;
 use crate::war::data::{WarRegistry, WarStatus};
@@ -329,6 +329,8 @@ fn resolve_finished_battles(
         // P27-007: 今日どちらの陣営も損害を与えられなかった戦闘は、防御側勝利
         // として即日終了し、攻撃側全員を出撃元(`attacker_origins`)へ撤退させる
         // (既存の組織率0撤退・10%ペナルティ・比例装備損失をそのまま再利用する)。
+        // 出撃元が現在も有効かをP27-FU-001の`attacker_retreat_destination`で
+        // 検証し、無効なら戦闘州隣接の代替自国州を探す(§3.7参照)。
         // 防御側は既存の「攻撃側全滅→防御側勝利」分岐と同じ状態変更を受ける。
         if zero_damage_battles_today.contains(&battle_id) {
             if let Some(b) = battle_registry.battles.get_mut(&battle_id) {
@@ -336,7 +338,14 @@ fn resolve_finished_battles(
             }
             for &division_id in &battle.attacker_division_ids {
                 let origin = battle.attacker_origins.get(&division_id).copied();
-                force_retreat_or_destroy(division_id, origin, military_registry);
+                let dest = attacker_retreat_destination(
+                    battle.state_id,
+                    battle.attacker_country,
+                    origin,
+                    state_registry,
+                    battle_registry,
+                );
+                force_retreat_or_destroy(division_id, dest, military_registry);
             }
             for &division_id in &battle.defender_division_ids {
                 if let Some(division) = military_registry.divisions.get_mut(&division_id) {
@@ -352,11 +361,19 @@ fn resolve_finished_battles(
             continue;
         }
 
-        // 攻撃側: 脱落者は各自の出撃元地域へ撤退する(常に退路あり)
+        // 攻撃側: 脱落者は各自の出撃元地域へ撤退する。出撃元が無効・欠落なら
+        // 戦闘州隣接の代替自国州を探す(P27-FU-001、§3.2・§3.3)。
         let mut remaining_attackers = Vec::new();
         for &division_id in &battle.attacker_division_ids {
             let origin = battle.attacker_origins.get(&division_id).copied();
-            if resolve_participant_outcome(division_id, origin, military_registry) {
+            let dest = attacker_retreat_destination(
+                battle.state_id,
+                battle.attacker_country,
+                origin,
+                state_registry,
+                battle_registry,
+            );
+            if resolve_participant_outcome(division_id, dest, military_registry) {
                 remaining_attackers.push(division_id);
             }
         }
@@ -447,7 +464,8 @@ fn resolve_finished_battles(
 /// 個々の参加師団の組織率/戦力を判定し、脱落していれば撤退または撃破処理を行う。
 /// 戦闘に留まる(組織率>0かつ戦力>0)場合のみ true を返す。
 ///
-/// `retreat_destination`は攻撃側なら出撃元(`battle.attacker_origins`、常にSome想定)、
+/// `retreat_destination`は攻撃側なら`attacker_retreat_destination`(出撃元が有効なら
+/// それ、無効なら戦闘州隣接の代替自国州、なければNone、P27-FU-001)で求めた退路、
 /// 防御側なら`find_retreat_destination`で求めた退路(見つからなければNone)を渡す。
 fn resolve_participant_outcome(
     division_id: DivisionId,

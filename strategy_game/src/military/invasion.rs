@@ -300,8 +300,19 @@ pub fn find_retreat_destination(
     battle_registry: &BattleRegistry,
 ) -> Option<StateId> {
     let division = military_registry.divisions.get(&division_id)?;
-    let owner = division.owner;
+    neighboring_retreat_candidate(current_state, division.owner, state_registry, battle_registry)
+}
 
+/// `current_state`の隣接州のうち、`controller()==owner`かつ進行中の別Battleが
+/// ない州を、StateId昇順で1件選ぶ(候補州生成の共通部分)。防御側の
+/// `find_retreat_destination`と、攻撃側の`attacker_retreat_destination`
+/// (originが無効な場合の代替先探索、P27-FU-001)が共有する。
+fn neighboring_retreat_candidate(
+    current_state: StateId,
+    owner: crate::common::CountryId,
+    state_registry: &StateRegistry,
+    battle_registry: &BattleRegistry,
+) -> Option<StateId> {
     let current_state_data = state_registry.get(current_state)?;
 
     let mut candidates: Vec<StateId> = current_state_data
@@ -330,6 +341,41 @@ pub fn find_retreat_destination(
     // 決定的な選択: StateId昇順
     candidates.sort_by_key(|id| id.0);
     candidates.into_iter().next()
+}
+
+/// 攻撃側Divisionの撤退先を決める(P27-FU-001)。
+///
+/// P27-008で、戦闘開始時に記録した`attacker_origins`(出撃元)の現在controllerを
+/// 検証せずに撤退させていたため、出撃元が戦闘継続中に敵へ再占領されると、
+/// 攻撃側Divisionが敵支配州で`Idle`のまま放置される不整合が確認された
+/// (P27-FU-001-PRE-001)。
+///
+/// 契約:
+/// 1. `preferred_origin`(記録済みの出撃元)が現在も有効
+///    (Stateが存在し、`controller()==owner`、進行中の別Battleがない)なら
+///    そこへ撤退する(既存どおりの優先)。
+/// 2. 無効・欠落なら、`battle_state`(戦闘州)を起点に、防御側
+///    `find_retreat_destination`と全く同じ条件(隣接・自国controller・
+///    進行中の別Battleなし)で代替先をStateId昇順で探す。
+/// 3. 代替先もなければ`None`(既存の撤退不能時消滅処理を呼び出し側が適用する)。
+///
+/// 首都連結性・補給可能性は検証しない(撤退可能性と補給可能性は分離する、
+/// P27-FU-001-PRE-001)。この関数自体は状態を変更しない純粋関数である。
+pub fn attacker_retreat_destination(
+    battle_state: StateId,
+    owner: crate::common::CountryId,
+    preferred_origin: Option<StateId>,
+    state_registry: &StateRegistry,
+    battle_registry: &BattleRegistry,
+) -> Option<StateId> {
+    if let Some(origin) = preferred_origin
+        && let Some(origin_state) = state_registry.get(origin)
+        && origin_state.controller() == owner
+        && battle_registry.get_ongoing_battle_in_state(origin).is_none()
+    {
+        return Some(origin);
+    }
+    neighboring_retreat_candidate(battle_state, owner, state_registry, battle_registry)
 }
 
 #[cfg(test)]
@@ -462,6 +508,206 @@ mod tests {
         );
 
         // StateId(2) の方が小さいのでそちらが選ばれる
+        assert_eq!(result, Some(StateId(2)));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // P27-FU-001: attacker_retreat_destination
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// 州0(戦闘州、owner不問)、州1(自国controller)、州2(自国controller)、
+    /// 州3(敵controller)がすべて州0の隣接州であるマップ。
+    fn fu001_states(owner: CountryId, enemy: CountryId) -> StateRegistry {
+        let battle_state = StateData {
+            id: StateId(0),
+            owner_country_id: enemy,
+            neighbors: vec![StateId(1), StateId(2), StateId(3)],
+            ..Default::default()
+        };
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: owner,
+            ..Default::default()
+        };
+        let s2 = StateData {
+            id: StateId(2),
+            owner_country_id: owner,
+            ..Default::default()
+        };
+        let s3 = StateData {
+            id: StateId(3),
+            owner_country_id: enemy,
+            ..Default::default()
+        };
+        StateRegistry::build(vec![battle_state, s1, s2, s3])
+    }
+
+    #[test]
+    fn attacker_retreat_destination_uses_the_valid_origin_and_does_not_search_alternatives() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let br = BattleRegistry::default();
+        // 州2も有効な代替候補だが、州1(origin)が有効なら探索せずそちらを使う。
+        let result =
+            attacker_retreat_destination(StateId(0), owner, Some(StateId(1)), &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_rejects_an_origin_controlled_by_the_enemy() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let br = BattleRegistry::default();
+        // origin(州3)は敵controller → 無効、代替探索で州1(StateId昇順の先頭)。
+        let result =
+            attacker_retreat_destination(StateId(0), owner, Some(StateId(3)), &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_rejects_an_origin_controlled_by_a_third_country() {
+        let owner = CountryId(1);
+        let third = CountryId(3);
+        let mut sr = fu001_states(owner, CountryId(2));
+        // 州1を第三国支配に変更する(同盟国等の区別は現行モデルにない、自国以外は全て無効)。
+        occupy_state(StateId(1), third, &mut sr);
+        let br = BattleRegistry::default();
+        let result =
+            attacker_retreat_destination(StateId(0), owner, Some(StateId(1)), &sr, &br);
+        // 州1(第三国支配になった)は無効、代替探索で州2。
+        assert_eq!(result, Some(StateId(2)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_searches_alternatives_when_origin_is_missing() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let br = BattleRegistry::default();
+        let result = attacker_retreat_destination(StateId(0), owner, None, &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_searches_alternatives_when_the_origin_state_does_not_exist() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let br = BattleRegistry::default();
+        let result =
+            attacker_retreat_destination(StateId(0), owner, Some(StateId(99)), &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_searches_alternatives_when_a_battle_is_ongoing_at_the_origin() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let mut br = BattleRegistry::default();
+        br.start_battle(Battle {
+            id: crate::common::BattleId(0),
+            war_id: crate::common::WarId(0),
+            state_id: StateId(1),
+            attacker_country: enemy,
+            defender_country: owner,
+            attacker_division_ids: vec![],
+            defender_division_ids: vec![],
+            attacker_origins: std::collections::HashMap::new(),
+            start_date: "1800/01/01".to_string(),
+            elapsed_days: 0,
+            status: BattleStatus::Ongoing,
+        })
+        .unwrap();
+        // origin(州1)自体に別の進行中Battleがある → 無効、代替探索で州2。
+        let result =
+            attacker_retreat_destination(StateId(0), owner, Some(StateId(1)), &sr, &br);
+        assert_eq!(result, Some(StateId(2)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_picks_the_smallest_state_id_among_multiple_alternatives() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let br = BattleRegistry::default();
+        // originが無効・欠落: 州1・州2がともに有効な代替候補、StateId昇順で州1。
+        let result =
+            attacker_retreat_destination(StateId(0), owner, Some(StateId(3)), &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_returns_none_when_no_alternative_exists() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        // 州1・州2も敵支配にして、代替先が本当に存在しない状態を作る。
+        let mut sr = fu001_states(owner, enemy);
+        occupy_state(StateId(1), enemy, &mut sr);
+        occupy_state(StateId(2), enemy, &mut sr);
+        let br = BattleRegistry::default();
+        let result = attacker_retreat_destination(StateId(0), owner, None, &sr, &br);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn attacker_retreat_destination_capital_disconnected_state_is_still_a_valid_candidate() {
+        // 首都連結性は撤退可能性の条件にしない(補給可能性と分離する、P27-FU-001-PRE-001)。
+        // fu001_statesの州1・州2は首都との連結を一切表現していないが、それでも
+        // controller==owner・進行中戦闘なしだけで有効な候補になることを確認する。
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        let sr = fu001_states(owner, enemy);
+        let br = BattleRegistry::default();
+        let result = attacker_retreat_destination(StateId(0), owner, None, &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn attacker_retreat_destination_is_independent_of_hashmap_or_vec_iteration_order() {
+        let owner = CountryId(1);
+        let enemy = CountryId(2);
+        // 隣接州の登録順を反転させても、StateId昇順の同じ結果になる。
+        let battle_state = StateData {
+            id: StateId(0),
+            owner_country_id: enemy,
+            neighbors: vec![StateId(3), StateId(2), StateId(1)],
+            ..Default::default()
+        };
+        let s1 = StateData { id: StateId(1), owner_country_id: owner, ..Default::default() };
+        let s2 = StateData { id: StateId(2), owner_country_id: owner, ..Default::default() };
+        let s3 = StateData { id: StateId(3), owner_country_id: enemy, ..Default::default() };
+        let sr = StateRegistry::build(vec![s3, s2, s1, battle_state]);
+        let br = BattleRegistry::default();
+        let result = attacker_retreat_destination(StateId(0), owner, None, &sr, &br);
+        assert_eq!(result, Some(StateId(1)));
+    }
+
+    #[test]
+    fn find_retreat_destination_result_is_unchanged_by_sharing_the_candidate_helper() {
+        // 防御側の既存関数は、共通ヘルパー抽出後も同じ結果を返す(既存テストの
+        // test_find_retreat_destination_deterministicと同じ入力・同じ期待値)。
+        let s1 = StateData {
+            id: StateId(1),
+            owner_country_id: CountryId(2),
+            neighbors: vec![StateId(3), StateId(2)],
+            ..Default::default()
+        };
+        let s2 = StateData { id: StateId(2), owner_country_id: CountryId(2), ..Default::default() };
+        let s3 = StateData { id: StateId(3), owner_country_id: CountryId(2), ..Default::default() };
+        let state_registry = StateRegistry::build(vec![s1, s2, s3]);
+        let battle_registry = BattleRegistry::default();
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions.insert(DivisionId(0), make_division(0, CountryId(2), StateId(1)));
+        let result = find_retreat_destination(
+            DivisionId(0),
+            StateId(1),
+            &mil,
+            &state_registry,
+            &battle_registry,
+        );
         assert_eq!(result, Some(StateId(2)));
     }
 
