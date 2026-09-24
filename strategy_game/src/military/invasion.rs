@@ -711,6 +711,112 @@ mod tests {
         assert_eq!(result, Some(StateId(2)));
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // P27-FU-003: 進行中Battleによる代替候補の除外
+    // ─────────────────────────────────────────────────────────────────────
+
+    const FU003_OWNER: CountryId = CountryId(1);
+    const FU003_ENEMY: CountryId = CountryId(2);
+    const FU003_BATTLE_STATE: StateId = StateId(10);
+    const FU003_CANDIDATE_A: StateId = StateId(11);
+    const FU003_CANDIDATE_B: StateId = StateId(12);
+
+    /// 戦闘州10の隣接州は候補A(11)と候補B(12)だけで、両方ともFU003_OWNERの
+    /// controller下にある。隣接リストと登録順はわざとStateId降順にしてある。
+    fn fu003_states() -> StateRegistry {
+        let battle_state = StateData {
+            id: FU003_BATTLE_STATE,
+            owner_country_id: FU003_ENEMY,
+            controller_country: Some(FU003_ENEMY),
+            neighbors: vec![FU003_CANDIDATE_B, FU003_CANDIDATE_A],
+            ..Default::default()
+        };
+        let candidate_a = StateData {
+            id: FU003_CANDIDATE_A,
+            owner_country_id: FU003_OWNER,
+            controller_country: Some(FU003_OWNER),
+            ..Default::default()
+        };
+        let candidate_b = StateData {
+            id: FU003_CANDIDATE_B,
+            owner_country_id: FU003_OWNER,
+            controller_country: Some(FU003_OWNER),
+            ..Default::default()
+        };
+        StateRegistry::build(vec![candidate_b, candidate_a, battle_state])
+    }
+
+    fn fu003_ongoing_battle_at(battle_registry: &mut BattleRegistry, state_id: StateId) {
+        battle_registry
+            .start_battle(Battle {
+                id: crate::common::BattleId(0),
+                war_id: crate::common::WarId(0),
+                state_id,
+                attacker_country: FU003_ENEMY,
+                defender_country: FU003_OWNER,
+                attacker_division_ids: vec![],
+                defender_division_ids: vec![],
+                attacker_origins: std::collections::HashMap::new(),
+                start_date: "1800/01/01".to_string(),
+                elapsed_days: 0,
+                status: BattleStatus::Ongoing,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn retreat_candidate_skips_smaller_state_id_with_ongoing_battle_and_picks_next() {
+        let sr = fu003_states();
+        let mut br = BattleRegistry::default();
+        fu003_ongoing_battle_at(&mut br, FU003_CANDIDATE_A);
+
+        // 前提: Battleがなければ候補A(11)が選ばれる、つまりAを外す理由はBattleだけ。
+        assert_eq!(
+            neighboring_retreat_candidate(FU003_BATTLE_STATE, FU003_OWNER, &sr, &BattleRegistry::default()),
+            Some(FU003_CANDIDATE_A),
+            "fixture precondition: without any battle the smaller candidate A(11) must win"
+        );
+
+        // 候補A(11)は自国controllerでも戦闘中の州であり、退却先にすると
+        // 別の戦闘へ撤退させることになるため選んではならない。
+        assert_eq!(
+            neighboring_retreat_candidate(FU003_BATTLE_STATE, FU003_OWNER, &sr, &br),
+            Some(FU003_CANDIDATE_B),
+            "expected candidate B(12) because candidate A(11) has an ongoing battle"
+        );
+
+        // 攻撃側の代替探索と防御側の撤退先探索は同じ候補選択を共有している。
+        assert_eq!(
+            attacker_retreat_destination(FU003_BATTLE_STATE, FU003_OWNER, None, &sr, &br),
+            Some(FU003_CANDIDATE_B),
+            "attacker fallback must also skip A(11) and pick B(12)"
+        );
+        let mut mil = MilitaryRegistry::default();
+        mil.divisions
+            .insert(DivisionId(0), make_division(0, FU003_OWNER, FU003_BATTLE_STATE));
+        assert_eq!(
+            find_retreat_destination(DivisionId(0), FU003_BATTLE_STATE, &mil, &sr, &br),
+            Some(FU003_CANDIDATE_B),
+            "defender retreat must also skip A(11) and pick B(12)"
+        );
+    }
+
+    #[test]
+    fn retreat_candidate_is_none_when_every_friendly_neighbor_has_an_ongoing_battle() {
+        let sr = fu003_states();
+        let mut br = BattleRegistry::default();
+        fu003_ongoing_battle_at(&mut br, FU003_CANDIDATE_A);
+        fu003_ongoing_battle_at(&mut br, FU003_CANDIDATE_B);
+
+        // 自国controllerの隣接州がすべて戦闘中なら退却先はなく、呼び出し側の
+        // 既存の撤退不能時処理へ委ねられなければならない。
+        assert_eq!(
+            neighboring_retreat_candidate(FU003_BATTLE_STATE, FU003_OWNER, &sr, &br),
+            None,
+            "expected None because both A(11) and B(12) have ongoing battles"
+        );
+    }
+
     #[test]
     fn test_start_battle_creates_exactly_one_battle() {
         let c1 = CountryId(1);
