@@ -10,6 +10,9 @@
 //! `tests/p27_002_a_ai_construction_fiscal_reserve_e2e_test.rs`と同じ
 //! 実証済みパターンを使う。
 
+#[path = "common/sim_calendar.rs"]
+mod sim_calendar;
+
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
@@ -136,14 +139,16 @@ fn send_load_request(app: &mut App) {
     app.update();
 }
 
-fn tick_day(app: &mut App, year: i32, month: u8, day: u8) {
+fn tick_day(app: &mut App, base_year: i32, month_index: u8, day: u8) {
+    let (year, month) = sim_calendar::sim_calendar_date(base_year, month_index);
     let mut state: SystemState<MessageWriter<DayChangedMessage>> = SystemState::new(app.world_mut());
     state.get_mut(app.world_mut()).unwrap().write(DayChangedMessage { year, month, day });
     state.apply(app.world_mut());
     app.update();
 }
 
-fn tick_month(app: &mut App, year: i32, month: u8) {
+fn tick_month(app: &mut App, base_year: i32, month_index: u8) {
+    let (year, month) = sim_calendar::sim_calendar_date(base_year, month_index);
     let mut state: SystemState<MessageWriter<MonthChangedMessage>> = SystemState::new(app.world_mut());
     state.get_mut(app.world_mut()).unwrap().write(MonthChangedMessage { year, month });
     state.apply(app.world_mut());

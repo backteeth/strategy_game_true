@@ -17,6 +17,9 @@
 //! `feedback_bevy_state_transition_harness.md`の教訓により、`setup_app`は
 //! `tests/p27_002_b_ai_tax_rate_adjustment_e2e_test.rs`と同じ実証済みパターンを使う。
 
+#[path = "common/sim_calendar.rs"]
+mod sim_calendar;
+
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
@@ -142,23 +145,25 @@ fn send_load_request(app: &mut App) {
     app.update();
 }
 
-fn tick_day(app: &mut App, year: i32, month: u8, day: u8) {
+fn tick_day(app: &mut App, base_year: i32, month_index: u8, day: u8) {
+    let (year, month) = sim_calendar::sim_calendar_date(base_year, month_index);
     let mut state: SystemState<MessageWriter<DayChangedMessage>> = SystemState::new(app.world_mut());
     state.get_mut(app.world_mut()).unwrap().write(DayChangedMessage { year, month, day });
     state.apply(app.world_mut());
     app.update();
 }
 
-fn tick_month(app: &mut App, year: i32, month: u8) {
+fn tick_month(app: &mut App, base_year: i32, month_index: u8) {
+    let (year, month) = sim_calendar::sim_calendar_date(base_year, month_index);
     let mut state: SystemState<MessageWriter<MonthChangedMessage>> = SystemState::new(app.world_mut());
     state.get_mut(app.world_mut()).unwrap().write(MonthChangedMessage { year, month });
     state.apply(app.world_mut());
     app.update();
 }
 
-/// `current_month_index`(1始まり)の1か月分を進める。月をまたいだ`month`引数は
-/// `wrapping_add`で単純増加させる(実カレンダーの年/月境界処理は本テストの対象外、
-/// 既存E2Eテスト群と同じ簡略化)。
+/// `current_month_index`(1始まりの通算月)の1か月分(30日)を進める。通算月は
+/// `wrapping_add`で増やし、`tick_day`/`tick_month`が`sim_calendar_date`で実在する
+/// (年, 1〜12月)へ変換して発行する(P28-002-PRE-002)。
 fn advance_one_month(app: &mut App, current_month_index: u8) {
     for day in 1..=30u8 {
         tick_day(app, 1800, current_month_index, day);
@@ -679,4 +684,90 @@ fn test_16_surplus_ai_country_can_reach_tax_rate_0_00_over_repeated_safe_decreas
         "極端な黒字を維持し続ければ0.02から複数回引下げられ0.0付近まで到達し得るはず: {}",
         tax_rate_of(&app, DWARF)
     );
+}
+
+// ─── P28-002-PRE-002: ハーネス暦の年跨ぎ ──────────────────────────────────────
+
+/// ハーネスが実際に発行した日次(`'D'`)・月次(`'M'`)メッセージの記録。
+#[derive(Resource, Default)]
+struct CalendarLog(Vec<(char, i32, u8, u8)>);
+
+fn record_calendar(
+    mut log: ResMut<CalendarLog>,
+    mut days: MessageReader<DayChangedMessage>,
+    mut months: MessageReader<MonthChangedMessage>,
+) {
+    for d in days.read() {
+        log.0.push(('D', d.year, d.month, d.day));
+    }
+    for m in months.read() {
+        log.0.push(('M', m.year, m.month, 0));
+    }
+}
+
+fn calendar_recording_app() -> App {
+    let mut app = App::new();
+    app.add_message::<DayChangedMessage>()
+        .add_message::<MonthChangedMessage>()
+        .init_resource::<CalendarLog>()
+        .add_systems(Update, record_calendar);
+    app
+}
+
+/// 通算月`start..start+months`について、30日の日次tickと月境界tickの期待列を作る
+/// (年跨ぎを含め、実在する(年, 1〜12月)だけで構成される)。
+fn expected_calendar(start: u8, months: u8) -> Vec<(char, i32, u8, u8)> {
+    let mut v = Vec::new();
+    for i in 0..months {
+        let idx = start + i;
+        let (y, m) = sim_calendar::sim_calendar_date(1800, idx);
+        for day in 1..=30u8 {
+            v.push(('D', y, m, day));
+        }
+        let (ny, nm) = sim_calendar::sim_calendar_date(1800, idx + 1);
+        v.push(('M', ny, nm, 0));
+    }
+    v
+}
+
+/// P28-002-PRE-002: 120か月の長期ハーネスが、12月の次に翌年1月へ進む実在の月だけを
+/// 発行し、1か月=30日・月次tick 120回・日次tick 3600回・最終日付を保つこと、年跨ぎの
+/// 前日・当日・翌日が連続すること、60か月でのsave→load相当の分割実行が連続実行と
+/// 同じ日付列になることを、実際に発行されたメッセージ列で直接検証する。
+#[test]
+fn test_17_harness_calendar_rolls_over_years_with_valid_months() {
+    let mut app = calendar_recording_app();
+    advance_months(&mut app, 1, 120);
+    let log = std::mem::take(&mut app.world_mut().resource_mut::<CalendarLog>().0);
+
+    // 日数・月次発火回数・総日数は旧簡略暦と同じ。
+    assert_eq!(log.iter().filter(|e| e.0 == 'D').count(), 3600);
+    assert_eq!(log.iter().filter(|e| e.0 == 'M').count(), 120);
+    // 月は常に1〜12、日は1〜30。
+    assert!(log.iter().all(|e| (1..=12).contains(&e.2)));
+    assert!(log.iter().filter(|e| e.0 == 'D').all(|e| (1..=30).contains(&e.3)));
+    // 重複・欠落なし(期待列と完全一致)。
+    assert_eq!(log, expected_calendar(1, 120));
+
+    // 年跨ぎ: 1800/12/30 → 月境界(1801年1月) → 1801/01/01。
+    let pos = log.iter().position(|e| *e == ('M', 1801, 1, 0)).expect("1801年1月の月境界");
+    assert_eq!(log[pos - 1], ('D', 1800, 12, 30));
+    assert_eq!(log[pos + 1], ('D', 1801, 1, 1));
+
+    // 36か月・120か月の最終日付と、各月境界の日付。
+    let month_ticks: Vec<_> = log.iter().filter(|e| e.0 == 'M').collect();
+    assert_eq!(*month_ticks[35], ('M', 1803, 1, 0));
+    assert_eq!(*month_ticks[119], ('M', 1810, 1, 0));
+    assert_eq!(log[log.len() - 2], ('D', 1809, 12, 30));
+
+    // save→load相当の分割実行(1〜60か月 + 61〜120か月)も同じ日付列。
+    let mut split = calendar_recording_app();
+    advance_months(&mut split, 1, 60);
+    advance_months(&mut split, 61, 60);
+    assert_eq!(split.world().resource::<CalendarLog>().0, log);
+
+    // 純粋関数の境界。
+    assert_eq!(sim_calendar::sim_calendar_date(1800, 12), (1800, 12));
+    assert_eq!(sim_calendar::sim_calendar_date(1800, 13), (1801, 1));
+    assert_eq!(sim_calendar::sim_calendar_date(1800, 131), (1810, 11));
 }

@@ -7,6 +7,9 @@
 //! この2つの誤判断を是正することを、実データ・実App経由(6か国同時、36か月)で
 //! 確認する(spec §7 Test J・K・L・M相当)。
 
+#[path = "common/sim_calendar.rs"]
+mod sim_calendar;
+
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::system::SystemState;
 use bevy::prelude::*;
@@ -139,14 +142,16 @@ fn send_load_request(app: &mut App) {
     state.apply(app.world_mut());
 }
 
-fn tick_day(app: &mut App, year: i32, month: u8, day: u8) {
+fn tick_day(app: &mut App, base_year: i32, month_index: u8, day: u8) {
+    let (year, month) = sim_calendar::sim_calendar_date(base_year, month_index);
     let mut state: SystemState<MessageWriter<DayChangedMessage>> = SystemState::new(app.world_mut());
     state.get_mut(app.world_mut()).unwrap().write(DayChangedMessage { year, month, day });
     state.apply(app.world_mut());
     app.update();
 }
 
-fn tick_month(app: &mut App, year: i32, month: u8) {
+fn tick_month(app: &mut App, base_year: i32, month_index: u8) {
+    let (year, month) = sim_calendar::sim_calendar_date(base_year, month_index);
     let mut state: SystemState<MessageWriter<MonthChangedMessage>> = SystemState::new(app.world_mut());
     state.get_mut(app.world_mut()).unwrap().write(MonthChangedMessage { year, month });
     state.apply(app.world_mut());
@@ -258,6 +263,20 @@ fn total_mine_level_owned_by(app: &App, country_id: CountryId) -> u32 {
         .filter(|s| s.owner_country_id == country_id)
         .map(|s| s.building_level(BuildingType::Mine))
         .sum()
+}
+
+/// P28-002-PRE-002: 国家AIの月次評価日を、ハーネスが発行する実在の(年, 月)から求める。
+/// 本番の`country_ai::handle_daily_country_ai`は`current_day_num = year * 365 + month * 30 + day`
+/// とし、`current_day_num % 30 == country_id % 30`の日に月次評価(建設AI)を行う。ハーネスの
+/// 1か月は30日なので、各月にちょうど1日だけ該当日がある。1年=360日のハーネス暦では
+/// 年を跨ぐたびに評価日が5日ずれるため、day 1などの固定値を仮定しない。
+fn country_ai_monthly_eval_day(month_index: u8, country_id: CountryId) -> u8 {
+    let (year, month) = sim_calendar::sim_calendar_date(1800, month_index);
+    (1..=30u8)
+        .find(|&day| {
+            (year * 365 + i32::from(month) * 30 + i32::from(day)) as u32 % 30 == country_id.0 as u32 % 30
+        })
+        .expect("a 30-day month always contains exactly one evaluation day")
 }
 
 fn decision_reason_of(app: &App, country_id: CountryId) -> Option<CountryAiDecisionReason> {
@@ -406,11 +425,16 @@ fn test_k1_elfin_mine_growth_is_correctly_reserve_gated_while_existing_supply_st
     );
 
     advance_months(&mut app, 35);
-    // 36か月目の建設AI評価日(Elfin=CountryId(1)、day % 30 == 1)の時点で、
+    // 36か月目の建設AI評価日(Elfin=CountryId(1)、`current_day_num % 30 == 1`)の時点で、
     // 予備判定が実際に`FundsShortage`を選んでいることを直接確認してから月を締める。
-    tick_day(&mut app, 1800, 36, 1);
+    // P28-002-PRE-002: 暦が実在の年月(36か月目=1802年12月)になったため、評価日は
+    // day 1固定ではなく本番の式から求める。
+    let eval_day = country_ai_monthly_eval_day(36, ELFIN);
+    for day in 1..=eval_day {
+        tick_day(&mut app, 1800, 36, day);
+    }
     let reason_at_month_36_eval = decision_reason_of(&app, ELFIN);
-    for day in 2..=30u8 {
+    for day in (eval_day + 1)..=30u8 {
         tick_day(&mut app, 1800, 36, day);
     }
     tick_month(&mut app, 1800, 37);
