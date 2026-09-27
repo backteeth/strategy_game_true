@@ -368,7 +368,16 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // Passguard 3・Ferrowyn 0。本タスクの実装が実測でも完全一致することを確認する
     // (単なる「0〜3回」の緩い受け入れ基準ではなく、監査の実測値そのものと
     // 突き合わせる、より厳密な回帰保護)。
-    const EXPECTED_OSCILLATIONS: [u32; 6] = [0, 0, 0, 1, 3, 0];
+    //
+    // P28-002で正規値を更新: 旧 [0, 0, 0, 1, 3, 0] → 新 [2, 0, 2, 3, 3, 0]。
+    // 戦時MilitaryFactory建設(`country_ai::try_wartime_supply_construction`)により
+    // Dwarfの補給が自国生産で回復し、既存の攻勢補給ゲートを正規に通過して戦争が
+    // 決着するようになった(このharnessでは1801/11/14にArcadiaが、1802/01/27に
+    // Oceanicが降伏し、州0・州8をDwarfへ割譲。Ferrowynも戦時建設を行う)。領土と建物の
+    // 移動で収支が変わるArcadia・Dwarf・Oceanicの振動回数が増えたが、いずれも上の
+    // 受け入れ基準(0〜3回)の範囲内。戦時建設も領土変化もないElfin・Passguardは旧値の
+    // まま(`test_18`で財政ロジック自体の契約として別途固定する)。
+    const EXPECTED_OSCILLATIONS: [u32; 6] = [2, 0, 2, 3, 3, 0];
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let changes = count_tax_rate_changes(&tax_rate_history[i]);
         let oscillations = count_tax_rate_oscillations(&tax_rate_history[i]);
@@ -388,13 +397,20 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // ── 監査§13の候補4実測値との完全一致確認(m3/m36/m120、実測により確認済み) ──
     // treasury/tax_rate/monthly_balance/weighted_lsのいずれも監査表の値と
     // 完全一致する(本実装が監査の一時パッチと数学的に同一であることの直接証拠)。
+    //
+    // P28-002で正規値を更新(旧値→新値、原因は上の振動回数のコメントと同じ):
+    // Arcadia  (0.140, 8340.77, 42.85)   → (0.160, 4365.70, 25.67)   降伏・州0割譲
+    // Dwarf    (0.220, 6170.62, 35.69)   → (0.170, 14536.65, 215.39) 戦時建設・州0/州8獲得
+    // Oceanic  (0.200, 10778.56, -16.42) → (0.130, 4761.01, 53.85)   降伏・州8割譲
+    // Ferrowyn (0.190, 1960.52, 18.22)   → (0.200, 693.24, 17.97)    戦時建設(建設費1200)
+    // Elfin・Passguardは旧値のまま。
     const M120_EXPECTED: [(f32, f64, f64); 6] = [
-        (0.140, 8340.77, 42.85),   // Arcadia
+        (0.160, 4365.70, 25.67),   // Arcadia
         (0.120, 6425.41, 24.31),   // Elfin
-        (0.220, 6170.62, 35.69),   // Dwarf
-        (0.200, 10778.56, -16.42), // Oceanic
+        (0.170, 14536.65, 215.39), // Dwarf
+        (0.130, 4761.01, 53.85),   // Oceanic
         (0.190, 904.06, 12.43),    // Passguard
-        (0.190, 1960.52, 18.22),   // Ferrowyn
+        (0.200, 693.24, 17.97),    // Ferrowyn
     ];
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let (expected_tax, expected_treasury, expected_balance) = M120_EXPECTED[i];
@@ -770,4 +786,64 @@ fn test_17_harness_calendar_rolls_over_years_with_valid_months() {
     assert_eq!(sim_calendar::sim_calendar_date(1800, 12), (1800, 12));
     assert_eq!(sim_calendar::sim_calendar_date(1800, 13), (1801, 1));
     assert_eq!(sim_calendar::sim_calendar_date(1800, 131), (1810, 11));
+}
+
+// ─── P28-002: 戦時建設の影響を受けない国の財政契約 ────────────────────────────
+
+fn owned_states_and_military_factory_levels(app: &App, c: CountryId) -> Vec<(usize, u32)> {
+    let mut v: Vec<(usize, u32)> = app
+        .world()
+        .resource::<StateRegistry>()
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == c)
+        .map(|s| {
+            let level = s
+                .buildings
+                .get(&strategy_game::building::data::BuildingType::MilitaryFactory)
+                .copied()
+                .unwrap_or(0);
+            (s.id.0, level)
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// P28-002: 戦時MilitaryFactory建設で`test_05`の正規値が変わったのは、戦争の決着
+/// (降伏・割譲)と戦時建設の建設費による意図した因果であり、財政ロジック自体の回帰では
+/// ないことを分けて固定する。戦時建設を一度も行わず、領土・MilitaryFactoryも変わらない
+/// Elfin・Passguardは、P27-002-Cの120か月正規値(税率・国庫・月次収支・振動回数)を
+/// そのまま保つ。
+#[test]
+fn test_18_countries_untouched_by_wartime_construction_keep_the_p27_002_c_fiscal_canon() {
+    let dir = TempTestDir::new("t18_untouched");
+    let mut app = setup_app(None, dir.save_file_config());
+    let untouched = [ELFIN, PASSGUARD];
+    let initial: Vec<_> = untouched.iter().map(|&c| owned_states_and_military_factory_levels(&app, c)).collect();
+    let mut tax_history: [Vec<f32>; 2] = [vec![tax_rate_of(&app, ELFIN)], vec![tax_rate_of(&app, PASSGUARD)]];
+    for m in 1..=120u8 {
+        advance_one_month(&mut app, m);
+        for (i, &c) in untouched.iter().enumerate() {
+            tax_history[i].push(tax_rate_of(&app, c));
+            let queue = &app.world().resource::<CountryRegistry>().get(c).unwrap().construction_queue;
+            assert!(
+                queue.iter().all(|q| q.building_type != strategy_game::building::data::BuildingType::MilitaryFactory),
+                "{c:?}: 月{m}に戦時MilitaryFactoryを着工した(前提崩れ)"
+            );
+        }
+    }
+    for (i, &c) in untouched.iter().enumerate() {
+        assert_eq!(owned_states_and_military_factory_levels(&app, c), initial[i], "{c:?}: 領土・MilitaryFactoryは不変(前提)");
+    }
+    // P27-002-C(`test_05`の旧正規値)と完全一致。
+    for (c, tax, treasury, balance, oscillations) in
+        [(ELFIN, 0.120f32, 6425.41, 24.31, 0u32), (PASSGUARD, 0.190, 904.06, 12.43, 3)]
+    {
+        let i = if c == ELFIN { 0 } else { 1 };
+        assert!((tax_rate_of(&app, c) - tax).abs() < 1e-6, "{c:?} tax_rate");
+        assert!((treasury_of(&app, c) - treasury).abs() < 0.01, "{c:?} treasury={}", treasury_of(&app, c));
+        assert!((monthly_balance_of(&app, c) - balance).abs() < 0.01, "{c:?} monthly_balance");
+        assert_eq!(count_tax_rate_oscillations(&tax_history[i]), oscillations, "{c:?} oscillations");
+    }
 }

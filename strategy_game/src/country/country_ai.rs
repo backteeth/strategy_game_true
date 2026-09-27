@@ -658,6 +658,235 @@ pub fn process_tax_rate_ai(
     }
 }
 
+// ─── P28-002: 戦時MilitaryFactory建設 ────────────────────────────────────────
+//
+// `verification_logs/phase-28/p28-002-pre-001/`の候補C。戦時のAI国家で、
+// MilitarySuppliesの実生産(前月の稼働率による月産)が現在の月次需要に届かない
+// 場合、入力資源と資金が許す範囲でMilitaryFactoryを1件だけ建設する。攻勢補給
+// ゲート・募兵ゲート・前線戦力比は一切変更しない——自国の生産で備蓄を回復させ、
+// 既存ゲートの条件を正規に満たすための建設判断である。
+
+/// 戦時MilitaryFactory建設で、建設費の支払い後も国庫に残すべき月次経常支出の
+/// 月数。平時の任意開発(優先度3)の`PEACETIME_CONSTRUCTION_RESERVE_MONTHS`
+/// (3か月)とは独立した定数で、平時建設には適用しない。3か月では交戦国が1件も
+/// 建設できず、0か月では国庫がほぼ0まで下がる国が出る(P28-002-PRE-001 §8.3)。
+pub const WARTIME_SUPPLY_CONSTRUCTION_RESERVE_MONTHS: f64 = 1.0;
+
+/// 戦時MilitaryFactory建設の入力。呼び出し側(`process_daily_country_ai`)が、
+/// 戦時のAI国家についてだけ構築する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WartimeSupplyContext {
+    /// 現在の国家総需要(`country_daily_demand_units`、units/日)。
+    pub daily_demand_units: u128,
+}
+
+/// この州のMilitaryFactoryが前月に実際に生産したMilitarySupplies(月産)。
+/// `economy::production::process_country_production`と同じく
+/// `出力 × level × 稼働率`で、稼働率は月次生産が書き戻した値をそのまま読む。
+fn realised_monthly_military_supplies(
+    state: &crate::state::data::StateData,
+    def: &crate::building::data::BuildingDefinition,
+) -> f64 {
+    let output = def.output_resources.get(&ResourceType::MilitarySupplies).copied().unwrap_or(0.0);
+    let level = state.building_level(BuildingType::MilitaryFactory);
+    output * f64::from(level) * f64::from(state.building_operation(BuildingType::MilitaryFactory))
+}
+
+/// この州にMilitaryFactoryを1レベル追加したときの、MilitarySupplies月産の増加見込み。
+///
+/// 既存の生産式(`稼働率 = min(労働力比, 物流比, 入力充足率)`)のうち、州ごとに
+/// 決まる労働力比と物流比だけを、追加前後の建物構成で評価する。入力充足率は国家
+/// 単位の備蓄で決まるため、ここでは1.0とし、別途`wartime_supply_inputs_covered`で
+/// 1か月分の備蓄を要求する。
+/// * 労働力比: `min(州の総必要労働力, 民間労働力) ÷ 労働力`
+///   (`population::update`の雇用計算と`calculate_economic_workforce_ratio`をそのまま使う)。
+///   追加後は総必要労働力に`required_workforce`を加える。
+/// * 物流比: `calculate_logistics_ratio(容量, 使用量)`。追加後は使用量に`logistics_cost`を加える。
+///
+/// 建設中に人口・雇用・他の建物が変わるため、完成後の実生産はこの見込みと一致する
+/// とは限らない(完成後の実生産は次回以降の判定で`realised_monthly_military_supplies`
+/// として再評価される)。上限levelの州、労働力0の州、出力を持たない定義は`None`。
+pub(crate) fn projected_military_factory_supply_gain(
+    state: &crate::state::data::StateData,
+    def: &crate::building::data::BuildingDefinition,
+    building_registry: &crate::building::data::BuildingRegistry,
+) -> Option<f64> {
+    let output = *def.output_resources.get(&ResourceType::MilitarySupplies)?;
+    let level = state.building_level(BuildingType::MilitaryFactory);
+    if level >= def.max_level {
+        return None;
+    }
+    let potential_workforce = state.total_workforce();
+    if potential_workforce == 0 {
+        return None;
+    }
+    let civilian_workforce = state.civilian_workforce();
+    // `population::update::update_state_population_and_employment`と同じ整数の総必要労働力。
+    let required_jobs: u64 = BuildingType::ALL
+        .iter()
+        .filter_map(|&b| {
+            let lv = state.building_level(b);
+            (lv > 0)
+                .then(|| building_registry.get(b))
+                .flatten()
+                .map(|d| (d.required_workforce as u64) * u64::from(lv))
+        })
+        .sum();
+    let operation = |jobs: u64, logistics_usage: f32| -> f64 {
+        let employed = jobs.min(civilian_workforce);
+        let workforce_ratio =
+            crate::population::update::calculate_economic_workforce_ratio(employed, potential_workforce)
+                .clamp(0.0, 1.0);
+        let logistics_ratio =
+            crate::logistics::update::calculate_logistics_ratio(state.logistics_capacity, logistics_usage);
+        f64::from(workforce_ratio.min(logistics_ratio))
+    };
+    let before = output * f64::from(level) * operation(required_jobs, state.logistics_usage);
+    let after = output
+        * f64::from(level + 1)
+        * operation(
+            required_jobs.saturating_add(def.required_workforce as u64),
+            state.logistics_usage + def.logistics_cost,
+        );
+    Some(after - before)
+}
+
+/// MilitaryFactoryを1レベル追加した後の月次入力需要に対し、各入力資源(Iron・
+/// IndustrialGoods等、定義から汎用に読む)の国家備蓄が1か月分以上あるか。
+///
+/// 需要は、この国家が所有する全州(月次生産と同じく`owner_country_id`で数える)の
+/// 全建物が、稼働率1.0で消費する量の合計に、追加する1レベル分を加えたもの。実際の
+/// 消費は稼働率を掛けた量なので、この判定は実消費より厳しい(保守的な)側にある。
+/// 走査は`StateId`昇順・`BuildingType::ALL`順で固定する。
+fn wartime_supply_inputs_covered(
+    country: &CountryData,
+    country_id: CountryId,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    def: &crate::building::data::BuildingDefinition,
+) -> bool {
+    let mut owned: Vec<&crate::state::data::StateData> =
+        state_registry.states.iter().filter(|s| s.owner_country_id == country_id).collect();
+    owned.sort_by_key(|s| s.id.0);
+    for resource in ResourceType::ALL {
+        let Some(&new_level_need) = def.input_resources.get(&resource) else {
+            continue;
+        };
+        let mut monthly_need = new_level_need;
+        for state in &owned {
+            for building in BuildingType::ALL {
+                let level = state.building_level(building);
+                if level == 0 {
+                    continue;
+                }
+                if let Some(need) = building_registry.get(building).and_then(|d| d.input_resources.get(&resource)) {
+                    monthly_need += need * f64::from(level);
+                }
+            }
+        }
+        // 備蓄がNaNの場合も不足として扱う。
+        let stock = country.stockpile.get(resource);
+        if stock.is_nan() || stock < monthly_need {
+            return false;
+        }
+    }
+    true
+}
+
+/// 優先度2.5(P28-002)。着工した場合だけ`true`(国庫・建設キューを変更する)。
+/// `false`のときは国庫・建設キューを一切変更しない。
+///
+/// 着工条件(すべて満たす場合):
+/// 1. MilitaryFactoryが建設キューにない(未完了の同種建設を重複発注しない)
+/// 2. 所有州の実月産(`realised_monthly_military_supplies`の合計) < 日次需要 × 30
+///    (MilitarySuppliesの正規units同士で比較する。需要0なら着工しない)
+/// 3. 入力資源の備蓄が追加後の月次需要の1か月分以上(`wartime_supply_inputs_covered`)
+/// 4. 自国が所有かつ支配する陸上州のうち、増産見込み
+///    (`projected_military_factory_supply_gain`)が正で最大の州がある(同値は`StateId`昇順)
+/// 5. `国庫 ≥ 建設費 + 月次経常支出 × WARTIME_SUPPLY_CONSTRUCTION_RESERVE_MONTHS`
+///    (非有限・負の値は着工しない側に倒す。P27-002-Aと同じ数値安全規約)
+fn try_wartime_supply_construction(
+    country: &mut CountryData,
+    country_id: CountryId,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    buildable_states: &[StateId],
+    context: WartimeSupplyContext,
+) -> bool {
+    let Some(def) = building_registry.get(BuildingType::MilitaryFactory) else {
+        return false;
+    };
+    if country
+        .construction_queue
+        .iter()
+        .any(|item| item.building_type == BuildingType::MilitaryFactory)
+    {
+        return false;
+    }
+
+    let Some(monthly_demand_units) = context.daily_demand_units.checked_mul(30) else {
+        return false;
+    };
+    let mut owned: Vec<&crate::state::data::StateData> =
+        state_registry.states.iter().filter(|s| s.owner_country_id == country_id).collect();
+    owned.sort_by_key(|s| s.id.0);
+    let realised: f64 = owned.iter().map(|s| realised_monthly_military_supplies(s, def)).sum();
+    let Ok(realised_units) = crate::economy::resources::military_supplies_value_to_units(realised) else {
+        return false;
+    };
+    if u128::from(realised_units) >= monthly_demand_units {
+        return false;
+    }
+
+    if !wartime_supply_inputs_covered(country, country_id, state_registry, building_registry, def) {
+        return false;
+    }
+
+    let mut best: Option<(f64, StateId, u32)> = None;
+    for &state_id in buildable_states {
+        let Some(state) = state_registry.get(state_id) else {
+            continue;
+        };
+        let Some(gain) = projected_military_factory_supply_gain(state, def, building_registry) else {
+            continue;
+        };
+        if gain > 0.0 && best.is_none_or(|(best_gain, _, _)| gain > best_gain) {
+            best = Some((gain, state_id, state.building_level(BuildingType::MilitaryFactory)));
+        }
+    }
+    let Some((_, state_id, current_level)) = best else {
+        return false;
+    };
+
+    let treasury = country.treasury;
+    let cost = def.construction_cost;
+    let monthly_expenses = country.monthly_expenses;
+    if !(treasury.is_finite()
+        && cost.is_finite()
+        && cost >= 0.0
+        && monthly_expenses.is_finite()
+        && monthly_expenses >= 0.0)
+    {
+        return false;
+    }
+    let required_treasury = cost + monthly_expenses * WARTIME_SUPPLY_CONSTRUCTION_RESERVE_MONTHS;
+    if !required_treasury.is_finite() || treasury < required_treasury {
+        return false;
+    }
+
+    country.treasury -= cost;
+    country.construction_queue.push(ConstructionQueueItem {
+        state_id,
+        building_type: BuildingType::MilitaryFactory,
+        target_level: current_level + 1,
+        progress: 0.0,
+        required_progress: def.required_progress,
+        paid_cost: cost,
+        status: ConstructionStatus::InQueue,
+    });
+    true
+}
+
 /// 1. 建設AI (月次評価: game_day % 30 == country_id % 30 または dirty)
 ///
 /// 優先順位(P26-004-PRE-002で(2)を新設、`verification_logs/phase-26/p26-004-pre-001/`
@@ -668,12 +897,37 @@ pub fn process_tax_rate_ai(
 /// (3) 既存の通常判断(原材料不足なら鉱山、それ以外は工場)。この段でMineが
 ///     選ばれたが領内に採掘可能な鉱床が一切ない場合(Elfin/Oceanic等)、Mineへの
 ///     浪費を防ぐため同じ月のうちに工場建設へ安全にフォールバックする。
+///
+/// 戦時のAI国家では(2)と(3)の間に戦時MilitaryFactory建設(P28-002)が入る
+/// (`process_construction_ai_with_wartime_supply`)。この関数は戦時文脈なしで
+/// 呼び出す従来の入口であり、挙動はP28-002以前と同一。
 pub fn process_construction_ai(
     country_id: CountryId,
     country_registry: &mut CountryRegistry,
     state_registry: &StateRegistry,
     building_registry: &crate::building::data::BuildingRegistry,
     ai_state: &mut CountryAiState,
+) {
+    process_construction_ai_with_wartime_supply(
+        country_id,
+        country_registry,
+        state_registry,
+        building_registry,
+        ai_state,
+        None,
+    );
+}
+
+/// `process_construction_ai`の本体。`wartime_supply`が`Some`のとき(呼び出し側が
+/// 戦時のAI国家についてだけ構築する)、優先度(2)の後・(3)の前で戦時MilitaryFactory
+/// 建設(P28-002、`try_wartime_supply_construction`)を評価する。
+pub fn process_construction_ai_with_wartime_supply(
+    country_id: CountryId,
+    country_registry: &mut CountryRegistry,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    ai_state: &mut CountryAiState,
+    wartime_supply: Option<WartimeSupplyContext>,
 ) {
     let country = match country_registry.get_mut(country_id) {
         Some(c) => c,
@@ -754,6 +1008,23 @@ pub fn process_construction_ai(
             });
             return;
         }
+    }
+
+    // 優先度2.5 (P28-002): 戦時のAI国家だけ、MilitarySuppliesの実生産が現在需要に
+    // 届かない場合にMilitaryFactoryを1件建設する。着工しなかった場合は、優先度3へ
+    // そのままフォールスルーする(優先度3の予備資金契約は変更しない)。
+    if let Some(context) = wartime_supply
+        && try_wartime_supply_construction(
+            country,
+            country_id,
+            state_registry,
+            building_registry,
+            &owned_states,
+            context,
+        )
+    {
+        ai_state.decision_reason = CountryAiDecisionReason::WarInProgress;
+        return;
     }
 
     // 優先度3: 既存の通常判断(原材料不足 -> Mine、それ以外 -> Factory)
@@ -1206,12 +1477,27 @@ pub fn process_daily_country_ai(
             // 次回の月次財政計算(Economy Set)から新税率が使われる。
             process_tax_rate_ai(country_id, country_registry, state_registry);
 
-            process_construction_ai(
+            // P28-002: 戦時のAI国家だけに戦時MilitaryFactory建設の文脈を渡す
+            // (このループはプレイヤー国家・消滅国家を既に除外している)。需要の算出が
+            // 失敗する防御的なケースでは文脈を作らず、従来の建設判断だけを行う。
+            let wartime_supply = if is_at_war {
+                crate::military::supply_initialization::country_daily_demand_units(
+                    country_id,
+                    &military_registry.divisions,
+                    &military_registry.definitions,
+                )
+                .ok()
+                .map(|daily_demand_units| WartimeSupplyContext { daily_demand_units })
+            } else {
+                None
+            };
+            process_construction_ai_with_wartime_supply(
                 country_id,
                 country_registry,
                 state_registry,
                 building_registry,
                 ai_state,
+                wartime_supply,
             );
             ai_state.last_monthly_evaluation_day = current_day;
         }
@@ -3595,5 +3881,378 @@ mod tests {
             (after_month - 0.17).abs() < 1e-6,
             "30日間でdirty初回(day1)+正規cadence(day2)の合計2回だけ変更されるはず: {after_month}"
         );
+    }
+
+    // ─── P28-002: 戦時MilitaryFactory建設(優先度2.5) ─────────────────────────
+
+    /// 労働力50,000(人口100,000×0.5)の州。民間労働力全員を未雇用として置き、
+    /// 月次雇用計算を経ずに増産見込みの式だけを検証できるようにする。
+    fn p28_state(id: usize, owner: CountryId, logistics_capacity: f32) -> StateData {
+        let mut s = p26_008_c_owned_state(id, owner);
+        s.population = 100_000;
+        s.workforce_ratio = 0.5;
+        s.employed_workforce = 0;
+        s.unemployed_workforce = 50_000;
+        s.logistics_capacity = logistics_capacity;
+        s.logistics_usage = 0.0;
+        s
+    }
+
+    /// 建物を置き、物流使用量を建物定義どおりに合わせる(`update_state_logistics`と同じ式)。
+    fn p28_with_building(mut s: StateData, b: BuildingType, level: u32, operation: f32) -> StateData {
+        let reg = p26_008_c_building_registry();
+        s.buildings.insert(b, level);
+        s.building_operation_ratios.insert(b, operation);
+        s.logistics_usage = s
+            .buildings
+            .iter()
+            .map(|(bt, lv)| reg.get(*bt).map(|d| d.logistics_cost * *lv as f32).unwrap_or(0.0))
+            .sum();
+        s
+    }
+
+    fn p28_country(id: CountryId, capital: StateId, treasury: f64) -> CountryData {
+        let mut c = p26_008_c_ample_country(id, capital, treasury);
+        c.stockpile.set(ResourceType::IndustrialGoods, 1000.0);
+        c.monthly_expenses = 100.0;
+        c
+    }
+
+    /// 需要2.0/日(=月60)の戦時文脈。
+    const P28_TWO_DIVISIONS: WartimeSupplyContext = WartimeSupplyContext { daily_demand_units: 2_000_000 };
+
+    /// 基準シナリオ: 州1にFactory lv1(IndustrialGoodsの構造的経路があるので優先度2は
+    /// 発火しない)とMilitaryFactory lv1(前月稼働率0.2 = 月産20 < 需要60)。
+    fn p28_base_state(owner: CountryId) -> StateData {
+        let s = p28_state(1, owner, 100.0);
+        let s = p28_with_building(s, BuildingType::Factory, 1, 1.0);
+        p28_with_building(s, BuildingType::MilitaryFactory, 1, 0.2)
+    }
+
+    fn p28_run(
+        country: CountryData,
+        states: Vec<StateData>,
+        wartime: Option<WartimeSupplyContext>,
+    ) -> (CountryData, CountryAiDecisionReason) {
+        let id = country.id;
+        let mut registry = CountryRegistry { countries: vec![country] };
+        let state_registry = StateRegistry::build(states);
+        let mut ai_state = CountryAiState::new(id);
+        process_construction_ai_with_wartime_supply(
+            id,
+            &mut registry,
+            &state_registry,
+            &p26_008_c_building_registry(),
+            &mut ai_state,
+            wartime,
+        );
+        (registry.countries.remove(0), ai_state.decision_reason)
+    }
+
+    fn p28_queued_military_factories(country: &CountryData) -> Vec<(StateId, u32)> {
+        country
+            .construction_queue
+            .iter()
+            .filter(|q| q.building_type == BuildingType::MilitaryFactory)
+            .map(|q| (q.state_id, q.target_level))
+            .collect()
+    }
+
+    #[test]
+    fn p28_projected_gain_uses_workforce_and_logistics_of_the_candidate_state() {
+        let reg = p26_008_c_building_registry();
+        let def = reg.get(BuildingType::MilitaryFactory).unwrap();
+        // 州1: 総必要労働力45,000/労働力50,000 → 労働力比0.9、物流35/100 → 1.0。
+        // 追加前 100×1×0.9 = 90、追加後 必要70,000 → 雇用50,000 → 1.0、物流55/100 → 1.0 → 200。
+        let gain = projected_military_factory_supply_gain(&p28_base_state(CountryId(1)), def, &reg).unwrap();
+        // 労働力比は本番と同じf32で計算するため、0.9のf32表現分の誤差を許容する。
+        assert!((gain - 110.0).abs() < 1e-4, "gain={gain}");
+        // 物流が飽和した州(容量35、使用35)。追加後は35/55で頭打ちになる。
+        let mut tight = p28_base_state(CountryId(1));
+        tight.logistics_capacity = 35.0;
+        let tight_gain = projected_military_factory_supply_gain(&tight, def, &reg).unwrap();
+        assert!((tight_gain - (200.0 * 35.0 / 55.0 - 90.0)).abs() < 1e-3, "tight_gain={tight_gain}");
+        // 上限levelの州と労働力0の州は候補外。
+        let maxed = p28_with_building(p28_state(2, CountryId(1), 1000.0), BuildingType::MilitaryFactory, 10, 1.0);
+        assert_eq!(projected_military_factory_supply_gain(&maxed, def, &reg), None);
+        let mut empty = p28_state(3, CountryId(1), 100.0);
+        empty.population = 0;
+        assert_eq!(projected_military_factory_supply_gain(&empty, def, &reg), None);
+    }
+
+    #[test]
+    fn p28_wartime_ai_starts_exactly_one_military_factory_when_realised_supply_falls_short() {
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, reason) = p28_run(country, vec![p28_base_state(CountryId(1))], Some(P28_TWO_DIVISIONS));
+        assert_eq!(p28_queued_military_factories(&after), vec![(StateId(1), 2)]);
+        assert_eq!(after.construction_queue.len(), 1, "1回の判断で追加するのは1件だけ");
+        assert!((after.treasury - 3800.0).abs() < 1e-9, "既存の支払い経路で建設費1200だけを支払う");
+        assert_eq!(reason, CountryAiDecisionReason::WarInProgress);
+    }
+
+    #[test]
+    fn p28_peacetime_path_never_starts_a_military_factory() {
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, _) = p28_run(country, vec![p28_base_state(CountryId(1))], None);
+        assert!(p28_queued_military_factories(&after).is_empty(), "戦時文脈なしでは新経路は評価されない");
+    }
+
+    #[test]
+    fn p28_state_is_chosen_by_projected_supply_gain_not_by_level_or_state_id() {
+        // 州1: StateIdが小さくMilitaryFactory levelも高いが、物流容量60がほぼ飽和(増産見込み≒12.6)。
+        let s1 = p28_with_building(p28_state(1, CountryId(1), 60.0), BuildingType::Factory, 1, 1.0);
+        let s1 = p28_with_building(s1, BuildingType::MilitaryFactory, 3, 0.1);
+        // 州2: 建物なし、労働力比0.5・物流1.0(増産見込み50)。
+        let s2 = p28_state(2, CountryId(1), 100.0);
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, _) = p28_run(country, vec![s1, s2], Some(P28_TWO_DIVISIONS));
+        assert_eq!(p28_queued_military_factories(&after), vec![(StateId(2), 1)]);
+    }
+
+    #[test]
+    fn p28_equal_gain_breaks_ties_by_state_id_regardless_of_registration_order() {
+        let mut s1 = p28_base_state(CountryId(1));
+        s1.logistics_capacity = 35.0; // 増産見込み≒37 < 州2・州3の50
+        let build = |states: Vec<StateData>| {
+            let country = p28_country(CountryId(1), StateId(1), 5000.0);
+            p28_queued_military_factories(&p28_run(country, states, Some(P28_TWO_DIVISIONS)).0)
+        };
+        let forward = build(vec![s1.clone(), p28_state(2, CountryId(1), 100.0), p28_state(3, CountryId(1), 100.0)]);
+        let reversed = build(vec![p28_state(3, CountryId(1), 100.0), p28_state(2, CountryId(1), 100.0), s1]);
+        assert_eq!(forward, vec![(StateId(2), 1)]);
+        assert_eq!(reversed, forward);
+    }
+
+    #[test]
+    fn p28_missing_inputs_block_the_wartime_factory() {
+        // 追加後の月次需要: Iron = Factory 20 + MF 30 + 新規30 = 80、IndustrialGoods = 15 + 新規15 = 30。
+        for (resource, short, exact) in [(ResourceType::Iron, 79.99, 80.0), (ResourceType::IndustrialGoods, 29.99, 30.0)] {
+            let mut country = p28_country(CountryId(1), StateId(1), 5000.0);
+            country.stockpile.set(resource, short);
+            let (after, _) = p28_run(country, vec![p28_base_state(CountryId(1))], Some(P28_TWO_DIVISIONS));
+            assert!(p28_queued_military_factories(&after).is_empty(), "{resource:?}が1か月分未満");
+            let mut country = p28_country(CountryId(1), StateId(1), 5000.0);
+            country.stockpile.set(resource, exact);
+            let (after, _) = p28_run(country, vec![p28_base_state(CountryId(1))], Some(P28_TWO_DIVISIONS));
+            assert_eq!(p28_queued_military_factories(&after).len(), 1, "{resource:?}がちょうど1か月分なら着工");
+        }
+    }
+
+    #[test]
+    fn p28_treasury_threshold_is_cost_plus_one_month_of_expenses() {
+        // 必要額 = 1200 + 100 × 1 = 1300。
+        let (below, _) = p28_run(
+            p28_country(CountryId(1), StateId(1), 1299.99),
+            vec![p28_base_state(CountryId(1))],
+            Some(P28_TWO_DIVISIONS),
+        );
+        assert!(p28_queued_military_factories(&below).is_empty());
+        assert!((below.treasury - 1299.99).abs() < 1e-9, "着工しない場合は国庫を変更しない");
+        let (exact, _) = p28_run(
+            p28_country(CountryId(1), StateId(1), 1300.0),
+            vec![p28_base_state(CountryId(1))],
+            Some(P28_TWO_DIVISIONS),
+        );
+        assert_eq!(p28_queued_military_factories(&exact), vec![(StateId(1), 2)]);
+        assert!((exact.treasury - 100.0).abs() < 1e-9);
+        // 非有限の経常支出は着工しない側に倒す。
+        let mut nan = p28_country(CountryId(1), StateId(1), 5000.0);
+        nan.monthly_expenses = f64::NAN;
+        let (after, _) = p28_run(nan, vec![p28_base_state(CountryId(1))], Some(P28_TWO_DIVISIONS));
+        assert!(p28_queued_military_factories(&after).is_empty());
+    }
+
+    #[test]
+    fn p28_no_buildable_state_no_demand_or_sufficient_supply_means_no_factory() {
+        // 建設可能州なし(上限level)。
+        let maxed = p28_with_building(
+            p28_with_building(p28_state(1, CountryId(1), 1000.0), BuildingType::Factory, 1, 1.0),
+            BuildingType::MilitaryFactory,
+            10,
+            0.0,
+        );
+        let (after, _) =
+            p28_run(p28_country(CountryId(1), StateId(1), 5000.0), vec![maxed], Some(P28_TWO_DIVISIONS));
+        assert!(p28_queued_military_factories(&after).is_empty());
+        // 需要0。
+        let (after, _) = p28_run(
+            p28_country(CountryId(1), StateId(1), 5000.0),
+            vec![p28_base_state(CountryId(1))],
+            Some(WartimeSupplyContext { daily_demand_units: 0 }),
+        );
+        assert!(p28_queued_military_factories(&after).is_empty());
+        // 実月産が需要とちょうど等しい(稼働率0.6 → 60 = 60)。
+        let mut enough = p28_base_state(CountryId(1));
+        enough.building_operation_ratios.insert(BuildingType::MilitaryFactory, 0.6);
+        let (after, _) =
+            p28_run(p28_country(CountryId(1), StateId(1), 5000.0), vec![enough], Some(P28_TWO_DIVISIONS));
+        assert!(p28_queued_military_factories(&after).is_empty());
+    }
+
+    #[test]
+    fn p28_unfinished_military_factory_is_never_ordered_twice() {
+        let country = p28_country(CountryId(1), StateId(1), 10_000.0);
+        let mut registry = CountryRegistry { countries: vec![country] };
+        let state_registry =
+            StateRegistry::build(vec![p28_base_state(CountryId(1)), p28_state(2, CountryId(1), 100.0)]);
+        let mut ai_state = CountryAiState::new(CountryId(1));
+        let building_registry = p26_008_c_building_registry();
+        for _ in 0..2 {
+            process_construction_ai_with_wartime_supply(
+                CountryId(1),
+                &mut registry,
+                &state_registry,
+                &building_registry,
+                &mut ai_state,
+                Some(P28_TWO_DIVISIONS),
+            );
+        }
+        assert_eq!(
+            p28_queued_military_factories(&registry.countries[0]).len(),
+            1,
+            "キュー上の未完了MilitaryFactoryがある間は新規発注しない"
+        );
+    }
+
+    #[test]
+    fn p28_food_emergency_and_supply_chain_repair_keep_priority_over_the_wartime_factory() {
+        // 優先度1: Food < 50。
+        let mut hungry = p28_country(CountryId(1), StateId(1), 5000.0);
+        hungry.stockpile.set(ResourceType::Food, 49.0);
+        let (after, reason) = p28_run(hungry, vec![p28_base_state(CountryId(1))], Some(P28_TWO_DIVISIONS));
+        assert_eq!(reason, CountryAiDecisionReason::FoodShortageFarmPriority);
+        assert!(p28_queued_military_factories(&after).is_empty());
+        // 優先度2: MilitaryFactoryがIndustrialGoodsを要求するのにFactoryがない。
+        let no_factory = p28_with_building(p28_state(1, CountryId(1), 100.0), BuildingType::MilitaryFactory, 1, 0.2);
+        let (after, reason) =
+            p28_run(p28_country(CountryId(1), StateId(1), 5000.0), vec![no_factory], Some(P28_TWO_DIVISIONS));
+        assert_eq!(reason, CountryAiDecisionReason::SteelShortageSteelMillPriority);
+        assert!(p28_queued_military_factories(&after).is_empty());
+        assert_eq!(after.construction_queue[0].building_type, BuildingType::Factory);
+    }
+
+    #[test]
+    fn p28_wartime_one_month_reserve_does_not_leak_into_peacetime_development() {
+        // 実月産が需要を満たす(優先度2.5は発火しない)とき、優先度3は従来どおり3か月予備を要求する:
+        // Factory 1000 + 200 × 3 = 1600 > 国庫1500 → FundsShortage(1か月予備なら1200で足りる額)。
+        let mut enough = p28_base_state(CountryId(1));
+        enough.building_operation_ratios.insert(BuildingType::MilitaryFactory, 0.6);
+        let mut country = p28_country(CountryId(1), StateId(1), 1500.0);
+        country.monthly_expenses = 200.0;
+        let (after, reason) = p28_run(country, vec![enough], Some(P28_TWO_DIVISIONS));
+        assert!(after.construction_queue.is_empty());
+        assert_eq!(reason, CountryAiDecisionReason::FundsShortage);
+    }
+
+    #[test]
+    fn p28_daily_ai_applies_the_wartime_factory_only_to_active_ai_countries_at_war() {
+        use crate::military::data::{DivisionDefinition, DivisionSize, DivisionType};
+        let (
+            player_country,
+            _,
+            _,
+            _,
+            _,
+            _,
+            mut diplomacy_registry,
+            tech_registry,
+            world_state,
+            mut justification_registry,
+            mut frontline_registry,
+            mut military_ai_registry,
+            mut country_ai_registry,
+        ) = setup_test_env();
+        // 1=プレイヤー(戦時)、2=AI(戦時)、3=消滅国家(戦争記録上は交戦中)、4=AI(平時)。
+        let mut countries: Vec<CountryData> =
+            (1..=4).map(|i| p28_country(CountryId(i), StateId(i), 10_000.0)).collect();
+        countries[2].status = crate::country::CountryStatus::Eliminated {
+            eliminated_date: "1800/01/01".into(),
+            annexed_by: CountryId(2),
+        };
+        let mut country_registry = CountryRegistry { countries };
+        let states: Vec<StateData> = (1..=4)
+            .map(|i| {
+                let s = p28_with_building(p28_state(i, CountryId(i), 100.0), BuildingType::Factory, 1, 1.0);
+                p28_with_building(s, BuildingType::MilitaryFactory, 1, 0.2)
+            })
+            .collect();
+        let state_registry = StateRegistry::build(states);
+        let mut military_registry = MilitaryRegistry::default();
+        military_registry.definitions.insert(
+            crate::common::DivisionDefinitionId(0),
+            DivisionDefinition {
+                id: crate::common::DivisionDefinitionId(0),
+                name: "Infantry".into(),
+                division_type: DivisionType::Infantry,
+                size: DivisionSize::Standard,
+                required_manpower: 10_000,
+                required_equipment: 10.0,
+                recruitment_days: 30,
+                movement_speed: 1.0,
+                attack: 10.0,
+                defense: 10.0,
+                breakthrough: 1.0,
+                organization: 100.0,
+                morale: 1.0,
+                supply_usage: 1.0,
+                maintenance_cost: 1.0,
+            },
+        );
+        for (n, owner) in [1usize, 1, 2, 2, 3, 3, 4, 4].into_iter().enumerate() {
+            let mut d = make_test_division(CountryId(owner), StateId(owner), 10_000);
+            d.id = crate::common::DivisionId(n);
+            military_registry.divisions.insert(d.id, d);
+        }
+        let mut war_registry = WarRegistry::default();
+        for (attacker, defender) in [(2, 1), (3, 1)] {
+            war_registry.add_war(crate::war::data::War {
+                id: WarId(0),
+                name: "test".into(),
+                attackers: [CountryId(attacker)].into_iter().collect(),
+                defenders: [CountryId(defender)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![],
+                start_date: "1800/01/01".into(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: Default::default(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: vec![],
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: Default::default(),
+            });
+        }
+        process_daily_country_ai(
+            1,
+            "1800/01/02",
+            &player_country,
+            &mut country_registry,
+            &state_registry,
+            &p26_008_c_building_registry(),
+            &military_registry,
+            &mut war_registry,
+            &mut diplomacy_registry,
+            &tech_registry,
+            &world_state,
+            &mut justification_registry,
+            &mut frontline_registry,
+            &mut military_ai_registry,
+            &mut country_ai_registry,
+            &mut Vec::new(),
+            &mut CrisisRegistry::default(),
+        );
+        let queued = |id: usize| p28_queued_military_factories(country_registry.get(CountryId(id)).unwrap());
+        assert!(queued(1).is_empty(), "プレイヤー国家には適用しない");
+        assert_eq!(queued(2), vec![(StateId(2), 2)], "戦時のAI国家だけが着工する");
+        assert!(queued(3).is_empty(), "消滅国家には適用しない");
+        assert!(queued(4).is_empty(), "平時のAI国家には適用しない");
     }
 }
