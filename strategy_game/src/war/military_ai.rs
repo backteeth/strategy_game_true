@@ -290,6 +290,42 @@ pub fn evaluate_powers(
     (own_power, enemy_power)
 }
 
+/// P28-003: 攻勢可否の前線配送判定に使うDivision集合を求める純粋関数。
+///
+/// `assigned`(前線計画の割当Division)から、**飛び地に取り残されたDivision**だけを除く。
+/// 取り残されたDivisionとは、現在州の`controller`が指揮国自身であり、かつその州が
+/// `capital_connected`(指揮国の首都から自国支配州をたどる陸路連結集合、
+/// `military::capital_connectivity::connected_states_from_capital`の結果)に含まれない
+/// Divisionである。こうしたDivisionは日次補給の配分対象外で補給充足率が恒久的に0になり、
+/// 国家備蓄も消費しないため、前線への配送の健全性を測る最小値から外す。
+///
+/// 除かないもの:
+/// * 敵支配州(controllerが指揮国以外)にいるDivision——攻撃中の部隊で、P27-005の一歩先の
+///   前線補給の対象になり得るため、従来どおり配送判定に含める。
+/// * 連結済みの自国支配州にいるDivision、登録に存在しないDivision、州が存在しないDivision。
+///
+/// 除いた結果が空になる場合(割当が取り残されたDivisionだけの場合)は、`assigned`を
+/// そのまま返す。補給不能な部隊しかいない前線を、空集合(「配送不足signalなし」)として
+/// 攻勢許可しないため。`assigned`が元々空なら空を返す(既存の割当0件の扱いのまま)。
+/// 返り値は`assigned`の順序を保つ(最小値の計算は順序に依存しない)。
+pub fn offensive_delivery_division_ids(
+    assigned: &[DivisionId],
+    commanding_country: CountryId,
+    capital_connected: &std::collections::HashSet<StateId>,
+    military_registry: &MilitaryRegistry,
+    state_registry: &StateRegistry,
+) -> Vec<DivisionId> {
+    let is_stranded = |id: &DivisionId| {
+        military_registry.divisions.get(id).is_some_and(|division| {
+            state_registry.get(division.current_state).is_some_and(|state| {
+                state.controller() == commanding_country && !capital_connected.contains(&state.id)
+            })
+        })
+    };
+    let scoped: Vec<DivisionId> = assigned.iter().copied().filter(|id| !is_stranded(id)).collect();
+    if scoped.is_empty() { assigned.to_vec() } else { scoped }
+}
+
 /// 前線に対するAI命令スタンスと理由の決定（ヒステリシス考慮）。
 ///
 /// P26-008-B: 戻り値の第3要素は、更新後の`FrontlinePlan.offensive_supply_blocked`
@@ -297,10 +333,17 @@ pub fn evaluate_powers(
 /// 持つ(この関数自体は`plan`を変更しない、既存の純粋関数という契約を維持)。
 /// 早期returnの理由に関わらず毎回この値を計算・返却する(spec §8.2: 現在の
 /// スタンスに関わらず、国家備蓄・前線配送の観測自体は常に行う)。
+///
+/// P28-003: `delivery_division_ids`は前線配送判定(`frontline_min_fulfillment`の
+/// 最小値を取る母集合)だけに使うDivision集合で、通常は
+/// `offensive_delivery_division_ids`で`plan.assigned_division_ids`から飛び地に取り残された
+/// Divisionを除いたもの。割当0件の判定・即応可能Divisionの判定・戦力比(`own_power`/
+/// `enemy_power`)には使わず、これらは従来どおり`plan.assigned_division_ids`で判定する。
 #[allow(clippy::too_many_arguments)]
 pub fn evaluate_military_ai_decision(
     frontline: &Frontline,
     plan: &FrontlinePlan,
+    delivery_division_ids: &[DivisionId],
     own_power: u64,
     enemy_power: u64,
     has_objective: bool,
@@ -317,7 +360,7 @@ pub fn evaluate_military_ai_decision(
             country,
             war_registry,
             military_registry,
-            &plan.assigned_division_ids,
+            delivery_division_ids,
             plan.offensive_supply_blocked,
         ) {
             Ok(eval) => (eval.blocked_after, eval.delivery_fully_healthy),
@@ -641,6 +684,21 @@ pub fn process_daily_military_ai(
         let mut last_reason = MilitaryAiDecisionReason::NoValidFrontline;
         let mut skipped_due_to_start_date = false;
 
+        // P28-003: 前線配送判定の母集合から飛び地のDivisionを除くための首都連結集合。
+        // 評価の日の州controllerから毎回計算し直す(日次補給`military::daily_supply`と同じ
+        // `connected_states_from_capital`を再利用、永続化しない)。首都がない場合は空集合。
+        let capital_connected = country_registry
+            .get(country_id)
+            .and_then(|c| c.current_capital_state_id())
+            .map(|capital| {
+                crate::military::capital_connectivity::connected_states_from_capital(
+                    capital,
+                    country_id,
+                    state_registry,
+                )
+            })
+            .unwrap_or_default();
+
         for war in &active_wars {
             // 宣戦布告当日は軍事AIの移動命令を発行しない（プレイヤー保護と不意打ち防止）
             if war.start_date == current_date {
@@ -676,10 +734,19 @@ pub fn process_daily_military_ai(
                     continue;
                 };
 
+                // P28-003: 配送判定だけに使う母集合(戦力比・割当・即応判定は`plan`のまま)。
+                let delivery_division_ids = offensive_delivery_division_ids(
+                    &plan.assigned_division_ids,
+                    country_id,
+                    &capital_connected,
+                    military_registry,
+                    state_registry,
+                );
                 let (new_stance, reason, new_offensive_supply_blocked) =
                     evaluate_military_ai_decision(
                         &fl,
                         &plan,
+                        &delivery_division_ids,
                         own_p,
                         enemy_p,
                         objective.is_some(),
@@ -1122,5 +1189,197 @@ mod tests {
             ai_c2.last_decision_reason,
             MilitaryAiDecisionReason::SufficientAdvantage
         );
+    }
+
+    // ─── P28-003: 飛び地に取り残されたDivisionの前線配送判定からの除外 ───────────
+
+    const P28_AI: CountryId = CountryId(2);
+    const P28_ENEMY: CountryId = CountryId(1);
+
+    fn p28_division(id: usize, owner: CountryId, state: StateId) -> Division {
+        Division {
+            id: DivisionId(id),
+            owner,
+            division_type: DivisionType::Infantry,
+            size: DivisionSize::Standard,
+            current_state: state,
+            destination: None,
+            current_path: Vec::new(),
+            target_state: None,
+            manpower: 1000,
+            max_manpower: 1000,
+            equipment: 10.0,
+            max_equipment: 10.0,
+            organization: 100.0,
+            max_organization: 100.0,
+            morale: 1.0,
+            max_morale: 1.0,
+            experience: 0.0,
+            supply_ratio: 1.0,
+            movement_progress: 0.0,
+            status: DivisionStatus::Idle,
+            def_id: DivisionDefinitionId(1),
+            attack_power: 10,
+            defense_power: 10,
+            combat_id: None,
+        }
+    }
+
+    fn p28_state(id: usize, owner: CountryId, controller: Option<CountryId>, neighbors: Vec<usize>) -> StateData {
+        StateData {
+            id: StateId(id),
+            name: format!("State {id}"),
+            owner_country_id: owner,
+            controller_country: controller,
+            neighbors: neighbors.into_iter().map(StateId).collect(),
+            world_position: [id as f32 * 100.0, 0.0],
+            size: [100.0, 100.0],
+            ..default()
+        }
+    }
+
+    /// 1(C1)-2(C1)-3(C2)-4(C2首都)-9(C2)-10(C2)の本土。州6(C2所有・支配)と州7(C1所有、
+    /// C2が占領)は本土と隣接しない飛び地。州8(C2所有、C1が占領)は州4に隣接する。
+    fn p28_states(nine_controller: Option<CountryId>) -> StateRegistry {
+        StateRegistry::build(vec![
+            p28_state(1, P28_ENEMY, None, vec![2]),
+            p28_state(2, P28_ENEMY, None, vec![1, 3]),
+            p28_state(3, P28_AI, None, vec![2, 4]),
+            p28_state(4, P28_AI, None, vec![3, 9, 8]),
+            p28_state(6, P28_AI, None, vec![]),
+            p28_state(7, P28_ENEMY, Some(P28_AI), vec![]),
+            p28_state(8, P28_AI, Some(P28_ENEMY), vec![4]),
+            p28_state(9, P28_AI, nine_controller, vec![4, 10]),
+            p28_state(10, P28_AI, None, vec![9]),
+        ])
+    }
+
+    fn p28_military(divisions: &[(usize, StateId)]) -> MilitaryRegistry {
+        let (_, _, _, _, mut military, _, _) = setup_test_env();
+        for &(id, state) in divisions {
+            military.divisions.insert(DivisionId(id), p28_division(id, P28_AI, state));
+        }
+        military
+    }
+
+    fn p28_scope(assigned: &[usize], states: &StateRegistry, military: &MilitaryRegistry) -> Vec<DivisionId> {
+        let connected =
+            crate::military::capital_connectivity::connected_states_from_capital(StateId(4), P28_AI, states);
+        let ids: Vec<DivisionId> = assigned.iter().copied().map(DivisionId).collect();
+        offensive_delivery_division_ids(&ids, P28_AI, &connected, military, states)
+    }
+
+    #[test]
+    fn p28_connected_friendly_divisions_stay_in_the_delivery_scope() {
+        let states = p28_states(None);
+        let military = p28_military(&[(1, StateId(3)), (2, StateId(4)), (3, StateId(10))]);
+        assert_eq!(p28_scope(&[1, 2, 3], &states, &military), vec![DivisionId(1), DivisionId(2), DivisionId(3)]);
+    }
+
+    #[test]
+    fn p28_stranded_friendly_exclave_divisions_are_removed_when_connected_ones_remain() {
+        let states = p28_states(None);
+        // 州6: 自国所有・自国支配の飛び地。州7: 他国所有だが自国が支配する飛び地。
+        let military = p28_military(&[(1, StateId(3)), (2, StateId(6)), (3, StateId(7))]);
+        assert_eq!(p28_scope(&[1, 2, 3], &states, &military), vec![DivisionId(1)]);
+    }
+
+    #[test]
+    fn p28_all_stranded_front_keeps_the_original_set_instead_of_an_empty_scope() {
+        let states = p28_states(None);
+        let military = p28_military(&[(2, StateId(6)), (3, StateId(7))]);
+        assert_eq!(
+            p28_scope(&[2, 3], &states, &military),
+            vec![DivisionId(2), DivisionId(3)],
+            "補給不能な部隊しかいない前線を空集合として扱わない"
+        );
+        assert!(p28_scope(&[], &states, &military).is_empty(), "割当0件は従来どおり空のまま");
+    }
+
+    #[test]
+    fn p28_divisions_in_enemy_controlled_states_are_never_removed() {
+        let states = p28_states(None);
+        // 州2: 敵国支配(攻撃中)。州8: 自国所有だが敵が占領中(controller≠自国)。
+        let military = p28_military(&[(1, StateId(2)), (2, StateId(8)), (3, StateId(6))]);
+        assert_eq!(p28_scope(&[1, 2, 3], &states, &military), vec![DivisionId(1), DivisionId(2)]);
+    }
+
+    #[test]
+    fn p28_scope_follows_the_current_controller_when_the_route_is_cut_and_restored() {
+        let military = p28_military(&[(1, StateId(3)), (2, StateId(10))]);
+        // 経路上の州9を敵が占領すると州10は首都から切断され、配送判定から外れる。
+        let cut = p28_states(Some(P28_ENEMY));
+        assert_eq!(p28_scope(&[1, 2], &cut, &military), vec![DivisionId(1)]);
+        // 州9を取り戻すと再び連結し、配送判定に戻る。
+        let restored = p28_states(None);
+        assert_eq!(p28_scope(&[1, 2], &restored, &military), vec![DivisionId(1), DivisionId(2)]);
+    }
+
+    #[test]
+    fn p28_scope_does_not_depend_on_registration_or_neighbor_order() {
+        let military = p28_military(&[(1, StateId(3)), (2, StateId(6)), (3, StateId(10))]);
+        let forward = p28_scope(&[1, 2, 3], &p28_states(None), &military);
+        let mut reversed_states: Vec<StateData> = p28_states(None).states.into_iter().rev().collect();
+        for s in &mut reversed_states {
+            s.neighbors.reverse();
+        }
+        let reversed = p28_scope(&[3, 2, 1], &StateRegistry::build(reversed_states), &military);
+        let mut a = forward.clone();
+        let mut b = reversed.clone();
+        a.sort_by_key(|d| d.0);
+        b.sort_by_key(|d| d.0);
+        assert_eq!(a, b);
+        assert_eq!(a, vec![DivisionId(1), DivisionId(3)]);
+    }
+
+    /// 配送判定の母集合だけが変わり、戦力比・割当・即応判定は変わらないことを
+    /// `evaluate_military_ai_decision`経由で確認する。
+    #[test]
+    fn p28_stranded_zero_fulfillment_no_longer_blocks_an_otherwise_ready_offensive() {
+        let (_, country_registry, _, war_registry, _, mut frontline_registry, _) = setup_test_env();
+        let states = p28_states(None);
+        let mut military = p28_military(&[(1, StateId(3)), (2, StateId(6))]);
+        military.division_supply_fulfillment.insert(DivisionId(1), 1.0);
+        military.division_supply_fulfillment.insert(DivisionId(2), 0.0);
+        update_all_frontlines(&war_registry, &states, &military, &mut frontline_registry);
+        let fl = frontline_registry.get_frontline_for_war(WarId(1)).unwrap().clone();
+        let mut plan = frontline_registry.get_plan(fl.frontline_id, P28_AI).unwrap().clone();
+        plan.assigned_division_ids = vec![DivisionId(1), DivisionId(2)];
+        let country = country_registry.get(P28_AI).unwrap();
+        let connected =
+            crate::military::capital_connectivity::connected_states_from_capital(StateId(4), P28_AI, &states);
+
+        // 従来の母集合(割当全体)では、飛び地の充足率0が最小値になり補給不足で止まる。
+        let (stance, reason, blocked) = evaluate_military_ai_decision(
+            &fl,
+            &plan,
+            &plan.assigned_division_ids,
+            2000,
+            1000,
+            true,
+            &military,
+            country,
+            &war_registry,
+        );
+        assert_eq!((stance, reason, blocked), (FrontlineStance::Defend, MilitaryAiDecisionReason::SupplyShortage, true));
+
+        // P28-003の母集合では、連結したDivisionの充足率1.0で判定し、攻勢を開始できる。
+        let scope = offensive_delivery_division_ids(&plan.assigned_division_ids, P28_AI, &connected, &military, &states);
+        assert_eq!(scope, vec![DivisionId(1)]);
+        let (stance, reason, blocked) =
+            evaluate_military_ai_decision(&fl, &plan, &scope, 2000, 1000, true, &military, country, &war_registry);
+        assert_eq!((stance, reason, blocked), (FrontlineStance::Offensive, MilitaryAiDecisionReason::SufficientAdvantage, false));
+
+        // 110%の戦力比条件は割当全体の戦力(呼び出し側の値)のまま: 1:1では攻勢を開始しない。
+        let (stance, reason, _) =
+            evaluate_military_ai_decision(&fl, &plan, &scope, 1000, 1000, true, &military, country, &war_registry);
+        assert_eq!((stance, reason), (FrontlineStance::Defend, MilitaryAiDecisionReason::ComparableStrength));
+
+        // 全員が取り残された前線は元の集合(充足率0)で判定し、空集合として攻勢許可しない。
+        plan.assigned_division_ids = vec![DivisionId(2)];
+        let scope = offensive_delivery_division_ids(&plan.assigned_division_ids, P28_AI, &connected, &military, &states);
+        let (stance, reason, _) =
+            evaluate_military_ai_decision(&fl, &plan, &scope, 2000, 1000, true, &military, country, &war_registry);
+        assert_eq!((stance, reason), (FrontlineStance::Defend, MilitaryAiDecisionReason::SupplyShortage));
     }
 }
