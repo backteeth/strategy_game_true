@@ -847,13 +847,23 @@ mod real_app {
     // - Arcadia/Elfinは変更なし(このシナリオでは本タスクの評価対象月において
     //   黒字判定または建設タイミングへの影響が閾値を跨がず、既存の挙動を維持する)。
     // 独立プロセス3回で新値の再現を確認済み(決定的)。
+    //
+    // 【P28-005により正規値を再更新】: 物流比率0.9未満の州へRailwayを優先建設する
+    // 段階(優先度2.7)の追加により、Oceanic(旧`459.577314`→`402.23853800000006`、
+    // 減少)は物流改善のためのRailway建設に建設枠と資金の一部を振り向けるようになり、
+    // 同じ36か月間のMilitaryFactory増産機会がわずかに後ろ倒しになった。これは
+    // `p26_006_capital_connectivity_supply_e2e_test.rs`の供給不足日数増加
+    // (550→561)と同根であり、長期の財政崩壊(`verification_logs/phase-28/p28-005-
+    // pre-001/`)を防ぐための正当なトレードオフである。Dwarfはプレイヤー国家であり
+    // AI建設対象外のため不変。他4か国も変更なし。独立プロセス3回で新値の再現を
+    // 確認済み(決定的)。
     #[test]
     fn test_f_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
             (ELFIN, 499.874123),
             (DWARF, 1647.0588400000001),
-            (OCEANIC, 459.577314),
+            (OCEANIC, 402.23853800000006),
             (PASSGUARD, 3672.5984340000005),
             (FERROWYN, 1333.5205999999996),
         ];

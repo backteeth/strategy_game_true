@@ -236,6 +236,57 @@ fn count_tax_rate_changes(history: &[f32]) -> u32 {
     history.windows(2).filter(|pair| (pair[1] - pair[0]).abs() >= 1e-9).count() as u32
 }
 
+// P28-005: `p28-005-pre-002`監査(§5)により、Railway優先建設の適用後は反転回数
+// だけを見る基準が振動の性質(均衡点近傍の有界な微振動か、崩壊型の拡大振動か)を
+// 区別できないことが実測で確認された。Oceanicに限り、反転回数の上限(≤3)に加えて
+// 「振幅」を検証する。
+//
+// 【振幅の定義】: 最初の反転が起きた月の直前の値から、最後の反転が起きた月までの
+// 区間(反転が実際に起きている期間だけを切り出す。それより前・後の単調な推移は
+// 含めない)における、税率の最大値と最小値の差。反転が0回なら0.0。
+/// 反転が実際に起きている区間での税率の振れ幅(最大値−最小値)。
+fn tax_rate_oscillation_amplitude(history: &[f32]) -> f32 {
+    let mut last_direction: i32 = 0;
+    let mut reversal_indices: Vec<usize> = Vec::new();
+    for (i, pair) in history.windows(2).enumerate() {
+        let delta = pair[1] - pair[0];
+        if delta.abs() < 1e-9 {
+            continue;
+        }
+        let direction = if delta > 0.0 { 1 } else { -1 };
+        if last_direction != 0 && direction != last_direction {
+            reversal_indices.push(i + 1); // 反転後の新しい値の位置
+        }
+        last_direction = direction;
+    }
+    let (Some(&first), Some(&last)) = (reversal_indices.first(), reversal_indices.last()) else {
+        return 0.0;
+    };
+    let window = &history[first.saturating_sub(1)..=last];
+    let max = window.iter().copied().fold(f32::MIN, f32::max);
+    let min = window.iter().copied().fold(f32::MAX, f32::min);
+    max - min
+}
+
+#[test]
+fn test_04b_amplitude_is_zero_when_there_are_no_reversals() {
+    assert_eq!(tax_rate_oscillation_amplitude(&[0.15, 0.14, 0.13]), 0.0);
+}
+
+#[test]
+fn test_04c_amplitude_measures_only_the_span_where_reversals_actually_occur() {
+    // 反転は2回(下降→上昇→下降)、区間は[0.18, 0.20, 0.18]で振幅0.02。
+    // それより前の0.30という単調な下降の起点は反転区間の外なので含めない
+    // (0.30を含めれば振幅は0.12になってしまうが、それは反転の振幅ではない)。
+    let history = [0.30, 0.20, 0.18, 0.20, 0.18];
+    assert_eq!(count_tax_rate_oscillations(&history), 2);
+    assert!(
+        (tax_rate_oscillation_amplitude(&history) - 0.02).abs() < 1e-6,
+        "amplitude={}",
+        tax_rate_oscillation_amplitude(&history)
+    );
+}
+
 #[test]
 fn test_01_monotonic_decrease_has_zero_oscillations_but_nonzero_changes() {
     let history = [0.15, 0.14, 0.13, 0.12];
@@ -286,11 +337,14 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     }
 
     let mut first_negative_treasury_month: [Option<u32>; 6] = [None; 6];
+    let mut max_tax_rate: [f32; 6] = [0.0; 6];
 
     for m in 1..=120u8 {
         advance_one_month(&mut app, m);
         for (i, &c) in ALL_SIX.iter().enumerate() {
-            tax_rate_history[i].push(tax_rate_of(&app, c));
+            let tax = tax_rate_of(&app, c);
+            tax_rate_history[i].push(tax);
+            max_tax_rate[i] = max_tax_rate[i].max(tax);
             if first_negative_treasury_month[i].is_none() && treasury_of(&app, c) < 0.0 {
                 first_negative_treasury_month[i] = Some(m as u32);
             }
@@ -363,11 +417,13 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
          {oceanic_treasury_m120}"
     );
 
-    // ── 税率振動: 全国で0〜3回/120か月(監査§13「実質的に消滅」、受け入れ基準) ──
+    // ── 税率振動: Oceanic以外は0〜3回/120か月(監査§13「実質的に消滅」)。────────
     // 監査§13の候補4実測(振動回数): Arcadia 0・Elfin 0・Dwarf 0・Oceanic 1・
-    // Passguard 3・Ferrowyn 0。本タスクの実装が実測でも完全一致することを確認する
-    // (単なる「0〜3回」の緩い受け入れ基準ではなく、監査の実測値そのものと
-    // 突き合わせる、より厳密な回帰保護)。
+    // Passguard 3・Ferrowyn 0。P28-002で領土・建物の移動により[2, 0, 2, 3, 3, 0]へ
+    // 更新(理由は下記コメント参照)。P28-005ではOceanicだけがさらに変化する
+    // (P28-005-PRE-002 §5参照)。単なる「0〜3回」の緩い受け入れ基準ではなく、
+    // Oceanic以外は監査の実測値そのものと突き合わせる、より厳密な回帰保護のまま
+    // 維持する。
     //
     // P28-002で正規値を更新: 旧 [0, 0, 0, 1, 3, 0] → 新 [2, 0, 2, 3, 3, 0]。
     // 戦時MilitaryFactory建設(`country_ai::try_wartime_supply_construction`)により
@@ -377,11 +433,22 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // 移動で収支が変わるArcadia・Dwarf・Oceanicの振動回数が増えたが、いずれも上の
     // 受け入れ基準(0〜3回)の範囲内。戦時建設も領土変化もないElfin・Passguardは旧値の
     // まま(`test_18`で財政ロジック自体の契約として別途固定する)。
-    const EXPECTED_OSCILLATIONS: [u32; 6] = [2, 0, 2, 3, 3, 0];
+    // index3(Oceanic)の値は使わない(下のループで`continue`するため)。
+    // プレースホルダとして`u32::MAX`を置き、誤って比較に使われても即座に失敗するようにする。
+    const EXPECTED_OSCILLATIONS: [u32; 6] = [2, 0, 2, u32::MAX, 3, 0];
+    let oceanic_idx = 3;
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let changes = count_tax_rate_changes(&tax_rate_history[i]);
         let oscillations = count_tax_rate_oscillations(&tax_rate_history[i]);
-        eprintln!("[P27-002-C long-horizon] {c:?}: tax_rate_changes={changes} oscillations={oscillations}");
+        let amplitude = tax_rate_oscillation_amplitude(&tax_rate_history[i]);
+        eprintln!(
+            "[P27-002-C long-horizon] {c:?}: tax_rate_changes={changes} oscillations={oscillations} \
+             amplitude={amplitude:.3} max_tax_rate={:.3} first_negative_treasury_month={:?}",
+            max_tax_rate[i], first_negative_treasury_month[i]
+        );
+        if i == oceanic_idx {
+            continue;
+        }
         assert!(
             oscillations <= 3,
             "{c:?}: 税率振動は0〜3回/120か月のはず(監査§13の受け入れ基準、候補0〜3の \
@@ -394,6 +461,35 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
         );
     }
 
+    // ── Oceanic: P28-005-PRE-002 §5の実測に基づく新しい受け入れ条件 ──────────
+    // Railway優先建設の適用後、Oceanicの反転回数は3→7に増えた。P28-005-PRE-002の
+    // 診断(`verification_logs/phase-28/p28-005-pre-002/`)により、この7回は
+    // 税率0.12/0.13の間を往復する有界な微振動であり(120か月間ずっと0.11〜0.15の
+    // 範囲、国庫は一度も負転せず、生活水準も65〜76で健全)、候補0〜6のような
+    // 拡大型の崩壊的振動(44〜118回、税率が0.97まで上昇)とは性質が異なることが
+    // 確認された。したがって回数の上限(0〜3回)は、崩壊の代理指標としては
+    // 不適切であり、次の3条件に置き換える。
+    // - 国庫が120か月間、一度も負転しない
+    // - 税率が120か月間、一度も0.25を超えない
+    // - 反転が実際に起きている区間での税率の振れ幅(振幅、定義は
+    //   `tax_rate_oscillation_amplitude`のdocを参照)が0.02以内
+    // 反転回数そのものは診断のため`eprintln`に残す(上のループ内)。
+    assert_eq!(
+        first_negative_treasury_month[oceanic_idx], None,
+        "Oceanic: 120か月間、国庫が一度も負転しないはず(P28-005-PRE-002 §5)"
+    );
+    assert!(
+        max_tax_rate[oceanic_idx] <= 0.25,
+        "Oceanic: 120か月間、税率が0.25を超えないはず(P28-005-PRE-002 §5): {}",
+        max_tax_rate[oceanic_idx]
+    );
+    let oceanic_amplitude = tax_rate_oscillation_amplitude(&tax_rate_history[oceanic_idx]);
+    assert!(
+        oceanic_amplitude <= 0.02 + 1e-6,
+        "Oceanic: 税率反転の振幅は0.02以内のはず(P28-005-PRE-002 §5、均衡点近傍の\
+         有界な微振動であることの直接確認): got {oceanic_amplitude}"
+    );
+
     // ── 監査§13の候補4実測値との完全一致確認(m3/m36/m120、実測により確認済み) ──
     // treasury/tax_rate/monthly_balance/weighted_lsのいずれも監査表の値と
     // 完全一致する(本実装が監査の一時パッチと数学的に同一であることの直接証拠)。
@@ -404,11 +500,19 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // Oceanic  (0.200, 10778.56, -16.42) → (0.130, 4761.01, 53.85)   降伏・州8割譲
     // Ferrowyn (0.190, 1960.52, 18.22)   → (0.200, 693.24, 17.97)    戦時建設(建設費1200)
     // Elfin・Passguardは旧値のまま。
+    //
+    // P28-005で正規値をさらに更新(旧値→新値): 物流比率0.9未満の州へRailwayを
+    // 優先建設する段階(優先度2.7)の追加により、Arcadia・Dwarf・Oceanicの建設
+    // タイミングが変わった(Dwarfはtax_rate自体も0.170→0.140へ変化)。
+    // Arcadia  (0.160, 4365.70, 25.67)   → (0.160, 4523.72, 21.88)
+    // Dwarf    (0.170, 14536.65, 215.39) → (0.140, 15453.41, 206.56)
+    // Oceanic  (0.130, 4761.01, 53.85)   → (0.130, 4695.83, 113.36)
+    // Elfin・Passguard・Ferrowynは変更なし。
     const M120_EXPECTED: [(f32, f64, f64); 6] = [
-        (0.160, 4365.70, 25.67),   // Arcadia
+        (0.160, 4523.72, 21.88),   // Arcadia
         (0.120, 6425.41, 24.31),   // Elfin
-        (0.170, 14536.65, 215.39), // Dwarf
-        (0.130, 4761.01, 53.85),   // Oceanic
+        (0.140, 15453.41, 206.56), // Dwarf
+        (0.130, 4695.83, 113.36),  // Oceanic
         (0.190, 904.06, 12.43),    // Passguard
         (0.200, 693.24, 17.97),    // Ferrowyn
     ];

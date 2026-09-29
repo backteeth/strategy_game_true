@@ -793,6 +793,97 @@ fn wartime_supply_inputs_covered(
     true
 }
 
+// ─── P28-005: 物流生活水準維持のためのRailway優先建設 ─────────────────────────
+//
+// `verification_logs/phase-28/p28-005-pre-001/`・`p28-005-pre-002/`で採用した
+// R0案。低雇用州に限らず、物流比率が`LOGISTICS_WELFARE_BONUS_RATIO`(0.9)未満の
+// 州は`update_state_welfare_and_unrest`の物流ボーナスを受けられず、雇用率<0.7と
+// 重なると生活水準が月あたり正味で低下し続け、最終的に税率0.25超のペナルティを
+// 誘発して長期の財政崩壊に至る(監査の因果確定)。雇用率で対象州を絞る案(P28-005
+// -PRE-002のR1)は、雇用率が境界付近で推移する州で保護が断続的に外れ、新たな
+// 崩壊経路を生むことが実測で確認されたため、雇用率による絞り込みは行わない。
+
+/// 優先度2.7(P28-005)。着工した場合だけ`true`(国庫・建設キューを変更する)。
+/// `false`のときは国庫・建設キューを一切変更しない。
+///
+/// 着工条件(すべて満たす場合):
+/// 1. 自国が所有かつ支配する陸上州のうち、物流比率が
+///    `economy::finance::LOGISTICS_WELFARE_BONUS_RATIO`未満の州がある
+///    (雇用率による絞り込みはしない)
+/// 2. その州のRailwayが最大レベル未満
+/// 3. その州にRailwayが建設キューにない(未完了の同種建設を重複発注しない)
+/// 4. 候補が複数あれば物流比率が最も低い州を選ぶ(同値は`StateId`昇順。
+///    `owned_states`は呼び出し側で既に`StateId`昇順に整列済みのため、走査順を
+///    崩さず「厳密に低い場合だけ更新」する通常の規則で決定的になる)
+/// 5. `国庫 ≥ 建設費 + 月次経常支出 × PEACETIME_CONSTRUCTION_RESERVE_MONTHS`
+///    (非有限・負の値は着工しない側に倒す。優先度3・戦時MilitaryFactoryと同じ
+///    数値安全規約)
+fn try_logistics_railway_construction(
+    country: &mut CountryData,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+) -> bool {
+    let Some(def) = building_registry.get(BuildingType::Railway) else {
+        return false;
+    };
+
+    let mut worst: Option<(f32, StateId, u32)> = None;
+    for &state_id in owned_states {
+        let Some(state) = state_registry.get(state_id) else {
+            continue;
+        };
+        let level = state.building_level(BuildingType::Railway);
+        if level >= def.max_level {
+            continue;
+        }
+        if state.logistics_ratio >= crate::economy::finance::LOGISTICS_WELFARE_BONUS_RATIO {
+            continue;
+        }
+        let queued = country
+            .construction_queue
+            .iter()
+            .any(|item| item.state_id == state_id && item.building_type == BuildingType::Railway);
+        if queued {
+            continue;
+        }
+        if worst.is_none_or(|(worst_ratio, _, _)| state.logistics_ratio < worst_ratio) {
+            worst = Some((state.logistics_ratio, state_id, level));
+        }
+    }
+    let Some((_, state_id, current_level)) = worst else {
+        return false;
+    };
+
+    let treasury = country.treasury;
+    let cost = def.construction_cost;
+    let monthly_expenses = country.monthly_expenses;
+    if !(treasury.is_finite()
+        && cost.is_finite()
+        && cost >= 0.0
+        && monthly_expenses.is_finite()
+        && monthly_expenses >= 0.0)
+    {
+        return false;
+    }
+    let required_treasury = cost + monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
+    if !required_treasury.is_finite() || treasury < required_treasury {
+        return false;
+    }
+
+    country.treasury -= cost;
+    country.construction_queue.push(ConstructionQueueItem {
+        state_id,
+        building_type: BuildingType::Railway,
+        target_level: current_level + 1,
+        progress: 0.0,
+        required_progress: def.required_progress,
+        paid_cost: cost,
+        status: ConstructionStatus::InQueue,
+    });
+    true
+}
+
 /// 優先度2.5(P28-002)。着工した場合だけ`true`(国庫・建設キューを変更する)。
 /// `false`のときは国庫・建設キューを一切変更しない。
 ///
@@ -1024,6 +1115,16 @@ pub fn process_construction_ai_with_wartime_supply(
         )
     {
         ai_state.decision_reason = CountryAiDecisionReason::WarInProgress;
+        return;
+    }
+
+    // 優先度2.7 (P28-005): 物流比率がLOGISTICS_WELFARE_BONUS_RATIO(0.9)未満の
+    // 州へRailwayを1件建設する。着工しなかった場合は、優先度3へそのまま
+    // フォールスルーする(優先度3の予備資金契約は変更しない)。判断理由は
+    // 既存の`PeacetimeDevelopment`を再利用する(Save V1の値域を広げないため、
+    // P28-002が`WarInProgress`を再利用したのと同じ方針)。
+    if try_logistics_railway_construction(country, state_registry, building_registry, &owned_states) {
+        ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
         return;
     }
 
@@ -2953,6 +3054,24 @@ mod tests {
                 railway_capacity_bonus: 0.0,
             },
         );
+        reg.definitions.insert(
+            BuildingType::Railway,
+            crate::building::data::BuildingDefinition {
+                building_type: BuildingType::Railway,
+                name: "Railway".to_string(),
+                construction_cost: 800.0,
+                required_progress: 60.0,
+                required_workforce: 3000.0,
+                logistics_cost: 0.0,
+                input_resources: HashMap::new(),
+                output_resources: HashMap::new(),
+                maintenance_cost: 20.0,
+                max_level: 5,
+                science_output: 0.0,
+                magic_output: 0.0,
+                railway_capacity_bonus: 50.0,
+            },
+        );
         reg
     }
 
@@ -4254,5 +4373,338 @@ mod tests {
         assert_eq!(queued(2), vec![(StateId(2), 2)], "戦時のAI国家だけが着工する");
         assert!(queued(3).is_empty(), "消滅国家には適用しない");
         assert!(queued(4).is_empty(), "平時のAI国家には適用しない");
+    }
+
+    // ─── P28-005: 物流生活水準維持のためのRailway優先建設(優先度2.7) ──────────
+
+    fn p28_005_queued_railways(country: &CountryData) -> Vec<(StateId, u32)> {
+        country
+            .construction_queue
+            .iter()
+            .filter(|q| q.building_type == BuildingType::Railway)
+            .map(|q| (q.state_id, q.target_level))
+            .collect()
+    }
+
+    /// Food/Wood/Iron/Coalが潤沢で、Factory lv1(IndustrialGoodsの構造的経路が
+    /// あるので優先度2は発火しない)を持つ州。`logistics_ratio`は呼び出し側が
+    /// 個別に設定する。
+    fn p28_005_state(id: usize, owner: CountryId, logistics_ratio: f32) -> StateData {
+        let mut s = p28_with_building(p28_state(id, owner, 100.0), BuildingType::Factory, 1, 1.0);
+        s.logistics_ratio = logistics_ratio;
+        s
+    }
+
+    /// 契約1: 物流比率0.9未満の適格州があれば着工できる。
+    #[test]
+    fn p28_005_builds_railway_when_a_state_is_below_the_logistics_bonus_ratio() {
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, reason) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.5)], None);
+        assert_eq!(p28_005_queued_railways(&after), vec![(StateId(1), 1)]);
+        assert_eq!(after.construction_queue.len(), 1, "1回の判断で追加するのは1件だけ");
+        assert!((after.treasury - 4200.0).abs() < 1e-9, "建設費800だけを支払う");
+        assert_eq!(reason, CountryAiDecisionReason::PeacetimeDevelopment);
+    }
+
+    /// 契約2: 物流比率0.9以上の州だけなら、この段階では着工しない
+    /// (0.9ちょうども含めて境界値を確認する)。
+    #[test]
+    fn p28_005_does_not_build_when_all_states_are_at_or_above_the_logistics_bonus_ratio() {
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.9)], None);
+        assert!(p28_005_queued_railways(&after).is_empty(), "0.9ちょうどは対象外");
+
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 1.0)], None);
+        assert!(p28_005_queued_railways(&after).is_empty());
+    }
+
+    /// 契約3: 雇用率が高くても、物流不足だけで対象から除外しない
+    /// (P28-005-PRE-002のR1が境界依存の保護漏れを起こしたことの直接対照)。
+    #[test]
+    fn p28_005_high_employment_state_with_low_logistics_is_still_eligible() {
+        let mut s = p28_005_state(1, CountryId(1), 0.5);
+        s.employed_workforce = 50_000; // total_workforce=50,000 → 雇用率1.0
+        s.unemployed_workforce = 0;
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, _) = p28_run(country, vec![s], None);
+        assert_eq!(
+            p28_005_queued_railways(&after),
+            vec![(StateId(1), 1)],
+            "雇用率1.0でも物流比率0.5なら着工する(雇用率フィルタを追加しない)"
+        );
+    }
+
+    /// 契約4: 複数候補では物流比率が最も低い州を選ぶ。
+    #[test]
+    fn p28_005_lowest_logistics_ratio_state_is_selected_among_multiple_candidates() {
+        let s1 = p28_005_state(1, CountryId(1), 0.7);
+        let s2 = p28_005_state(2, CountryId(1), 0.3);
+        let s3 = p28_005_state(3, CountryId(1), 0.8);
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, _) = p28_run(country, vec![s1, s2, s3], None);
+        assert_eq!(p28_005_queued_railways(&after), vec![(StateId(2), 1)]);
+    }
+
+    /// 契約5: 物流比率が同じとき、州登録順に依存せず決定的に選ぶ(StateId最小)。
+    #[test]
+    fn p28_005_tie_breaks_by_state_id_regardless_of_registration_order() {
+        let build = |states: Vec<StateData>| {
+            let country = p28_country(CountryId(1), StateId(1), 5000.0);
+            p28_005_queued_railways(&p28_run(country, states, None).0)
+        };
+        let forward = build(vec![
+            p28_005_state(2, CountryId(1), 0.5),
+            p28_005_state(5, CountryId(1), 0.5),
+            p28_005_state(9, CountryId(1), 0.5),
+        ]);
+        let reversed = build(vec![
+            p28_005_state(9, CountryId(1), 0.5),
+            p28_005_state(5, CountryId(1), 0.5),
+            p28_005_state(2, CountryId(1), 0.5),
+        ]);
+        assert_eq!(forward, vec![(StateId(2), 1)]);
+        assert_eq!(forward, reversed, "登録順を反転しても同じ州(StateId最小)を選ぶ");
+    }
+
+    /// 契約6: 自国所有・支配の条件を満たさない州(他国が所有、または自国所有だが
+    /// 敵が占領中)には着工しない。
+    #[test]
+    fn p28_005_never_targets_a_state_the_country_does_not_own_or_control() {
+        let foreign = p28_005_state(1, CountryId(2), 0.1); // 他国所有
+        let mut occupied = p28_005_state(2, CountryId(1), 0.1); // 自国所有・敵が占領中
+        occupied.controller_country = Some(CountryId(2));
+        let own = p28_005_state(3, CountryId(1), 0.9); // 唯一の適格州(物流0.9で非対象)
+        let country = p28_country(CountryId(1), StateId(3), 5000.0);
+        let (after, _) = p28_run(country, vec![foreign, occupied, own], None);
+        assert!(
+            p28_005_queued_railways(&after).is_empty(),
+            "所有かつ支配する州以外はどれだけ物流が低くても対象にならない"
+        );
+    }
+
+    /// 契約7: 既存の建設キューと建設可能条件を尊重する
+    /// (重複発注しない、最大レベルは対象外、キュー上限2件も既存どおり)。
+    #[test]
+    fn p28_005_respects_existing_queue_and_buildable_conditions() {
+        // 既にRailwayがキュー中の州は、物流が低くても再発注しない。
+        let mut country = p28_country(CountryId(1), StateId(1), 5000.0);
+        country.construction_queue.push(ConstructionQueueItem {
+            state_id: StateId(1),
+            building_type: BuildingType::Railway,
+            target_level: 1,
+            progress: 0.0,
+            required_progress: 60.0,
+            paid_cost: 800.0,
+            status: ConstructionStatus::InQueue,
+        });
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.1)], None);
+        assert_eq!(
+            p28_005_queued_railways(&after),
+            vec![(StateId(1), 1)],
+            "既存の1件だけが残り、重複発注しない(この州が唯一の候補なので優先度2.7はfalseを返し、\
+             優先度3のFactoryへフォールスルーして別途1件追加されるのは契約11どおりの正しい動作)"
+        );
+
+        // 最大レベル(テスト用定義では5)に達した州は対象外。
+        let mut maxed = p28_005_state(2, CountryId(1), 0.1);
+        maxed.buildings.insert(BuildingType::Railway, 5);
+        let country = p28_country(CountryId(1), StateId(2), 5000.0);
+        let (after, _) = p28_run(country, vec![maxed], None);
+        assert!(p28_005_queued_railways(&after).is_empty(), "最大レベルの州には着工しない");
+
+        // キュー上限2件は既存の冒頭判定のまま(Railway専用の例外を作らない)。
+        let mut country = p28_country(CountryId(1), StateId(1), 5000.0);
+        country.construction_queue.push(ConstructionQueueItem {
+            state_id: StateId(9),
+            building_type: BuildingType::Factory,
+            target_level: 1,
+            progress: 0.0,
+            required_progress: 10.0,
+            paid_cost: 300.0,
+            status: ConstructionStatus::InQueue,
+        });
+        country.construction_queue.push(ConstructionQueueItem {
+            state_id: StateId(9),
+            building_type: BuildingType::Mine,
+            target_level: 1,
+            progress: 0.0,
+            required_progress: 10.0,
+            paid_cost: 500.0,
+            status: ConstructionStatus::InQueue,
+        });
+        let before_treasury = country.treasury;
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.1)], None);
+        assert_eq!(after.construction_queue.len(), 2, "既存のキュー上限2件を尊重する");
+        assert!((after.treasury - before_treasury).abs() < 1e-9);
+    }
+
+    /// 契約8: 建設費 + 月次経常支出3か月分の予備資金を確保できなければ着工しない
+    /// (優先度3・戦時MilitaryFactoryと同じ数値安全規約。非有限値も安全側に倒す)。
+    #[test]
+    fn p28_005_treasury_threshold_is_cost_plus_three_months_of_expenses() {
+        // 800 + 100×3 = 1100(p28_countryのmonthly_expensesは100)。
+        let country = p28_country(CountryId(1), StateId(1), 1099.999);
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.1)], None);
+        assert!(p28_005_queued_railways(&after).is_empty(), "1099.999は不足");
+
+        let country = p28_country(CountryId(1), StateId(1), 1100.0);
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.1)], None);
+        assert_eq!(p28_005_queued_railways(&after), vec![(StateId(1), 1)], "1100ちょうどは着工する(>=)");
+
+        let mut country = p28_country(CountryId(1), StateId(1), f64::NAN);
+        country.monthly_expenses = 100.0;
+        let (after, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.1)], None);
+        assert!(p28_005_queued_railways(&after).is_empty(), "国庫がNaNなら着工しない");
+    }
+
+    /// 契約9: 1回の判断でRailwayを複数着工しない(適格州が複数あっても1件だけ)。
+    #[test]
+    fn p28_005_builds_at_most_one_railway_per_decision() {
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let states = vec![p28_005_state(1, CountryId(1), 0.2), p28_005_state(2, CountryId(1), 0.3)];
+        let (after, _) = p28_run(country, states, None);
+        assert_eq!(after.construction_queue.len(), 1);
+        assert_eq!(p28_005_queued_railways(&after), vec![(StateId(1), 1)]);
+    }
+
+    /// 契約10: Food緊急・供給網修復(優先度2)・戦時MilitaryFactory(優先度2.5)の
+    /// 既存優先順位を維持する(Railwayに奪われない)。
+    #[test]
+    fn p28_005_existing_higher_priorities_are_preserved() {
+        // 10-a: Food緊急(優先度1)が最優先。
+        let mut hungry = p28_country(CountryId(1), StateId(1), 5000.0);
+        hungry.stockpile.set(ResourceType::Food, 10.0);
+        let (after, reason) = p28_run(hungry, vec![p28_005_state(1, CountryId(1), 0.1)], None);
+        assert!(p28_005_queued_railways(&after).is_empty(), "Food緊急時はRailwayより優先");
+        assert_eq!(reason, CountryAiDecisionReason::FoodShortageFarmPriority);
+
+        // 10-b: 供給網修復(優先度2、IndustrialGoodsの構造的経路がない)がRailwayより優先。
+        let mut no_factory = p28_state(1, CountryId(1), 0.1);
+        no_factory.buildings.insert(BuildingType::MilitaryFactory, 1);
+        no_factory.building_operation_ratios.insert(BuildingType::MilitaryFactory, 1.0);
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, reason) = p28_run(country, vec![no_factory], None);
+        assert!(p28_005_queued_railways(&after).is_empty(), "供給網修復がRailwayより優先");
+        assert_eq!(reason, CountryAiDecisionReason::SteelShortageSteelMillPriority);
+
+        // 10-c: 戦時MilitaryFactory(優先度2.5、実月産不足)がRailwayより優先。
+        // (Factory lv1・MilitaryFactory lv1@稼働率0.2の`p28_base_state`に、
+        // Railwayも対象になるよう物流比率0.1を明示的に上書きする。)
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let mut low_logistics_wartime = p28_base_state(CountryId(1));
+        low_logistics_wartime.logistics_ratio = 0.1;
+        let (after, reason) = p28_run(country, vec![low_logistics_wartime], Some(P28_TWO_DIVISIONS));
+        assert_eq!(p28_queued_military_factories(&after), vec![(StateId(1), 2)]);
+        assert!(p28_005_queued_railways(&after).is_empty(), "戦時MilitaryFactoryがRailwayより優先");
+        assert_eq!(reason, CountryAiDecisionReason::WarInProgress);
+    }
+
+    /// 契約11: Railwayの判断後、条件を満たさないときは既存の優先度3
+    /// (原材料不足→Mine、それ以外→Factory)へ正しく進む。
+    #[test]
+    fn p28_005_falls_through_to_normal_development_when_ineligible() {
+        // 物流は十分(0.9以上)だが原材料が不足 → 優先度3のMine。
+        let mut low_materials = p28_005_state(1, CountryId(1), 1.0);
+        let mut country = p28_country(CountryId(1), StateId(1), 5000.0);
+        country.stockpile.set(ResourceType::Iron, 10.0);
+        low_materials.resource_deposits = vec![p26_008_c_deposit(ResourceType::Iron, true)];
+        let (after, reason) = p28_run(country, vec![low_materials], None);
+        assert!(p28_005_queued_railways(&after).is_empty());
+        assert_eq!(reason, CountryAiDecisionReason::RawMaterialMinePriority);
+
+        // 物流も原材料も十分 → 優先度3のFactory(既存の通常開発)。
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after, reason) = p28_run(country, vec![p28_005_state(1, CountryId(1), 1.0)], None);
+        assert!(p28_005_queued_railways(&after).is_empty());
+        assert_eq!(reason, CountryAiDecisionReason::PeacetimeDevelopment);
+        assert!(
+            after.construction_queue.iter().any(|q| q.building_type == BuildingType::Factory),
+            "Railway非対象なら既存の優先度3がFactoryを建てる"
+        );
+    }
+
+    /// 契約12: プレイヤー国家・消滅国家にはRailway優先建設を適用しない
+    /// (`process_daily_country_ai`経由、既存の除外ロジックのまま)。
+    #[test]
+    fn p28_005_daily_ai_never_applies_to_player_or_eliminated_countries() {
+        let (
+            player_country,
+            _,
+            _,
+            _,
+            _,
+            _,
+            mut diplomacy_registry,
+            tech_registry,
+            world_state,
+            mut justification_registry,
+            mut frontline_registry,
+            mut military_ai_registry,
+            mut country_ai_registry,
+        ) = setup_test_env();
+        // 1=プレイヤー、2=通常のAI(平時)、3=消滅国家。いずれも物流0.1の州を持つ。
+        let mut countries: Vec<CountryData> =
+            (1..=3).map(|i| p28_country(CountryId(i), StateId(i), 5000.0)).collect();
+        countries[2].status = crate::country::CountryStatus::Eliminated {
+            eliminated_date: "1800/01/01".into(),
+            annexed_by: CountryId(2),
+        };
+        let mut country_registry = CountryRegistry { countries };
+        let states: Vec<StateData> =
+            (1..=3).map(|i| p28_005_state(i, CountryId(i), 0.1)).collect();
+        let state_registry = StateRegistry::build(states);
+        process_daily_country_ai(
+            1,
+            "1800/01/02",
+            &player_country,
+            &mut country_registry,
+            &state_registry,
+            &p26_008_c_building_registry(),
+            &MilitaryRegistry::default(),
+            &mut WarRegistry::default(),
+            &mut diplomacy_registry,
+            &tech_registry,
+            &world_state,
+            &mut justification_registry,
+            &mut frontline_registry,
+            &mut military_ai_registry,
+            &mut country_ai_registry,
+            &mut Vec::new(),
+            &mut CrisisRegistry::default(),
+        );
+        let queued = |id: usize| p28_005_queued_railways(country_registry.get(CountryId(id)).unwrap());
+        assert!(queued(1).is_empty(), "プレイヤー国家には適用しない");
+        assert_eq!(queued(2), vec![(StateId(2), 1)], "平時の通常AI国家には適用する");
+        assert!(queued(3).is_empty(), "消滅国家には適用しない");
+    }
+
+    /// 契約13: Railway完成後の次回判断は、現在の物流比率と建物レベルを再評価する
+    /// (過去の判断を記憶せず、毎回作り直した`owned_states`から選び直す)。
+    #[test]
+    fn p28_005_reevaluates_current_logistics_and_level_after_completion() {
+        // 1回目: 物流0.5の州にlv1を着工。
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after_first, _) = p28_run(country, vec![p28_005_state(1, CountryId(1), 0.5)], None);
+        assert_eq!(p28_005_queued_railways(&after_first), vec![(StateId(1), 1)]);
+
+        // 完成をシミュレート: レベル1・キューを空にし、物流はまだ0.7(<0.9)のまま。
+        let mut completed_state = p28_005_state(1, CountryId(1), 0.7);
+        completed_state.buildings.insert(BuildingType::Railway, 1);
+        let mut after_completion = after_first;
+        after_completion.construction_queue.clear();
+        let (after_second, _) = p28_run(after_completion, vec![completed_state], None);
+        assert_eq!(
+            p28_005_queued_railways(&after_second),
+            vec![(StateId(1), 2)],
+            "完成後もまだ0.9未満なら、現在のレベル(1)を基にlv2を再発注する"
+        );
+
+        // 物流が0.9以上まで改善していれば、レベルに関わらずもう発注しない。
+        let mut satisfied_state = p28_005_state(1, CountryId(1), 0.95);
+        satisfied_state.buildings.insert(BuildingType::Railway, 1);
+        let country = p28_country(CountryId(1), StateId(1), 5000.0);
+        let (after_third, _) = p28_run(country, vec![satisfied_state], None);
+        assert!(p28_005_queued_railways(&after_third).is_empty(), "0.9以上に改善していれば再評価で対象から外れる");
     }
 }

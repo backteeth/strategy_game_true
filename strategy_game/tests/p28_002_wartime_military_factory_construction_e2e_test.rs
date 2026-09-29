@@ -355,34 +355,46 @@ fn test_01_dwarf_builds_completes_and_passes_the_unchanged_offensive_gate_by_its
         }
     }
 
-    // 着工・完成(実測)。
-    assert_eq!(
-        observer.starts.iter().filter(|s| s.1 == DWARF).map(|s| (s.0.as_str(), s.2, s.3)).collect::<Vec<_>>(),
-        vec![("1800/06/05", StateId(20), 1), ("1801/03/24", StateId(20), 2)],
-        "Dwarfは宣戦翌日に州20へlv1を着工し、戦時需要の増加後にlv2を着工する"
-    );
-    assert!(
-        observer.completions.iter().any(|c| c.0 == "1800/09/03" && c.1 == DWARF.0 && c.2 == 20 && c.3 == 1),
-        "州20のMilitaryFactory lv1は1800/09/03に完成する: {:?}", observer.completions
-    );
-    // 完成後の実生産は開戦時の月産を上回る。
+    // ── 機能上の契約(州を問わない。P28-005でRailway優先建設が加わっても、この
+    // 契約自体は不変であるはず): 戦時に着工が起こり、完成後の実生産が開戦時を
+    // 上回り、正規のゲート再開(既存の70日しきい値)→攻勢→戦闘→勝利へ進む。
+    assert!(!observer.starts.iter().filter(|s| s.1 == DWARF).collect::<Vec<_>>().is_empty(), "Dwarfは戦時に少なくとも1件着工するはず");
+    assert!(!observer.completions.iter().filter(|c| c.1 == DWARF.0).collect::<Vec<_>>().is_empty(), "戦時建設が少なくとも1件完成するはず");
     let dwarf_supply_after = realised_monthly_supply(&app, DWARF);
     assert!(
         dwarf_supply_after > dwarf_supply_before_war,
         "完成後の月産{dwarf_supply_after}は開戦時{dwarf_supply_before_war}より大きいはず"
     );
-    // 自国生産による正規のゲート再開 → 攻勢 → 戦闘 → 勝利。
-    assert_eq!(resumed_on.as_deref(), Some("1801/03/01"));
-    assert_eq!(first_offensive.as_deref(), Some("1801/03/04"));
-    assert_eq!(first_battle.as_deref(), Some("1801/03/08"));
+    assert!(resumed_on.is_some(), "自国生産により既存ゲートが正規に再開するはず");
+    assert!(first_offensive.is_some(), "ゲート再開後に攻勢が始まるはず");
+    assert!(first_battle.is_some(), "攻勢後に戦闘が起こるはず");
     let wars = app.world().resource::<WarRegistry>();
     let war0 = wars
         .wars
         .values()
         .find(|w| w.attackers.contains(&DWARF) && w.defenders.contains(&ARCADIA) && w.start_date == "1800/06/04")
         .unwrap();
-    assert_eq!(war0.status, WarStatus::AttackerVictory);
-    assert_eq!(war0.end_date.as_deref(), Some("1801/03/29"));
+    assert_eq!(war0.status, WarStatus::AttackerVictory, "自国生産による補給で最終的に攻撃側が勝利するはず");
+
+    // ── 自然再現(参考。P28-005のRailway優先建設により、着工州・日付が変わったことを
+    // 記録する回帰保護。Railwayが州6の物流を先に改善したことで、優先度2.5の増産見込み
+    // 判定(`projected_military_factory_supply_gain`)が州20ではなく州6を選ぶようになり、
+    // ゲート再開・攻勢・戦闘・終戦の日付も早まった——いずれも
+    // `verification_logs/phase-28/p28-005/`で確認した経路依存の結果であり、
+    // 上の機能上の契約はいずれの州が選ばれても成立する)。
+    assert_eq!(
+        observer.starts.iter().filter(|s| s.1 == DWARF).map(|s| (s.0.as_str(), s.2, s.3)).collect::<Vec<_>>(),
+        vec![("1800/06/05", StateId(6), 3), ("1801/03/03", StateId(6), 4)],
+        "P28-005適用後の自然再現(旧: 州20のlv1/lv2。理由は上記コメント参照)"
+    );
+    assert!(
+        observer.completions.iter().any(|c| c.0 == "1800/09/03" && c.1 == DWARF.0 && c.2 == 6 && c.3 == 3),
+        "州6のMilitaryFactory lv3は1800/09/03に完成する: {:?}", observer.completions
+    );
+    assert_eq!(resumed_on.as_deref(), Some("1800/11/03"), "P28-005適用後の自然再現(旧: 1801/03/01)");
+    assert_eq!(first_offensive.as_deref(), Some("1800/12/03"), "P28-005適用後の自然再現(旧: 1801/03/04)");
+    assert_eq!(first_battle.as_deref(), Some("1800/12/07"), "P28-005適用後の自然再現(旧: 1801/03/08)");
+    assert_eq!(war0.end_date.as_deref(), Some("1801/01/30"), "P28-005適用後の自然再現(旧: 1801/03/29)");
 }
 
 /// プレイヤーが交戦中でも、そのプレイヤー国家にはAIの戦時建設を適用しない。
@@ -416,8 +428,9 @@ fn test_03_save_load_before_during_and_after_wartime_construction_matches_contin
         let queued_before_save = queued_military_factories(&app, DWARF);
         match label {
             "before" => assert!(queued_before_save.is_empty()),
-            "queued" => assert_eq!(queued_before_save, vec![(StateId(20), 1)]),
-            _ => assert!(queued_before_save.is_empty(), "1800/10/01にはlv1が完成済み"),
+            // P28-005適用後の自然再現(旧: 州20のlv1。test_01のコメント参照)。
+            "queued" => assert_eq!(queued_before_save, vec![(StateId(6), 3)]),
+            _ => assert!(queued_before_save.is_empty(), "1800/10/01にはlv3が完成済み"),
         }
         send_save_request(&mut app);
         send_load_request(&mut app);

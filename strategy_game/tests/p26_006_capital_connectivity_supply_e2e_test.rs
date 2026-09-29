@@ -821,9 +821,19 @@ fn test_36_month_oceanic_shortage_unchanged_when_uncontested_by_capital_connecti
     // Ferrowyn等の恒久的税収ゼロ化)を防ぐための正当なトレードオフであり、
     // `first_shortage_day=32`(初期ブリッジ備蓄枯渇由来、cadence非依存)は不変
     // (独立プロセス3回で550が再現することを確認済み、決定的)。
+    //
+    // 【P28-005により正規値を再更新】: 物流比率0.9未満の州へRailwayを優先建設する
+    // 段階(優先度2.7)の追加により、DwarfのMilitaryFactory増産経路が(物流の改善で
+    // 早期に空いた建設枠を使って)州20から州6へ変わり、開戦・ゲート再開・戦闘・
+    // 終戦のタイミングが早まった(`verification_logs/phase-28/p28-005/`実測)。
+    // この経路変化はOceanicにも波及し、供給不足日数が550→561(972日中+11日、
+    // 約2%)へ増加した。財政の長期崩壊(`verification_logs/phase-28/p28-005-pre-001/`)
+    // を防ぐための正当なトレードオフであり、`first_shortage_day=32`(初期ブリッジ
+    // 備蓄枯渇由来、Railway導入と無関係)は不変(独立プロセス2回で561が再現する
+    // ことを確認済み、決定的)。
     assert_eq!(
-        shortage_days, 550,
-        "P27-002-C適用後の正規値(旧544から更新、理由は上記コメント参照)"
+        shortage_days, 561,
+        "P28-005適用後の正規値(旧550から更新、理由は上記コメント参照)"
     );
     assert_eq!(first_shortage_day, Some(32), "初回不足発生日はcadence修正の影響を受けないはず");
 }

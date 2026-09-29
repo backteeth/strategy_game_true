@@ -941,13 +941,20 @@ mod real_app {
     // 3672.5984340000005へ増加。Ferrowynも同根の効果でさらに大きく1097.532100→
     // 1333.5205999999996へ増加[いずれも監査が確認した長期回復と同根]。Arcadia/
     // Elfinは不変)。独立プロセス3回で新値の再現を確認済み(決定的)。
+    //
+    // 【P28-005により正規値を再更新】: 理由・新値は
+    // `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名テストのコメントと
+    // 同一(Railway優先建設によりOceanicの建設枠・資金の一部が物流改善に振り向けられ、
+    // 36か月累計MilitarySupplies生産分が459.577314→402.23853800000006へ減少。
+    // Dwarfはプレイヤー国家のため不変、他4か国も不変)。独立プロセス3回で新値の
+    // 再現を確認済み(決定的)。
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
             (ELFIN, 499.874123),
             (DWARF, 1647.0588400000001),
-            (OCEANIC, 459.577314),
+            (OCEANIC, 402.23853800000006),
             (PASSGUARD, 3672.5984340000005),
             (FERROWYN, 1333.5205999999996),
         ];

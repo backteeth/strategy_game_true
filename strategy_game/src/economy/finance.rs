@@ -13,6 +13,14 @@ pub const TAX_COEFFICIENT: f64 = 0.0001;
 pub const ADMIN_COEFFICIENT: f64 = 0.0008;
 pub const LOGISTICS_MAINTENANCE_COEFFICIENT: f64 = 0.05;
 
+/// P28-005: `update_state_welfare_and_unrest`の物流生活水準ボーナスの境界
+/// (物流比率がこの値以上なら生活水準+0.3/月、これ未満で0.5未満なら-0.5/月)。
+/// 建設AIのRailway優先建設(`country::country_ai`優先度2.7)は、この定数を
+/// そのまま対象州の選定閾値として共有する——生活水準が改善に転じる物流比率と、
+/// AIがRailwayを検討する物流比率を、同じ定数で常に一致させるため
+/// (`verification_logs/phase-28/p28-005-pre-001/`の監査で確認した境界)。
+pub const LOGISTICS_WELFARE_BONUS_RATIO: f32 = 0.9;
+
 /// P27-002-B: tax_rateを1回の操作で変更する幅。プレイヤーUI(`ui::economy_panel`の
 /// 税率±ボタン)とAI税率自己調整(`country::country_ai::process_tax_rate_ai`)の
 /// 両方が、この定数と下の`apply_tax_rate_delta`を共有する唯一の変更経路とする
@@ -186,7 +194,7 @@ pub fn update_state_welfare_and_unrest(
     }
 
     // 物流
-    if state.logistics_ratio >= 0.9 {
+    if state.logistics_ratio >= LOGISTICS_WELFARE_BONUS_RATIO {
         ls_delta += 0.3;
     } else if state.logistics_ratio < 0.5 {
         ls_delta -= 0.5;
