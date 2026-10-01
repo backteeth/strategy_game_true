@@ -16,6 +16,7 @@ use strategy_game::common::{CountryId, DivisionId, FrontlineId, StateId, WarId};
 use strategy_game::country::{CountryData, CountryPlugin, CountryRegistry, PlayerCountry};
 use strategy_game::diplomacy::DiplomacyPlugin;
 use strategy_game::diplomacy::crisis::{WarGoal, WarGoalType};
+use strategy_game::diplomacy::data::DiplomacyRegistry;
 use strategy_game::economy::EconomyPlugin;
 use strategy_game::economy::resources::ResourceType;
 use strategy_game::military::MilitaryPlugin;
@@ -748,6 +749,30 @@ fn tick_day(app: &mut App, year: i32, month: u8, day: u8) {
     app.update();
 }
 
+/// P28-007: `test_90_day_controlled_war_offensive_supply_gate_real_app_verification`は
+/// `PlayerCountry(None)`(全AI)で実データ世界を動かすため、本テストが手動挿入する
+/// 制御War以外にも、AI外交が独自にCountryId(1)(Elfin)を当事国とするWarを宣戦し
+/// 得る(実測: CountryId(3)対CountryId(1)のWarが1800/03/14にP28-007のE2で白紙講和、
+/// これ自体はE2の正しい挙動――実データ上に実在する、国境を失ったまま構造的に
+/// 停止したWar)。`execute_peace_settlement`の占領状態正常化は、終結したWarの
+/// 当事国が所有する現在占領中の全州を基準に戻す(war_idでの絞り込みはOR条件の
+/// フォールバックで迂回される)ため、この無関係なWarの終結に、本テストの制御War
+/// が占領中の州3(Elfin所有)の占領まで巻き込まれて解除されてしまう
+/// (P28-007のE2固有の問題ではなく、`execute_peace_settlement`の既存の仕様に
+/// 起因する副作用で、終結経路が降伏・既存E1・E2のいずれでも起こり得る)。
+/// この種のWarはCrisis宣戦前に`is_in_truce`を参照する(`src/diplomacy/crisis.rs`)
+/// ため、Elfinと他の全AI国家との間に長期休戦を事前設定し、本テストの観測
+/// ウィンドウ中にElfinが新たなWarの当事国にならないようにして、制御シナリオを
+/// 隔離する(前線補給ゲートの挙動のみを検証対象とするための事前条件であり、
+/// 検証対象の戦力比・補給率・本番Systemの計算自体には一切手を加えない)。
+fn isolate_elfin_from_unrelated_wars(app: &mut App) {
+    let far_future = "1950/01/01".to_string();
+    let mut dip = app.world_mut().resource_mut::<DiplomacyRegistry>();
+    for other in [2usize, 3, 4, 5] {
+        dip.set_truce(CountryId(1), CountryId(other), far_future.clone());
+    }
+}
+
 fn set_game_date(app: &mut App, year: i32, month: u8, day: u8) {
     let mut gd = app.world_mut().resource_mut::<GameDate>();
     gd.year = year;
@@ -915,6 +940,7 @@ fn advance_days(app: &mut App, start_year: i32, start_month: u8, start_day: u8, 
 fn test_90_day_controlled_war_offensive_supply_gate_real_app_verification() {
     let dir = TempTestDir::new("ninety_day_offensive");
     let mut app = setup_app(None, dir.save_file_config());
+    isolate_elfin_from_unrelated_wars(&mut app);
 
     // 実データのCountryId(0)(Arcadia)とCountryId(1)(Elfin)の間に制御された戦争を
     // 作る(自然発生を待たない、spec §15: 結果を成立させるために本番データ・戦力比・

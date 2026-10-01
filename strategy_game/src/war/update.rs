@@ -123,6 +123,12 @@ pub fn mark_ai_registries_dirty_on_change(
     }
 }
 
+/// P28-007: 国境(有効な前線)を失ったまま継続するWarを白紙講和させる際の`end_reason`。
+/// 既存の州所有権変更に起因する`"War Goal No Longer Achievable"`(E1,
+/// `peace::invalidate_other_wars_targeting_state`)とは別の文言にして、ログ・UI上で
+/// 原因を区別できるようにする。
+const FRONTLINE_UNREACHABLE_REASON: &str = "Frontline Unreachable";
+
 /// 戦争解決・後処理システム (WarResolution Set)
 /// 戦闘結果の集計、戦勝点更新、降伏判定・自動講和、戦後整理を行う
 /// (AI dirty化は`mark_ai_registries_dirty_on_change`へ分離済み、上記コメント参照)。
@@ -202,27 +208,76 @@ pub fn handle_daily_war_resolution(
                         &mut reported_errors,
                         &player_country,
                     );
-                    match outcome {
-                        CapitulationSettlementOutcome::Settled
-                        | CapitulationSettlementOutcome::FailedAlreadyReported => {}
-                        CapitulationSettlementOutcome::FailedNotifyPlayer(err_key) => {
-                            notif_writer.write(GameNotification {
-                                message: loc.tf(
-                                    "war_error.peace.auto_settlement_failed",
-                                    vec![("reason", loc.t(err_key))],
-                                ),
-                            });
-                        }
-                        CapitulationSettlementOutcome::FailedLogOnly(err_key) => {
-                            bevy::log::warn!(
-                                "[AutoCapitulation] {war_id:?} settlement failed (AI-only, no \
-                                 player notification, will not repeat until the error or war \
-                                 changes): {err_key}"
-                            );
-                        }
-                    }
+                    report_settlement_outcome(
+                        outcome,
+                        war_id,
+                        "AutoCapitulation",
+                        &mut notif_writer,
+                        &loc,
+                    );
                 }
             }
+        }
+
+        // 3.5. 有効な前線(border_region_pairs)を失ったまま継続するWarの終結(P28-007)。
+        // 対象州の所有者自体は変わらないが、国境・戦争目標が構造的に成立不能になった
+        // 戦争を、既存の白紙講和経路(`settle_capitulation`)で終結させる。ステップ3
+        // (降伏判定、およびその内部で`execute_peace_settlement`が副作用として呼ぶ
+        // `invalidate_other_wars_targeting_state`=既存のE1)が同日中に既にこのWarを
+        // 終結させている場合があるため、Active War一覧をここで改めて取得し直し、
+        // 降伏・既存E1による終結を誤って上書きしない。
+        //
+        // `war_goals`が空のWarは対象外とする(P28-007回帰検証で発見した境界条件、
+        // P28-007-PRE-001の一時パッチでは未検証): 自然発生するAI戦争は必ず単一の
+        // `WarGoalType::ConquerState`を持つ(`src/diplomacy/crisis.rs`等、宣戦5箇所で
+        // 確認済み)。`war_goals`が空なのは、戦争目標を伴わない純粋な戦闘・補給機構
+        // テスト用fixtureだけに現れる人為的な状態であり、このようなWarは
+        // `check_defender_capitulation`/`check_attacker_capitulation`の前提
+        // (`war.war_goals.first()`)自体が成立しないため降伏判定で終わる経路が
+        // 最初から存在しない。攻撃側が防御側の到達可能な全領域を占領し尽くす
+        // ことでもborder_region_pairsは空になり得るが、これは「構造的停止」では
+        // なく「占領による実質的勝利」であり、E2が白紙講和で誤って占領状態を
+        // 正常化(無効化)してはならない。実際のAI戦争はConquerStateを持つため、
+        // この除外は現行の対象原因(国境・戦争目標喪失)の挙動を一切変えない。
+        let frontline_stalled_war_ids: Vec<WarId> = war_registry
+            .wars
+            .values()
+            .filter(|w| w.status == WarStatus::Active && !w.war_goals.is_empty())
+            .map(|w| w.id)
+            .collect();
+
+        for war_id in frontline_stalled_war_ids {
+            if !war_has_no_valid_frontline(war_id, &frontline_registry) {
+                continue;
+            }
+
+            let outcome = settle_capitulation(
+                war_id,
+                crate::war::peace::PeaceTerm::WhitePeace,
+                FRONTLINE_UNREACHABLE_REASON,
+                &current_date_str,
+                &mut state_registry,
+                &mut war_registry,
+                &mut military_registry,
+                &mut battle_registry,
+                &mut diplomacy_registry,
+                &mut frontline_registry,
+                &mut crisis_registry,
+                &mut claim_registry,
+                &mut country_registry,
+                &mut elimination_extras.army_registry,
+                &mut elimination_extras.justification_registry,
+                &mut elimination_extras.power_registry,
+                &mut reported_errors,
+                &player_country,
+            );
+            report_settlement_outcome(
+                outcome,
+                war_id,
+                "FrontlineUnreachable",
+                &mut notif_writer,
+                &loc,
+            );
         }
 
         // 4. 無効前線・陸軍参照の整理と前線の最新状態再計算
@@ -232,6 +287,45 @@ pub fn handle_daily_war_resolution(
             &military_registry,
             &mut frontline_registry,
         );
+    }
+}
+
+/// P28-007: このWarに対応する`Frontline`が存在し、かつ`border_region_pairs`が
+/// 空(＝`MilitaryAiDecisionReason::NoValidFrontline`と同一条件、
+/// `src/war/military_ai.rs`参照)かどうかを判定する。純粋関数としてユニットテスト
+/// 可能にしておく(`settle_capitulation`と同じ設計方針)。宣戦当日などまだ
+/// `Frontline`が生成されていない(`None`)場合は、構造的な停止ではないため`false`。
+fn war_has_no_valid_frontline(war_id: WarId, frontline_registry: &FrontlineRegistry) -> bool {
+    frontline_registry
+        .get_frontline_for_war(war_id)
+        .is_some_and(|fl| fl.border_region_pairs.is_empty())
+}
+
+/// P21-020/P28-007: `settle_capitulation`の結果に応じて、プレイヤー通知またはログ
+/// 出力を行う。降伏判定(ステップ3)と前線喪失判定(ステップ3.5)の両方から共通で使う。
+fn report_settlement_outcome(
+    outcome: CapitulationSettlementOutcome,
+    war_id: WarId,
+    tag: &str,
+    notif_writer: &mut MessageWriter<GameNotification>,
+    loc: &Loc<'_>,
+) {
+    match outcome {
+        CapitulationSettlementOutcome::Settled | CapitulationSettlementOutcome::FailedAlreadyReported => {}
+        CapitulationSettlementOutcome::FailedNotifyPlayer(err_key) => {
+            notif_writer.write(GameNotification {
+                message: loc.tf(
+                    "war_error.peace.auto_settlement_failed",
+                    vec![("reason", loc.t(err_key))],
+                ),
+            });
+        }
+        CapitulationSettlementOutcome::FailedLogOnly(err_key) => {
+            bevy::log::warn!(
+                "[{tag}] {war_id:?} settlement failed (AI-only, no player notification, will \
+                 not repeat until the error or war changes): {err_key}"
+            );
+        }
     }
 }
 
@@ -768,6 +862,457 @@ mod tests {
         assert!(
             !reported.reported.iter().any(|&(w, _)| w == WarId(1)),
             "a successful settlement must clear all previously-reported entries for this war"
+        );
+    }
+
+    /// P28-007 要求テスト(国境消失): 対象州の所有者は変わらないが、第三国への
+    /// 割譲によって当事国間の有効な国境(`border_region_pairs`)が消失した場合、
+    /// 次の判定で白紙講和(`FRONTLINE_UNREACHABLE_REASON`)により終結する。
+    /// 既存のE1(`peace::invalidate_other_wars_targeting_state`)は戦争目標州
+    /// 自体の所有者変更を要求するため、このケース(目標州は不変)では発火せず、
+    /// 州所有権移転も発生しないことを確認する。
+    #[test]
+    fn frontline_lost_without_target_state_transfer_ends_in_white_peace() {
+        use crate::state::data::StateData;
+        use crate::war::frontline::update_or_create_frontline_for_war;
+
+        // state0: 攻撃側(country0)の境界州。state1: 防御側(country1)の境界州
+        // (state0に隣接)。state2: 防御側(country1)の戦争目標州(state1にのみ隣接、
+        // state0とは非隣接)。
+        let mut states = StateRegistry::build(vec![
+            StateData {
+                id: StateId(0),
+                owner_country_id: CountryId(0),
+                neighbors: vec![StateId(1)],
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(1),
+                owner_country_id: CountryId(1),
+                neighbors: vec![StateId(0), StateId(2)],
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(2),
+                owner_country_id: CountryId(1),
+                neighbors: vec![StateId(1)],
+                ..Default::default()
+            },
+        ]);
+
+        let mut war_reg = WarRegistry::default();
+        war_reg.wars.insert(
+            WarId(1),
+            War {
+                id: WarId(1),
+                name: "Border Loss Test War".to_string(),
+                attackers: [CountryId(0)].into_iter().collect(),
+                defenders: [CountryId(1)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![WarGoal {
+                    attacker: CountryId(0),
+                    defender: CountryId(1),
+                    goal_type: WarGoalType::ConquerState,
+                    target_states: vec![StateId(2)],
+                    base_peace_cost: 20.0,
+                    international_concern: 10.0,
+                    completion: 0.0,
+                    is_primary: true,
+                }],
+                start_date: "1936/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: std::collections::HashSet::new(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: std::collections::HashSet::new(),
+            },
+        );
+
+        let mut fl_reg = FrontlineRegistry::default();
+        let war_snapshot = war_reg.wars.get(&WarId(1)).unwrap().clone();
+        update_or_create_frontline_for_war(&war_snapshot, &states, &mut fl_reg);
+        assert!(
+            !war_has_no_valid_frontline(WarId(1), &fl_reg),
+            "開戦時点ではstate0-state1の国境が存在するはず"
+        );
+
+        // 第三国(country2)への割譲により、防御側の境界州(state1)の所有者が
+        // 変わる。戦争目標州(state2)自体は防御側(country1)のまま不変。
+        states.get_mut(StateId(1)).unwrap().owner_country_id = CountryId(2);
+        update_or_create_frontline_for_war(&war_snapshot, &states, &mut fl_reg);
+
+        assert!(
+            war_has_no_valid_frontline(WarId(1), &fl_reg),
+            "state1喪失により、state0(country0)に隣接するdefender(country1)の州が無くなるはず"
+        );
+        assert_eq!(
+            states.get(StateId(2)).unwrap().owner_country_id,
+            CountryId(1),
+            "戦争目標州は割譲されていない(E1が発火する条件ではない)"
+        );
+
+        let mut mil_reg = MilitaryRegistry::default();
+        let mut battle_reg = BattleRegistry::default();
+        let mut dip_reg = DiplomacyRegistry::default();
+        let mut crisis_reg = CrisisRegistry::default();
+        let mut claim_reg = ClaimRegistry::default();
+        let mut country_reg = CountryRegistry {
+            countries: vec![0, 1, 2]
+                .into_iter()
+                .map(|id| crate::country::CountryData {
+                    id: CountryId(id),
+                    capital_state_id: StateId(999), // 首都再配置ロジックを誘発しない
+                    ..Default::default()
+                })
+                .collect(),
+        };
+        let mut reported = ReportedPeaceSettlementErrors::default();
+        let mut army_reg = crate::military::army::ArmyRegistry::default();
+        let mut justification_reg = crate::war::justification::WarJustificationRegistry::default();
+        let mut power_reg = crate::country::power::CountryPowerRegistry::default();
+
+        // ステップ3.5相当: 国境喪失を検出したWarを、既存の白紙講和経路で終結させる。
+        let outcome = settle_capitulation(
+            WarId(1),
+            PeaceTerm::WhitePeace,
+            FRONTLINE_UNREACHABLE_REASON,
+            "1936/06/01",
+            &mut states,
+            &mut war_reg,
+            &mut mil_reg,
+            &mut battle_reg,
+            &mut dip_reg,
+            &mut fl_reg,
+            &mut crisis_reg,
+            &mut claim_reg,
+            &mut country_reg,
+            &mut army_reg,
+            &mut justification_reg,
+            &mut power_reg,
+            &mut reported,
+            &PlayerCountry(None),
+        );
+
+        assert_eq!(outcome, CapitulationSettlementOutcome::Settled);
+        let war = war_reg.wars.get(&WarId(1)).unwrap();
+        assert_eq!(war.status, WarStatus::WhitePeace);
+        assert_eq!(war.winner, None);
+        assert_eq!(
+            war.end_reason.as_deref(),
+            Some(FRONTLINE_UNREACHABLE_REASON)
+        );
+        assert!(
+            fl_reg.get_frontline_for_war(WarId(1)).is_none(),
+            "終結後は前線が削除されるはず"
+        );
+        assert_eq!(
+            states.get(StateId(2)).unwrap().owner_country_id,
+            CountryId(1),
+            "白紙講和では戦争目標州の所有権は移転しない"
+        );
+        assert!(
+            dip_reg.is_in_truce(CountryId(0), CountryId(1), "1936/06/01"),
+            "白紙講和後は攻撃側・防御側間に休戦が作成されるはず"
+        );
+    }
+
+    /// P28-007 要求テスト(国境が残る停止): 国境は存在するが、補給・戦力不足で
+    /// 長期間攻勢に出られないwar9型の停止では、単なる無戦闘・前線割当不足を
+    /// 理由にE2が発火してはならない。E2は`border_region_pairs`の有無のみで
+    /// 判定し、`offensive_supply_blocked`や師団配置状況とは独立している。
+    #[test]
+    fn frontline_with_remaining_border_is_never_terminated_by_e2() {
+        use crate::state::data::StateData;
+        use crate::war::frontline::update_or_create_frontline_for_war;
+
+        let states = StateRegistry::build(vec![
+            StateData {
+                id: StateId(0),
+                owner_country_id: CountryId(0),
+                neighbors: vec![StateId(1)],
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(1),
+                owner_country_id: CountryId(1),
+                neighbors: vec![StateId(0)],
+                ..Default::default()
+            },
+        ]);
+
+        let mut war_reg = WarRegistry::default();
+        war_reg.wars.insert(
+            WarId(1),
+            War {
+                id: WarId(1),
+                name: "Stalled War (war9-type)".to_string(),
+                attackers: [CountryId(0)].into_iter().collect(),
+                defenders: [CountryId(1)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![WarGoal {
+                    attacker: CountryId(0),
+                    defender: CountryId(1),
+                    goal_type: WarGoalType::ConquerState,
+                    target_states: vec![StateId(1)],
+                    base_peace_cost: 20.0,
+                    international_concern: 10.0,
+                    completion: 0.0,
+                    is_primary: true,
+                }],
+                start_date: "1936/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: std::collections::HashSet::new(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: std::collections::HashSet::new(),
+            },
+        );
+
+        let mut fl_reg = FrontlineRegistry::default();
+        let war_snapshot = war_reg.wars.get(&WarId(1)).unwrap().clone();
+        let fl_id = update_or_create_frontline_for_war(&war_snapshot, &states, &mut fl_reg);
+
+        // war6/war9型の実際の症状(攻勢供給ブロック)を模して、国境は残っているが
+        // 長期間攻勢に出られない状態を再現する(師団割当は意図的に空のまま)。
+        fl_reg
+            .plans
+            .get_mut(&(fl_id, CountryId(0)))
+            .unwrap()
+            .offensive_supply_blocked = true;
+
+        assert!(
+            !war_has_no_valid_frontline(WarId(1), &fl_reg),
+            "state0-state1の国境は消えていないため、E2は発火してはならない"
+        );
+
+        // 実際のステップ3.5と同じ抽出条件で、Activeな戦争からE2対象を探す
+        // ――war9型の停止はこのフィルタで除外されるはず。
+        let stalled_candidates: Vec<WarId> = war_reg
+            .wars
+            .values()
+            .filter(|w| w.status == WarStatus::Active)
+            .map(|w| w.id)
+            .filter(|&id| war_has_no_valid_frontline(id, &fl_reg))
+            .collect();
+
+        assert!(
+            stalled_candidates.is_empty(),
+            "国境が残るwar9型の停止はE2の対象候補に含まれてはならない"
+        );
+        assert_eq!(
+            war_reg.wars.get(&WarId(1)).unwrap().status,
+            WarStatus::Active,
+            "war9型の戦争はActiveのまま継続するはず(単なる無戦闘で終結しない)"
+        );
+    }
+
+    /// P28-007 要求テスト(優先順位): 同じWarが同日中に降伏条件(ステップ3)と
+    /// E2の国境喪失条件(ステップ3.5)の両方を満たし得る場合でも、先に処理される
+    /// 降伏判定が正規の講和結果を確定させ、E2がその結果を白紙講和へ誤って
+    /// 上書きしないことを確認する。ステップ3.5は「ステップ3完了後にActiveな
+    /// War一覧を改めて取得し直す」ため、既に非ActiveになったWarは自然に対象外に
+    /// なる。念のため、仮にE2がこのWarへ直接(誤って)適用されても
+    /// `execute_peace_settlement`の二重適用防止により結果が変化しないことも
+    /// あわせて確認する。
+    #[test]
+    fn capitulation_outcome_is_not_overwritten_by_e2_same_day() {
+        use crate::state::data::StateData;
+        use crate::war::frontline::update_or_create_frontline_for_war;
+
+        // state0: 攻撃側(country0)の境界州。state1: 防御側(country1)の唯一の
+        // 所有州であり、戦争目標でもある。既に攻撃側に占領されている
+        // (owner=country1のまま、controller=country0)。
+        let states = StateRegistry::build(vec![
+            StateData {
+                id: StateId(0),
+                owner_country_id: CountryId(0),
+                neighbors: vec![StateId(1)],
+                ..Default::default()
+            },
+            StateData {
+                id: StateId(1),
+                owner_country_id: CountryId(1),
+                controller_country: Some(CountryId(0)),
+                neighbors: vec![StateId(0)],
+                ..Default::default()
+            },
+        ]);
+
+        let mut war_reg = WarRegistry::default();
+        war_reg.wars.insert(
+            WarId(1),
+            War {
+                id: WarId(1),
+                name: "Capitulation Priority Test War".to_string(),
+                attackers: [CountryId(0)].into_iter().collect(),
+                defenders: [CountryId(1)].into_iter().collect(),
+                primary_attacker: None,
+                primary_defender: None,
+                source_crisis_id: None,
+                war_goals: vec![WarGoal {
+                    attacker: CountryId(0),
+                    defender: CountryId(1),
+                    goal_type: WarGoalType::ConquerState,
+                    target_states: vec![StateId(1)],
+                    base_peace_cost: 20.0,
+                    international_concern: 10.0,
+                    completion: 0.0,
+                    is_primary: true,
+                }],
+                start_date: "1936/01/01".to_string(),
+                end_date: None,
+                duration_days: 0,
+                war_score: 0.0,
+                attacker_war_exhaustion: 0.0,
+                defender_war_exhaustion: 0.0,
+                occupied_states: std::collections::HashSet::new(),
+                status: WarStatus::Active,
+                winner: None,
+                end_reason: None,
+                applied_terms: Vec::new(),
+                won_attacker_battles: 0,
+                won_defender_battles: 0,
+                processed_battle_ids: std::collections::HashSet::new(),
+            },
+        );
+
+        let mut fl_reg = FrontlineRegistry::default();
+        let war_snapshot = war_reg.wars.get(&WarId(1)).unwrap().clone();
+        update_or_create_frontline_for_war(&war_snapshot, &states, &mut fl_reg);
+
+        // defenderは既にstate1(唯一の所有州=戦争目標)の実効支配を失っており、
+        // 降伏条件(占領率100%)とE2の国境喪失条件の両方が同時に成立し得る。
+        assert!(war_has_no_valid_frontline(WarId(1), &fl_reg));
+
+        let mut mil_reg = MilitaryRegistry::default();
+        let cap = crate::war::capitulation::evaluate_war_capitulation(
+            war_reg.wars.get(&WarId(1)).unwrap(),
+            &states,
+            &mil_reg,
+        );
+        assert_eq!(
+            cap,
+            crate::war::capitulation::CapitulationResult::DefenderCapitulated,
+            "占領率100%により、降伏判定(ステップ3)が成立するはず"
+        );
+
+        let mut states = states;
+        let mut battle_reg = BattleRegistry::default();
+        let mut dip_reg = DiplomacyRegistry::default();
+        let mut crisis_reg = CrisisRegistry::default();
+        let mut claim_reg = ClaimRegistry::default();
+        let mut country_reg = CountryRegistry {
+            countries: vec![0, 1]
+                .into_iter()
+                .map(|id| crate::country::CountryData {
+                    id: CountryId(id),
+                    capital_state_id: StateId(999),
+                    ..Default::default()
+                })
+                .collect(),
+        };
+        let mut reported = ReportedPeaceSettlementErrors::default();
+        let mut army_reg = crate::military::army::ArmyRegistry::default();
+        let mut justification_reg = crate::war::justification::WarJustificationRegistry::default();
+        let mut power_reg = crate::country::power::CountryPowerRegistry::default();
+
+        // ステップ3: 降伏判定による正規の講和(CedeWarGoalRegion)。
+        let outcome = settle_capitulation(
+            WarId(1),
+            PeaceTerm::CedeWarGoalRegion,
+            "Defender Capitulation",
+            "1936/06/01",
+            &mut states,
+            &mut war_reg,
+            &mut mil_reg,
+            &mut battle_reg,
+            &mut dip_reg,
+            &mut fl_reg,
+            &mut crisis_reg,
+            &mut claim_reg,
+            &mut country_reg,
+            &mut army_reg,
+            &mut justification_reg,
+            &mut power_reg,
+            &mut reported,
+            &PlayerCountry(None),
+        );
+        assert_eq!(outcome, CapitulationSettlementOutcome::Settled);
+        assert_eq!(
+            war_reg.wars.get(&WarId(1)).unwrap().status,
+            WarStatus::AttackerVictory
+        );
+        assert_eq!(
+            war_reg.wars.get(&WarId(1)).unwrap().end_reason.as_deref(),
+            Some("Defender Capitulation")
+        );
+
+        // ステップ3.5相当: Active War一覧を改めて取得し直す。このWarは既に
+        // AttackerVictoryへ遷移済みのため、フィルタで自然に除外される。
+        let frontline_stalled_war_ids: Vec<WarId> = war_reg
+            .wars
+            .values()
+            .filter(|w| w.status == WarStatus::Active)
+            .map(|w| w.id)
+            .collect();
+        assert!(
+            frontline_stalled_war_ids.is_empty(),
+            "降伏判定で既に終結したWarはE2の対象から除外されるはず"
+        );
+
+        // 保険として、仮にE2をこのWarへ直接(誤って)適用しても、
+        // execute_peace_settlementの二重適用防止により結果が変化しないことを
+        // 確認する(end_reasonが白紙講和の理由で上書きされてはならない)。
+        let outcome2 = settle_capitulation(
+            WarId(1),
+            PeaceTerm::WhitePeace,
+            FRONTLINE_UNREACHABLE_REASON,
+            "1936/06/01",
+            &mut states,
+            &mut war_reg,
+            &mut mil_reg,
+            &mut battle_reg,
+            &mut dip_reg,
+            &mut fl_reg,
+            &mut crisis_reg,
+            &mut claim_reg,
+            &mut country_reg,
+            &mut army_reg,
+            &mut justification_reg,
+            &mut power_reg,
+            &mut reported,
+            &PlayerCountry(None),
+        );
+        assert_eq!(outcome2, CapitulationSettlementOutcome::Settled);
+        assert_eq!(
+            war_reg.wars.get(&WarId(1)).unwrap().status,
+            WarStatus::AttackerVictory,
+            "二重適用防止により、既存の降伏結果が白紙講和へ上書きされてはならない"
+        );
+        assert_eq!(
+            war_reg.wars.get(&WarId(1)).unwrap().end_reason.as_deref(),
+            Some("Defender Capitulation"),
+            "end_reasonも上書きされないはず"
         );
     }
 }
