@@ -1,5 +1,6 @@
 pub mod country_selection;
 pub mod diplomacy_panel;
+pub mod division_status_view;
 pub mod economy_panel;
 pub mod load_confirm;
 pub mod military_panel;

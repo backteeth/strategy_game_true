@@ -15,6 +15,7 @@ use crate::military::recruitment::{
 };
 use crate::state::SelectedState;
 use crate::state::data::StateRegistry;
+use crate::ui::division_status_view::DivisionStatusView;
 use crate::ui::notification::GameNotification;
 use crate::ui::tab_bar::{TabBarRoot, ctrl_held};
 use crate::war::data::WarRegistry;
@@ -1392,6 +1393,24 @@ fn update_military_panel_ui(
                         ("status", tr(division_status_key(division.status))),
                     ],
                 ));
+                // P28-009: Divisionごとに戦力・装備・組織率・補給・戦闘準備率を個別表示する
+                // (平均はしない。補給0のDivisionを他のDivisionの値で隠さない)。
+                lines.push(
+                    DivisionStatusView::from_division(
+                        division,
+                        military_registry
+                            .division_supply_fulfillment
+                            .get(&division.id)
+                            .copied(),
+                        military_registry.supply_fulfillment_of(division.id),
+                    )
+                    .compact_line(&tr, &trf),
+                );
+            } else {
+                lines.push(trf(
+                    "military_panel.selected_missing",
+                    vec![("id", division_id.0.to_string())],
+                ));
             }
         }
         lines.push(String::new());
@@ -1436,35 +1455,18 @@ fn update_military_panel_ui(
             lines.push(tr("military_panel.destroyed_or_no_power"));
         }
 
-        // 戦力・組織率
-        lines.push(trf(
-            "military_panel.strength",
-            vec![
-                ("current", division.manpower.to_string()),
-                ("max", division.max_manpower.to_string()),
-                (
-                    "percent",
-                    format!(
-                        "{:.0}",
-                        division.manpower as f32 / division.max_manpower as f32 * 100.0
-                    ),
-                ),
-            ],
-        ));
-        lines.push(trf(
-            "military_panel.organization",
-            vec![
-                ("current", format!("{:.0}", division.organization)),
-                ("max", format!("{:.0}", division.max_organization)),
-                (
-                    "percent",
-                    format!(
-                        "{:.0}",
-                        division.organization / division.max_organization * 100.0
-                    ),
-                ),
-            ],
-        ));
+        // 戦力・装備・組織率・補給・戦闘準備率(P28-009: 正規データ/正規関数をそのまま表示)
+        lines.extend(
+            DivisionStatusView::from_division(
+                division,
+                military_registry
+                    .division_supply_fulfillment
+                    .get(&division.id)
+                    .copied(),
+                military_registry.supply_fulfillment_of(division.id),
+            )
+            .detail_lines(&tr, &trf),
+        );
         lines.push(trf(
             "military_panel.power",
             vec![
@@ -1490,6 +1492,13 @@ fn update_military_panel_ui(
         } else {
             lines.push(tr("military_panel.destination_none"));
         }
+        lines.push(String::new());
+    } else if let Some(missing_id) = selected_division.primary() {
+        // 選択中のDivisionがレジストリに存在しない(消滅直後など)場合は、古い値を出さず明示する。
+        lines.push(trf(
+            "military_panel.selected_missing",
+            vec![("id", missing_id.0.to_string())],
+        ));
         lines.push(String::new());
     }
 
