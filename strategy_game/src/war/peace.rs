@@ -1,5 +1,5 @@
 use crate::app::time::GameDate;
-use crate::common::{ClaimId, CountryId, StateId, WarId};
+use crate::common::{ClaimId, CountryId, DivisionId, StateId, WarId};
 use crate::diplomacy::claims::ClaimRegistry;
 use crate::diplomacy::crisis::CrisisRegistry;
 use crate::diplomacy::data::DiplomacyRegistry;
@@ -8,6 +8,7 @@ use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarRegistry, WarStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// 講和条件の種別
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,13 +174,133 @@ pub fn can_accept_peace_offer(
     Ok(())
 }
 
+/// `excluded_war_id`以外のActive Warで、`a`と`b`が敵対する陣営に分かれているか。
+/// (`WarRegistry::are_countries_at_war`と同じ判定だが、終結処理中のWar自身を除く。
+/// 講和ステップ2・5の時点では終結するWarの`status`はまだ`Active`のため、除外が必須。)
+fn are_enemies_in_other_active_war(
+    war_registry: &WarRegistry,
+    excluded_war_id: WarId,
+    a: CountryId,
+    b: CountryId,
+) -> bool {
+    a != b
+        && war_registry.wars.values().any(|w| {
+            w.id != excluded_war_id
+                && w.status == WarStatus::Active
+                && ((w.attackers.contains(&a) && w.defenders.contains(&b))
+                    || (w.attackers.contains(&b) && w.defenders.contains(&a)))
+        })
+}
+
+/// P28-008: 終結するWarに帰属する占領だけを、所有国の支配へ戻す。
+///
+/// 現行の占領処理(`military::invasion::occupy_state`)は`controller_country`しか
+/// 書かず、`state.war_id`は本番で設定されない(`war::occupation::process_occupation`は
+/// 本番Systemから呼ばれない)。そのため占領元Warは州データから直接は分からず、
+/// 次の条件で帰属を判定する(`war_id`には一切依存しない)。
+///
+/// 州の`owner`・`controller`が異なる(=占領中)とき、次をすべて満たす占領だけを戻す。
+/// - `owner`・`controller`がともに終結Warの全参加国(`attackers ∪ defenders`。
+///   主要当事国だけでなく支持国も含む)に属する
+/// - 他のActive Warで`owner`と`controller`が敵対陣営に分かれていない
+///   (そのWarが続く限り、この占領は別Warによって維持されている)
+///
+/// 真理値表(W=終結するWar):
+///
+/// | 状況 | owner∈P(W) | controller∈P(W) | 他Active Warで敵対 | 結果 |
+/// |---|---|---|---|---|
+/// | 単独War: WでXがY所有州を占領 | ○ | ○ | × | 戻す |
+/// | 同じ防御国Yへの別War B(Z対Y)でZが占領した州 | ○ | × | - | 保持 |
+/// | 当事国共有: 別War(V対X)でVが占領したX所有州 | ○ | × | - | 保持 |
+/// | 支持国Q所有州をXが占領(QはWの防御側参加国) | ○ | ○ | × | 戻す |
+/// | WでもXがYの州を占領、かつ別Active WarでもX・Yが敵対 | ○ | ○ | ○ | 保持 |
+/// | 所有国がWの参加国でない州 | × | - | - | 保持 |
+///
+/// 割譲された州は呼び出し前に`controller==owner`になっているため対象外。
+fn normalize_occupations_of_ended_war(
+    war_id: WarId,
+    state_registry: &mut StateRegistry,
+    war_registry: &WarRegistry,
+) {
+    let participants: HashSet<CountryId> = match war_registry.wars.get(&war_id) {
+        Some(w) => w
+            .attackers
+            .iter()
+            .chain(w.defenders.iter())
+            .copied()
+            .collect(),
+        None => return,
+    };
+
+    for state in state_registry.states.iter_mut() {
+        if state.is_sea {
+            continue;
+        }
+        let owner = state.owner_country_id;
+        let controller = state.controller();
+        let belongs_to_ended_war = controller != owner
+            && participants.contains(&owner)
+            && participants.contains(&controller)
+            && !are_enemies_in_other_active_war(war_registry, war_id, owner, controller);
+        if belongs_to_ended_war {
+            state.controller_country = Some(owner);
+            state.occupation_progress = 0.0;
+            state.original_owner = None;
+            state.war_id = None;
+        } else if state.war_id == Some(war_id) {
+            // 終結済みWarを指す参照を残さない(本番では設定されない旧フィールドの衛生処理)。
+            state.war_id = None;
+        }
+    }
+}
+
+/// P28-008: 終結するWar以外のActive Warで、所有国が州のcontrollerまたはownerと敵対している
+/// Division(=別Warで正当に敵領内にいる)のIDを返す。講和の帰還処理の対象外とする。
+fn divisions_legitimately_in_enemy_territory(
+    war_id: WarId,
+    state_registry: &StateRegistry,
+    military_registry: &MilitaryRegistry,
+    war_registry: &WarRegistry,
+) -> HashSet<DivisionId> {
+    military_registry
+        .divisions
+        .values()
+        .filter(|d| d.status != DivisionStatus::Destroyed && d.manpower > 0)
+        .filter(|d| {
+            state_registry.get(d.current_state).is_some_and(|s| {
+                are_enemies_in_other_active_war(war_registry, war_id, d.owner, s.controller())
+                    || are_enemies_in_other_active_war(
+                        war_registry,
+                        war_id,
+                        d.owner,
+                        s.owner_country_id,
+                    )
+            })
+        })
+        .map(|d| d.id)
+        .collect()
+}
+
 /// 戦争終結後の敵国領残存陸軍の自国領域への安全帰還処理
 pub fn relocate_hostile_territory_divisions(
     state_registry: &StateRegistry,
     military_registry: &mut MilitaryRegistry,
 ) {
+    relocate_hostile_territory_divisions_except(state_registry, military_registry, &HashSet::new());
+}
+
+/// `relocate_hostile_territory_divisions`の本体。`skip`に含まれるDivisionは移動しない
+/// (P28-008: 別のActive Warで正当に敵領内にいるDivision)。
+pub fn relocate_hostile_territory_divisions_except(
+    state_registry: &StateRegistry,
+    military_registry: &mut MilitaryRegistry,
+    skip: &HashSet<DivisionId>,
+) {
     for division in military_registry.divisions.values_mut() {
         if division.status == DivisionStatus::Destroyed || division.manpower == 0 {
+            continue;
+        }
+        if skip.contains(&division.id) {
             continue;
         }
 
@@ -585,18 +706,8 @@ pub fn execute_peace_settlement(
         );
     }
 
-    // 2. 占領状態の正常化（割譲されなかった陸上地域の支配権を現在の所有国へ戻す）
-    for state in state_registry.states.iter_mut() {
-        if !state.is_sea
-            && (state.war_id == Some(war_id) || state.controller_country.is_some())
-            && (state.owner_country_id == attacker || state.owner_country_id == defender)
-        {
-            state.controller_country = Some(state.owner_country_id);
-            state.occupation_progress = 0.0;
-            state.original_owner = None;
-            state.war_id = None;
-        }
-    }
+    // 2. 占領状態の正常化（このWarに帰属する占領だけを所有国へ戻す。P28-008）
+    normalize_occupations_of_ended_war(war_id, state_registry, war_registry);
 
     // 3. 進行中戦闘の中止と陸軍状態のクリア
     for battle in battle_registry.battles.values_mut() {
@@ -624,8 +735,18 @@ pub fn execute_peace_settlement(
         frontline_registry.remove_frontline(fl.frontline_id, military_registry);
     }
 
-    // 5. 敵国領残存陸軍の帰還
-    relocate_hostile_territory_divisions(state_registry, military_registry);
+    // 5. 敵国領残存陸軍の帰還(別のActive Warで正当に敵領内にいるDivisionは対象外。P28-008)
+    let legitimately_deployed = divisions_legitimately_in_enemy_territory(
+        war_id,
+        state_registry,
+        military_registry,
+        war_registry,
+    );
+    relocate_hostile_territory_divisions_except(
+        state_registry,
+        military_registry,
+        &legitimately_deployed,
+    );
 
     // 6. 5年間 (1825日) の休戦の作成
     let curr_date = GameDate::from_string(current_date_str).unwrap_or_default();
