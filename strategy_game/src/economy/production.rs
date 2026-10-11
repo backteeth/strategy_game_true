@@ -80,6 +80,72 @@ pub fn calculate_actual_input(base_input: f64, level: u32, operation_ratio: f32)
     base_input * (level as f64) * (operation_ratio as f64)
 }
 
+/// 稼働率`planned_op`のまま全入力が現在備蓄で賄えるならそのまま返す(従来と同一の
+/// 消費・産出を維持する)。賄えない場合は、最も厳しい入力に合わせて、その消費量が
+/// 備蓄を超えない最大の稼働率(f32の切り捨て側)へ引き下げる。
+fn limit_operation_ratio_to_stock(
+    planned_op: f32,
+    level: u32,
+    inputs: &HashMap<ResourceType, f64>,
+    stockpile: &CountryStockpile,
+) -> Option<f32> {
+    let affordable = |op: f32| {
+        inputs
+            .iter()
+            .all(|(&res, &base_in)| calculate_actual_input(base_in, level, op) <= stockpile.get(res))
+    };
+    if affordable(planned_op) {
+        return Some(planned_op);
+    }
+    let mut cap = planned_op as f64;
+    for (&res, &base_in) in inputs {
+        let per_op = base_in * level as f64;
+        if per_op > 0.0 {
+            cap = cap.min(stockpile.get(res) / per_op);
+        }
+    }
+    if !cap.is_finite() || cap <= 0.0 {
+        return Some(0.0);
+    }
+    let mut op = (cap as f32).min(planned_op);
+    // f32への丸めで備蓄を超える場合のみ、1ulずつ下げる(有限回で必ず収束する)。
+    while op > 0.0 && !affordable(op) {
+        op = f32::from_bits(op.to_bits() - 1);
+    }
+    Some(op.max(0.0))
+}
+
+/// 全入力を原子的に引き落とす。全入力の備蓄を事前確認し、すべて賄える場合だけ
+/// 引き落とす。途中で失敗した場合は、引き落とし済みの分を戻して`false`を返す
+/// (入力の一部だけが消費された状態を残さない)。
+fn consume_inputs_atomically(
+    stockpile: &mut CountryStockpile,
+    inputs: &HashMap<ResourceType, f64>,
+    level: u32,
+    op: f32,
+) -> bool {
+    let mut order: Vec<(ResourceType, f64)> = inputs
+        .iter()
+        .map(|(&res, &base_in)| (res, calculate_actual_input(base_in, level, op)))
+        .collect();
+    order.sort_by_key(|(res, _)| ResourceType::ALL.iter().position(|r| r == res));
+    if order.iter().any(|&(res, amount)| stockpile.get(res) < amount) {
+        return false;
+    }
+    let mut done: Vec<(ResourceType, f64)> = Vec::new();
+    for &(res, amount) in &order {
+        if stockpile.consume(res, amount) {
+            done.push((res, amount));
+        } else {
+            for &(r, a) in &done {
+                stockpile.add(r, a);
+            }
+            return false;
+        }
+    }
+    true
+}
+
 /// 1つの国家が所有する州の生産・消費をまとめて一括処理する
 pub fn process_country_production(
     states: &mut [&mut StateData],
@@ -220,13 +286,27 @@ pub fn process_country_production(
                 }
             }
 
-            let final_op = calculate_operation_ratio(wf_ratio, log_ratio, min_res_sat, is_bankrupt);
-            op_ratios_per_state[i].insert(b_type, final_op);
+            let planned_op =
+                calculate_operation_ratio(wf_ratio, log_ratio, min_res_sat, is_bankrupt);
 
-            // 消費実行
-            for (&res, &base_in) in &def.input_resources {
-                let actual_in = calculate_actual_input(base_in, level, final_op);
-                stockpile.consume(res, actual_in);
+            // P28-010-IMPL-001: 原子的な入力会計。`sat`は月初備蓄を、`t`込みの需要で
+            // 割った値のため、`sat < t`の月は実消費が備蓄を超え得る。この時点の備蓄で
+            // 全入力を賄える最大稼働率へ引き下げ、入力が引き落とせた分だけ産出する。
+            let final_op = match limit_operation_ratio_to_stock(
+                planned_op,
+                level,
+                &def.input_resources,
+                stockpile,
+            ) {
+                Some(op) if consume_inputs_atomically(stockpile, &def.input_resources, level, op) => {
+                    op
+                }
+                _ => 0.0,
+            };
+            op_ratios_per_state[i].insert(b_type, final_op);
+            if final_op <= 0.0 && planned_op > 0.0 {
+                // 入力を1つも引き落とせなかったentryは産出・研究力を加算しない。
+                continue;
             }
 
             // 生産実行 (Mineの場合は州の鉱床情報を利用)
@@ -321,4 +401,46 @@ pub fn process_country_production(
     }
 
     (science_total, magic_total)
+}
+
+#[cfg(test)]
+mod atomic_input_tests {
+    use super::*;
+
+    fn inputs() -> HashMap<ResourceType, f64> {
+        HashMap::from([(ResourceType::Iron, 30.0), (ResourceType::IndustrialGoods, 15.0)])
+    }
+
+    #[test]
+    fn atomic_consume_leaves_stock_unchanged_when_one_input_is_short() {
+        let mut s = CountryStockpile::new();
+        s.set(ResourceType::Iron, 100.0);
+        s.set(ResourceType::IndustrialGoods, 1.0);
+        assert!(!consume_inputs_atomically(&mut s, &inputs(), 1, 1.0));
+        assert_eq!(s.get(ResourceType::Iron), 100.0, "partial deduction must not remain");
+        assert_eq!(s.get(ResourceType::IndustrialGoods), 1.0);
+    }
+
+    #[test]
+    fn atomic_consume_deducts_every_input_when_all_are_available() {
+        let mut s = CountryStockpile::new();
+        s.set(ResourceType::Iron, 100.0);
+        s.set(ResourceType::IndustrialGoods, 100.0);
+        assert!(consume_inputs_atomically(&mut s, &inputs(), 2, 0.5));
+        assert_eq!(s.get(ResourceType::Iron), 70.0);
+        assert_eq!(s.get(ResourceType::IndustrialGoods), 85.0);
+    }
+
+    #[test]
+    fn limit_keeps_planned_op_when_affordable_and_reduces_otherwise() {
+        let mut s = CountryStockpile::new();
+        s.set(ResourceType::Iron, 30.0);
+        s.set(ResourceType::IndustrialGoods, 15.0);
+        assert_eq!(limit_operation_ratio_to_stock(1.0, 1, &inputs(), &s), Some(1.0));
+        s.set(ResourceType::IndustrialGoods, 7.5);
+        let op = limit_operation_ratio_to_stock(1.0, 1, &inputs(), &s).unwrap();
+        assert!(op <= 0.5 && op > 0.499_999);
+        s.set(ResourceType::Iron, 0.0);
+        assert_eq!(limit_operation_ratio_to_stock(1.0, 1, &inputs(), &s), Some(0.0));
+    }
 }

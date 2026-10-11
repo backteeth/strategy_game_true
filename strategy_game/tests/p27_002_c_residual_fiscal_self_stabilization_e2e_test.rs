@@ -435,7 +435,7 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // まま(`test_18`で財政ロジック自体の契約として別途固定する)。
     // index3(Oceanic)の値は使わない(下のループで`continue`するため)。
     // プレースホルダとして`u32::MAX`を置き、誤って比較に使われても即座に失敗するようにする。
-    const EXPECTED_OSCILLATIONS: [u32; 6] = [2, 0, 2, u32::MAX, 3, 0];
+    const EXPECTED_OSCILLATIONS: [u32; 6] = [2, 1, 2, u32::MAX, 3, 0];
     let oceanic_idx = 3;
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let changes = count_tax_rate_changes(&tax_rate_history[i]);
@@ -485,8 +485,8 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     );
     let oceanic_amplitude = tax_rate_oscillation_amplitude(&tax_rate_history[oceanic_idx]);
     assert!(
-        oceanic_amplitude <= 0.02 + 1e-6,
-        "Oceanic: 税率反転の振幅は0.02以内のはず(P28-005-PRE-002 §5、均衡点近傍の\
+        oceanic_amplitude <= 0.05 + 1e-6, // P28-010-IMPL-001: 実測0.04(旧0.02)、最大税率0.15・国庫非負のまま有界
+        "Oceanic: 税率反転の振幅は0.05以内のはず(P28-005-PRE-002 §5、均衡点近傍の\
          有界な微振動であることの直接確認): got {oceanic_amplitude}"
     );
 
@@ -525,13 +525,26 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // war2は1801/04/06に終結する。Dwarf・Oceanicの月120値はP28-005の値と完全に一致する。
     // (E2自体の効果として残るのは、war3の終結日と、war7の開戦日が06/02→05/02へ
     // 前倒しになることのみで、月120の財政値には影響しない。)
+    //
+    // P28-010-IMPL-001で正規値を更新(旧値→新値): 生産entryの入力引落しを原子的にした結果、
+    // Arcadia等の備蓄不足月の無償産出(P28-010-PRE-002 §3)が消え、戦争の経過が変わった
+    // (Elfinは州3、Passguardは州10を失う。`test_18`参照)。差分はsrc/economy/production.rs
+    // の入力引落しだけであり、全6か国の値が新しい軌道に移る。
+    // Arcadia  (0.160, 4523.72, 21.88)   → (0.150, 3567.68, 1.11)
+    // Elfin    (0.120, 6425.41, 24.31)   → (0.140, 3410.35, 10.33)
+    // Dwarf    (0.140, 15453.41, 206.56) → (0.170, 10907.06, 146.05)
+    // Oceanic  (0.130, 4695.83, 113.36)  → (0.110, 13090.24, 78.17)
+    // Passguard(0.190, 904.06, 12.43)    → (0.180, 921.35, 8.29)
+    // Ferrowyn (0.200, 693.24, 17.97)    → (0.190, 1950.52, 17.07)
+    // 振動回数は Elfin 0→1、Oceanic 3/7→4(振幅0.04)。国庫は全国で一度も負転しない(Passguardの
+    // 月7を除く従来どおり)。
     const M120_EXPECTED: [(f32, f64, f64); 6] = [
-        (0.160, 4523.72, 21.88),   // Arcadia
-        (0.120, 6425.41, 24.31),   // Elfin
-        (0.140, 15453.41, 206.56), // Dwarf
-        (0.130, 4695.83, 113.36),  // Oceanic
-        (0.190, 904.06, 12.43),    // Passguard
-        (0.200, 693.24, 17.97),    // Ferrowyn
+        (0.150, 3567.68, 1.11),    // Arcadia
+        (0.140, 3410.35, 10.33),   // Elfin
+        (0.170, 10907.06, 146.05), // Dwarf
+        (0.110, 13090.24, 78.17),  // Oceanic
+        (0.180, 921.35, 8.29),     // Passguard
+        (0.190, 1950.52, 17.07),   // Ferrowyn
     ];
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let (expected_tax, expected_treasury, expected_balance) = M120_EXPECTED[i];
@@ -935,7 +948,7 @@ fn owned_states_and_military_factory_levels(app: &App, c: CountryId) -> Vec<(usi
 /// (降伏・割譲)と戦時建設の建設費による意図した因果であり、財政ロジック自体の回帰では
 /// ないことを分けて固定する。戦時建設を一度も行わず、領土・MilitaryFactoryも変わらない
 /// Elfin・Passguardは、P27-002-Cの120か月正規値(税率・国庫・月次収支・振動回数)を
-/// そのまま保つ。
+/// そのまま保つ(P28-010-IMPL-001以降は、領土の喪失を含む新正規値。本体のコメント参照)。
 #[test]
 fn test_18_countries_untouched_by_wartime_construction_keep_the_p27_002_c_fiscal_canon() {
     let dir = TempTestDir::new("t18_untouched");
@@ -954,12 +967,32 @@ fn test_18_countries_untouched_by_wartime_construction_keep_the_p27_002_c_fiscal
             );
         }
     }
+    // 【P28-010-IMPL-001で前提と正規値を更新】: 生産入力の原子的会計でArcadia等の無償産出が
+    // 消え、戦争の経過が変わった結果、Elfinは州3を、Passguardは州10を戦争で失う
+    // (旧: 120か月間どちらも領土不変)。本テストの旧前提「領土が不変」はもう成立しない。
+    // 戦時MilitaryFactoryを一度も着工しない点(上のループ)は引き続き成立する。ここでは、
+    // (a) 失う州が州3・州10だけであること、(b) 失った州にMilitaryFactoryは無かった/
+    // 残りの州のMilitaryFactoryは不変であること、(c) 新しい120か月の財政正規値、を固定する。
+    // 差分はsrc/economy/production.rsの入力引落しだけであり、新値はその会計補正に帰属する
+    // (個別の戦闘経過までは追っていない)。
+    //   Elfin    (0.120, 6425.41, 24.31, 振動0) → (0.140, 3410.35, 10.33, 振動1)
+    //   Passguard(0.190,  904.06, 12.43, 振動3) → (0.180,  921.35,  8.29, 振動3)
+    // 開始時の領土・MilitaryFactory(前提): Elfin=州3/4/14/16/18、Passguard=州10/13/15/17。
+    assert_eq!(initial[0], vec![(3, 0), (4, 0), (14, 0), (16, 0), (18, 1)]);
+    assert_eq!(initial[1], vec![(10, 1), (13, 1), (15, 0), (17, 0)]);
+    let expected_final: [Vec<(usize, u32)>; 2] = [
+        vec![(4, 0), (14, 0), (16, 0), (18, 1)],
+        vec![(13, 1), (15, 0), (17, 0)],
+    ];
     for (i, &c) in untouched.iter().enumerate() {
-        assert_eq!(owned_states_and_military_factory_levels(&app, c), initial[i], "{c:?}: 領土・MilitaryFactoryは不変(前提)");
+        assert_eq!(
+            owned_states_and_military_factory_levels(&app, c),
+            expected_final[i],
+            "{c:?}: 州の喪失(Elfin=州3、Passguard=州10)以外の領土・MilitaryFactoryは不変"
+        );
     }
-    // P27-002-C(`test_05`の旧正規値)と完全一致。
     for (c, tax, treasury, balance, oscillations) in
-        [(ELFIN, 0.120f32, 6425.41, 24.31, 0u32), (PASSGUARD, 0.190, 904.06, 12.43, 3)]
+        [(ELFIN, 0.140f32, 3410.35, 10.33, 1u32), (PASSGUARD, 0.180, 921.35, 8.29, 3)]
     {
         let i = if c == ELFIN { 0 } else { 1 };
         assert!((tax_rate_of(&app, c) - tax).abs() < 1e-6, "{c:?} tax_rate");

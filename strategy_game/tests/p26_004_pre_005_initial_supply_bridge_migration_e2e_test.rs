@@ -657,10 +657,17 @@ fn test_f1_world_total_after_new_game_grant_equals_sum_of_six_grants() {
 /// 時点production_onlyが再び増加した(462.5130180000→471.7906510000、
 /// 684.7896940000→749.6364860000、`verification_logs/phase-27/p27-002-b/`実測、
 /// 独立プロセスで再現確認済み)。
+///
+/// 【P28-010-IMPL-001により正規値を再更新】: 生産entryの入力引落しを原子的にした結果、
+/// ArcadiaのMilitaryFactoryがIndustrialGoods備蓄不足の月(1800/03)に、IndustrialGoodsを
+/// 引き落とせないまま満額のMilitarySuppliesを産出する無償産出が消えた(P28-010-PRE-002 §3、
+/// 備蓄不足のentryは引き落とせる最大稼働率まで下がる)。引かれなかったIndustrialGoodsが
+/// 備蓄に残らなくなり、IG律速の後続月の稼働率も下がった結果、月12/18時点のproduction_onlyが
+/// 減少した(471.7906510000→453.4529480000、749.6364860000→731.2987830000)。
 #[test]
 fn test_f2_arcadia_deterministic_production_values_are_protected_after_the_initial_grant() {
-    const ARCADIA_CANONICAL_M12: f64 = 471.7906510000;
-    const ARCADIA_CANONICAL_M18: f64 = 749.6364860000;
+    const ARCADIA_CANONICAL_M12: f64 = 453.4529480000;
+    const ARCADIA_CANONICAL_M18: f64 = 731.2987830000;
 
     let dir = TempTestDir::new("f2");
     let mut app = setup_app_in_playing(DWARF, dir.save_file_config());

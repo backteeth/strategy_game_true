@@ -404,7 +404,9 @@ fn test_02_player_country_at_war_never_receives_the_ai_wartime_factory() {
     let dir = TempTestDir::new("t02");
     let mut app = setup_app(Some(ARCADIA), dir.save_file_config());
     let mut run = Observer::new(&app, Some(ARCADIA));
-    run.run_until(&mut app, "1801/01/01");
+    // P28-010-IMPL-001: 入力引落しの原子的会計で戦争の経過が変わり、ArcadiaへのAIの宣戦3件は
+    // 1800/12/10に終結する(旧: 1801/01/01時点でも交戦中)。交戦中を確認できる1800/12/01で観測する。
+    run.run_until(&mut app, "1800/12/01");
     assert!(is_at_war(&app, ARCADIA), "前提: プレイヤーのArcadiaはAIに宣戦されて交戦中");
     assert!(run.starts.iter().all(|s| s.1 != ARCADIA));
     assert!(queued_military_factories(&app, ARCADIA).is_empty());

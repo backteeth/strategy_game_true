@@ -849,10 +849,16 @@ mod real_app {
     /// `p26_det_001_construction_ai_determinism_e2e_test.rs`の同名定数のコメントと
     /// 同一(AI国家の月次tax_rate自己調整により、Arcadiaの税収増加分だけMine完成が
     /// さらに前倒しされた結果)。
-    const ARCADIA_CANONICAL_M12: f64 = 471.7906510000;
-    const ARCADIA_CANONICAL_M18: f64 = 749.6364860000;
-    const ARCADIA_CANONICAL_M24: f64 = 876.6945270000;
-    const ARCADIA_CANONICAL_M36: f64 = 1112.3573450000;
+    /// 【P28-010-IMPL-001により正規値を再更新】: 生産entryの入力引落しを原子的にした結果、
+    /// ArcadiaのMilitaryFactoryがIndustrialGoods/Iron備蓄不足の月に、入力を引き落とせない
+    /// まま満額のMilitarySuppliesを産出していた無償産出(P28-010-PRE-002 §3・§4.2)が消えた。
+    /// 他5か国(Dwarf・Passguard・Elfin・Oceanic・Ferrowyn)の値は不変(入力引落しの失敗が
+    /// 本シナリオでは発生しない)。471.7906510000→453.4529480000、749.6364860000→
+    /// 731.2987830000、876.6945270000→810.1867770000、1112.3573450000→967.7942830000。
+    const ARCADIA_CANONICAL_M12: f64 = 453.4529480000;
+    const ARCADIA_CANONICAL_M18: f64 = 731.2987830000;
+    const ARCADIA_CANONICAL_M24: f64 = 810.1867770000;
+    const ARCADIA_CANONICAL_M36: f64 = 967.7942830000;
 
     // Test H: Arcadia単独36か月の正規値(本タスクの国家内順序変更後も、
     // Arcadiaは州0内にFactory/MilitaryFactoryが同居するため、州間ではなく

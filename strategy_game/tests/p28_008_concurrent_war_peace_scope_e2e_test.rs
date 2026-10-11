@@ -367,6 +367,11 @@ fn run_standard_scenario(stop_date: &str, mut hook: impl FnMut(&mut App, &str)) 
 
 #[test]
 fn standard_scenario_e2_peace_of_war3_does_not_erase_war2s_conquest() {
+    // 【P28-010-IMPL-001でWarIdを更新】: 生産入力の原子的会計で、戦争の発生順が変わり、
+    // 旧WarId(3)(att c5/def c3、1801/03/02開戦)は新WarId(1)(同じ組み合わせ、1800/08/03
+    // 開戦、終結は同じく1801/03/22のE2)になった。旧WarId(2)(att c2/def c3)は同じWarId(2)
+    // のまま、開戦1801/03/02・終結1801/04/06・敗者降伏で一致する。検証対象の因果
+    // (E2の講和がActiveなwar2のs9占領を消さない)は同じ実データ上で引き続き再現する。
     // P28-008-PRE-001の実測(標準シナリオ): war3(att c5/def c3)は1801/03/22にE2で白紙講和。
     // 旧実装では、同日にその所有国c3のs9をActiveのwar2(att c2/def c3)が占領中であるのに、
     // 正常化がs9のc2占領を消してしまい、war2の終結が04/06→04/12へ遅れた。
@@ -385,9 +390,9 @@ fn standard_scenario_e2_peace_of_war3_does_not_erase_war2s_conquest() {
     });
 
     assert_eq!(
-        war_line(&app, 3),
+        war_line(&app, 1),
         "WhitePeace|1801/03/22|Frontline Unreachable",
-        "war3はP28-007のE2で03/22に終結する"
+        "同じ対Oceanic戦(att c5/def c3、P28-010-IMPL-001後はWarId(1))はP28-007のE2で03/22に終結する"
     );
     assert_eq!(s9_before, Some(2), "前提: c2(Dwarf)が03/21時点でs9を占領中");
     assert_eq!(

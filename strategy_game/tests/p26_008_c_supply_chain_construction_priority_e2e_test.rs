@@ -798,6 +798,32 @@ fn test_90_day_and_36_month_six_country_real_data_verification() {
         // 36か月後には、初期に欠損を持っていた国も含め全国家でIndustrialGoods
         // 構造的欠損が解消していることを確認する(実データはこのウィンドウ内で
         // 解決可能だった、という実測結果を固定する)。
+        //
+        // 【P28-010-IMPL-001により例外を1件追加】: 入力引落しの原子的会計でArcadia等の
+        // 無償産出(MilitarySupplies)が消え、36か月までの戦争経過が変わった(戦争総数
+        // 7→10)。Passguardは、修正前は保持していた州10(Factory Level1・MilitaryFactory
+        // Level1)を戦争で失い、Factoryのない州13(MilitaryFactory Level1)だけが残る。
+        // この欠損はAI建設判断の不発ではなくFactory州の喪失によるため、州10の所有者で
+        // 確認する。
+        if c == CountryId(4) {
+            let state10_owner = app
+                .world()
+                .resource::<strategy_game::state::data::StateRegistry>()
+                .states
+                .iter()
+                .find(|s| s.id == StateId(10))
+                .map(|s| s.owner_country_id);
+            assert_ne!(
+                state10_owner,
+                Some(c),
+                "{c:?}: Factory州(10)を失ったことだけが構造的欠損の残る理由のはず"
+            );
+            assert!(
+                militaryfactory_needs_industrial_goods_but_lacks_factory(&app, c),
+                "{c:?}: Factory州の喪失後はMilitaryFactoryのみが残る"
+            );
+            continue;
+        }
         assert!(
             !militaryfactory_needs_industrial_goods_but_lacks_factory(&app, c),
             "{c:?}: 36か月後もIndustrialGoods構造的欠損が残っている"
