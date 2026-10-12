@@ -60,7 +60,16 @@
     ("economy_panel.stockpile_line", "  {resource}: {amount}\n"),
     ("economy_panel.queue_empty", "  (空)\n"),
     ("economy_panel.queue_line", "  [{index}] {building} @ {state} ({progress}/{required} 日)\n"),
-    ("economy_panel.info", "国家: {state}\n税率: {tax_rate}%\n月次収入: +{income} G\n月次支出: -{expenses} G\n月次収支: {balance} G\n科学キャパシティ: {sci_cap}\n魔法キャパシティ: {mag_cap}\n\n[備蓄]\n{stockpile}\n[建設キュー (キャンセル: Cキー)]\n{queue}\n[通知]\n  {last_notification}"),
+    ("economy_panel.supply_header", "[軍用補給物資の収支]\n"),
+    ("economy_panel.supply_production", "  前回の月次生産(実績・{period}分): {amount}\n"),
+    ("economy_panel.supply_production_pending", "  前回の月次生産(実績): 未集計(次の月次生産後に表示)\n"),
+    ("economy_panel.supply_demand", "  現在の需要: {amount} / 日\n"),
+    ("economy_panel.supply_demand_unavailable", "  現在の需要: 算出不能\n"),
+    ("economy_panel.supply_days", "  備蓄: {days}日分(追加生産なしで現在の需要が続く場合)\n"),
+    ("economy_panel.supply_days_none", "  備蓄: 消費なし(需要0)\n"),
+    ("economy_panel.supply_days_unavailable", "  備蓄: 算出不能\n"),
+    ("economy_panel.supply_note", "  ※各Divisionの補給充足率とは別の、国家備蓄の日数です\n"),
+    ("economy_panel.info", "国家: {state}\n税率: {tax_rate}%\n月次収入: +{income} G\n月次支出: -{expenses} G\n月次収支: {balance} G\n科学キャパシティ: {sci_cap}\n魔法キャパシティ: {mag_cap}\n\n[備蓄]\n{stockpile}\n{supply_balance}\n[建設キュー (キャンセル: Cキー)]\n{queue}\n[通知]\n  {last_notification}"),
 
     // ── research_panel ──────────────────────────────────────
     ("research_panel.toggle_button", "[Ctrl+1] 研究"),

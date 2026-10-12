@@ -331,6 +331,13 @@ fn reset_terminal_ui_state(world: &mut World) {
     *world.resource_mut::<PlayerEliminationMode>() = PlayerEliminationMode::default();
     *world.resource_mut::<PlayerVictoryMode>() = PlayerVictoryMode::default();
     *world.resource_mut::<WorldConclusionMode>() = WorldConclusionMode::default();
+    // P29-002: 表示専用の月次生産実績(非永続)は、ロード後の世界と対応しないため消す。
+    // ロード直後は次の月次生産まで「未集計」と表示される。
+    if let Some(mut ledger) =
+        world.get_resource_mut::<crate::economy::supply_balance::MilitarySupplyProductionLedger>()
+    {
+        ledger.clear();
+    }
 }
 
 pub fn handle_load_requests(

@@ -2,6 +2,7 @@ pub mod economic_state;
 pub mod finance;
 pub mod production;
 pub mod resources;
+pub mod supply_balance;
 
 use crate::app::game_state::GameState;
 use crate::app::time::{DailySimulationSet, DayChangedMessage, MonthChangedMessage};
@@ -10,7 +11,8 @@ use crate::building::data::BuildingRegistry;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::economy::economic_state::{EconomicMetrics, calculate_economic_state};
 use crate::economy::finance::{process_country_finance, update_state_welfare_and_unrest};
-use crate::economy::production::process_country_production;
+use crate::economy::production::process_country_production_with_outcome;
+use crate::economy::supply_balance::MilitarySupplyProductionLedger;
 use crate::economy::resources::ResourceType;
 use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
 use crate::logistics::update::update_state_logistics;
@@ -25,6 +27,11 @@ impl Plugin for EconomyPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::localization::TranslationCorePlugin)
             .insert_resource(NotificationHistory::default())
+            .insert_resource(MilitarySupplyProductionLedger::default())
+            .add_systems(
+                OnEnter(GameState::CountrySelection),
+                clear_military_supply_production_ledger,
+            )
             .add_message::<GameNotification>()
             .add_systems(
                 Update,
@@ -112,8 +119,9 @@ pub fn handle_monthly_economy(
     mut notif_writer: MessageWriter<GameNotification>,
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
+    mut supply_ledger: Option<ResMut<MilitarySupplyProductionLedger>>,
 ) {
-    for _event in month_events.read() {
+    for event in month_events.read() {
         for country in country_registry.countries.iter_mut() {
             let country_id = country.id;
 
@@ -124,6 +132,10 @@ pub fn handle_monthly_economy(
                 .collect();
 
             if owned_states.is_empty() {
+                // 生産を行わない国家に古い実績を残さない(表示専用)。
+                if let Some(ledger) = supply_ledger.as_mut() {
+                    ledger.remove(country_id);
+                }
                 continue;
             }
 
@@ -145,14 +157,24 @@ pub fn handle_monthly_economy(
             }
 
             let is_bankrupt = country.treasury < 0.0;
-            let (sci, mag) = process_country_production(
+            let outcome = process_country_production_with_outcome(
                 &mut owned_states,
                 &mut country.stockpile,
                 &building_registry,
                 is_bankrupt,
             );
-            country.science_research_capacity = sci;
-            country.magic_research_capacity = mag;
+            country.science_research_capacity = outcome.science;
+            country.magic_research_capacity = outcome.magic;
+            // P29-002: 表示専用。実際に備蓄へ反映したMilitarySuppliesの量を、この月次生産の
+            // 年月と共に記録する(ゲーム状態・Save V1には影響しない)。
+            if let Some(ledger) = supply_ledger.as_mut() {
+                ledger.record(
+                    country_id,
+                    event.year,
+                    event.month,
+                    outcome.military_supplies_produced,
+                );
+            }
 
             process_country_finance(country, &mut owned_states, &building_registry);
 
@@ -251,4 +273,10 @@ fn handle_notifications(
         history.add(notif.message.clone());
         info!("[Notification] {}", notif.message);
     }
+}
+
+/// P29-002: New Game(国家選択画面への進入)で、前のゲームの月次生産実績(表示専用)を
+/// 残さない。ロード成功時の消去は`save::runtime::handle_load_requests`が行う。
+fn clear_military_supply_production_ledger(mut ledger: ResMut<MilitarySupplyProductionLedger>) {
+    ledger.clear();
 }

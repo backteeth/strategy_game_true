@@ -61,7 +61,16 @@
     ("economy_panel.stockpile_line", "  {resource}: {amount}\n"),
     ("economy_panel.queue_empty", "  (Empty)\n"),
     ("economy_panel.queue_line", "  [{index}] {building} @ {state} ({progress}/{required} d)\n"),
-    ("economy_panel.info", "State: {state}\nTax Rate: {tax_rate}%\nMonthly Inc: +{income} G\nMonthly Exp: -{expenses} G\nMonthly Bal: {balance} G\nSci Capacity: {sci_cap}\nMag Capacity: {mag_cap}\n\n[Stockpile]\n{stockpile}\n[Construction Queue (Cancel: Press C)]\n{queue}\n[Notification]\n  {last_notification}"),
+    ("economy_panel.supply_header", "[Military Supplies Balance]\n"),
+    ("economy_panel.supply_production", "  Last monthly production (actual, {period}): {amount}\n"),
+    ("economy_panel.supply_production_pending", "  Last monthly production (actual): not yet recorded (shown after the next monthly production)\n"),
+    ("economy_panel.supply_demand", "  Current demand: {amount} / day\n"),
+    ("economy_panel.supply_demand_unavailable", "  Current demand: unavailable\n"),
+    ("economy_panel.supply_days", "  Stock: {days} days (if current demand continues with no new production)\n"),
+    ("economy_panel.supply_days_none", "  Stock: no consumption (demand 0)\n"),
+    ("economy_panel.supply_days_unavailable", "  Stock: unavailable\n"),
+    ("economy_panel.supply_note", "  Note: national stockpile days, separate from each division's supply fulfillment\n"),
+    ("economy_panel.info", "State: {state}\nTax Rate: {tax_rate}%\nMonthly Inc: +{income} G\nMonthly Exp: -{expenses} G\nMonthly Bal: {balance} G\nSci Capacity: {sci_cap}\nMag Capacity: {mag_cap}\n\n[Stockpile]\n{stockpile}\n{supply_balance}\n[Construction Queue (Cancel: Press C)]\n{queue}\n[Notification]\n  {last_notification}"),
 
     // ── research_panel ──────────────────────────────────────
     ("research_panel.toggle_button", "[Ctrl+1] Research"),

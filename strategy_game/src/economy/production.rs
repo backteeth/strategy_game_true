@@ -188,6 +188,19 @@ fn consume_inputs_atomically(
     true
 }
 
+/// 1つの国家の月次生産の結果(研究力と、MilitarySuppliesの実産出)。
+///
+/// P29-002: `military_supplies_produced`は、この月次生産で**実際に備蓄へ反映された**
+/// MilitarySuppliesの総量(FIX1・D4・入力不足・entryごとの量子化を反映した値。国家備蓄の
+/// 純増減ではない)。産出が0だった場合は`Some(0.0)`。集計・commitに失敗して備蓄へ反映
+/// できなかった場合は`None`(0とは区別する)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CountryProductionOutcome {
+    pub science: f64,
+    pub magic: f64,
+    pub military_supplies_produced: Option<f64>,
+}
+
 /// 1つの国家が所有する州の生産・消費をまとめて一括処理する
 pub fn process_country_production(
     states: &mut [&mut StateData],
@@ -195,6 +208,19 @@ pub fn process_country_production(
     building_registry: &BuildingRegistry,
     is_bankrupt: bool,
 ) -> (f64, f64) {
+    let outcome =
+        process_country_production_with_outcome(states, stockpile, building_registry, is_bankrupt);
+    (outcome.science, outcome.magic)
+}
+
+/// `process_country_production`と同一の処理を行い、MilitarySuppliesの実産出も返す
+/// (P29-002、表示専用の実績。生産式・処理順・配分は`process_country_production`と同一)。
+pub fn process_country_production_with_outcome(
+    states: &mut [&mut StateData],
+    stockpile: &mut CountryStockpile,
+    building_registry: &BuildingRegistry,
+    is_bankrupt: bool,
+) -> CountryProductionOutcome {
     let mut science_total = 0.0;
     let mut magic_total = 0.0;
 
@@ -457,6 +483,8 @@ pub fn process_country_production(
     // 記録する——生の`add`へのフォールバックはしない(`Result`を無視しない、明示的に
     // 処理する)。合計0の場合は、意図的に`CountryStockpile`を一切変更しない(spec §9
     // 「合計0の場合は備蓄を更新しない処理を推奨」)。
+    // P29-002: 実際に備蓄へ反映された量(表示専用)。commitに成功した場合だけ`Some`。
+    let mut military_supplies_produced: Option<f64> = None;
     match military_supplies_units {
         SuppliesUnitsAccumulation::Failed => {
             warn!(
@@ -470,13 +498,16 @@ pub fn process_country_production(
             if total_units > 0 {
                 match verified_military_supplies_value(total_units) {
                     Some(value) => {
-                        if let Err(err) = stockpile.add_military_supplies_produced(value) {
-                            warn!(
-                                "MilitarySupplies production commit failed for this country \
-                                 this month (stockpile left unchanged, other resources \
-                                 unaffected): {:?}",
-                                err
-                            );
+                        match stockpile.add_military_supplies_produced(value) {
+                            Ok(()) => military_supplies_produced = Some(value),
+                            Err(err) => {
+                                warn!(
+                                    "MilitarySupplies production commit failed for this country \
+                                     this month (stockpile left unchanged, other resources \
+                                     unaffected): {:?}",
+                                    err
+                                );
+                            }
                         }
                     }
                     None => {
@@ -488,11 +519,17 @@ pub fn process_country_production(
                         );
                     }
                 }
+            } else {
+                military_supplies_produced = Some(0.0);
             }
         }
     }
 
-    (science_total, magic_total)
+    CountryProductionOutcome {
+        science: science_total,
+        magic: magic_total,
+        military_supplies_produced,
+    }
 }
 
 #[cfg(test)]
