@@ -293,14 +293,17 @@ fn real_app_is_deterministic_across_two_runs() {
     assert_eq!(a.rows, b.rows);
 }
 
-/// 入力引落しの失敗が無かったDwarf・Passguardは、修正前(P28-010-PRE-002 の
-/// FIX1 基準、全国同時)の正規値と一致する。
+/// 入力引落しの失敗が無かったDwarf・Passguardは、IMPL-001(FIX1)の時点では修正前の正規値と
+/// 一致した。P28-010-IMPL-002(D4: IG備蓄で保護したMilitaryFactory優先配分)以降は、
+/// - Passguard: 120か月まで同じ値(Iron不足でもIG備蓄がゲートを満たさない)。
+/// - Dwarf: Iron枯渇(m100)でD4が成立し、Division 11→16、補給不足 5857→4649、
+///   IG備蓄 5074→2838、国庫 15176→15340 へ変わる(最初の分岐は m099〜m100)。
 #[test]
-fn dwarf_and_passguard_match_pre_change_normative_values_at_month_120() {
+fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     let fp = simulate(120, &[120], false);
     let row = fp.rows.iter().find(|r| r.starts_with("m120")).unwrap();
-    assert!(row.contains("c2 divs=11 shortD=5857 Iron=49 Coal=4802 IG=5074"), "Dwarf: {row}");
-    assert!(row.contains("tr=15176"), "Dwarf treasury: {row}");
+    assert!(row.contains("c2 divs=16 shortD=4649 Iron=101 Coal=5925 IG=2838"), "Dwarf: {row}");
+    assert!(row.contains("tr=15340"), "Dwarf treasury: {row}");
     assert!(row.contains("c4 divs=1 shortD=119 Iron=37 Coal=2900 IG=18"), "Passguard: {row}");
     assert!(row.contains("tr=904"), "Passguard treasury: {row}");
 }

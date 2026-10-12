@@ -699,10 +699,16 @@ mod real_app {
     /// 他5か国(Dwarf・Passguard・Elfin・Oceanic・Ferrowyn)の値は不変(入力引落しの失敗が
     /// 本シナリオでは発生しない)。471.7906510000→453.4529480000、749.6364860000→
     /// 731.2987830000、876.6945270000→810.1867770000、1112.3573450000→967.7942830000。
+    /// 【P28-010-IMPL-002により正規値を再更新】: Iron不足かつIG備蓄がMilitaryFactoryの月間IG需要の
+    /// 3か月分以上のとき、MilitaryFactoryがIronを優先確保する(D4)ようになった。Arcadiaは月21の
+    /// 時点でIG備蓄 22.2 ≥ 3か月分、Iron 6.6 が不足となり、月22からMilitaryFactoryが優先確保して
+    /// 月次の産出が増える(最初の分岐は月22。月12/18は不変)。月24: 810.1867770000→827.7702550000、
+    /// 月36: 967.7942830000→1020.4045230000。ElfinはtestFの表で 499.874123→508.935259。
+    /// 他4か国(Dwarf・Oceanic・Passguard・Ferrowyn)の値は不変(このシナリオでは優先配分が成立しない)。
     const ARCADIA_CANONICAL_M12: f64 = 453.4529480000;
     const ARCADIA_CANONICAL_M18: f64 = 731.2987830000;
-    const ARCADIA_CANONICAL_M24: f64 = 810.1867770000;
-    const ARCADIA_CANONICAL_M36: f64 = 967.7942830000;
+    const ARCADIA_CANONICAL_M24: f64 = 827.7702550000;
+    const ARCADIA_CANONICAL_M36: f64 = 1020.4045230000;
 
     // Test E: Arcadia単独36か月の正規値。
     //
@@ -867,7 +873,7 @@ mod real_app {
     fn test_f_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 499.874123),
+            (ELFIN, 508.935259),
             (DWARF, 1647.0588400000001),
             (OCEANIC, 402.23853800000006),
             (PASSGUARD, 3672.5984340000005),
