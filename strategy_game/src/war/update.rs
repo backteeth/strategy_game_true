@@ -34,6 +34,9 @@ pub struct WarResolutionEliminationExtras<'w> {
     pub army_registry: ResMut<'w, crate::military::army::ArmyRegistry>,
     pub justification_registry: ResMut<'w, crate::war::justification::WarJustificationRegistry>,
     pub power_registry: ResMut<'w, crate::country::power::CountryPowerRegistry>,
+    /// P29-003: 停滞戦争の白紙講和で、軍事AIの直近判断(攻勢可能か)を参照する。
+    /// 資源を持たない最小Appでも動くよう`Option`。
+    pub military_ai_registry: Option<Res<'w, crate::war::military_ai::MilitaryAiRegistry>>,
 }
 
 impl ReportedPeaceSettlementErrors {
@@ -279,6 +282,54 @@ pub fn handle_daily_war_resolution(
                 &loc,
             );
         }
+
+        // 3.6. 長期停滞したAI戦争の白紙講和(P29-003、診断 P29-003-DIAG-001 の E1)。
+        // ステップ3(降伏・E1)・3.5(国境消失)が同日に既に終結させた戦争は対象外
+        // (停滞期間の更新は Active War のみを対象にするため、ここで改めて取得し直される)。
+        // 条件の詳細は`crate::war::stalemate`。講和は既存の`settle_capitulation`
+        // (`execute_peace_settlement`、領土移転なしの白紙講和)で行う。
+        let stalemate_war_ids = crate::war::stalemate::update_stalemate_records(
+            &mut war_registry,
+            &state_registry,
+            &military_registry,
+            &battle_registry,
+            &frontline_registry,
+            &country_registry,
+            elimination_extras.military_ai_registry.as_deref(),
+            player_country.0,
+            &current_date_str,
+        );
+        for war_id in stalemate_war_ids {
+            let outcome = settle_capitulation(
+                war_id,
+                crate::war::peace::PeaceTerm::WhitePeace,
+                crate::war::stalemate::STALEMATE_END_REASON,
+                &current_date_str,
+                &mut state_registry,
+                &mut war_registry,
+                &mut military_registry,
+                &mut battle_registry,
+                &mut diplomacy_registry,
+                &mut frontline_registry,
+                &mut crisis_registry,
+                &mut claim_registry,
+                &mut country_registry,
+                &mut elimination_extras.army_registry,
+                &mut elimination_extras.justification_registry,
+                &mut elimination_extras.power_registry,
+                &mut reported_errors,
+                &player_country,
+            );
+            report_settlement_outcome(
+                outcome,
+                war_id,
+                "StalemateWhitePeace",
+                &mut notif_writer,
+                &loc,
+            );
+        }
+        // 終結した戦争(連鎖終結を含む)の停滞記録を、Save へ残さないよう直ちに削除する。
+        crate::war::stalemate::prune_inactive_records(&mut war_registry);
 
         // 4. 無効前線・陸軍参照の整理と前線の最新状態再計算
         crate::war::frontline::update_all_frontlines(

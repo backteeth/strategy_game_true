@@ -176,6 +176,9 @@ impl War {
 pub struct WarRegistry {
     pub wars: HashMap<WarId, War>,
     next_id: usize,
+    /// P29-003: 停滞した AI 戦争の白紙講和のための、停滞期間の計測状態(Save V1 の
+    /// `SavedWarRegistry.stalemate`へ追加フィールドとして保存する。古い Save には存在しない)。
+    pub stalemate_records: HashMap<WarId, crate::war::stalemate::WarStalemateRecord>,
 }
 
 impl WarRegistry {
@@ -186,7 +189,11 @@ impl WarRegistry {
     /// 保存されていた要素・次回ID発行値から`WarRegistry`を復元する（P21-SAVE-002D）。
     /// `crate::save`のDTO型ではなく、通常のコレクションとカウンタだけを引数にとる。
     pub(crate) fn from_saved_parts(wars: HashMap<WarId, War>, next_id: usize) -> Self {
-        Self { wars, next_id }
+        Self {
+            wars,
+            next_id,
+            stalemate_records: HashMap::new(),
+        }
     }
 
     pub fn add_war(&mut self, mut war: War) -> WarId {

@@ -98,6 +98,7 @@ pub fn build_save_game_v1(sources: &SaveGameSources) -> SaveGameV1 {
         wars: SavedWarRegistry {
             wars: sources.war_registry.wars.clone(),
             next_id: sources.war_registry.next_id(),
+            stalemate: sources.war_registry.stalemate_records.clone(),
         },
         claims: SavedClaimRegistry {
             claims: sources.claim_registry.claims.clone(),

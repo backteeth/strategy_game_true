@@ -182,7 +182,7 @@ struct WarTrace {
 }
 
 #[test]
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::needless_range_loop)]
 fn diag_continuing_wars_600_months() {
     let dir = std::env::temp_dir().join(format!(
         "strategy_game_p29_003_diag_{}_{}",
@@ -194,6 +194,7 @@ fn diag_continuing_wars_600_months() {
     ));
     let mut app = setup_app(&dir);
     let end = "1850/01/01";
+    let mut shortage = [0u32; 6];
 
     let mut traces: BTreeMap<usize, WarTrace> = BTreeMap::new();
     let mut monthly_dwarf: Vec<SupplyRow> = Vec::new();
@@ -205,6 +206,14 @@ fn diag_continuing_wars_600_months() {
     while date(&app).as_str() < end {
         advance_one_day(&mut app);
         let today = date(&app);
+        {
+            let mil = app.world().resource::<MilitaryRegistry>();
+            for d in mil.divisions.values() {
+                if mil.supply_fulfillment_of(d.id) < 0.34 {
+                    shortage[d.owner.0] += 1;
+                }
+            }
+        }
 
         // 2月の初期補給切れ(P29-002-DIAG-001)との関係を見るため、1800年2月の補給 0 の日数を数える。
         if today.starts_with("1800/02") {
@@ -307,6 +316,27 @@ fn diag_continuing_wars_600_months() {
     }
 
     // ── ログ出力 ───────────────────────────────────────────────────────
+    {
+        let cr = app.world().resource::<CountryRegistry>();
+        let sr = app.world().resource::<strategy_game::state::data::StateRegistry>();
+        for c in 0..6usize {
+            let id = CountryId(c);
+            let row = supply_row(&app, id);
+            let ct = cr.get(id).unwrap();
+            let own = sr.states.iter().filter(|s| s.owner_country_id == id).count();
+            println!(
+                "SUMMARY c{c} states={own} divisions={} stock={:.0} demand={:.0} produced={:?} treasury={:.0} tax={:.2} shortage_div_days={} active={}",
+                row.divisions, row.stock, row.demand, row.produced, ct.treasury, ct.tax_rate, shortage[c], ct.is_active()
+            );
+        }
+        let wr = app.world().resource::<WarRegistry>();
+        let mut by_reason: BTreeMap<String, u32> = BTreeMap::new();
+        for w in wr.wars.values() {
+            let k = if w.status == WarStatus::Active { "Active".to_string() } else { w.end_reason.clone().unwrap_or_default() };
+            *by_reason.entry(k).or_default() += 1;
+        }
+        println!("SUMMARY_WARS total={} by_end={:?}", wr.wars.len(), by_reason);
+    }
     println!("FIRST_WAR_START {:?}", first_war_date);
     println!("DWARF_FEB_1800_ZERO_SUPPLY_DAYS {feb_1800_dwarf_zero_days}");
     for (id, t) in &traces {
@@ -361,7 +391,17 @@ fn diag_continuing_wars_600_months() {
         }
     }
 
-    // ── 特性化の検査(現状の記録。望ましい挙動の固定ではない) ─────────────────
+    // ── 特性化の検査 ─────────────────────────────────────────────────────
+    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)の導入後の世界での記録。診断(P29-003-DIAG-001)が
+    // 示した ISS-1 の構造(攻勢開始が 70 日分のストック判定で、募兵が備蓄を使い切る)は同じまま、
+    // 終結手段が追加されたことで戦争の経過が変わる。**現状の記録であり、望ましい挙動の固定ではない**。
+    let find = |start: &str, a: &[usize], d: &[usize]| -> (usize, &WarTrace) {
+        traces
+            .iter()
+            .find(|(_, t)| t.start == start && t.attackers == a && t.defenders == d)
+            .map(|(id, t)| (*id, t))
+            .unwrap_or_else(|| panic!("war {start} {a:?} vs {d:?} not found"))
+    };
     let still_active: Vec<usize> = {
         let wr = app.world().resource::<WarRegistry>();
         let mut v: Vec<usize> = wr
@@ -373,54 +413,52 @@ fn diag_continuing_wars_600_months() {
         v.sort();
         v
     };
-    assert_eq!(still_active, vec![5, 9], "ISS-1(WarId 5)・ISS-2(WarId 9)が 600 か月時点で継続");
-    let w5 = &traces[&5];
-    assert_eq!((w5.start.as_str(), &w5.attackers, &w5.defenders), ("1806/03/02", &vec![1, 2], &vec![0]));
-    let w9 = &traces[&9];
-    assert_eq!((w9.start.as_str(), &w9.attackers, &w9.defenders), ("1824/04/02", &vec![5], &vec![3]));
-    // ISS-1(WarId 5): 攻勢は 600 か月で一度も開始されず(判断理由は開戦日の NoValidFrontline を除き
-    // SupplyShortage のみ)、国家備蓄が 70 日分以上だったのは 1808/08/01・08/02 の 2 日だけ。
-    assert_eq!(w5.offensive_days, 0);
-    assert_eq!(w5.reasons.keys().cloned().collect::<Vec<_>>(), vec!["NoValidFrontline", "SupplyShortage"]);
-    assert_eq!(w5.days_at_or_above_70, vec!["1808/08/01".to_string(), "1808/08/02".to_string()]);
-    // その 2 日間も、攻勢待ち(blocked)のまま判断理由が更新されていない(評価周期 3 日の間に挟まった)。
+
+    // ISS-1(Dwarf + Elfin 対 Arcadia、1806/03/02): 攻勢は一度も開始されないが、長期停滞の
+    // 白紙講和で終結する。終結は、Elfin が当事者の別戦争(Elfin 対 Arcadia、〜1811/12/05)で
+    // 師団が動いていた間は見送られ、その戦争の終結の翌日になる(進行中の攻撃を妨げない)。
+    let (_, iss1) = find("1806/03/02", &[1, 2], &[0]);
+    assert_eq!(iss1.offensive_days, 0);
+    assert_eq!(iss1.end.as_deref(), Some("1811/12/06"));
+    assert_eq!(iss1.end_reason.as_deref(), Some("Stalemate White Peace"));
+    assert_eq!(iss1.days_at_or_above_70, vec!["1808/08/01".to_string(), "1808/08/02".to_string()]);
+    assert_eq!(iss1.reasons.keys().cloned().collect::<Vec<_>>(), vec!["NoValidFrontline", "SupplyShortage"]);
+    // 70 日分に届いた 2 日間は、攻勢待ち(blocked)のまま評価されなかった。
     for (d, row, blocked, reason, _) in &dwarf_window {
         if d == "1808/08/01" || d == "1808/08/02" {
             assert!(row.days.unwrap() >= 70.0, "{d}");
-            assert!(*blocked && reason == "SupplyShortage", "{d}: not re-evaluated while the stock was above 70 days");
+            assert!(*blocked && reason == "SupplyShortage", "{d}");
         }
     }
-    // 備蓄 70 日分のあと、募兵が再開して Division が 11 → 16 に増え、需要が月産を上回った。
+    // 備蓄 70 日分のあと、募兵が再開して Division が 11 → 16 に増え、月産 < 月需要になった。
     let aug = monthly_dwarf.iter().find(|r| r.date == "1808/08/01").unwrap();
     let feb09 = monthly_dwarf.iter().find(|r| r.date == "1809/02/01").unwrap();
     assert_eq!((aug.divisions, feb09.divisions), (11, 16));
-    assert!(feb09.produced.unwrap() < feb09.demand * 30.0, "月産 < 月需要(30 日)");
+    assert!(feb09.produced.unwrap() < feb09.demand * 30.0);
 
-    // ISS-2(WarId 9): 備蓄は 600 か月を通じて 70 日分に届かない(最大 20 日分未満)。
-    assert_eq!(w9.offensive_days, 0);
-    assert!(w9.max_days_cover < 20.0, "{}", w9.max_days_cover);
-    let f_end = monthly_ferrowyn.last().unwrap();
-    assert!(f_end.produced.unwrap() < f_end.demand * 30.0, "月産 < 月需要(30 日)");
-    // 平時の募兵: 備蓄が潤沢な 1814〜1819 年に Division が 3 → 8 に増えた。
-    let f14 = monthly_ferrowyn.iter().find(|r| r.date == "1814/02/01").unwrap();
-    let f19 = monthly_ferrowyn.iter().find(|r| r.date == "1819/04/01").unwrap();
-    assert_eq!((f14.divisions, f19.divisions), (3, 8));
-    assert!(f14.days.unwrap() > 1000.0);
+    // Oceanic(師団 0)が攻撃側の戦争(1806/05/02): 365 日後に白紙講和(従来は攻撃側降伏で 1808/12/05)。
+    let (_, w6) = find("1806/05/02", &[3], &[5]);
+    assert_eq!(w6.end.as_deref(), Some("1807/05/02"));
+    assert_eq!(w6.end_reason.as_deref(), Some("Stalemate White Peace"));
 
-    // 両戦争とも、防御側は Division 0 で、戦争目標州は未占領(攻撃側の降伏条件が成立しない)。
-    // 多国間戦争の支持国(Elfin)には前線計画がなく、独自には攻勢できない。
+    // 残る継続戦争: Dwarf + Elfin 対 Ferrowyn(1812/02/02)。**両陣営に師団がある**ため、
+    // 今回の白紙講和(一方が無力であることを要求)の対象外。Dwarf は ISS-1 と同じ構造
+    // (月産 < 月需要で攻勢開始の 70 日分に届かない)で攻勢できず、Ferrowyn は劣勢で攻勢しない。
+    assert_eq!(still_active, vec![8]);
+    let (_, w8) = find("1812/02/02", &[1, 2], &[5]);
+    assert_eq!(w8.offensive_days, 0);
+    assert!(w8.end.is_none());
     {
         let wr = app.world().resource::<WarRegistry>();
         let fr = app.world().resource::<FrontlineRegistry>();
-        for id in [5usize, 9] {
-            let w = &wr.wars[&strategy_game::common::WarId(id)];
-            assert_eq!(w.occupied_states.len(), 0);
-            assert_eq!(w.won_attacker_battles + w.won_defender_battles, 0, "戦闘は一度も起きていない");
-            assert_eq!(supply_row(&app, w.primary_defender_id()).divisions, 0);
-        }
+        let w = &wr.wars[&strategy_game::common::WarId(8)];
+        assert_eq!(w.occupied_states.len(), 0);
+        assert_eq!(w.won_attacker_battles + w.won_defender_battles, 0);
+        assert!(supply_row(&app, CountryId(5)).divisions > 0, "防御側にも師団がある");
+        assert!(supply_row(&app, DWARF).divisions > 0);
         assert!(
             !fr.plans.keys().any(|(_, c)| *c == CountryId(1)),
-            "Elfin(WarId 5 の支持国)には前線計画がない"
+            "Elfin(支持国)には前線計画がない(今回は変更しない)"
         );
     }
     let _ = std::fs::remove_dir_all(dir);

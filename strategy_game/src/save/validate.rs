@@ -3246,7 +3246,11 @@ mod tests {
             states,
             diplomacy: SavedDiplomacyRegistry { relations },
             war_justifications: SavedWarJustificationRegistry::default(),
-            wars: SavedWarRegistry { wars, next_id: 1 },
+            wars: SavedWarRegistry {
+                wars,
+                next_id: 1,
+                ..Default::default()
+            },
             claims: SavedClaimRegistry::default(),
             crises: SavedCrisisRegistry::default(),
             country_ai: SavedCountryAiRegistry {

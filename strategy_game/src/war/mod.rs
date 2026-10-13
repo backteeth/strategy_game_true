@@ -8,6 +8,7 @@ pub mod military_ai;
 pub mod occupation;
 pub mod offensive_supply_gate;
 pub mod peace;
+pub mod stalemate;
 pub mod update;
 pub mod war_score;
 

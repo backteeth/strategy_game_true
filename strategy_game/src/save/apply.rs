@@ -440,7 +440,23 @@ pub(crate) fn prepare_load(
             save.war_justifications.justifications,
             save.war_justifications.next_id,
         ),
-        war_registry: WarRegistry::from_saved_parts(save.wars.wars, save.wars.next_id),
+        war_registry: {
+            let mut registry = WarRegistry::from_saved_parts(save.wars.wars, save.wars.next_id);
+            // P29-003: 停滞期間の計測状態。存在しない(旧 Save)場合は空で、ロード後の最初の
+            // 評価日から計測する。Activeでない・存在しない戦争の記録は復元しない。
+            registry.stalemate_records = save
+                .wars
+                .stalemate
+                .into_iter()
+                .filter(|(id, _)| {
+                    registry
+                        .wars
+                        .get(id)
+                        .is_some_and(|w| w.status == crate::war::data::WarStatus::Active)
+                })
+                .collect();
+            registry
+        },
         claim_registry: ClaimRegistry::from_saved_parts(save.claims.claims, save.claims.next_id),
         crisis_registry: CrisisRegistry::from_saved_parts(save.crises.crises, save.crises.next_id),
         country_ai_registry,
@@ -1044,7 +1060,11 @@ mod tests {
             states,
             diplomacy: SavedDiplomacyRegistry { relations },
             war_justifications: SavedWarJustificationRegistry::default(),
-            wars: SavedWarRegistry { wars, next_id: 1 },
+            wars: SavedWarRegistry {
+                wars,
+                next_id: 1,
+                ..Default::default()
+            },
             claims: SavedClaimRegistry::default(),
             crises: SavedCrisisRegistry::default(),
             country_ai: SavedCountryAiRegistry {

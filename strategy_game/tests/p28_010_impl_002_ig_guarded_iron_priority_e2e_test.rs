@@ -307,15 +307,22 @@ fn d4_240_months_keeps_the_ledger_closed_and_matches_the_audited_outcomes() {
     // Iron枯渇後のDwarf(m100〜): MilitaryFactory優先でDivision増・補給不足率の改善。
     assert!(m120.contains("c2 divs=16 shortD=4649 IG=2838 tr=15340"), "{m120}");
     assert!(m240.contains("c2 divs=16 shortD=17065 IG=9425 tr=16462"), "{m240}");
-    // Elfin・Ferrowyn: 補給不足日数の大幅減(旧D0: 23879 / 5069)。
-    assert!(m240.contains("c1 divs=9 shortD=17066 IG=638 tr=8187"), "{m240}");
-    assert!(m240.contains("c5 divs=8 shortD=2080 IG=6873 tr=3899"), "{m240}");
-    // Passguard: D0と完全一致(旧D0 240か月: Division1・補給不足119・IG18・国庫1842・LS70.0)。
-    assert!(m240.contains("c4 divs=1 shortD=119 IG=18 tr=1842 LS=70.0"), "{m240}");
+    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)の導入で、戦争の履歴が変わり世界が分岐した
+    // (最初の分岐: WarId(6)[Oceanic 対 Ferrowyn、1806/05/02]が 365 日後の 1807/05/02 に白紙講和
+    // で終結。従来は 1808/12/05 の攻撃側降伏)。Dwarf(c2)・Arcadia(c0)の値は不変。
+    // Elfin・Ferrowyn: 補給不足日数は旧D0(23879 / 5069)より小さい(D4 の効果の方向は維持)。
+    assert!(m240.contains("c1 divs=9 shortD=13502 IG=102 tr=8300"), "{m240}");
+    assert!(m240.contains("c5 divs=2 shortD=3792 IG=6634 tr=1939"), "{m240}");
+    // Passguard: E1 導入前は D0 と完全一致(旧D0 240か月: Division1・補給不足119・IG18・国庫1842・
+    // LS70.0)だった。E1 後は、Elfin 対 Passguard の戦争(1812/01、世界の分岐で新規)で州を
+    // 1 つ失うため値が変わる。補給不足 119 日は不変。D0 との同一性は、Passguard の Iron・IG
+    // 配分が州の喪失の前(〜m143)まで連続的であること(次のテスト)と、fixture 検証で担保する。
+    assert!(m240.contains("c4 divs=1 shortD=119 IG=1254 tr=743 LS=60.0"), "{m240}");
     // Arcadia・Oceanic(MilitaryFactoryなし/Iron枯渇): D0と同一(旧D0の240か月値)。
     assert!(m240.contains("c0 divs=0 shortD=7835 IG=6 tr=3731"), "{m240}");
-    // Ferrowynが Oceanic に勝つ戦争(WarId(8))が 1819/02/07 に決着(旧D0: 継続)。
-    assert_eq!(s.war8_end.as_deref(), Some("1819/02/07"));
+    // 旧世界の「Ferrowyn 対 Oceanic の WarId(8) が 1819/02/07 に決着」は、E1 後の世界では
+    // 発生しない(WarId(8)は別の戦争)。D4 の効果は Dwarf の値(上記、不変)で確認する。
+    assert_eq!(s.war8_end, None);
 }
 
 /// Passguardで D1/D3 が起こした「FactoryがIron不足→IG枯渇→MilitaryFactory停止→Ironが余って
@@ -325,8 +332,12 @@ fn passguard_does_not_enter_the_d1_d3_starvation_oscillation() {
     let s = simulate(250, &[]);
     let p = &s.monthly[4];
     assert_eq!(p.len(), 250);
-    // 序盤(Mine稼働前)を除く。
-    let tail = &p[20..];
+    // 序盤(Mine稼働前)を除く。E1 後の世界では、Passguard は 1812 年(約 m144)に Factory を持つ
+    // 州を失う。Factory がある間(Factory の Iron 引落しが 0 でない間)だけを対象にする。
+    let tail_all = &p[20..];
+    let owned = tail_all.iter().position(|x| x.0 == 0.0).unwrap_or(tail_all.len());
+    assert!(owned >= 100, "Factory を保持する期間が十分長い(観測 {owned} か月)");
+    let tail = &tail_all[..owned];
     let max_mf = tail.iter().map(|x| x.1).fold(f64::MIN, f64::max);
     let min_mf = tail.iter().map(|x| x.1).fold(f64::MAX, f64::min);
     let min_f = tail.iter().map(|x| x.0).fold(f64::MAX, f64::min);
@@ -358,12 +369,22 @@ fn long_horizon_600_months_has_no_new_insolvency_or_tax_runaway() {
         assert!(neg <= allowed, "c{c}: negative treasury months {neg}");
         assert!(max_tax <= 0.25 + 1e-6, "c{c}: tax runaway {max_tax}");
     }
-    // 税率の反転回数(観測: Arcadia 3、Elfin 8、Dwarf 5、Passguard 39、Ferrowyn 5。D0: 3/10/5/5/41)。
+    // 税率の反転回数(観測: Arcadia 3、Elfin 8、Dwarf 5、Passguard 39、Ferrowyn 5。D0: 3/10/5/5/41。E1 後は下記)。
     // Passguardの39回は、IG備蓄がゲート(3か月分)付近で優先配分と比例配分が月ごとに切り替わる
     // 閾値での振動(振幅 0.01、国庫・生活水準は不変)。D4の契約上の既知の挙動で、報告書に記載。
     let rev: Vec<u32> = (0..6).map(|c| reversals(&s.monthly[c])).collect();
     assert!(rev[2] <= 10, "Dwarf tax reversals {}", rev[2]);
-    assert!(rev[1] <= 12 && rev[5] <= 10 && rev[0] <= 6, "{rev:?}");
+    // E1 後の世界(観測: Arcadia 3、Elfin 62、Dwarf 5、Passguard 9、Ferrowyn 4): Elfin は約 m190〜m374 に、
+    // 税率が 0.12 と 0.14 の間を往復する有界な振動を示す(国庫は常に正、上限 0.25 未満、振幅は
+    // 0.02 以内。単発の 0.04 の変化は州獲得後の再調整)。暴走・破産ではない。
+    assert!(rev[1] <= 70 && rev[5] <= 10 && rev[0] <= 6, "{rev:?}");
+    for c in 0..6 {
+        let max_step = s.monthly[c]
+            .windows(2)
+            .map(|w| (w[1].3 - w[0].3).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_step <= 0.05 + 1e-6, "c{c}: tax step {max_step}");
+    }
     assert!(rev[4] <= 45, "Passguard tax reversals {}", rev[4]);
 }
 

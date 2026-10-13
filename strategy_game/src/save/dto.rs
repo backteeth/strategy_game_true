@@ -140,6 +140,11 @@ pub struct SavedWarJustificationRegistry {
 pub struct SavedWarRegistry {
     pub wars: HashMap<WarId, War>,
     pub next_id: usize,
+    /// P29-003: 停滞した AI 戦争の白紙講和のための、停滞期間の計測状態。追加フィールド
+    /// (旧 Save には存在せず、`#[serde(default)]`により空として復元する。その場合、停滞期間は
+    /// ロード後の最初の評価日から計測し直す)。
+    #[serde(default)]
+    pub stalemate: HashMap<WarId, crate::war::stalemate::WarStalemateRecord>,
 }
 
 /// `diplomacy::claims::ClaimRegistry`のコンテナDTO。
