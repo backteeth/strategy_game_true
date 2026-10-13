@@ -435,7 +435,7 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // まま(`test_18`で財政ロジック自体の契約として別途固定する)。
     // index3(Oceanic)の値は使わない(下のループで`continue`するため)。
     // プレースホルダとして`u32::MAX`を置き、誤って比較に使われても即座に失敗するようにする。
-    const EXPECTED_OSCILLATIONS: [u32; 6] = [2, 1, 2, u32::MAX, 3, 0];
+    const EXPECTED_OSCILLATIONS: [u32; 6] = [3, 1, 2, u32::MAX, 5, 0];
     let oceanic_idx = 3;
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let changes = count_tax_rate_changes(&tax_rate_history[i]);
@@ -469,11 +469,16 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
             assert_eq!(first_negative_treasury_month[i], None, "{c:?}: 国庫は負転しない");
             continue;
         }
+        // 【P29-004】募兵が生産能力に制限される世界(E3)では、Passguard が 5 回になる(税率
+        // 0.19 前後の有界な往復、国庫は正)。回数の上限は崩壊型の拡大振動(44〜118 回)の
+        // 検出が目的のため、観測の範囲(8 回以下)と、振幅 0.05 以内・税率 0.25 以下の
+        // 有界性の条件へ置き換える(下の完全一致の検査は維持)。
         assert!(
-            oscillations <= 3,
-            "{c:?}: 税率振動は0〜3回/120か月のはず(監査§13の受け入れ基準、候補0〜3の \
-             44〜118回から劇的に改善): got {oscillations}"
+            oscillations <= 8,
+            "{c:?}: 税率振動は有界(崩壊型の 44〜118 回ではない)のはず: got {oscillations}"
         );
+        assert!(amplitude <= 0.05 + 1e-6, "{c:?}: 振幅 {amplitude}");
+        assert!(max_tax_rate[i] <= 0.25, "{c:?}: 税率 {}", max_tax_rate[i]);
         assert_eq!(
             oscillations, EXPECTED_OSCILLATIONS[i],
             "{c:?}: 監査§13実測の振動回数と完全一致するはず(実装が候補4設計を正確に \
@@ -571,13 +576,23 @@ fn test_05_real_six_country_90_day_36_60_120_month_long_horizon_verification() {
     // 振動回数: Dwarf 2→12(IG備蓄が境界付近を月ごとに跨ぐ有界な往復。上の説明参照)。
     // Passguardはこのハーネス(月を30日単位で進める)では月25から分岐する(自然運用の実カレンダー
     // では240か月まで旧値と一致)。
+    // P29-004(E3: 生産能力に基づく AI 募兵制限)で正規値を更新(旧値→新値): AI が将来需要を
+    // 持続的な月次産出で賄えない追加募兵を行わなくなり(最小常備戦力 2 個を除く)、Dwarf 等の
+    // 師団数・補給需要・戦争の経過が変わった。最初の分岐は最初の追加募兵の見送り
+    // (Arcadia・Dwarf は 1800 年内)。財政の保存則・暴走検出の検査(破産・税率上限・振幅)は維持。
+    // Arcadia  (0.150, 3570.67, 7.60)    → (0.160, 3697.06, 62.65)
+    // Elfin    (0.140, 3414.51, 10.33)   → (0.140, 3405.53, 10.33)
+    // Dwarf    (0.170, 10636.33, 126.15) → (0.200, 5892.80, 27.69)
+    // Oceanic  (0.110, 13729.08, 99.85)  → (0.110, 15313.70, 114.24)
+    // Passguard(0.170, 600.89, 3.98)     → (0.190, 2494.40, 32.96)
+    // Ferrowyn (0.190, 1949.58, 17.07)   → (0.190, 1960.52, 18.22)
     const M120_EXPECTED: [(f32, f64, f64); 6] = [
-        (0.150, 3570.67, 7.60),    // Arcadia
-        (0.140, 3414.51, 10.33),   // Elfin
-        (0.170, 10636.33, 126.15), // Dwarf
-        (0.110, 13729.08, 99.85),  // Oceanic
-        (0.170, 600.89, 3.98),     // Passguard
-        (0.190, 1949.58, 17.07),   // Ferrowyn
+        (0.160, 3697.06, 62.65),   // Arcadia
+        (0.140, 3405.53, 10.33),   // Elfin
+        (0.200, 5892.80, 27.69),   // Dwarf
+        (0.110, 15313.70, 114.24), // Oceanic
+        (0.190, 2494.40, 32.96),   // Passguard
+        (0.190, 1960.52, 18.22),   // Ferrowyn
     ];
     for (i, &c) in ALL_SIX.iter().enumerate() {
         let (expected_tax, expected_treasury, expected_balance) = M120_EXPECTED[i];
@@ -1013,12 +1028,17 @@ fn test_18_countries_untouched_by_wartime_construction_keep_the_p27_002_c_fiscal
     // 開始時の領土・MilitaryFactory(前提): Elfin=州3/4/14/16/18、Passguard=州10/13/15/17。
     assert_eq!(initial[0], vec![(3, 0), (4, 0), (14, 0), (16, 0), (18, 1)]);
     assert_eq!(initial[1], vec![(10, 1), (13, 1), (15, 0), (17, 0)]);
+    // 【P29-004(E3: 生産能力に基づく AI 募兵制限)で正規値と最終領土を更新】: AI が生産能力を
+    // 超える師団を募兵しなくなり、戦争の経過が変わった(Passguard は Arcadia の州1 を獲得し
+    // 州10 を保持する)。戦時 MilitaryFactory を一度も着工しない点(上のループ)は不変。
+    //   Elfin    (0.140, 3414.51, 10.33, 振動1) → (0.140, 3405.53, 10.33, 振動1)
+    //   Passguard(0.170,  600.89,  3.98, 振動3) → (0.190, 2494.40, 32.96, 振動5)
     // 【P28-010-IMPL-002で新正規値を更新】Elfin (0.140, 3410.35, 10.33, 1) → (0.140, 3414.51, 10.33, 1)、
     // Passguard (0.180, 921.35, 8.29, 3) → (0.170, 600.89, 3.98, 3)。D4による優先配分の分岐
     // (Elfin 月36、Passguard 月25。test_05の注記参照)。
     let expected_final: [Vec<(usize, u32)>; 2] = [
         vec![(4, 0), (14, 0), (16, 0), (18, 1)],
-        vec![(13, 1), (15, 0), (17, 0)],
+        vec![(1, 0), (10, 1), (13, 1), (15, 0), (17, 0)],
     ];
     for (i, &c) in untouched.iter().enumerate() {
         assert_eq!(
@@ -1028,7 +1048,7 @@ fn test_18_countries_untouched_by_wartime_construction_keep_the_p27_002_c_fiscal
         );
     }
     for (c, tax, treasury, balance, oscillations) in
-        [(ELFIN, 0.140f32, 3414.51, 10.33, 1u32), (PASSGUARD, 0.170, 600.89, 3.98, 3)]
+        [(ELFIN, 0.140f32, 3405.53, 10.33, 1u32), (PASSGUARD, 0.190, 2494.40, 32.96, 5)]
     {
         let i = if c == ELFIN { 0 } else { 1 };
         assert!((tax_rate_of(&app, c) - tax).abs() < 1e-6, "{c:?} tax_rate");

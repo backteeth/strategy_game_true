@@ -25,6 +25,11 @@ use strategy_game::economy::supply_balance::{
     MilitarySupplyProductionLedger, MonthlyProductionRecord,
 };
 use strategy_game::military::MilitaryPlugin;
+use strategy_game::building::data::BuildingRegistry;
+use strategy_game::military::production_capacity_gate::{
+    MIN_STANDING_DIVISIONS, monthly_units_from_daily, projected_daily_demand_units,
+    sustained_monthly_supply,
+};
 use strategy_game::military::data::MilitaryRegistry;
 use strategy_game::military::supply_initialization::country_daily_demand_units;
 use strategy_game::politics::PoliticsPlugin;
@@ -195,6 +200,8 @@ fn diag_continuing_wars_600_months() {
     let mut app = setup_app(&dir);
     let end = "1850/01/01";
     let mut shortage = [0u32; 6];
+    let mut over_capacity_months = [0u32; 6];
+    let mut months_observed = 0u32;
 
     let mut traces: BTreeMap<usize, WarTrace> = BTreeMap::new();
     let mut monthly_dwarf: Vec<SupplyRow> = Vec::new();
@@ -297,6 +304,26 @@ fn diag_continuing_wars_600_months() {
 
         // 月初の記録(Dwarf・Ferrowyn)。
         if app.world().resource::<GameDate>().day == 1 {
+            months_observed += 1;
+            for c in 0..6usize {
+                let id = CountryId(c);
+                let cr = app.world().resource::<CountryRegistry>();
+                let country = cr.get(id).unwrap();
+                let mil = app.world().resource::<MilitaryRegistry>();
+                let standing = mil.divisions.values().filter(|d| d.owner == id && d.manpower > 0).count() as u128
+                    + country.recruitment_queue.len() as u128;
+                let demand = projected_daily_demand_units(country, mil).unwrap();
+                let required = monthly_units_from_daily(demand).unwrap();
+                let cap = sustained_monthly_supply(
+                    id,
+                    app.world().resource::<strategy_game::state::data::StateRegistry>(),
+                    app.world().resource::<BuildingRegistry>(),
+                )
+                .monthly_units;
+                if standing > MIN_STANDING_DIVISIONS && required > cap {
+                    over_capacity_months[c] += 1;
+                }
+            }
             monthly_dwarf.push(supply_row(&app, DWARF));
             monthly_ferrowyn.push(supply_row(&app, FERROWYN));
         }
@@ -325,8 +352,8 @@ fn diag_continuing_wars_600_months() {
             let ct = cr.get(id).unwrap();
             let own = sr.states.iter().filter(|s| s.owner_country_id == id).count();
             println!(
-                "SUMMARY c{c} states={own} divisions={} stock={:.0} demand={:.0} produced={:?} treasury={:.0} tax={:.2} shortage_div_days={} active={}",
-                row.divisions, row.stock, row.demand, row.produced, ct.treasury, ct.tax_rate, shortage[c], ct.is_active()
+                "SUMMARY c{c} states={own} divisions={} queue={} stock={:.0} demand={:.0} produced={:?} treasury={:.0} tax={:.2} shortage_div_days={} over_capacity_months={}/{} active={}",
+                row.divisions, ct.recruitment_queue.len(), row.stock, row.demand, row.produced, ct.treasury, ct.tax_rate, shortage[c], over_capacity_months[c], months_observed, ct.is_active()
             );
         }
         let wr = app.world().resource::<WarRegistry>();
@@ -392,9 +419,10 @@ fn diag_continuing_wars_600_months() {
     }
 
     // ── 特性化の検査 ─────────────────────────────────────────────────────
-    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)の導入後の世界での記録。診断(P29-003-DIAG-001)が
-    // 示した ISS-1 の構造(攻勢開始が 70 日分のストック判定で、募兵が備蓄を使い切る)は同じまま、
-    // 終結手段が追加されたことで戦争の経過が変わる。**現状の記録であり、望ましい挙動の固定ではない**。
+    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)と P29-004(E3: 生産能力に基づく AI 募兵制限)
+    // の導入後の世界での記録。診断(P29-003-DIAG-001)が示した構造(攻勢開始が 70 日分の
+    // ストック判定)は同じまま、募兵と終結手段が変わることで戦争の経過が変わる。
+    // **現状の記録であり、望ましい挙動の固定ではない**。
     let find = |start: &str, a: &[usize], d: &[usize]| -> (usize, &WarTrace) {
         traces
             .iter()
@@ -414,52 +442,52 @@ fn diag_continuing_wars_600_months() {
         v
     };
 
-    // ISS-1(Dwarf + Elfin 対 Arcadia、1806/03/02): 攻勢は一度も開始されないが、長期停滞の
-    // 白紙講和で終結する。終結は、Elfin が当事者の別戦争(Elfin 対 Arcadia、〜1811/12/05)で
-    // 師団が動いていた間は見送られ、その戦争の終結の翌日になる(進行中の攻撃を妨げない)。
-    let (_, iss1) = find("1806/03/02", &[1, 2], &[0]);
-    assert_eq!(iss1.offensive_days, 0);
-    assert_eq!(iss1.end.as_deref(), Some("1811/12/06"));
-    assert_eq!(iss1.end_reason.as_deref(), Some("Stalemate White Peace"));
-    assert_eq!(iss1.days_at_or_above_70, vec!["1808/08/01".to_string(), "1808/08/02".to_string()]);
-    assert_eq!(iss1.reasons.keys().cloned().collect::<Vec<_>>(), vec!["NoValidFrontline", "SupplyShortage"]);
-    // 70 日分に届いた 2 日間は、攻勢待ち(blocked)のまま評価されなかった。
-    for (d, row, blocked, reason, _) in &dwarf_window {
-        if d == "1808/08/01" || d == "1808/08/02" {
-            assert!(row.days.unwrap() >= 70.0, "{d}");
-            assert!(*blocked && reason == "SupplyShortage", "{d}");
-        }
-    }
-    // 備蓄 70 日分のあと、募兵が再開して Division が 11 → 16 に増え、月産 < 月需要になった。
-    let aug = monthly_dwarf.iter().find(|r| r.date == "1808/08/01").unwrap();
-    let feb09 = monthly_dwarf.iter().find(|r| r.date == "1809/02/01").unwrap();
-    assert_eq!((aug.divisions, feb09.divisions), (11, 16));
-    assert!(feb09.produced.unwrap() < feb09.demand * 30.0);
+    // ISS-1・ISS-2 の戦争(1806/03/02 Dwarf+Elfin 対 Arcadia、1824/04/02 Ferrowyn 対 Oceanic)は、
+    // 募兵が生産能力に制限された世界では発生しない。
+    assert!(!traces.values().any(|t| t.start == "1806/03/02" && t.defenders == [0]));
+    assert!(!traces.values().any(|t| t.start == "1824/04/02"));
 
-    // Oceanic(師団 0)が攻撃側の戦争(1806/05/02): 365 日後に白紙講和(従来は攻撃側降伏で 1808/12/05)。
-    let (_, w6) = find("1806/05/02", &[3], &[5]);
-    assert_eq!(w6.end.as_deref(), Some("1807/05/02"));
-    assert_eq!(w6.end_reason.as_deref(), Some("Stalemate White Peace"));
+    // E1 は引き続き機能する: Oceanic(師団 0)対 Ferrowyn(1822/11/02)は 365 日後に白紙講和。
+    let (_, w_e1) = find("1822/11/02", &[3], &[5]);
+    assert_eq!(w_e1.end.as_deref(), Some("1823/11/02"));
+    assert_eq!(w_e1.end_reason.as_deref(), Some("Stalemate White Peace"));
 
-    // 残る継続戦争: Dwarf + Elfin 対 Ferrowyn(1812/02/02)。**両陣営に師団がある**ため、
-    // 今回の白紙講和(一方が無力であることを要求)の対象外。Dwarf は ISS-1 と同じ構造
-    // (月産 < 月需要で攻勢開始の 70 日分に届かない)で攻勢できず、Ferrowyn は劣勢で攻勢しない。
-    assert_eq!(still_active, vec![8]);
-    let (_, w8) = find("1812/02/02", &[1, 2], &[5]);
-    assert_eq!(w8.offensive_days, 0);
-    assert!(w8.end.is_none());
+    // 残る継続戦争 2 件。
+    assert_eq!(still_active.len(), 2);
+    // (a) Dwarf(3 Division、備蓄は 24,000 日分超)対 Ferrowyn(3 Division): 補給ゲートではなく
+    // 戦力比(EnemyStronger / ComparableStrength)で攻勢しない。両陣営に師団があり E1 の対象外。
+    let (_, w_mutual) = find("1801/06/09", &[2], &[5]);
+    assert_eq!(w_mutual.offensive_days, 0);
+    assert_eq!(w_mutual.blocked_days, 0);
+    assert!(w_mutual.max_days_cover > 1000.0);
+    assert!(
+        w_mutual.reasons.get("EnemyStronger").copied().unwrap_or(0)
+            + w_mutual.reasons.get("ComparableStrength").copied().unwrap_or(0)
+            > 17_000
+    );
+    // (b) Elfin(9 Division)対 Dwarf+Passguard: Elfin の月産は将来需要を賄える(募兵は能力内)が、
+    // 備蓄が約 30 日分で、攻勢開始の 70 日分に届かない(E3 は 70 日分判定を変更しない)。
+    let (_, w_supply) = find("1817/03/02", &[1], &[2, 4]);
+    assert_eq!(w_supply.offensive_days, 0);
+    assert!(w_supply.blocked_days > 11_000);
+    assert!(w_supply.max_days_cover < 70.0);
     {
-        let wr = app.world().resource::<WarRegistry>();
-        let fr = app.world().resource::<FrontlineRegistry>();
-        let w = &wr.wars[&strategy_game::common::WarId(8)];
-        assert_eq!(w.occupied_states.len(), 0);
-        assert_eq!(w.won_attacker_battles + w.won_defender_battles, 0);
-        assert!(supply_row(&app, CountryId(5)).divisions > 0, "防御側にも師団がある");
-        assert!(supply_row(&app, DWARF).divisions > 0);
-        assert!(
-            !fr.plans.keys().any(|(_, c)| *c == CountryId(1)),
-            "Elfin(支持国)には前線計画がない(今回は変更しない)"
-        );
+        let cr = app.world().resource::<CountryRegistry>();
+        let mil = app.world().resource::<MilitaryRegistry>();
+        let elfin = cr.get(CountryId(1)).unwrap();
+        let required = monthly_units_from_daily(projected_daily_demand_units(elfin, mil).unwrap()).unwrap();
+        let cap = sustained_monthly_supply(
+            CountryId(1),
+            app.world().resource::<strategy_game::state::data::StateRegistry>(),
+            app.world().resource::<BuildingRegistry>(),
+        )
+        .monthly_units;
+        assert!(required <= cap, "Elfin の将来需要は持続的な産出で賄える({required} <= {cap})");
     }
+
+    // 募兵の抑止: Dwarf は生産能力(月産 207)を超える師団(旧 16)を持たない。
+    let dwarf = supply_row(&app, DWARF);
+    assert_eq!(dwarf.divisions, 3);
+    assert!(dwarf.produced.unwrap() >= dwarf.demand * 30.4);
     let _ = std::fs::remove_dir_all(dir);
 }

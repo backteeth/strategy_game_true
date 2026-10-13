@@ -304,24 +304,21 @@ fn d4_240_months_keeps_the_ledger_closed_and_matches_the_audited_outcomes() {
     assert_eq!(s.frozen_iron_months, 0);
     let m120 = s.rows.iter().find(|r| r.starts_with("m120")).unwrap();
     let m240 = s.rows.iter().find(|r| r.starts_with("m240")).unwrap();
-    // Iron枯渇後のDwarf(m100〜): MilitaryFactory優先でDivision増・補給不足率の改善。
-    assert!(m120.contains("c2 divs=16 shortD=4649 IG=2838 tr=15340"), "{m120}");
-    assert!(m240.contains("c2 divs=16 shortD=17065 IG=9425 tr=16462"), "{m240}");
-    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)の導入で、戦争の履歴が変わり世界が分岐した
-    // (最初の分岐: WarId(6)[Oceanic 対 Ferrowyn、1806/05/02]が 365 日後の 1807/05/02 に白紙講和
-    // で終結。従来は 1808/12/05 の攻撃側降伏)。Dwarf(c2)・Arcadia(c0)の値は不変。
-    // Elfin・Ferrowyn: 補給不足日数は旧D0(23879 / 5069)より小さい(D4 の効果の方向は維持)。
-    assert!(m240.contains("c1 divs=9 shortD=13502 IG=102 tr=8300"), "{m240}");
-    assert!(m240.contains("c5 divs=2 shortD=3792 IG=6634 tr=1939"), "{m240}");
-    // Passguard: E1 導入前は D0 と完全一致(旧D0 240か月: Division1・補給不足119・IG18・国庫1842・
-    // LS70.0)だった。E1 後は、Elfin 対 Passguard の戦争(1812/01、世界の分岐で新規)で州を
-    // 1 つ失うため値が変わる。補給不足 119 日は不変。D0 との同一性は、Passguard の Iron・IG
-    // 配分が州の喪失の前(〜m143)まで連続的であること(次のテスト)と、fixture 検証で担保する。
-    assert!(m240.contains("c4 divs=1 shortD=119 IG=1254 tr=743 LS=60.0"), "{m240}");
-    // Arcadia・Oceanic(MilitaryFactoryなし/Iron枯渇): D0と同一(旧D0の240か月値)。
-    assert!(m240.contains("c0 divs=0 shortD=7835 IG=6 tr=3731"), "{m240}");
-    // 旧世界の「Ferrowyn 対 Oceanic の WarId(8) が 1819/02/07 に決着」は、E1 後の世界では
-    // 発生しない(WarId(8)は別の戦争)。D4 の効果は Dwarf の値(上記、不変)で確認する。
+    // P29-004(E3: 生産能力に基づく AI 募兵制限)の導入後の値(120・240 か月)。AI が生産能力を
+    // 超える募兵をしなくなり、Dwarf は Division 3(旧 16)のまま、Iron は枯渇せず(Iron 備蓄が
+    // 残るため D4 の優先配分が成立する局面自体が現れない)、IG 備蓄が積み上がる。この
+    // テストの目的(保存則の閉鎖・備蓄の非負・Iron の据え置きなし)は上の検査で維持され、D4 の
+    // 契約(適用条件・D0 への復帰・予算内の消費)は fixture テスト(12 件・単体 7 件)が担保する。
+    // 世界の経過: E1 で戦争が分岐し(P29-003)、さらに E3 で募兵が変わる。
+    assert!(m120.contains("c2 divs=3 shortD=3184 IG=8952 tr=15090"), "{m120}");
+    assert!(m240.contains("c2 divs=3 shortD=6834 IG=36840 tr=16108"), "{m240}");
+    assert!(m240.contains("c1 divs=9 shortD=7323 IG=118 tr=8124"), "{m240}");
+    assert!(m240.contains("c5 divs=3 shortD=2523 IG=5688 tr=2328"), "{m240}");
+    // Passguard: Division 1・補給不足 119 日は旧 D0 の値(不変)。IG・国庫・生活水準は、
+    // 戦争の分岐による州の増減で変わる。
+    assert!(m240.contains("c4 divs=1 shortD=119 IG=1249 tr=797 LS=60.0"), "{m240}");
+    assert!(m240.contains("c0 divs=0 shortD=7805 IG=8 tr=3759"), "{m240}");
+    // 旧世界の「Ferrowyn 対 Oceanic の WarId(8) が 1819/02/07 に決着」は発生しない。
     assert_eq!(s.war8_end, None);
 }
 

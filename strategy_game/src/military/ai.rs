@@ -11,11 +11,13 @@
 //! (§5/§6の定数はいずれも「平時・戦時共通の保守的な軍備水準」という意図のみで、
 //! 戦争状態や国力による補正は行わない)。
 use crate::app::time::GameDate;
+use crate::building::data::BuildingRegistry;
 use crate::common::{CountryId, StateId};
 use crate::country::country_ai::CountryAiRegistry;
 use crate::country::{CountryRegistry, PlayerCountry};
 use crate::military::data::{DivisionStatus, MilitaryRegistry, STANDARD_INFANTRY_DEFINITION_ID};
 use crate::military::manpower::compute_manpower_ledger;
+use crate::military::production_capacity_gate::evaluate_production_capacity_gate;
 use crate::military::recruitment::request_recruitment;
 use crate::military::recruitment_supply_gate::evaluate_recruitment_supply_gate;
 use crate::population::growth::{compute_manpower_cap, compute_population_by_owner};
@@ -43,6 +45,10 @@ pub enum AiRecruitmentOutcome {
     /// `SkippedLedgerInvalid`が複数の帳簿不整合原因を1種類にまとめているのと
     /// 同じ設計判断であり、公開enumを不必要に細分化しない。
     SkippedSupplyShortage,
+    /// P29-004: 新しい師団の完成後の日次需要(生存師団・訓練中・今回の募兵)を、直近の月次
+    /// 生産の実績から再構成した持続的な産出で賄えないため、新規募兵を見送った(備蓄が
+    /// 潤沢でも許可しない)。評価自体の失敗(overflow 等)も安全側として見送る。
+    SkippedProductionCapacity,
     /// 呼び出し時点で対象国家が`CountryRegistry`に見当たらない防御的なケース
     /// (通常の呼び出し経路[`evaluate_ai_monthly_recruitment`]では起こり得ない)。
     SkippedCountryNotFound,
@@ -131,6 +137,7 @@ fn decide_and_recruit_for_country(
     country_registry: &mut CountryRegistry,
     military_registry: &MilitaryRegistry,
     state_registry: &StateRegistry,
+    building_registry: &BuildingRegistry,
     war_registry: &WarRegistry,
     game_date: &GameDate,
     population_by_owner: &HashMap<CountryId, u64>,
@@ -217,6 +224,33 @@ fn decide_and_recruit_for_country(
         }
     }
 
+    // P29-004: 生産能力ゲート(補給ゲートの後に追加する。既存の判定・ヒステリシス状態は
+    // 変更しない)。訓練キュー(この月に先に許可した注文を含む)は将来需要に算入される。
+    match evaluate_production_capacity_gate(
+        country,
+        military_registry,
+        state_registry,
+        building_registry,
+        def,
+    ) {
+        Ok(verdict) if verdict.allowed => {}
+        Ok(verdict) => {
+            debug!(
+                "[AiRecruitment] country {country_id:?}: production capacity gate holds recruitment \n                 (capacity {} < required {} units/month, unreported MF entries {})",
+                verdict.capacity_monthly_units,
+                verdict.required_monthly_units,
+                verdict.unreported_entries
+            );
+            return AiRecruitmentOutcome::SkippedProductionCapacity;
+        }
+        Err(_) => {
+            debug!(
+                "[AiRecruitment] country {country_id:?}: production capacity gate evaluation \n                 failed, skipping this month as a safe default"
+            );
+            return AiRecruitmentOutcome::SkippedProductionCapacity;
+        }
+    }
+
     let reserve = calculate_ai_manpower_reserve(cap);
     let Some(needed) = required.checked_add(reserve) else {
         return AiRecruitmentOutcome::SkippedInsufficientManpower;
@@ -250,10 +284,12 @@ fn decide_and_recruit_for_country(
 /// P23-009のエントリーポイント(Bevy非依存)。プレイヤー以外の活動国家を
 /// `CountryId`昇順で処理し、各国最大1件までAI月次募兵を試みる。国家A失敗が
 /// 国家Bの判断を妨げないよう、国家ごとに独立して評価する。
+#[allow(clippy::too_many_arguments)]
 pub fn evaluate_ai_monthly_recruitment(
     country_registry: &mut CountryRegistry,
     military_registry: &MilitaryRegistry,
     state_registry: &StateRegistry,
+    building_registry: &BuildingRegistry,
     war_registry: &WarRegistry,
     game_date: &GameDate,
     country_ai_registry: &mut CountryAiRegistry,
@@ -276,6 +312,7 @@ pub fn evaluate_ai_monthly_recruitment(
             country_registry,
             military_registry,
             state_registry,
+            building_registry,
             war_registry,
             game_date,
             &population_by_owner,
@@ -296,6 +333,7 @@ pub fn handle_monthly_ai_recruitment(
     mut country_registry: ResMut<CountryRegistry>,
     military_registry: Res<MilitaryRegistry>,
     state_registry: Res<StateRegistry>,
+    building_registry: Res<BuildingRegistry>,
     war_registry: Res<WarRegistry>,
     game_date: Res<GameDate>,
     mut country_ai_registry: ResMut<CountryAiRegistry>,
@@ -312,6 +350,7 @@ pub fn handle_monthly_ai_recruitment(
             &mut country_registry,
             &military_registry,
             &state_registry,
+            &building_registry,
             &war_registry,
             &game_date,
             &mut country_ai_registry,
@@ -554,6 +593,7 @@ mod tests {
         military: MilitaryRegistry,
         states: StateRegistry,
         war: WarRegistry,
+        buildings: BuildingRegistry,
         country_ai: CountryAiRegistry,
         game_date: GameDate,
     }
@@ -577,6 +617,7 @@ mod tests {
             military,
             states: StateRegistry::build(states),
             war: WarRegistry::default(),
+            buildings: BuildingRegistry::default(),
             country_ai: CountryAiRegistry::default(),
             // 月半ば(境界日ではない)の任意の日付。既存テストはbridge計算の
             // 暦境界そのものを検証する対象ではない――境界値は
@@ -593,6 +634,7 @@ mod tests {
             &mut h.countries,
             &h.military,
             &h.states,
+            &h.buildings,
             &h.war,
             &h.game_date,
             &population_by_owner,
@@ -757,6 +799,7 @@ mod tests {
             &mut h.countries,
             &h.military,
             &h.states,
+            &h.buildings,
             &h.war,
             &h.game_date,
             &mut h.country_ai,
@@ -906,6 +949,7 @@ mod tests {
             &mut h.countries,
             &h.military,
             &h.states,
+            &h.buildings,
             &h.war,
             &h.game_date,
             &mut h.country_ai,
@@ -941,6 +985,7 @@ mod tests {
             &mut h.countries,
             &h.military,
             &h.states,
+            &h.buildings,
             &h.war,
             &h.game_date,
             &mut h.country_ai,

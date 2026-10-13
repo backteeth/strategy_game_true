@@ -177,6 +177,7 @@ fn evaluate(h: &mut Harness, country_id: CountryId) {
         &mut h.countries,
         &h.military,
         &h.states,
+        &strategy_game::building::data::BuildingRegistry::default(),
         &h.war,
         &h.game_date,
         &mut h.country_ai,
@@ -1136,11 +1137,22 @@ fn test_36_month_six_country_recruitment_gate_real_app_verification() {
         for s in history {
             assert!(s.military_supplies >= 0.0, "{c:?}: MilitarySuppliesが負値になってはいけない");
         }
-        for w in history.windows(2) {
-            assert!(
-                w[1].division_count >= w[0].division_count,
-                "{c:?}: 開戦していないシナリオでDivision数が減少してはいけない"
-            );
+        // 開戦していない国では、Division数は減少しない(自動解隊・消失の検出)。P29-004 で
+        // 募兵の許可条件が変わり、36 か月の間に戦争が発生する世界の経過も変わるため、
+        // 当該国が(いずれかの時点で)戦争に参加した場合は、戦闘による損耗を許容する。
+        let participated = app
+            .world()
+            .resource::<strategy_game::war::data::WarRegistry>()
+            .wars
+            .values()
+            .any(|w| w.is_participant(c));
+        if !participated {
+            for w in history.windows(2) {
+                assert!(
+                    w[1].division_count >= w[0].division_count,
+                    "{c:?}: 開戦していないシナリオでDivision数が減少してはいけない"
+                );
+            }
         }
     }
 

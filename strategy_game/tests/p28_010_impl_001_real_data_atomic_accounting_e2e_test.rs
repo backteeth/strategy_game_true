@@ -302,8 +302,12 @@ fn real_app_is_deterministic_across_two_runs() {
 fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     let fp = simulate(120, &[120], false);
     let row = fp.rows.iter().find(|r| r.starts_with("m120")).unwrap();
-    assert!(row.contains("c2 divs=16 shortD=4649 Iron=101 Coal=5925 IG=2838"), "Dwarf: {row}");
-    assert!(row.contains("tr=15340"), "Dwarf treasury: {row}");
+    // P29-004(E3: 生産能力に基づく AI 募兵制限)後: Dwarf は生産能力を超える募兵をしなくなり、
+    // 120 か月で Division 3(旧 16)。Iron は枯渇せず(2323)、D4 の優先配分が成立する局面自体が
+    // 現れない。Passguard は変わらない(下の検査。FIX1 が入力引落しの失敗の無い国を変えない
+    // という本テストの目的はこちらで維持される)。
+    assert!(row.contains("c2 divs=3 shortD=3184 Iron=2323 Coal=4176 IG=8952"), "Dwarf: {row}");
+    assert!(row.contains("tr=15090"), "Dwarf treasury: {row}");
     assert!(row.contains("c4 divs=1 shortD=119 Iron=37 Coal=2900 IG=18"), "Passguard: {row}");
     assert!(row.contains("tr=904"), "Passguard treasury: {row}");
 }

@@ -384,8 +384,9 @@ fn test_01_dwarf_builds_completes_and_passes_the_unchanged_offensive_gate_by_its
     // 上の機能上の契約はいずれの州が選ばれても成立する)。
     assert_eq!(
         observer.starts.iter().filter(|s| s.1 == DWARF).map(|s| (s.0.as_str(), s.2, s.3)).collect::<Vec<_>>(),
-        vec![("1800/06/05", StateId(6), 3), ("1801/03/03", StateId(6), 4)],
-        "P28-005適用後の自然再現(旧: 州20のlv1/lv2。理由は上記コメント参照)"
+        vec![("1800/06/05", StateId(6), 3)],
+        "P28-005適用後の自然再現(旧: 州20のlv1/lv2)。P29-004(E3)では、募兵が生産能力に制限され
+Division 数が増えないため、2 件目の着工(旧: 1801/03/03 の lv4)は発生しない"
     );
     assert!(
         observer.completions.iter().any(|c| c.0 == "1800/09/03" && c.1 == DWARF.0 && c.2 == 6 && c.3 == 3),
@@ -394,7 +395,9 @@ fn test_01_dwarf_builds_completes_and_passes_the_unchanged_offensive_gate_by_its
     assert_eq!(resumed_on.as_deref(), Some("1800/11/03"), "P28-005適用後の自然再現(旧: 1801/03/01)");
     assert_eq!(first_offensive.as_deref(), Some("1800/12/03"), "P28-005適用後の自然再現(旧: 1801/03/04)");
     assert_eq!(first_battle.as_deref(), Some("1800/12/07"), "P28-005適用後の自然再現(旧: 1801/03/08)");
-    assert_eq!(war0.end_date.as_deref(), Some("1801/01/30"), "P28-005適用後の自然再現(旧: 1801/03/29)");
+    // P29-004(E3): 募兵が生産能力に制限され Arcadia 側の戦力・経過が変わり、降伏は 1801/01/30 から
+    // 1801/03/04 へ遅れる(攻勢開始・戦闘の日付、着工・完成は不変)。
+    assert_eq!(war0.end_date.as_deref(), Some("1801/03/04"), "P29-004適用後の自然再現(旧: 1801/01/30)");
 }
 
 /// プレイヤーが交戦中でも、そのプレイヤー国家にはAIの戦時建設を適用しない。

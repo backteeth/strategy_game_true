@@ -805,19 +805,18 @@ fn test_90_day_and_36_month_six_country_real_data_verification() {
         // Level1)を戦争で失い、Factoryのない州13(MilitaryFactory Level1)だけが残る。
         // この欠損はAI建設判断の不発ではなくFactory州の喪失によるため、州10の所有者で
         // 確認する。
-        if c == CountryId(4) {
-            let state10_owner = app
-                .world()
-                .resource::<strategy_game::state::data::StateRegistry>()
-                .states
-                .iter()
-                .find(|s| s.id == StateId(10))
-                .map(|s| s.owner_country_id);
-            assert_ne!(
-                state10_owner,
-                Some(c),
-                "{c:?}: Factory州(10)を失ったことだけが構造的欠損の残る理由のはず"
-            );
+        // 【P29-004により条件を追加】: 募兵が生産能力に制限される(E3)と戦争の経過が変わり、
+        // Passguard が州10を保持する世界になる。その場合は、他の国と同じく欠損が解消して
+        // いることを確認する(下の一般の検査)。州10を失った世界では、従来どおり、欠損の
+        // 原因が州の喪失であることを確認する。
+        let state10_owner = app
+            .world()
+            .resource::<strategy_game::state::data::StateRegistry>()
+            .states
+            .iter()
+            .find(|s| s.id == StateId(10))
+            .map(|s| s.owner_country_id);
+        if c == CountryId(4) && state10_owner != Some(c) {
             assert!(
                 militaryfactory_needs_industrial_goods_but_lacks_factory(&app, c),
                 "{c:?}: Factory州の喪失後はMilitaryFactoryのみが残る"
