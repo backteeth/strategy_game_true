@@ -242,6 +242,7 @@ fn update_economy_panel(
     supply_ledger: Res<MilitarySupplyProductionLedger>,
     date: Res<GameDate>,
     mut supply_text_cache: Local<Option<String>>,
+    mut supply_cache_key: Local<Option<(crate::common::CountryId, u64)>>,
     mut text_q: Query<(&mut Text, &mut LocalizedText), With<EconomyPanelText>>,
 ) {
     let Ok((mut text, mut marker)) = text_q.single_mut() else {
@@ -280,7 +281,12 @@ fn update_economy_panel(
     // P29-002: 軍用補給物資の収支。日付・軍事登録・実績・言語・プレイヤー国家が変わった
     // ときだけ再計算する(毎フレームの全Division走査を避ける)。国家備蓄・需要・実績は同じ
     // フレームのスナップショットから読むため、異なる日の値は混在しない。
+    // 備蓄が(日付・軍事登録・実績の変化と別の経路で)変わった場合や、表示対象の国家が変わった
+    // 場合も再計算する(更新順によって備蓄だけが先に変わっても古い表示を残さない)。
+    let stock_now = country.stockpile.get(ResourceType::MilitarySupplies);
+    let cache_key = (country_id, stock_now.to_bits());
     let needs_supply_refresh = supply_text_cache.is_none()
+        || *supply_cache_key != Some(cache_key)
         || date.is_changed()
         || military_registry.is_changed()
         || supply_ledger.is_changed()
@@ -289,12 +295,13 @@ fn update_economy_panel(
     if needs_supply_refresh {
         let view = build_military_supply_balance_view(
             country_id,
-            country.stockpile.get(ResourceType::MilitarySupplies),
+            stock_now,
             &military_registry.divisions,
             &military_registry.definitions,
             &supply_ledger,
         );
         *supply_text_cache = Some(format_military_supply_balance(&view, &catalog, locale.0));
+        *supply_cache_key = Some(cache_key);
     }
     let supply_balance_str = supply_text_cache.clone().unwrap_or_default();
 
@@ -575,6 +582,24 @@ mod tests {
         app.update();
         let text = panel_text(&mut app);
         assert!(text.contains("前回の月次生産(実績・1800/04分): 0.0"), "{text}");
+    }
+
+    #[test]
+    fn stock_change_alone_refreshes_the_supply_block_without_date_or_division_changes() {
+        // 日付・軍事登録・実績・言語・国家が一切変わらなくても、備蓄が変わったら
+        // 備蓄日数が再計算される(更新順によって備蓄だけが先に変わる場合の取り残し防止)。
+        let mut app = supply_app(Locale::JaJp);
+        assert!(panel_text(&mut app).contains("備蓄: 90.0日分"));
+        app.update(); // 何も変わらない更新を挟み、変更フラグを消す
+        app.update();
+        app.world_mut()
+            .resource_mut::<CountryRegistry>()
+            .countries[0]
+            .stockpile
+            .set(ResourceType::MilitarySupplies, 20.0);
+        app.update();
+        let text = panel_text(&mut app);
+        assert!(text.contains("備蓄: 10.0日分"), "{text}");
     }
 
     #[test]
