@@ -142,6 +142,7 @@ fn decide_and_recruit_for_country(
     game_date: &GameDate,
     population_by_owner: &HashMap<CountryId, u64>,
     living_by_owner: &HashMap<CountryId, u64>,
+    supply_history: &crate::military::supply_production_history::SupplyProductionHistory,
     ai_state: &mut crate::country::country_ai::CountryAiState,
     country_id: CountryId,
 ) -> AiRecruitmentOutcome {
@@ -231,13 +232,17 @@ fn decide_and_recruit_for_country(
         military_registry,
         state_registry,
         building_registry,
+        supply_history,
+        (game_date.year, game_date.month),
         def,
     ) {
         Ok(verdict) if verdict.allowed => {}
         Ok(verdict) => {
             debug!(
-                "[AiRecruitment] country {country_id:?}: production capacity gate holds recruitment \n                 (capacity {} < required {} units/month, unreported MF entries {})",
+                "[AiRecruitment] country {country_id:?}: production capacity gate holds recruitment \n                 (capacity {} (average {:?}, current {}) < required {} units/month, unreported MF entries {})",
                 verdict.capacity_monthly_units,
+                verdict.period_average_units,
+                verdict.current_estimate_units,
                 verdict.required_monthly_units,
                 verdict.unreported_entries
             );
@@ -307,6 +312,11 @@ pub fn evaluate_ai_monthly_recruitment(
     candidates.sort_by_key(|id| id.0);
 
     for country_id in candidates {
+        let supply_history = country_ai_registry
+            .supply_production_history
+            .get(&country_id)
+            .cloned()
+            .unwrap_or_default();
         let ai_state = country_ai_registry.get_or_create_mut(country_id);
         decide_and_recruit_for_country(
             country_registry,
@@ -317,6 +327,7 @@ pub fn evaluate_ai_monthly_recruitment(
             game_date,
             &population_by_owner,
             &living_by_owner,
+            &supply_history,
             ai_state,
             country_id,
         );
@@ -639,6 +650,7 @@ mod tests {
             &h.game_date,
             &population_by_owner,
             &living_by_owner,
+            &Default::default(),
             ai_state,
             country_id,
         )

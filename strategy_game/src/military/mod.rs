@@ -19,6 +19,7 @@ pub mod recruitment_supply_gate;
 pub mod reinforcement;
 pub mod supply;
 pub mod supply_initialization;
+pub mod supply_production_history;
 pub mod update;
 
 #[cfg(test)]

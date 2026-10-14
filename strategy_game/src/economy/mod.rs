@@ -120,6 +120,7 @@ pub fn handle_monthly_economy(
     locale: Res<CurrentLocale>,
     catalog: Res<TranslationCatalog>,
     mut supply_ledger: Option<ResMut<MilitarySupplyProductionLedger>>,
+    mut ai_registry: Option<ResMut<crate::country::country_ai::CountryAiRegistry>>,
 ) {
     for event in month_events.read() {
         for country in country_registry.countries.iter_mut() {
@@ -135,6 +136,10 @@ pub fn handle_monthly_economy(
                 // 生産を行わない国家に古い実績を残さない(表示専用)。
                 if let Some(ledger) = supply_ledger.as_mut() {
                     ledger.remove(country_id);
+                }
+                // P29-005: 生産を行わない国の履歴は、次に生産を再開した月から計測し直す。
+                if let Some(reg) = ai_registry.as_mut() {
+                    reg.supply_production_history.remove(&country_id);
                 }
                 continue;
             }
@@ -174,6 +179,20 @@ pub fn handle_monthly_economy(
                     event.month,
                     outcome.military_supplies_produced,
                 );
+            }
+
+            // P29-005: AI 募兵の能力推定用の履歴(永続)。UI 表示用 ledger とは別に、実際の産出
+            // (units)を対象年月とともに記録する。集計失敗は None(0 と区別)。プレイヤー国は対象外。
+            if let Some(reg) = ai_registry.as_mut()
+                && player_country.0 != Some(country_id)
+            {
+                let units = outcome
+                    .military_supplies_produced
+                    .and_then(|v| crate::economy::resources::military_supplies_value_to_units(v).ok());
+                reg.supply_production_history
+                    .entry(country_id)
+                    .or_default()
+                    .record(event.year, event.month, units);
             }
 
             process_country_finance(country, &mut owned_states, &building_registry);
@@ -277,6 +296,14 @@ fn handle_notifications(
 
 /// P29-002: New Game(国家選択画面への進入)で、前のゲームの月次生産実績(表示専用)を
 /// 残さない。ロード成功時の消去は`save::runtime::handle_load_requests`が行う。
-fn clear_military_supply_production_ledger(mut ledger: ResMut<MilitarySupplyProductionLedger>) {
+fn clear_military_supply_production_ledger(
+    mut ledger: ResMut<MilitarySupplyProductionLedger>,
+    ai_registry: Option<ResMut<crate::country::country_ai::CountryAiRegistry>>,
+) {
     ledger.clear();
+    // P29-005: AI 募兵の能力推定用の履歴(永続)も、New Game では前セッションの値を残さない。
+    // ロード成功時は、Save に保存された履歴で置き換わる(旧 Save では空)。
+    if let Some(mut reg) = ai_registry {
+        reg.supply_production_history.clear();
+    }
 }

@@ -419,9 +419,10 @@ fn diag_continuing_wars_600_months() {
     }
 
     // ── 特性化の検査 ─────────────────────────────────────────────────────
-    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)と P29-004(E3: 生産能力に基づく AI 募兵制限)
-    // の導入後の世界での記録。診断(P29-003-DIAG-001)が示した構造(攻勢開始が 70 日分の
-    // ストック判定)は同じまま、募兵と終結手段が変わることで戦争の経過が変わる。
+    // P29-003(E1: 長期停滞した AI 戦争の白紙講和)、P29-004(E3: 生産能力に基づく AI 募兵制限)、
+    // P29-005(直近 4 か月の実産出の平均に基づく能力上限)の導入後の世界での記録。診断
+    // (P29-003-DIAG-001)が示した構造(攻勢開始が 70 日分のストック判定)は同じまま、募兵と終結
+    // 手段が変わることで戦争の経過が変わる。戦争は WarId ではなく、開始日・参加国で照合する。
     // **現状の記録であり、望ましい挙動の固定ではない**。
     let find = |start: &str, a: &[usize], d: &[usize]| -> (usize, &WarTrace) {
         traces
@@ -443,20 +444,28 @@ fn diag_continuing_wars_600_months() {
     };
 
     // ISS-1・ISS-2 の戦争(1806/03/02 Dwarf+Elfin 対 Arcadia、1824/04/02 Ferrowyn 対 Oceanic)は、
-    // 募兵が生産能力に制限された世界では発生しない。
+    // 募兵が生産能力に制限された世界では発生しない(変更前の世界の戦争で、終結したのではなく
+    // 発生しなくなった)。
     assert!(!traces.values().any(|t| t.start == "1806/03/02" && t.defenders == [0]));
     assert!(!traces.values().any(|t| t.start == "1824/04/02"));
 
-    // E1 は引き続き機能する: Oceanic(師団 0)対 Ferrowyn(1822/11/02)は 365 日後に白紙講和。
-    let (_, w_e1) = find("1822/11/02", &[3], &[5]);
-    assert_eq!(w_e1.end.as_deref(), Some("1823/11/02"));
+    // E1 は引き続き機能する: Oceanic(師団 0)対 Ferrowyn(1818/01/02)は 365 日後に白紙講和。
+    let (_, w_e1) = find("1818/01/02", &[3], &[5]);
+    assert_eq!(w_e1.end.as_deref(), Some("1819/01/02"));
     assert_eq!(w_e1.end_reason.as_deref(), Some("Stalemate White Peace"));
 
-    // 残る継続戦争 2 件。
-    assert_eq!(still_active.len(), 2);
-    // (a) Dwarf(3 Division、備蓄は 24,000 日分超)対 Ferrowyn(3 Division): 補給ゲートではなく
-    // 戦力比(EnemyStronger / ComparableStrength)で攻勢しない。両陣営に師団があり E1 の対象外。
-    let (_, w_mutual) = find("1801/06/09", &[2], &[5]);
+    // Elfin 対 Dwarf+Passguard(1817/03/02): 変更前の世界では 70 日分に届かず攻勢できないまま
+    // 継続していた戦争。この世界では、攻勢が始まり、12 日後(1817/03/14)に防御側が降伏する。
+    // (世界の分岐を含むため、因果は特定していない。攻勢開始日と降伏の記録のみを固定する。)
+    let (_, w_supply) = find("1817/03/02", &[1], &[2, 4]);
+    assert_eq!(w_supply.end.as_deref(), Some("1817/03/14"));
+    assert_eq!(w_supply.end_reason.as_deref(), Some("Defender Capitulation"));
+    assert!(w_supply.offensive_days > 0);
+
+    // 残る継続戦争 1 件: Dwarf 対 Ferrowyn(1801/07/02)。補給ゲートではなく戦力比
+    // (EnemyStronger / ComparableStrength)で攻勢しない(E1 の対象外、戦力拮抗の停滞は未解決)。
+    assert_eq!(still_active.len(), 1);
+    let (_, w_mutual) = find("1801/07/02", &[2], &[5]);
     assert_eq!(w_mutual.offensive_days, 0);
     assert_eq!(w_mutual.blocked_days, 0);
     assert!(w_mutual.max_days_cover > 1000.0);
@@ -465,27 +474,8 @@ fn diag_continuing_wars_600_months() {
             + w_mutual.reasons.get("ComparableStrength").copied().unwrap_or(0)
             > 17_000
     );
-    // (b) Elfin(9 Division)対 Dwarf+Passguard: Elfin の月産は将来需要を賄える(募兵は能力内)が、
-    // 備蓄が約 30 日分で、攻勢開始の 70 日分に届かない(E3 は 70 日分判定を変更しない)。
-    let (_, w_supply) = find("1817/03/02", &[1], &[2, 4]);
-    assert_eq!(w_supply.offensive_days, 0);
-    assert!(w_supply.blocked_days > 11_000);
-    assert!(w_supply.max_days_cover < 70.0);
-    {
-        let cr = app.world().resource::<CountryRegistry>();
-        let mil = app.world().resource::<MilitaryRegistry>();
-        let elfin = cr.get(CountryId(1)).unwrap();
-        let required = monthly_units_from_daily(projected_daily_demand_units(elfin, mil).unwrap()).unwrap();
-        let cap = sustained_monthly_supply(
-            CountryId(1),
-            app.world().resource::<strategy_game::state::data::StateRegistry>(),
-            app.world().resource::<BuildingRegistry>(),
-        )
-        .monthly_units;
-        assert!(required <= cap, "Elfin の将来需要は持続的な産出で賄える({required} <= {cap})");
-    }
 
-    // 募兵の抑止: Dwarf は生産能力(月産 207)を超える師団(旧 16)を持たない。
+    // 募兵の抑止: Dwarf は生産能力を超える師団(旧 16)を持たない。
     let dwarf = supply_row(&app, DWARF);
     assert_eq!(dwarf.divisions, 3);
     assert!(dwarf.produced.unwrap() >= dwarf.demand * 30.4);

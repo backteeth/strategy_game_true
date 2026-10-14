@@ -193,6 +193,17 @@ fn flows(app: &App, c: CountryId) -> ([f64; 4], [f64; 4]) {
     (out, used)
 }
 
+/// 国家が所有する州の集合(月次処理の同一フレームでの講和・占領による所有変更の検出用)。
+fn owned_state_ids(app: &App, c: CountryId) -> Vec<usize> {
+    app.world()
+        .resource::<StateRegistry>()
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == c)
+        .map(|s| s.id.0)
+        .collect()
+}
+
 fn simulate(months: u32, report_at: &[u32], print: bool) -> Fingerprint {
     let dir = TempTestDir::new("impl001");
     let mut app = setup_app(None, dir.save_file_config());
@@ -212,7 +223,9 @@ fn simulate(months: u32, report_at: &[u32], print: bool) -> Fingerprint {
         if app.world().resource::<GameDate>().add_days(1).day == 1 {
             pre = ALL_SIX.map(|c| stocks(&app, c));
         }
+        let owned_before = ALL_SIX.map(|c| owned_state_ids(&app, c));
         advance_one_day(&mut app);
+        let owned_after = ALL_SIX.map(|c| owned_state_ids(&app, c));
         {
             let mr = app.world().resource::<MilitaryRegistry>();
             for d in mr.divisions.values() {
@@ -230,10 +243,17 @@ fn simulate(months: u32, report_at: &[u32], print: bool) -> Fingerprint {
             month_i += 1;
             for c in ALL_SIX {
                 let post = stocks(&app, c);
+                // 月次生産(Economy)の後、同じフレームの講和・占領で州の所有が変わった国は、
+                // 再構成(現在の所有・稼働率)が生産時点とずれるため、保存則の照合から外す
+                // (P29-005: 世界の分岐で、月初の同一フレームに州が移る月が現れた)。
+                let territory_changed = owned_before[c.0] != owned_after[c.0];
                 let (out, used) = flows(&app, c);
                 for i in 0..4 {
                     let resid = post[i] - (pre[c.0][i] + out[i] - used[i]);
-                    fp.max_resid = fp.max_resid.max(resid.abs());
+                    if !territory_changed {
+                        fp.max_resid = fp.max_resid.max(resid.abs());
+                    }
+
                     fp.min_stock = fp.min_stock.min(post[i]);
                 }
                 // 入力を使う建物が稼働しているのに、Ironが据え置かれ(産出もなく)続ける=無償産出。
@@ -302,12 +322,14 @@ fn real_app_is_deterministic_across_two_runs() {
 fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     let fp = simulate(120, &[120], false);
     let row = fp.rows.iter().find(|r| r.starts_with("m120")).unwrap();
+    // P29-005(複数月の実産出に基づく能力上限)で、m120 の Dwarf を shortD 3184→3161・Iron 2323→2319・
+    // Coal 4176→4156・IG 8952→9093・国庫 15090→15243 へ更新した(世界の分岐。Passguard は不変)。
     // P29-004(E3: 生産能力に基づく AI 募兵制限)後: Dwarf は生産能力を超える募兵をしなくなり、
     // 120 か月で Division 3(旧 16)。Iron は枯渇せず(2323)、D4 の優先配分が成立する局面自体が
     // 現れない。Passguard は変わらない(下の検査。FIX1 が入力引落しの失敗の無い国を変えない
     // という本テストの目的はこちらで維持される)。
-    assert!(row.contains("c2 divs=3 shortD=3184 Iron=2323 Coal=4176 IG=8952"), "Dwarf: {row}");
-    assert!(row.contains("tr=15090"), "Dwarf treasury: {row}");
+    assert!(row.contains("c2 divs=3 shortD=3161 Iron=2319 Coal=4156 IG=9093"), "Dwarf: {row}");
+    assert!(row.contains("tr=15243"), "Dwarf treasury: {row}");
     assert!(row.contains("c4 divs=1 shortD=119 Iron=37 Coal=2900 IG=18"), "Passguard: {row}");
     assert!(row.contains("tr=904"), "Passguard treasury: {row}");
 }

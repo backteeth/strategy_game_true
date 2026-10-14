@@ -161,6 +161,11 @@ impl CountryAiState {
 pub struct CountryAiRegistry {
     pub ai_states: HashMap<CountryId, CountryAiState>,
     pub dirty: bool,
+    /// P29-005: AI 募兵の能力推定に使う、軍用補給物資の実際の月次産出の履歴(国別)。
+    /// Save V1 へは追加フィールドとして保存される(旧 Save では空)。
+    #[serde(default)]
+    pub supply_production_history:
+        HashMap<CountryId, crate::military::supply_production_history::SupplyProductionHistory>,
 }
 
 impl CountryAiRegistry {

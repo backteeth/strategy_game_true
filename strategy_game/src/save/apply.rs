@@ -389,6 +389,12 @@ pub(crate) fn prepare_load(
                 )
             })
             .collect(),
+        supply_production_history: save
+            .country_ai
+            .supply_production_history
+            .into_iter()
+            .map(|(id, h)| (id, h.sanitized()))
+            .collect(),
         dirty: true,
     };
 
@@ -1069,6 +1075,7 @@ mod tests {
             crises: SavedCrisisRegistry::default(),
             country_ai: SavedCountryAiRegistry {
                 ai_states: country_ai_states,
+                supply_production_history: Default::default(),
             },
             military_ai: SavedMilitaryAiRegistry {
                 ai_states: military_ai_states,

@@ -115,6 +115,10 @@ pub fn build_save_game_v1(sources: &SaveGameSources) -> SaveGameV1 {
                 .iter()
                 .map(|(id, state)| (*id, export_country_ai_state(state)))
                 .collect(),
+            supply_production_history: sources
+                .country_ai_registry
+                .supply_production_history
+                .clone(),
         },
         military_ai: SavedMilitaryAiRegistry {
             ai_states: sources

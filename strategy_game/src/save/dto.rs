@@ -230,6 +230,11 @@ fn default_dirty_true() -> bool {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedCountryAiRegistry {
     pub ai_states: HashMap<CountryId, SavedCountryAiState>,
+    /// P29-005: AI 募兵の能力推定に使う月次産出の履歴。追加フィールド(旧 Save には存在せず、
+    /// `#[serde(default)]`により空として復元する。過去の月を推測して埋めない)。
+    #[serde(default)]
+    pub supply_production_history:
+        HashMap<CountryId, crate::military::supply_production_history::SupplyProductionHistory>,
 }
 
 /// `war::military_ai::MilitaryAiRegistry`のコンテナDTO。理由は`SavedCountryAiRegistry`と
@@ -458,6 +463,7 @@ mod tests {
             crises: SavedCrisisRegistry { crises, next_id: 1 },
             country_ai: SavedCountryAiRegistry {
                 ai_states: country_ai_states,
+                supply_production_history: Default::default(),
             },
             military_ai: SavedMilitaryAiRegistry {
                 ai_states: military_ai_states,
@@ -967,6 +973,7 @@ mod tests {
         // 構築できる(dirtyフィールドが存在すれば、このリテラルはコンパイルが通らない)。
         let empty_country_ai = SavedCountryAiRegistry {
             ai_states: HashMap::new(),
+            supply_production_history: Default::default(),
         };
         let empty_military_ai = SavedMilitaryAiRegistry {
             ai_states: HashMap::new(),
@@ -993,5 +1000,24 @@ mod tests {
             restored.military_ai.ai_states.get(&CountryId(2)).unwrap().dirty,
             save.military_ai.ai_states.get(&CountryId(2)).unwrap().dirty,
         );
+    }
+
+    /// P29-005: AI 募兵の能力推定用の履歴は追加フィールド。旧 Save(フィールドなし)は空の履歴として
+    /// 復元し、過去の月を推測して埋めない。新しい Save は履歴を往復で保持する。
+    #[test]
+    fn supply_production_history_is_additive_and_round_trips() {
+        let old: SavedCountryAiRegistry =
+            ron::from_str("(ai_states: {})").expect("old-format RON (no history field) must parse");
+        assert!(old.supply_production_history.is_empty());
+
+        let mut reg = SavedCountryAiRegistry::default();
+        let mut h = crate::military::supply_production_history::SupplyProductionHistory::default();
+        h.record(1800, 12, Some(100));
+        h.record(1801, 1, None);
+        h.record(1801, 2, Some(0));
+        reg.supply_production_history.insert(CountryId(2), h.clone());
+        let text = ron::to_string(&reg).unwrap();
+        let back: SavedCountryAiRegistry = ron::from_str(&text).unwrap();
+        assert_eq!(back.supply_production_history.get(&CountryId(2)), Some(&h));
     }
 }

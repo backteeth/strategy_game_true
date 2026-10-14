@@ -16,10 +16,11 @@
 //! (`economy::production`の産出式 `calculate_actual_output` と量子化をそのまま使う)。
 //! 理論上の最大出力ではなく、直近の実績を再構成した値である。
 //!
-//! - **採用期間**: 直近 1 か月。理由: 稼働率の履歴を新たに保持すると Save/Load・リセット経路が
-//!   増える。直近の稼働率なら既存の永続データだけで New Game・Load 後も同じ値が再現できる。
-//!   募兵判断は月次なので、一時的な入力不足・物流低下の月は見送られ、翌月に回復すれば
-//!   許可される(増産・減産に 1 か月遅れで追従する)。
+//! - **P29-005 による変更(採用期間)**: 通常経路の能力上限は、上の「現在設備による推定」(月次の
+//!   稼働率の 1 点推定)と、**直近 N か月(`SUPPLY_HISTORY_WINDOW`)の実際の月次産出の平均**
+//!   (`supply_production_history`)の**小さい方**。平均は周期的な高稼働月の過大評価を防ぎ、
+//!   現在設備の推定は急な減産への追従を担保する。履歴が N か月分揃うまで(旧 Save・New Game 直後)
+//!   通常経路の新規募兵は保留する(最小常備戦力の免除は履歴に依存しない)。
 //! - **未集計と生産 0 の区別**: 稼働率が記録されていない MilitaryFactory(Level > 0 で、まだ
 //!   月次生産を経ていない新設分)は「未集計」(`unreported_entries`)として数え、能力には
 //!   **0 として加算する**(無限大とはみなさない)。稼働率が記録済みで 0 の場合は「生産 0」。
@@ -52,6 +53,7 @@ use crate::military::recruitment_supply_gate::proposed_division_daily_demand_uni
 use crate::military::supply_initialization::{
     SupplyDemandError, division_daily_demand_units, is_living,
 };
+use crate::military::supply_production_history::SupplyProductionHistory;
 use crate::state::data::StateRegistry;
 
 /// 生産能力の判定を免除する最小の常備戦力(生存師団 + 訓練中の師団の数がこの数未満のとき、
@@ -161,11 +163,16 @@ pub fn projected_daily_demand_units(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProductionCapacityVerdict {
     pub allowed: bool,
-    /// 持続的な月次産出(units/月)。
+    /// 通常経路の最終的な能力上限(units/月)= 「直近 N か月の平均実産出」と「現在設備による
+    /// 推定」の小さい方。履歴が揃わない間は 0(通常経路の新規募兵を保留)。
     pub capacity_monthly_units: u128,
     /// 新規 1 個を加えた将来需要の月次換算(units/月)。
     pub required_monthly_units: u128,
     pub unreported_entries: u32,
+    /// 現在設備による能力推定(P29-004 の再構成値、units/月)。
+    pub current_estimate_units: u128,
+    /// 直近 [`crate::military::supply_production_history::SUPPLY_HISTORY_WINDOW`] か月の実産出の平均(units/月)。履歴が揃わなければ`None`。
+    pub period_average_units: Option<u128>,
     /// 生存師団 + 訓練中の数が [`MIN_STANDING_DIVISIONS`] 未満で、判定を免除した。
     pub within_minimum_standing_force: bool,
 }
@@ -178,6 +185,8 @@ pub fn evaluate_production_capacity_gate(
     military: &MilitaryRegistry,
     states: &StateRegistry,
     buildings: &BuildingRegistry,
+    history: &SupplyProductionHistory,
+    now: (i32, u8),
     def: &DivisionDefinition,
 ) -> Result<ProductionCapacityVerdict, SupplyDemandError> {
     let projected = projected_daily_demand_units(country, military)?;
@@ -194,11 +203,18 @@ pub fn evaluate_production_capacity_gate(
         .count() as u128
         + country.recruitment_queue.len() as u128;
     let within_minimum = standing < MIN_STANDING_DIVISIONS;
+    // 通常経路の能力上限: 「直近 N か月の平均実産出」と「現在設備による推定」の小さい方
+    // (平均は急な減産に遅れて追従するため、現在設備の推定を上限として併用する)。
+    // 履歴が揃わない間は上限を 0 として扱い、通常経路の新規募兵を保留する。
+    let period_average = history.average_units(now);
+    let capacity = period_average.map_or(0, |avg| avg.min(supply.monthly_units));
     Ok(ProductionCapacityVerdict {
-        allowed: within_minimum || required <= supply.monthly_units,
-        capacity_monthly_units: supply.monthly_units,
+        allowed: within_minimum || (period_average.is_some() && required <= capacity),
+        capacity_monthly_units: capacity,
         required_monthly_units: required,
         unreported_entries: supply.unreported_entries,
+        current_estimate_units: supply.monthly_units,
+        period_average_units: period_average,
         within_minimum_standing_force: within_minimum,
     })
 }
@@ -335,12 +351,34 @@ mod tests {
         c
     }
 
+    const NOW: (i32, u8) = (1800, 4);
+
+    /// 直近 4 か月の実績が各 `units`(units/月)の履歴(最後の月が NOW)。
+    fn history_of(units: [Option<u64>; 4]) -> SupplyProductionHistory {
+        let mut h = SupplyProductionHistory::default();
+        for (i, u) in units.into_iter().enumerate() {
+            h.record(1800, i as u8 + 1, u);
+        }
+        h
+    }
+
+    /// 履歴が十分に大きい(平均が上限にならない)場合の判定 = 現在設備の推定だけで決まる。
     fn gate(
         c: &CountryData,
         m: &MilitaryRegistry,
         s: &StateRegistry,
     ) -> ProductionCapacityVerdict {
-        evaluate_production_capacity_gate(c, m, s, &buildings(), &def(1.0)).unwrap()
+        gate_with(c, m, s, &history_of([Some(10_000_000_000); 4]), NOW)
+    }
+
+    fn gate_with(
+        c: &CountryData,
+        m: &MilitaryRegistry,
+        s: &StateRegistry,
+        h: &SupplyProductionHistory,
+        now: (i32, u8),
+    ) -> ProductionCapacityVerdict {
+        evaluate_production_capacity_gate(c, m, s, &buildings(), h, now, &def(1.0)).unwrap()
     }
 
     #[test]
@@ -470,5 +508,107 @@ mod tests {
         dead.status = DivisionStatus::Destroyed;
         let m = military(vec![dead], vec![def(1.0)]);
         assert_eq!(projected_daily_demand_units(&country(0), &m).unwrap(), 0);
+    }
+    // ── P29-005: 複数月の実産出に基づく能力上限 ─────────────────────────
+
+    fn m_two_standing() -> MilitaryRegistry {
+        military(
+            vec![division(0, C, 10_000, 0), division(1, C, 10_000, 0)],
+            vec![def(1.0)],
+        )
+    }
+
+    /// 現在設備の推定は required(3.0/日 → 92 /月)ちょうど。
+    fn states_at_required() -> StateRegistry {
+        StateRegistry::build(vec![mf_state(0, C, 1, Some(0.92))])
+    }
+
+    #[test]
+    fn a_high_current_month_is_held_when_the_period_average_is_too_low() {
+        let m = m_two_standing();
+        let s = states_at_required();
+        assert!(gate(&country(0), &m, &s).allowed, "単月(現在設備)の判定なら許可される");
+        // 直近 4 か月: 高稼働 2 か月 + 生産 0 の 2 か月 → 平均 46e6 < 92e6。
+        let h = history_of([Some(92_000_000), Some(92_000_000), Some(0), Some(0)]);
+        let v = gate_with(&country(0), &m, &s, &h, NOW);
+        assert_eq!(v.period_average_units, Some(46_000_000));
+        assert!(v.current_estimate_units.abs_diff(92_000_000) <= 10, "f32 の丸め誤差のみ");
+        assert_eq!(v.capacity_monthly_units, 46_000_000, "小さい方が上限");
+        assert!(!v.allowed);
+    }
+
+    #[test]
+    fn a_stable_history_with_headroom_allows_recruitment() {
+        let m = m_two_standing();
+        let s = states_at_required();
+        let h = history_of([Some(92_000_000); 4]);
+        let v = gate_with(&country(0), &m, &s, &h, NOW);
+        assert!(v.allowed);
+        assert_eq!(v.capacity_monthly_units, 92_000_000);
+    }
+
+    #[test]
+    fn the_current_estimate_caps_a_good_history_after_a_permanent_cut() {
+        let m = m_two_standing();
+        // 設備は縮小済み(推定 46)。過去 4 か月の平均は 200 でも、現在設備の推定が上限。
+        let s = StateRegistry::build(vec![mf_state(0, C, 1, Some(0.46))]);
+        let h = history_of([Some(200_000_000); 4]);
+        let v = gate_with(&country(0), &m, &s, &h, NOW);
+        assert_eq!(v.period_average_units, Some(200_000_000));
+        assert_eq!(v.capacity_monthly_units, v.current_estimate_units);
+        assert!(v.current_estimate_units.abs_diff(46_000_000) <= 10);
+        assert!(!v.allowed);
+    }
+
+    #[test]
+    fn zero_production_months_are_part_of_the_average() {
+        let m = m_two_standing();
+        let s = StateRegistry::build(vec![mf_state(0, C, 5, Some(1.0))]); // 推定 500
+        let h = history_of([Some(0), Some(0), Some(0), Some(0)]);
+        let v = gate_with(&country(0), &m, &s, &h, NOW);
+        assert_eq!(v.period_average_units, Some(0));
+        assert!(!v.allowed);
+    }
+
+    #[test]
+    fn an_incomplete_stale_or_unavailable_history_holds_the_normal_path_only() {
+        let m = m_two_standing();
+        let s = StateRegistry::build(vec![mf_state(0, C, 5, Some(1.0))]);
+        let big = Some(10_000_000_000);
+        // 3 か月分しかない
+        let mut short = SupplyProductionHistory::default();
+        for mth in 2..=4 {
+            short.record(1800, mth, big);
+        }
+        let v = gate_with(&country(0), &m, &s, &short, NOW);
+        assert_eq!(v.period_average_units, None);
+        assert_eq!(v.capacity_monthly_units, 0);
+        assert!(!v.allowed);
+        // 古い履歴(最後の月が今月でない)
+        let v = gate_with(&country(0), &m, &s, &history_of([big; 4]), (1800, 7));
+        assert!(!v.allowed);
+        // 集計失敗の月を含む(0 とは区別され、平均は出ない)
+        let v = gate_with(&country(0), &m, &s, &history_of([big, None, big, big]), NOW);
+        assert_eq!(v.period_average_units, None);
+        assert!(!v.allowed);
+        // 最小常備戦力の免除は履歴に関係なく、既存条件のまま使える。
+        let m0 = military(vec![], vec![def(1.0)]);
+        let v = gate_with(&country(0), &m0, &s, &SupplyProductionHistory::default(), NOW);
+        assert!(v.within_minimum_standing_force);
+        assert!(v.allowed);
+        // 3 個目以降は(履歴なしでは)免除されない。
+        let v = gate_with(&country(0), &m, &s, &SupplyProductionHistory::default(), NOW);
+        assert!(!v.within_minimum_standing_force);
+        assert!(!v.allowed);
+    }
+
+    #[test]
+    fn sequential_orders_in_one_update_cannot_exceed_the_period_cap() {
+        let s = StateRegistry::build(vec![mf_state(0, C, 10, Some(1.0))]); // 推定 1000
+        let m = m_two_standing();
+        // 平均 100e6 → 3.0/日(92)は許可、4.0/日(122)は不許可。キュー 1 件で判定が変わる。
+        let h = history_of([Some(100_000_000); 4]);
+        assert!(gate_with(&country(0), &m, &s, &h, NOW).allowed);
+        assert!(!gate_with(&country(1), &m, &s, &h, NOW).allowed);
     }
 }

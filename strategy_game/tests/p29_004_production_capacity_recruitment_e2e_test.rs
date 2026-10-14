@@ -170,7 +170,17 @@ fn harness(divisions: usize, op: Option<f32>) -> Harness {
         states: StateRegistry::build(vec![state]),
         war: WarRegistry::default(),
         buildings,
-        ai: CountryAiRegistry::default(),
+        ai: {
+            // 既存の検査が「現在設備の推定」だけで決まるよう、判断月を最後とする十分大きな
+            // 4 か月分の実績(平均が上限にならない)を与える。
+            let mut ai = CountryAiRegistry::default();
+            let mut history = SupplyProductionHistory::default();
+            for month in 3..=6u8 {
+                history.record(1800, month, Some(10_000_000_000));
+            }
+            ai.supply_production_history.insert(C, history);
+            ai
+        },
         date: GameDate::new(1800, 6, 15),
     }
 }
@@ -450,7 +460,16 @@ fn every_ai_order_in_a_real_run_stays_within_the_sustained_capacity_or_the_minim
                 let buildings = app.world().resource::<BuildingRegistry>();
                 let demand = projected_daily_demand_units(country, mil).unwrap();
                 let required = monthly_units_from_daily(demand).unwrap();
-                let capacity = sustained_monthly_supply(c, states, buildings).monthly_units;
+                // P29-005: 通常経路の能力上限は、現在設備の推定と直近 4 か月の実産出の平均の小さい方。
+                let current = sustained_monthly_supply(c, states, buildings).monthly_units;
+                let date_now = app.world().resource::<GameDate>().clone();
+                let average = app
+                    .world()
+                    .resource::<CountryAiRegistry>()
+                    .supply_production_history
+                    .get(&c)
+                    .and_then(|h| h.average_units((date_now.year, date_now.month)));
+                let capacity = average.map_or(0, |a| a.min(current));
                 let standing = mil
                     .divisions
                     .values()
@@ -531,4 +550,128 @@ fn capacity_estimate_is_reconstructed_identically_after_save_and_load() {
         saved,
         "Save に永続化された稼働率だけから、同じ能力が再構成される(追加の保存状態は不要)"
     );
+}
+
+// ── P29-005: 直近 N か月の実産出の平均に基づく能力上限 ──────────────────────
+
+use strategy_game::military::supply_production_history::{
+    SUPPLY_HISTORY_WINDOW, SupplyProductionHistory,
+};
+
+/// 判断月(1800/06)を最後とする直近 N か月の実績(units/月)を、国家 C の履歴として設定する。
+fn set_history(h: &mut Harness, units: [Option<u64>; SUPPLY_HISTORY_WINDOW]) {
+    let mut history = SupplyProductionHistory::default();
+    for (i, u) in units.into_iter().enumerate() {
+        history.record(1800, (6 - (SUPPLY_HISTORY_WINDOW - 1 - i)) as u8, u);
+    }
+    h.ai.supply_production_history.insert(C, history);
+}
+
+#[test]
+fn a_high_current_month_is_suppressed_by_the_period_average_in_the_real_ai_path() {
+    // 生存 3 個 + 新規 1 = 4.0/日 → 121.67/月。現在設備は 90/月(Lv1 × 100 × 0.9)では足りないので、
+    // Lv3 × 0.9 = 270 で単月なら足りる。
+    let mut single = harness(3, Some(0.9));
+    single
+        .states
+        .get_mut(StateId(1))
+        .unwrap()
+        .buildings
+        .insert(BuildingType::MilitaryFactory, 3);
+    evaluate(&mut single, None);
+    assert_eq!(queue_len(&single), 1, "前提: 単月(現在設備)の判定なら許可される");
+
+    // 同じ現在設備でも、直近の産出が周期的に低い(平均 60/月 < 121.67)なら見送る。
+    let mut averaged = harness(3, Some(0.9));
+    averaged
+        .states
+        .get_mut(StateId(1))
+        .unwrap()
+        .buildings
+        .insert(BuildingType::MilitaryFactory, 3);
+    set_history(
+        &mut averaged,
+        [Some(150_000_000), Some(90_000_000), Some(0), Some(0)],
+    );
+    evaluate(&mut averaged, None);
+    assert_eq!(queue_len(&averaged), 0, "期間平均が将来需要を賄えない注文は見送る");
+}
+
+#[test]
+fn a_stable_history_with_headroom_recruits_and_sequential_orders_stop_at_the_cap() {
+    let mut h = harness(2, Some(1.0));
+    h.states
+        .get_mut(StateId(1))
+        .unwrap()
+        .buildings
+        .insert(BuildingType::MilitaryFactory, 2); // 現在設備 200/月
+    // 平均 150/月: 生存 2 + 新規 = 3.0/日(91.25/月)は許可、続く 4.0/日(121.67/月)も許可、
+    // 5.0/日(152.08/月)は平均 150 を超えるため見送る。
+    set_history(&mut h, [Some(150_000_000); SUPPLY_HISTORY_WINDOW]);
+    evaluate(&mut h, None);
+    assert_eq!(queue_len(&h), 1);
+}
+
+#[test]
+fn without_a_full_history_only_the_minimum_force_recruits() {
+    // 履歴なし(旧 Save・New Game 直後): 3 個目は保留、2 個目までは(既存条件を満たせば)許可。
+    let mut h = harness(2, Some(1.0));
+    h.ai.supply_production_history.clear();
+    evaluate(&mut h, None);
+    assert_eq!(queue_len(&h), 0, "通常経路は履歴が揃うまで保留");
+    let mut h = harness(1, Some(1.0));
+    h.ai.supply_production_history.clear();
+    evaluate(&mut h, None);
+    assert_eq!(queue_len(&h), 1, "最小常備戦力の免除は履歴に依存しない");
+    // 集計失敗の月を含む履歴も、0 とは区別して保留する。
+    let mut h = harness(2, Some(1.0));
+    set_history(&mut h, [Some(10_000_000_000), None, Some(10_000_000_000), Some(10_000_000_000)]);
+    evaluate(&mut h, None);
+    assert_eq!(queue_len(&h), 0);
+}
+
+#[test]
+fn production_history_is_recorded_per_month_without_duplicates_and_is_saved_and_loaded() {
+    let dir = TempDir(std::env::temp_dir().join(format!(
+        "strategy_game_p29_005_history_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    let mut app = setup_app(&dir.0);
+    // 6 か月進める(1800/01/01 → 1800/07/xx)。窓幅を超える古い月は残らない。
+    for _ in 0..(31 + 28 + 31 + 30 + 31 + 30 + 5) {
+        advance_one_day(&mut app);
+    }
+    let snapshot = |app: &App| {
+        app.world()
+            .resource::<CountryAiRegistry>()
+            .supply_production_history
+            .clone()
+    };
+    let before = snapshot(&app);
+    assert!(!before.is_empty());
+    for (id, h) in &before {
+        if *id == CountryId(4) {
+            continue; // プレイヤー
+        }
+        let months: Vec<(i32, u8)> = h.samples().iter().map(|s| (s.year, s.month)).collect();
+        assert_eq!(months.len(), SUPPLY_HISTORY_WINDOW, "{id:?}: 窓幅を超える古い実績を保持しない");
+        assert!(months.windows(2).all(|w| (w[1].0 * 12 + w[1].1 as i32) == (w[0].0 * 12 + w[0].1 as i32) + 1));
+        assert_eq!(*months.last().unwrap(), (1800, 7), "{id:?}: 最後は直近の月次生産の年月");
+        assert!(h.samples().iter().all(|s| s.units.is_some()));
+    }
+    assert!(
+        !before.contains_key(&CountryId(4)),
+        "プレイヤー国は AI 判断用の履歴を持たない"
+    );
+    send_save(&mut app);
+    for _ in 0..60 {
+        advance_one_day(&mut app);
+    }
+    assert_ne!(snapshot(&app), before);
+    send_load(&mut app);
+    assert_eq!(snapshot(&app), before, "Save に保存された履歴が、そのまま復元される");
 }

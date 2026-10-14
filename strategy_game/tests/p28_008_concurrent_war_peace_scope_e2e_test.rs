@@ -377,51 +377,54 @@ fn standard_scenario_e2_peace_of_war3_does_not_erase_war2s_conquest() {
     // 正常化がs9のc2占領を消してしまい、war2の終結が04/06→04/12へ遅れた。
     // 【P29-004(E3: 生産能力に基づく AI 募兵制限)で日付を更新】: 募兵が生産能力に制限され、
     // 戦争の開戦・終結日が変わった。同じ組み合わせ(att c5/def c3 = WarId(1)、att c2/def c3 =
-    // WarId(2))は、E2 の白紙講和が 1801/03/22 → 1801/04/25、war2 の降伏が 1801/04/06 →
-    // 1801/05/09 になる。検証対象の因果(E2 の講和が Active な war2 の s9 占領を消さない)は、
+    // WarId(2))は、E2 の白紙講和が 1801/03/22 → 1801/05/18、war2 の降伏が 1801/04/06 →
+    // 1801/06/01 になる。検証対象の因果(E2 の講和が Active な war2 の s9 占領を消さない)は、
     // 同じ実データ上で引き続き再現する。
+    // 【P29-005(複数月の実産出に基づく能力上限)で日付と WarId を更新】: 同じ組み合わせ(att c5/def c3 =
+    // WarId(1)、att c2/def c3 = WarId(3))は、E2 の白紙講和が 1801/05/18、降伏が 1801/06/01 になる
+    // (c2 対 c3 の戦争は、Elfin 対 Arcadia の戦争が先に開戦したため WarId(3) になる)。因果は同じ。
     let mut s9_before = None;
     let mut s9_on_e2_day = None;
     let mut war2_end_seen = None;
-    let (app, _dir) = run_standard_scenario("1801/05/12", |app, d| {
+    let (app, _dir) = run_standard_scenario("1801/06/04", |app, d| {
         match d {
-            "1801/04/24" => s9_before = Some(controller_of(app, 9)),
-            "1801/04/25" => s9_on_e2_day = Some(controller_of(app, 9)),
+            "1801/05/17" => s9_before = Some(controller_of(app, 9)),
+            "1801/05/18" => s9_on_e2_day = Some(controller_of(app, 9)),
             _ => {}
         }
-        if war2_end_seen.is_none() && war_line(app, 2).starts_with("AttackerVictory") {
+        if war2_end_seen.is_none() && war_line(app, 3).starts_with("AttackerVictory") {
             war2_end_seen = Some(d.to_string());
         }
     });
 
     assert_eq!(
         war_line(&app, 1),
-        "WhitePeace|1801/04/25|Frontline Unreachable",
-        "同じ対Oceanic戦(att c5/def c3 = WarId(1))はP28-007のE2で04/25に終結する"
+        "WhitePeace|1801/05/18|Frontline Unreachable",
+        "同じ対Oceanic戦(att c5/def c3 = WarId(1))はP28-007のE2で05/18に終結する"
     );
-    assert_eq!(s9_before, Some(2), "前提: c2(Dwarf)が04/24時点でs9を占領中");
+    assert_eq!(s9_before, Some(2), "前提: c2(Dwarf)が05/17時点でs9を占領中");
     assert_eq!(
         s9_on_e2_day,
         Some(2),
         "E2の講和でwar2のs9占領が消えてはならない"
     );
     assert_eq!(
-        war_line(&app, 2),
-        "AttackerVictory|1801/05/09|Defender Capitulation",
-        "war2はE2講和の影響を受けず05/09に降伏勝利する"
+        war_line(&app, 3),
+        "AttackerVictory|1801/06/01|Defender Capitulation",
+        "war2はE2講和の影響を受けず06/01に降伏勝利する"
     );
-    assert_eq!(war2_end_seen.as_deref(), Some("1801/05/09"));
+    assert_eq!(war2_end_seen.as_deref(), Some("1801/06/01"));
 }
 
 #[test]
 fn save_load_around_the_peace_matches_continuous_run() {
-    let (continuous, _d0) = run_standard_scenario("1801/05/12", |_, _| {});
+    let (continuous, _d0) = run_standard_scenario("1801/06/04", |_, _| {});
     let expected = world_snapshot(&continuous);
 
     // 講和(03/22)の直前でsave→load→(2回連続)load。
     let mut done_before = false;
-    let (before, _d1) = run_standard_scenario("1801/05/12", |app, d| {
-        if d == "1801/04/24" && !done_before {
+    let (before, _d1) = run_standard_scenario("1801/06/04", |app, d| {
+        if d == "1801/05/17" && !done_before {
             done_before = true;
             send_save_request(app);
             send_load_request(app);
@@ -433,8 +436,8 @@ fn save_load_around_the_peace_matches_continuous_run() {
 
     // 講和(03/22)の直後でsave→load。
     let mut done_after = false;
-    let (after, _d2) = run_standard_scenario("1801/05/12", |app, d| {
-        if d == "1801/04/25" && !done_after {
+    let (after, _d2) = run_standard_scenario("1801/06/04", |app, d| {
+        if d == "1801/05/18" && !done_after {
             done_after = true;
             send_save_request(app);
             send_load_request(app);

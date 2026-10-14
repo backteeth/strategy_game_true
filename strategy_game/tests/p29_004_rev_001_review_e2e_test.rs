@@ -172,6 +172,7 @@ fn review_reconstruction_orders_and_elfin_trace_over_600_months() {
     let mut prev_queue: BTreeMap<usize, usize> = BTreeMap::new();
     let mut prev_living: BTreeMap<usize, usize> = BTreeMap::new();
     let mut recon_checked = 0u32;
+    let mut recon_skipped_territory = 0u32;
     let mut recon_mismatch: Vec<String> = Vec::new();
     // 能力超過の月(将来需要 > 能力)。免除経路(生存+訓練中 ≤ 2)と、それを超える師団数に分ける。
     let mut over_exempt = [0u32; 6];
@@ -191,8 +192,24 @@ fn review_reconstruction_orders_and_elfin_trace_over_600_months() {
             .unwrap()
             .stockpile
             .get(ResourceType::MilitarySupplies);
+        let owned_sig = |app: &App| -> Vec<(usize, usize, u32)> {
+            app.world()
+                .resource::<StateRegistry>()
+                .states
+                .iter()
+                .map(|s| {
+                    (
+                        s.id.0,
+                        s.owner_country_id.0,
+                        s.building_level(strategy_game::building::data::BuildingType::MilitaryFactory),
+                    )
+                })
+                .collect()
+        };
+        let sig_before = owned_sig(&app);
         advance_one_day(&mut app);
         let date = app.world().resource::<GameDate>().clone();
+        let territory_changed_after_production = sig_before != owned_sig(&app);
         let is_month_start = date.day == 1;
 
         let cr = app.world().resource::<CountryRegistry>();
@@ -231,6 +248,24 @@ fn review_reconstruction_orders_and_elfin_trace_over_600_months() {
                     "normal"
                 };
                 orders.rows.push((date.display(), c, path, required, cap, before));
+                let avg = app
+                    .world()
+                    .resource::<strategy_game::country::country_ai::CountryAiRegistry>()
+                    .supply_production_history
+                    .get(&id)
+                    .and_then(|h| h.average_units((date.year, date.month)));
+                println!(
+                    "ORDER_HIST {} c{c} {path} single_month_cap={} period_avg={:?} final_cap={:?} required={}",
+                    date.display(),
+                    cap,
+                    avg,
+                    avg.map(|a| a.min(cap)),
+                    required
+                );
+                if path == "normal" {
+                    let a = avg.expect("通常経路の注文には N か月分の履歴がある");
+                    assert!(required <= a.min(cap), "{id:?}: 注文は平均・現在設備の小さい方の内");
+                }
             }
             prev_queue.insert(c, queue);
             prev_living.insert(c, living);
@@ -243,6 +278,11 @@ fn review_reconstruction_orders_and_elfin_trace_over_600_months() {
                 if let Some(e) = ledger.get(id)
                     && let MonthlyProductionRecord::Produced(v) = e.record
                 {
+                    if territory_changed_after_production {
+                        // 同一フレームの生産後に講和・占領で州の所有が変わった日は、再構成が現在の設備を
+                        // 見るため(契約どおり)生産時点とは異なる。照合の対象外として別に数える。
+                        recon_skipped_territory += 1;
+                    } else {
                     recon_checked += 1;
                     if units(v) != cap {
                         recon_mismatch.push(format!(
@@ -251,6 +291,7 @@ fn review_reconstruction_orders_and_elfin_trace_over_600_months() {
                             units(v),
                             cap
                         ));
+                    }
                     }
                 }
                 let standing = (living + queue) as u128;
@@ -346,6 +387,7 @@ fn review_reconstruction_orders_and_elfin_trace_over_600_months() {
     }
     println!("OVER_EXEMPT {over_exempt:?}");
     println!("OVER_ABOVE_MIN {over_above_min:?}");
+    println!("RECON_SKIPPED_TERRITORY_CHANGE {recon_skipped_territory}");
     println!("RECON checked={recon_checked} mismatches={}", recon_mismatch.len());
     for m in recon_mismatch.iter().take(10) {
         println!("RECON_MISMATCH {m}");
