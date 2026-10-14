@@ -1137,22 +1137,30 @@ fn test_36_month_six_country_recruitment_gate_real_app_verification() {
         for s in history {
             assert!(s.military_supplies >= 0.0, "{c:?}: MilitarySuppliesが負値になってはいけない");
         }
-        // 開戦していない国では、Division数は減少しない(自動解隊・消失の検出)。P29-004 で
-        // 募兵の許可条件が変わり、36 か月の間に戦争が発生する世界の経過も変わるため、
-        // 当該国が(いずれかの時点で)戦争に参加した場合は、戦闘による損耗を許容する。
-        let participated = app
+        // 戦争に参加していない期間には、Division数は減少しない(自動解隊・消失の検出)。P29-004 で
+        // 世界の経過が変わり、36 か月の間に戦争が発生する国もあるため、減少を許容するのは
+        // 「当該国が参加した戦争の期間(開始日〜終結日、継続中は無期限)が、前月末〜当月末の区間と
+        // 重なる月」(戦闘損耗)に限る。
+        let wars: Vec<(String, Option<String>)> = app
             .world()
             .resource::<strategy_game::war::data::WarRegistry>()
             .wars
             .values()
-            .any(|w| w.is_participant(c));
-        if !participated {
-            for w in history.windows(2) {
-                assert!(
-                    w[1].division_count >= w[0].division_count,
-                    "{c:?}: 開戦していないシナリオでDivision数が減少してはいけない"
-                );
+            .filter(|w| w.is_participant(c))
+            .map(|w| (w.start_date.clone(), w.end_date.clone()))
+            .collect();
+        for w in history.windows(2) {
+            let month_start = |idx: u32| format!("{}/{:02}/01", 1800 + (idx - 1) / 12, (idx - 1) % 12 + 1);
+            let month_end = |idx: u32| format!("{}/{:02}/31", 1800 + (idx - 1) / 12, (idx - 1) % 12 + 1);
+            let (from, to) = (month_start(w[0].month_index), month_end(w[1].month_index));
+            if wars.iter().any(|(s, e)| s.as_str() <= to.as_str() && e.as_deref().is_none_or(|e| e >= from.as_str())) {
+                continue;
             }
+            assert!(
+                w[1].division_count >= w[0].division_count,
+                "{c:?}: 戦争中でない月にDivision数が減少してはいけない(月{})",
+                w[1].month_index
+            );
         }
     }
 
