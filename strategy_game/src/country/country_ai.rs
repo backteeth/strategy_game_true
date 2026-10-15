@@ -171,6 +171,10 @@ pub struct CountryAiRegistry {
     #[serde(default)]
     pub iron_shortage_history:
         HashMap<CountryId, crate::economy::iron_shortage::IronShortageHistory>,
+    /// P29-010: Factory 増設抑止(B2)用の履歴(国別)。Save V1 の追加フィールド(旧 Save では空)。
+    #[serde(default)]
+    pub factory_starvation_history:
+        HashMap<CountryId, crate::economy::factory_starvation::FactoryStarvationHistory>,
 }
 
 impl CountryAiRegistry {
@@ -738,6 +742,36 @@ fn peacetime_reserve_satisfied(country: &CountryData, construction_cost: f64) ->
     required.is_finite() && treasury >= required
 }
 
+/// P29-010: Factory の増設を抑止するか。日付(`YYYY/MM/DD`)を解釈できない・Factory がない
+/// (初回建設)・履歴が不足/古い・設備署名が現在と異なる(完成・増設・所有者変更の直後)・
+/// 全 entry が条件を満たさない場合は`false`(従来の建設判断)。
+pub fn factory_expansion_blocked(
+    history: &crate::economy::factory_starvation::FactoryStarvationHistory,
+    current_date_str: &str,
+    country_id: CountryId,
+    state_registry: &StateRegistry,
+) -> bool {
+    let mut parts = current_date_str.split('/');
+    let (Some(y), Some(m)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    let (Ok(year), Ok(month)) = (y.parse::<i32>(), m.parse::<u8>()) else {
+        return false;
+    };
+    let entries: Vec<(usize, u32)> = state_registry
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == country_id)
+        .map(|s| (s.id.0, s.building_level(BuildingType::Factory)))
+        .filter(|(_, l)| *l > 0)
+        .collect();
+    history.blocks_expansion(
+        (year, month),
+        crate::economy::factory_starvation::factory_signature(&entries),
+        entries.len(),
+    )
+}
+
 /// P29-009: 履歴から、建設 AI へ渡す Iron 不足の文脈を作る。日付(`YYYY/MM/DD`)を解釈できない
 /// ・履歴が未集計・継続的な不足がない場合は`None`。国家の Mine レベル合計は、履歴の各月の値と
 /// 比較して「完成・喪失が実績に反映済みか」を判定するために使う。
@@ -1205,6 +1239,7 @@ pub fn process_construction_ai_with_wartime_supply(
         ai_state,
         wartime_supply,
         None,
+        false,
     );
 }
 
@@ -1221,6 +1256,7 @@ pub fn process_construction_ai_with_contexts(
     ai_state: &mut CountryAiState,
     wartime_supply: Option<WartimeSupplyContext>,
     iron_supply: Option<IronSupplyContext>,
+    factory_expansion_blocked: bool,
 ) {
     let country = match country_registry.get_mut(country_id) {
         Some(c) => c,
@@ -1281,7 +1317,12 @@ pub fn process_construction_ai_with_contexts(
                 (BuildingType::Factory, sid, CountryAiDecisionReason::SteelShortageSteelMillPriority)
             }
         };
-        if let Some(def) = building_registry.get(target_building)
+        // P29-010: 入力不足で低稼働の Factory の増設は、構造的な IG 開発でも除外する(候補なしとして
+        // 優先度 2.5 以降へ。予算・キュー枠は消費しない)。
+        let factory_excluded =
+            target_building == BuildingType::Factory && factory_expansion_blocked;
+        if !factory_excluded
+            && let Some(def) = building_registry.get(target_building)
             && country.treasury >= def.construction_cost
         {
             ai_state.decision_reason = decision_reason;
@@ -1353,6 +1394,13 @@ pub fn process_construction_ai_with_contexts(
         BuildingType::Factory
     };
 
+    // P29-010 (B2): 入力不足で低稼働の Factory の増設候補を除外する。優先度 3 の選択肢は Mine か
+    // Factory の二択のため、Factory が除外された場合は他の有効候補がなく、建設を保留する
+    // (支出を続けるためだけの代替建設はしない。着工・予算・キューは一切変更しない)。
+    if target_building == BuildingType::Factory && factory_expansion_blocked {
+        return;
+    }
+
     match try_construct_peacetime(country, state_registry, building_registry, &owned_states, target_building) {
         ConstructOutcome::Built => {}
         ConstructOutcome::InsufficientFunds => {
@@ -1366,6 +1414,9 @@ pub fn process_construction_ai_with_contexts(
                 // P27-002-A: このフォールバックも優先度3の一部であり、同じ予備資金
                 // 判定(`try_construct_peacetime`)を適用する。
                 ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
+                if factory_expansion_blocked {
+                    return;
+                }
                 if let ConstructOutcome::InsufficientFunds = try_construct_peacetime(
                     country,
                     state_registry,
@@ -1723,6 +1774,12 @@ pub fn process_daily_country_ai(
             .get(&country_id)
             .cloned()
             .unwrap_or_default();
+        // P29-010: Factory 増設抑止(B2)用の履歴(同上)。
+        let factory_history = country_ai_registry
+            .factory_starvation_history
+            .get(&country_id)
+            .cloned()
+            .unwrap_or_default();
 
         let ai_state = country_ai_registry.get_or_create_mut(country_id);
 
@@ -1828,6 +1885,12 @@ pub fn process_daily_country_ai(
                 ai_state,
                 wartime_supply,
                 iron_supply,
+                factory_expansion_blocked(
+                    &factory_history,
+                    current_date_str,
+                    country_id,
+                    state_registry,
+                ),
             );
             ai_state.last_monthly_evaluation_day = current_day;
         }

@@ -123,6 +123,10 @@ pub fn build_save_game_v1(sources: &SaveGameSources) -> SaveGameV1 {
                 .country_ai_registry
                 .iron_shortage_history
                 .clone(),
+            factory_starvation_history: sources
+                .country_ai_registry
+                .factory_starvation_history
+                .clone(),
         },
         military_ai: SavedMilitaryAiRegistry {
             ai_states: sources

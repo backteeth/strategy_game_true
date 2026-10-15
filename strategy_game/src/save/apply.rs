@@ -401,6 +401,12 @@ pub(crate) fn prepare_load(
             .into_iter()
             .map(|(id, h)| (id, h.sanitized()))
             .collect(),
+        factory_starvation_history: save
+            .country_ai
+            .factory_starvation_history
+            .into_iter()
+            .map(|(id, h)| (id, h.sanitized()))
+            .collect(),
         dirty: true,
     };
 
@@ -1083,6 +1089,7 @@ mod tests {
                 ai_states: country_ai_states,
                 supply_production_history: Default::default(),
                 iron_shortage_history: Default::default(),
+                factory_starvation_history: Default::default(),
             },
             military_ai: SavedMilitaryAiRegistry {
                 ai_states: military_ai_states,

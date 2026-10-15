@@ -239,6 +239,10 @@ pub struct SavedCountryAiRegistry {
     #[serde(default)]
     pub iron_shortage_history:
         HashMap<CountryId, crate::economy::iron_shortage::IronShortageHistory>,
+    /// P29-010: Factory 増設抑止(B2)用の履歴。追加フィールド(旧 Save では空)。
+    #[serde(default)]
+    pub factory_starvation_history:
+        HashMap<CountryId, crate::economy::factory_starvation::FactoryStarvationHistory>,
 }
 
 /// `war::military_ai::MilitaryAiRegistry`のコンテナDTO。理由は`SavedCountryAiRegistry`と
@@ -469,6 +473,7 @@ mod tests {
                 ai_states: country_ai_states,
                 supply_production_history: Default::default(),
                 iron_shortage_history: Default::default(),
+                factory_starvation_history: Default::default(),
             },
             military_ai: SavedMilitaryAiRegistry {
                 ai_states: military_ai_states,
@@ -980,6 +985,7 @@ mod tests {
             ai_states: HashMap::new(),
             supply_production_history: Default::default(),
             iron_shortage_history: Default::default(),
+            factory_starvation_history: Default::default(),
         };
         let empty_military_ai = SavedMilitaryAiRegistry {
             ai_states: HashMap::new(),
@@ -1043,5 +1049,22 @@ mod tests {
         let text = ron::to_string(&reg).unwrap();
         let back: SavedCountryAiRegistry = ron::from_str(&text).unwrap();
         assert_eq!(back.iron_shortage_history.get(&CountryId(1)), Some(&h));
+    }
+
+    /// P29-010: Factory 増設抑止の履歴は追加フィールド。旧 Save(フィールドなし)は空 = 抑止しない。
+    #[test]
+    fn factory_starvation_history_is_additive_and_round_trips() {
+        let old: SavedCountryAiRegistry =
+            ron::from_str("(ai_states: {})").expect("old-format RON (no history fields) must parse");
+        assert!(old.factory_starvation_history.is_empty());
+
+        let mut reg = SavedCountryAiRegistry::default();
+        let mut h = crate::economy::factory_starvation::FactoryStarvationHistory::default();
+        h.record(1800, 12, 42, true);
+        h.record(1801, 1, 42, false);
+        reg.factory_starvation_history.insert(CountryId(1), h.clone());
+        let text = ron::to_string(&reg).unwrap();
+        let back: SavedCountryAiRegistry = ron::from_str(&text).unwrap();
+        assert_eq!(back.factory_starvation_history.get(&CountryId(1)), Some(&h));
     }
 }

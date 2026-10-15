@@ -459,7 +459,7 @@ fn diag_continuing_wars_600_months() {
     // 継続していた戦争。この世界では、攻勢が始まり、12 日後(1817/03/14)に防御側が降伏する。
     // (世界の分岐を含むため、因果は特定していない。攻勢開始日と降伏の記録のみを固定する。)
     let (_, w_supply) = find("1817/03/02", &[1], &[2, 4]);
-    assert_eq!(w_supply.end.as_deref(), Some("1817/03/14"));
+    assert_eq!(w_supply.end.as_deref(), Some("1817/03/13"));
     assert_eq!(w_supply.end_reason.as_deref(), Some("Defender Capitulation"));
     assert!(w_supply.offensive_days > 0);
 

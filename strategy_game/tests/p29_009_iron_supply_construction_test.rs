@@ -172,6 +172,7 @@ fn new_decision(
             ai.get_or_create_mut(ME),
             None,
             ctx,
+            false,
         );
     }
     (built(&cr), cr.get(ME).unwrap().treasury)

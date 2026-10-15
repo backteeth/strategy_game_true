@@ -344,16 +344,16 @@ fn d4_240_months_keeps_the_ledger_closed_and_matches_the_audited_outcomes() {
     // 世界の経過: E1 で戦争が分岐し(P29-003)、さらに E3 で募兵が変わる。
     assert!(m120.contains("c2 divs=3 shortD=3161 IG=9093 tr=15243"), "{m120}");
     assert!(m240.contains("c2 divs=3 shortD=6811 IG=37211 tr=16257"), "{m240}");
-    assert!(m240.contains("c1 divs=12 shortD=6624 IG=1628 tr=9149"), "{m240}");
+    assert!(m240.contains("c1 divs=12 shortD=6624 IG=803 tr=8719"), "{m240}");
     assert!(m240.contains("c5 divs=3 shortD=2523 IG=5688 tr=2328"), "{m240}");
     // Passguard: Division 1・補給不足 119 日は旧 D0 の値(不変)。IG・国庫・生活水準は、
     // 戦争の分岐による州の増減で変わる。
     assert!(m240.contains("c4 divs=1 shortD=123 IG=750 tr=464 LS=39.5"), "{m240}");
-    assert!(m240.contains("c0 divs=0 shortD=7807 IG=8 tr=3759"), "{m240}");
+    assert!(m240.contains("c0 divs=0 shortD=7807 IG=8 tr=5211"), "{m240}");
     // 旧世界の「Ferrowyn 対 Oceanic の WarId(8) が 1819/02/07 に決着」は発生しない。P29-005 後の
-    // WarId(8) は別の戦争(Elfin 対 Dwarf+Passguard、1817/03/02 開戦)で、1817/03/14 に攻撃側が
+    // WarId(8) は別の戦争(Elfin 対 Dwarf+Passguard、1817/03/02 開戦)で、1817/03/13 に攻撃側が
     // 降伏勝利する(変更前の世界では同じ組合せの戦争が 1817/03/02 から継続していた)。
-    assert_eq!(s.war8_end.as_deref(), Some("1817/03/14"));
+    assert_eq!(s.war8_end.as_deref(), Some("1817/03/13"));
 }
 
 /// Passguardで D1/D3 が起こした「FactoryがIron不足→IG枯渇→MilitaryFactory停止→Ironが余って

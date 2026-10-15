@@ -229,6 +229,11 @@ pub struct CountryProductionOutcome {
     pub iron_unmet_other: f64,
     /// P29-009: Mine がこの月に備蓄へ加えた Iron の量(供給能力の観測)。
     pub iron_produced: f64,
+    /// P29-010: 稼働しうる Factory の entry(州、level > 0)の数。観測用。
+    pub factory_entries: u32,
+    /// P29-010: そのうち、Iron 不足が実際の稼働制約(`iron_free_op` より厳密に低い)で、かつ
+    /// 稼働率が 0.1 未満の entry の数。観測用で、生産会計・配分には使わない。
+    pub factory_iron_starved_entries: u32,
 }
 
 /// 1つの国家が所有する州の生産・消費をまとめて一括処理する
@@ -370,6 +375,8 @@ pub fn process_country_production_with_outcome(
     let mut iron_unmet_military = 0.0f64;
     let mut iron_unmet_other = 0.0f64;
     let mut iron_produced = 0.0f64;
+    let mut factory_entries = 0u32;
+    let mut factory_iron_starved_entries = 0u32;
 
     // P26-DET-001-REV-001: 各州ごとの`building_operation_ratios`は、下の全州分
     // 処理が終わってから1回だけ書き戻す(ループ構造をBuildingType外側/State内側へ
@@ -508,6 +515,16 @@ pub fn process_country_production_with_outcome(
                     iron_unmet_military += unmet;
                 } else {
                     iron_unmet_other += unmet;
+                    // P29-010: Factory の entry(州)ごとの観測。入力不足が実際の稼働制約
+                    // (Iron を除いた上限より実際の稼働率が厳密に低い)で、かつ稼働率が 0.1 未満。
+                    // 労働力・物流・破産・他の入力による低稼働は`free_op`に既に反映されるため
+                    // 数えない。同率(複数の制約が同時に律速)は Iron が厳密な制約ではないので数えない。
+                    factory_entries += 1;
+                    // 「0.1 未満」は f32 の切り下げ(備蓄を超えない最大の稼働率への 1ulp の引き下げ)を
+                    // 許容する: 0.1 ちょうどの充足率が 0.099999994 に記録されても、0.1 未満とはしない。
+                    if free_op - final_op > 1e-6 && final_op < crate::economy::factory_starvation::FACTORY_LOW_OPERATION_THRESHOLD - 1e-6 {
+                        factory_iron_starved_entries += 1;
+                    }
                 }
             }
             if final_op <= 0.0 && planned_op > 0.0 {
@@ -623,6 +640,8 @@ pub fn process_country_production_with_outcome(
         iron_unmet_military,
         iron_unmet_other,
         iron_produced,
+        factory_entries,
+        factory_iron_starved_entries,
     }
 }
 

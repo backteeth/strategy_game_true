@@ -1,4 +1,5 @@
 pub mod economic_state;
+pub mod factory_starvation;
 pub mod finance;
 pub mod iron_shortage;
 pub mod production;
@@ -142,6 +143,7 @@ pub fn handle_monthly_economy(
                 if let Some(reg) = ai_registry.as_mut() {
                     reg.supply_production_history.remove(&country_id);
                     reg.iron_shortage_history.remove(&country_id);
+                    reg.factory_starvation_history.remove(&country_id);
                 }
                 continue;
             }
@@ -215,6 +217,29 @@ pub fn handle_monthly_economy(
                         event.month,
                         Some(outcome.iron_unmet_military),
                         mine_levels_total,
+                    );
+            }
+
+            // P29-010: Factory 増設抑止(B2)用の履歴(永続)。全 Factory entry が Iron 不足で稼働率 0.1
+            // 未満の月を、Factory の設備署名とともに記録する。プレイヤー国は対象外。
+            if let Some(reg) = ai_registry.as_mut()
+                && player_country.0 != Some(country_id)
+            {
+                let entries: Vec<(usize, u32)> = owned_states
+                    .iter()
+                    .map(|s| (s.id.0, s.building_level(crate::building::data::BuildingType::Factory)))
+                    .filter(|(_, l)| *l > 0)
+                    .collect();
+                let starved = outcome.factory_entries > 0
+                    && outcome.factory_iron_starved_entries == outcome.factory_entries;
+                reg.factory_starvation_history
+                    .entry(country_id)
+                    .or_default()
+                    .record(
+                        event.year,
+                        event.month,
+                        crate::economy::factory_starvation::factory_signature(&entries),
+                        starved,
                     );
             }
 
@@ -329,5 +354,6 @@ fn clear_military_supply_production_ledger(
     if let Some(mut reg) = ai_registry {
         reg.supply_production_history.clear();
         reg.iron_shortage_history.clear();
+        reg.factory_starvation_history.clear();
     }
 }
