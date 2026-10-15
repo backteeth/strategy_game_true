@@ -861,10 +861,14 @@ mod real_app {
     /// 月次の産出が増える(最初の分岐は月22。月12/18は不変)。月24: 810.1867770000→827.7702550000、
     /// 月36: 967.7942830000→1020.4045230000。ElfinはtestFの表で 499.874123→508.935259。
     /// 他4か国(Dwarf・Oceanic・Passguard・Ferrowyn)の値は不変(このシナリオでは優先配分が成立しない)。
+    /// 【P29-007により正規値を再更新】: D4 の優先配分を IG 備蓄に応じた線形補間(α = IG / 3か月分)
+    /// へ変更した。Arcadia は IG 備蓄が 3 か月分を下回る期間も、α に比例して MilitaryFactory へ
+    /// Iron が配分されるため、月 24: 827.7702550000→834.2637750000、月 36: 1020.4045230000→
+    /// 1031.1836210000(月 12・18 は不変)。
     const ARCADIA_CANONICAL_M12: f64 = 453.4529480000;
     const ARCADIA_CANONICAL_M18: f64 = 731.2987830000;
-    const ARCADIA_CANONICAL_M24: f64 = 827.7702550000;
-    const ARCADIA_CANONICAL_M36: f64 = 1020.4045230000;
+    const ARCADIA_CANONICAL_M24: f64 = 834.2637749999999;
+    const ARCADIA_CANONICAL_M36: f64 = 1031.1836210000;
 
     // Test H: Arcadia単独36か月の正規値(本タスクの国家内順序変更後も、
     // Arcadiaは州0内にFactory/MilitaryFactoryが同居するため、州間ではなく
@@ -963,11 +967,13 @@ mod real_app {
     #[test]
     fn test_i_all_six_countries_stable_within_process_and_no_regression() {
         let countries = [
+            // P29-007(D4 の IG 備蓄に応じた線形補間): Elfin 508.935259→533.055649、Passguard
+            // 3672.5984340000005→3651.633968(他国は不変。Arcadia は ARCADIA_CANONICAL_M36)。
             (ARCADIA, ARCADIA_CANONICAL_M36),
-            (ELFIN, 508.935259),
+            (ELFIN, 533.055649),
             (DWARF, 1647.0588400000001),
             (OCEANIC, 402.23853800000006),
-            (PASSGUARD, 3672.5984340000005),
+            (PASSGUARD, 3651.633968),
             (FERROWYN, 1333.5205999999996),
         ];
         let tracked: Vec<CountryId> = countries.iter().map(|(cid, _)| *cid).collect();

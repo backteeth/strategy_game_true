@@ -322,6 +322,9 @@ fn real_app_is_deterministic_across_two_runs() {
 fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     let fp = simulate(120, &[120], false);
     let row = fp.rows.iter().find(|r| r.starts_with("m120")).unwrap();
+    // P29-007(D4 の IG 備蓄に応じた線形補間): IG 備蓄が 3 か月分を下回る Passguard も、IG 備蓄に比例
+    // して優先配分が混ざるため、m120 の Passguard を Iron 37→38・Coal 2900→2897・IG 18→14・国庫
+    // 904→802 へ更新した(Division 1・補給不足 119 日は不変)。Dwarf は不変。
     // P29-005(複数月の実産出に基づく能力上限)で、m120 の Dwarf を shortD 3184→3161・Iron 2323→2319・
     // Coal 4176→4156・IG 8952→9093・国庫 15090→15243 へ更新した(世界の分岐。Passguard は不変)。
     // P29-004(E3: 生産能力に基づく AI 募兵制限)後: Dwarf は生産能力を超える募兵をしなくなり、
@@ -330,6 +333,6 @@ fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     // という本テストの目的はこちらで維持される)。
     assert!(row.contains("c2 divs=3 shortD=3161 Iron=2319 Coal=4156 IG=9093"), "Dwarf: {row}");
     assert!(row.contains("tr=15243"), "Dwarf treasury: {row}");
-    assert!(row.contains("c4 divs=1 shortD=119 Iron=37 Coal=2900 IG=18"), "Passguard: {row}");
-    assert!(row.contains("tr=904"), "Passguard treasury: {row}");
+    assert!(row.contains("c4 divs=1 shortD=119 Iron=38 Coal=2897 IG=14"), "Passguard: {row}");
+    assert!(row.contains("tr=802"), "Passguard treasury: {row}");
 }

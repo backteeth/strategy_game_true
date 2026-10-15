@@ -81,16 +81,42 @@ pub fn calculate_actual_input(base_input: f64, level: u32, operation_ratio: f32)
 }
 
 /// P28-010-IMPL-002: IG備蓄の保護月数。IndustrialGoods備蓄が、MilitaryFactoryの月間IG需要
-/// (Step 1と同じ`base × level × t`の州合計)のこの月数分以上あるときだけ、Iron不足時に
-/// MilitaryFactoryへIronを優先配分する。境界と等しい場合は優先配分を適用する。
+/// (Step 1と同じ`base × level × t`の州合計)のこの月数分以上あるとき、Iron不足時の
+/// MilitaryFactoryへのIron優先配分が**全面的に**適用される(P29-007: 重み α = 1)。
+/// これを下回る間は、IG備蓄に比例して α が 0〜1 で下がり、優先配分と需要比例配分の間を
+/// 線形に補間する([`military_iron_priority_weight`])。境界(ちょうど 3 か月分)は α = 1。
 pub const MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS: f64 = 3.0;
+
+/// P29-007: D4 の優先配分の重み α = clamp(S / (K × D), 0, 1)。
+///
+/// - S: 月初のIG備蓄、D: MilitaryFactoryの月間IG需要(Step 1と同じ`base × level × t`の州合計)、
+///   K = [`MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS`]。
+/// - α = 0: 需要比例配分(D0)と一致。α = 1: 従来の D4 優先配分と一致。
+/// - D ≤ 0(MilitaryFactoryが IG を要求しない): 従来仕様(ゲート `S < K × 0` は偽 → 優先配分を
+///   適用)を維持して α = 1。非有限の備蓄は 0 として扱う(ゼロ除算・不正値を作らない)。
+pub fn military_iron_priority_weight(ig_stock: f64, ig_want_military: f64) -> f64 {
+    let reserve = MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS * ig_want_military;
+    if reserve.is_nan() || reserve <= 0.0 || !reserve.is_finite() {
+        return 1.0;
+    }
+    let stock = if ig_stock.is_finite() { ig_stock.max(0.0) } else { 0.0 };
+    (stock / reserve).clamp(0.0, 1.0)
+}
+
+/// P29-007: 充足率(= 予算 / 需要)の補間 `(1 − α) × P + α × M`。α = 0 で P、α = 1 で M と
+/// ビット一致する。`P`・`M` は同じ在庫・需要から得た 2 方式の配分(`M` の他消費者は`t`込み)。
+fn blend_iron_satisfaction(alpha: f64, proportional: f64, priority: f64) -> f32 {
+    ((1.0 - alpha) * proportional + alpha * priority).clamp(0.0, 1.0) as f32
+}
 
 /// P28-010-IMPL-002(PRE-003のD4): Iron不足時のMilitaryFactory優先配分の入力充足率。
 ///
-/// 適用条件(全て満たす場合のみ`Some`、それ以外は`None`=現行の需要比例配分D0):
+/// 優先配分(M)が定義される条件(満たす場合のみ`Some`、それ以外は`None`=現行の需要比例配分D0):
 /// 1. MilitaryFactoryのIron需要が正
 /// 2. Ironの需要合計(MilitaryFactory + 他の消費者)が月初備蓄を超える(Iron不足)
-/// 3. IG備蓄 ≥ `MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS` × MilitaryFactoryの月間IG需要
+///
+/// P29-007: 旧 3.(IG備蓄 ≥ 3か月分という二択のゲート)は、重み α
+/// ([`military_iron_priority_weight`])による M と D0 の線形補間へ置き換えた。
 ///
 /// 戻り値は`(MilitaryFactoryのIron充足率, 他の消費者のIron充足率)`。
 /// MilitaryFactoryは全入力のうち最も厳しい`備蓄/需要`(`mf_min_input_ratio`、Iron自身を含む)
@@ -100,16 +126,11 @@ fn military_iron_priority_satisfaction(
     iron_want_military: f64,
     iron_want_others: f64,
     mf_min_input_ratio: f64,
-    ig_stock: f64,
-    ig_want_military: f64,
 ) -> Option<(f32, f32)> {
     if iron_want_military <= 0.0 {
         return None;
     }
     if iron_want_military + iron_want_others <= iron_stock {
-        return None;
-    }
-    if ig_stock < MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS * ig_want_military {
         return None;
     }
     let mf_ratio = mf_min_input_ratio.clamp(0.0, 1.0);
@@ -313,14 +334,18 @@ pub fn process_country_production_with_outcome(
                 iron_want_others += want(b, ResourceType::Iron);
             }
         }
+        // P29-007: 優先配分(M)と需要比例配分(P)の補間の重み α(IG 備蓄 / 3 か月分)。
+        let alpha = military_iron_priority_weight(
+            stockpile.get(ResourceType::IndustrialGoods),
+            want(BuildingType::MilitaryFactory, ResourceType::IndustrialGoods),
+        );
         military_iron_priority_satisfaction(
             stockpile.get(ResourceType::Iron),
             iron_want_military,
             iron_want_others,
             mf_min_input_ratio,
-            stockpile.get(ResourceType::IndustrialGoods),
-            want(BuildingType::MilitaryFactory, ResourceType::IndustrialGoods),
         )
+        .map(|(mf_sat, others_sat)| (mf_sat, others_sat, alpha))
     };
 
     // Step 3: 各州・建物ごとの最終稼働率を決定し、消費および生産を行う
@@ -387,15 +412,25 @@ pub fn process_country_production_with_outcome(
             let mut min_res_sat = 1.0f32;
             for res in def.input_resources.keys() {
                 let sat = match (*res, iron_priority) {
-                    (ResourceType::Iron, Some((mf_sat, others_sat))) => {
+                    (ResourceType::Iron, Some((mf_sat, others_sat, alpha))) => {
                         // 優先配分の残り(予算)を、他の消費者の需要(`t`込み)に対する割合`others_sat`で
                         // 受け取る。消費は`base × level × op`(`t`なし)なので、`t × others_sat`で
                         // 受け取った予算ちょうどに揃える(`min(t, sat)`のままだと1/t倍に超過する)。
-                        Some(if b_type == BuildingType::MilitaryFactory {
+                        let priority = if b_type == BuildingType::MilitaryFactory {
                             mf_sat
                         } else {
                             others_sat * wf_ratio.min(log_ratio)
-                        })
+                        };
+                        // P29-007: 需要比例配分(P: 全消費者に共通の月初備蓄/需要)との線形補間。
+                        // 配分は建物ごとの Iron 量(`base × level × 充足率`)で、充足率の補間は
+                        // その量の補間と等価。α = 1 で従来の D4、α = 0 で D0 とビット一致する。
+                        let proportional =
+                            resource_satisfaction.get(res).copied().unwrap_or(1.0);
+                        Some(blend_iron_satisfaction(
+                            alpha,
+                            proportional as f64,
+                            priority as f64,
+                        ))
                     }
                     _ => resource_satisfaction.get(res).copied(),
                 };
@@ -578,34 +613,72 @@ mod atomic_input_tests {
 mod military_iron_priority_tests {
     use super::*;
 
-    // iron_stock, iron_want_military, iron_want_others, mf_min_input_ratio, ig_stock, ig_want_military
+    // iron_stock, iron_want_military, iron_want_others, mf_min_input_ratio
     #[test]
     fn iron_sufficient_keeps_the_proportional_rule() {
-        assert_eq!(military_iron_priority_satisfaction(100.0, 30.0, 40.0, 1.0, 1000.0, 15.0), None);
+        assert_eq!(military_iron_priority_satisfaction(100.0, 30.0, 40.0, 1.0), None);
         // 需要合計 = 備蓄(ちょうど)も「不足ではない」。
-        assert_eq!(military_iron_priority_satisfaction(70.0, 30.0, 40.0, 1.0, 1000.0, 15.0), None);
+        assert_eq!(military_iron_priority_satisfaction(70.0, 30.0, 40.0, 1.0), None);
     }
 
     #[test]
     fn no_military_factory_demand_keeps_the_proportional_rule() {
-        assert_eq!(military_iron_priority_satisfaction(10.0, 0.0, 40.0, 1.0, 1000.0, 0.0), None);
+        assert_eq!(military_iron_priority_satisfaction(10.0, 0.0, 40.0, 1.0), None);
+    }
+
+    /// P29-007: 重み α = clamp(S / (3 × D), 0, 1)。端点・中間・境界・不正値。
+    #[test]
+    fn weight_is_a_clamped_linear_ramp_of_the_ig_stock() {
+        let d = 15.0;
+        let boundary = MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS * d;
+        assert_eq!(military_iron_priority_weight(0.0, d), 0.0, "IG 備蓄 0 は需要比例配分");
+        assert_eq!(military_iron_priority_weight(boundary, d), 1.0, "ちょうど 3 か月分は優先配分");
+        assert_eq!(military_iron_priority_weight(boundary * 4.0, d), 1.0, "3 か月分以上は優先配分");
+        assert!((military_iron_priority_weight(boundary / 2.0, d) - 0.5).abs() < 1e-12);
+        assert!((military_iron_priority_weight(boundary / 4.0, d) - 0.25).abs() < 1e-12);
+        // 直前・直後に大きな飛躍がない(旧仕様は 0 → 1 の二択)。
+        let below = military_iron_priority_weight(f64::from_bits(boundary.to_bits() - 1), d);
+        assert!(below > 1.0 - 1e-12 && below <= 1.0);
+        // 単調非減少。
+        let mut prev = 0.0;
+        for i in 0..=200 {
+            let a = military_iron_priority_weight(boundary * i as f64 / 100.0, d);
+            assert!(a >= prev && (0.0..=1.0).contains(&a));
+            prev = a;
+        }
     }
 
     #[test]
-    fn ig_reserve_boundary_is_inclusive() {
-        let want_ig = 15.0;
-        let boundary = MILITARY_IRON_PRIORITY_IG_RESERVE_MONTHS * want_ig;
-        let below = f64::from_bits(boundary.to_bits() - 1);
-        let above = f64::from_bits(boundary.to_bits() + 1);
-        assert_eq!(military_iron_priority_satisfaction(50.0, 30.0, 40.0, 1.0, below, want_ig), None);
-        assert!(military_iron_priority_satisfaction(50.0, 30.0, 40.0, 1.0, boundary, want_ig).is_some());
-        assert!(military_iron_priority_satisfaction(50.0, 30.0, 40.0, 1.0, above, want_ig).is_some());
+    fn weight_is_well_defined_for_zero_demand_and_invalid_values() {
+        // D = 0: 従来仕様(ゲート `S < K × 0` は偽 → 優先配分を適用)を維持して α = 1。
+        assert_eq!(military_iron_priority_weight(0.0, 0.0), 1.0);
+        assert_eq!(military_iron_priority_weight(100.0, 0.0), 1.0);
+        assert_eq!(military_iron_priority_weight(5.0, -1.0), 1.0);
+        // 非有限・負の備蓄は 0 として扱う(NaN を作らない)。
+        assert_eq!(military_iron_priority_weight(f64::NAN, 15.0), 0.0);
+        assert_eq!(military_iron_priority_weight(-3.0, 15.0), 0.0);
+        assert_eq!(military_iron_priority_weight(f64::INFINITY, 15.0), 0.0);
+        assert_eq!(military_iron_priority_weight(10.0, f64::NAN), 1.0);
+    }
+
+    #[test]
+    fn blend_matches_the_endpoints_bit_for_bit_and_interpolates_between() {
+        let (p, m) = (0.3_f32 as f64, 0.9_f32 as f64);
+        assert_eq!(blend_iron_satisfaction(0.0, p, m), 0.3_f32);
+        assert_eq!(blend_iron_satisfaction(1.0, p, m), 0.9_f32);
+        let mid = blend_iron_satisfaction(0.5, p, m);
+        assert!((mid - 0.6).abs() < 1e-6);
+        // 補間値は 2 端点の間に収まる。
+        for i in 0..=100 {
+            let a = i as f64 / 100.0;
+            let v = blend_iron_satisfaction(a, p, m) as f64;
+            assert!(v >= p - 1e-6 && v <= m + 1e-6);
+        }
     }
 
     #[test]
     fn military_gets_its_demand_first_and_others_share_the_rest() {
-        let (mf, others) =
-            military_iron_priority_satisfaction(50.0, 30.0, 40.0, 1.0, 45.0, 15.0).unwrap();
+        let (mf, others) = military_iron_priority_satisfaction(50.0, 30.0, 40.0, 1.0).unwrap();
         assert_eq!(mf, 1.0);
         assert!((others - 0.5).abs() < 1e-6, "others={others}"); // (50-30)/40
     }
@@ -613,7 +686,7 @@ mod military_iron_priority_tests {
     #[test]
     fn military_is_capped_by_stock_and_others_get_nothing() {
         let (mf, others) =
-            military_iron_priority_satisfaction(20.0, 30.0, 40.0, 20.0 / 30.0, 45.0, 15.0).unwrap();
+            military_iron_priority_satisfaction(20.0, 30.0, 40.0, 20.0 / 30.0).unwrap();
         assert!((mf - 20.0 / 30.0).abs() < 1e-6);
         assert_eq!(others, 0.0);
     }
@@ -621,17 +694,17 @@ mod military_iron_priority_tests {
     #[test]
     fn iron_is_not_reserved_beyond_what_another_military_input_allows() {
         // 他の入力が律速(0.4)なら、MilitaryFactoryのIron予約は 30 × 0.4 = 12 だけ。
-        let (mf, others) =
-            military_iron_priority_satisfaction(50.0, 30.0, 40.0, 0.4, 45.0, 15.0).unwrap();
+        let (mf, others) = military_iron_priority_satisfaction(50.0, 30.0, 40.0, 0.4).unwrap();
         assert!((mf - 0.4).abs() < 1e-6);
         assert!((others - (50.0 - 12.0) / 40.0).abs() < 1e-6, "others={others}");
     }
 
     #[test]
     fn zero_stock_and_zero_others_are_well_defined() {
-        let (mf, others) = military_iron_priority_satisfaction(0.0, 30.0, 40.0, 0.0, 45.0, 15.0).unwrap();
+        let (mf, others) = military_iron_priority_satisfaction(0.0, 30.0, 40.0, 0.0).unwrap();
         assert_eq!((mf, others), (0.0, 0.0));
-        let (mf, others) = military_iron_priority_satisfaction(10.0, 30.0, 0.0, 10.0 / 30.0, 45.0, 15.0).unwrap();
+        let (mf, others) =
+            military_iron_priority_satisfaction(10.0, 30.0, 0.0, 10.0 / 30.0).unwrap();
         assert!((mf - 10.0 / 30.0).abs() < 1e-6);
         assert_eq!(others, 1.0);
     }

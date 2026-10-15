@@ -101,7 +101,15 @@ fn advance_one_day(app: &mut App) {
 }
 
 
-const ELFIN: CountryId = CountryId(1);
+/// 診断対象の国(既定 Elfin = 1。環境変数 `P29_DIAG_COUNTRY` で他国へ変更できる)。
+fn elfin_id() -> CountryId {
+    CountryId(
+        std::env::var("P29_DIAG_COUNTRY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
+    )
+}
 
 #[derive(Clone, Debug, Default)]
 struct Row {
@@ -159,7 +167,7 @@ fn p29_006_elfin_production_cycle_trace() {
         // 前日末の備蓄(Iron/Coal/IG は日次で消費されないため、月次生産の直前の値)。
         let pre = {
             let cr = app.world().resource::<CountryRegistry>();
-            let st = &cr.get(ELFIN).unwrap().stockpile;
+            let st = &cr.get(elfin_id()).unwrap().stockpile;
             (
                 st.get(ResourceType::Iron),
                 st.get(ResourceType::Coal),
@@ -174,11 +182,11 @@ fn p29_006_elfin_production_cycle_trace() {
         let cr = app.world().resource::<CountryRegistry>();
         let sr = app.world().resource::<StateRegistry>();
         let br = app.world().resource::<BuildingRegistry>();
-        let st = &cr.get(ELFIN).unwrap().stockpile;
+        let st = &cr.get(elfin_id()).unwrap().stockpile;
         let owned: Vec<(usize, u32)> = sr
             .states
             .iter()
-            .filter(|s| s.owner_country_id == ELFIN)
+            .filter(|s| s.owner_country_id == elfin_id())
             .map(|s| (s.id.0, s.building_level(B::MilitaryFactory)))
             .collect();
         let mut r = Row {
@@ -194,7 +202,7 @@ fn p29_006_elfin_production_cycle_trace() {
         };
         owned_prev = owned;
         let def = |b: B| br.get(b).unwrap();
-        for s in sr.states.iter().filter(|s| s.owner_country_id == ELFIN) {
+        for s in sr.states.iter().filter(|s| s.owner_country_id == elfin_id()) {
             let wf = (s.employed_workforce as f32 / s.total_workforce().max(1) as f32).clamp(0.0, 1.0);
             let t = wf.min(s.logistics_ratio);
             for b in [B::Mine, B::Factory, B::MilitaryFactory] {
@@ -331,6 +339,7 @@ fn p29_006_elfin_production_cycle_trace() {
     // (二重配分・二重消費・不正な丸めがない)。
     assert!(max_resid < 1e-6, "conservation residual {max_resid}");
     assert!(rows.iter().all(|r| r.iron_end >= 0.0 && r.ig_end >= 0.0), "no negative stock");
-    // 診断が対象とする機構(D4 の優先配分の成立月)が実際に現れている。
-    assert!(d4_months > 100, "D4 months {d4_months}");
+    // (P29-007 で D4 を IG 備蓄に応じた線形補間へ変更したため、「D4 が成立する月」の数は
+    // 配分方式に依存する診断値であり、検査しない。基準 HEAD では 386 か月だった。)
+    let _ = d4_months;
 }

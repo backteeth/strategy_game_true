@@ -170,14 +170,54 @@ fn ig_at_or_above_three_months_prioritizes_the_military_factory() {
     }
 }
 
-/// 境界の直下: 現行の需要比例配分(D0)。両者とも 50/70 の稼働率。
+/// P29-007: 境界の直下は、優先配分(α = 1)から連続する(旧仕様の二択の飛躍がない)。
+/// 旧仕様では、ここで両者とも 50/70 の稼働率(D0)へ飛んでいた。
 #[test]
-fn ig_just_below_three_months_uses_the_proportional_rule() {
+fn ig_just_below_three_months_is_continuous_with_the_priority_allocation() {
     let o = scarce_case(next_down(IG_GATE));
-    let sat = 50.0 / 70.0;
-    assert!((op(&o, BuildingType::Factory) - sat).abs() < 1e-5);
-    assert!((iron_used(&o, BuildingType::Factory) - 40.0 * sat).abs() < 1e-4);
-    assert!((iron_used(&o, BuildingType::MilitaryFactory) - 30.0 * sat).abs() < 1e-4);
+    assert!((op(&o, BuildingType::MilitaryFactory) - 1.0).abs() < 1e-6);
+    assert!((iron_used(&o, BuildingType::MilitaryFactory) - 30.0).abs() < 1e-5);
+    assert!((op(&o, BuildingType::Factory) - 0.5).abs() < 1e-6);
+    assert!((iron_used(&o, BuildingType::Factory) - 20.0).abs() < 1e-5);
+}
+
+/// P29-007: 3 か月分未満では、需要比例配分(P)と優先配分(M)を α = IG / 45 で線形補間する。
+/// P: 両者とも 50/70。M: MilitaryFactory 1.0、Factory 0.5。配分総量は備蓄 50 に一致する。
+#[test]
+fn between_zero_and_three_months_interpolates_proportional_and_priority_allocations() {
+    let p = 50.0 / 70.0;
+    for ig in [15.0, 22.5, 30.0, 40.0] {
+        let a = ig / IG_GATE;
+        let o = scarce_case(ig);
+        let mf = (1.0 - a) * p + a * 1.0;
+        let f = (1.0 - a) * p + a * 0.5;
+        assert!((op(&o, BuildingType::MilitaryFactory) - mf).abs() < 1e-5, "ig={ig}");
+        assert!((op(&o, BuildingType::Factory) - f).abs() < 1e-5, "ig={ig}");
+        let total = iron_used(&o, BuildingType::MilitaryFactory) + iron_used(&o, BuildingType::Factory);
+        assert!((total - IRON_SCARCE).abs() < 1e-4, "配分総量が備蓄に一致する ig={ig} total={total}");
+    }
+}
+
+/// P29-007: 他条件を固定した場合、IG 備蓄の増加で MilitaryFactory の Iron 配分は減らず、
+/// Factory の Iron 配分は増えない(IG が MilitaryFactory 自身を律速しない範囲 ig ≥ 15)。
+#[test]
+fn military_iron_share_is_monotone_in_the_ig_stock() {
+    let mut prev_mf = 0.0;
+    let mut prev_f = f64::MAX;
+    for i in 0..=60 {
+        let ig = 15.0 + i as f64; // 15..75(IG_GATE = 45 を跨ぐ)
+        let o = scarce_case(ig);
+        let mf = iron_used(&o, BuildingType::MilitaryFactory);
+        let f = iron_used(&o, BuildingType::Factory);
+        assert!(mf >= prev_mf - 1e-6, "ig={ig}: MF {mf} < {prev_mf}");
+        assert!(f <= prev_f + 1e-6, "ig={ig}: Factory {f} > {prev_f}");
+        // 3 か月分未満から以上へ、1 か月分の IG 刻みで大きな飛躍がない。
+        if i > 0 {
+            assert!((mf - prev_mf).abs() < 5.0, "ig={ig}: MF jump {}", mf - prev_mf);
+        }
+        prev_mf = mf;
+        prev_f = f;
+    }
 }
 
 /// Ironが足りている場合は、IG備蓄に関わらず従来と同じ(全員が計画稼働率 t = 1)。
@@ -255,18 +295,29 @@ fn multiple_states_use_the_national_totals() {
     // 稼働率はf32のため、Factoryが予算を超えない範囲で丸め誤差(相対 1e-7)が出る。
     assert!((iron_used(&on, BuildingType::MilitaryFactory) - 90.0).abs() < 1e-5);
     assert!((iron_used(&on, BuildingType::Factory) - 10.0).abs() < 1e-5);
+    // P29-007: 境界の直下は優先配分と連続する(旧: 需要比例配分 100/210 への飛躍)。
     let off = run(
         states(),
         stock(&[(ResourceType::Iron, 100.0), (ResourceType::Coal, 1000.0), (ResourceType::IndustrialGoods, next_down(gate))]),
     );
-    let sat = 100.0 / 210.0;
-    assert!((iron_used(&off, BuildingType::MilitaryFactory) - 90.0 * sat).abs() < 1e-3);
-    assert!((iron_used(&off, BuildingType::Factory) - 120.0 * sat).abs() < 1e-3);
+    assert!((iron_used(&off, BuildingType::MilitaryFactory) - 90.0).abs() < 1e-3);
+    assert!((iron_used(&off, BuildingType::Factory) - 10.0).abs() < 1e-3);
+    // 半分(α = 0.5): P = 100/210、M = (MilitaryFactory 1.0、Factory 10/120)の平均。総量は備蓄 100。
+    let mid = run(
+        states(),
+        stock(&[(ResourceType::Iron, 100.0), (ResourceType::Coal, 1000.0), (ResourceType::IndustrialGoods, gate / 2.0)]),
+    );
+    let p = 100.0 / 210.0;
+    let mf = 90.0 * (0.5 * p + 0.5 * 1.0);
+    let f = 120.0 * (0.5 * p + 0.5 * (10.0 / 120.0));
+    assert!((iron_used(&mid, BuildingType::MilitaryFactory) - mf).abs() < 1e-3);
+    assert!((iron_used(&mid, BuildingType::Factory) - f).abs() < 1e-3);
+    assert!((mf + f - 100.0).abs() < 1e-9, "配分総量は備蓄に一致する");
 }
 
 /// 浮動小数点: `t`が2進で割り切れない場合でも、ゲートは「ちょうど3か月分」で包含的に切り替わる。
 #[test]
-fn gate_is_exact_for_a_non_dyadic_operation_ratio() {
+fn gate_is_exact_and_continuous_for_a_non_dyadic_operation_ratio() {
     let employed = 333_333u64; // t = 333333 / 500000(f32)
     let mk = || {
         vec![
@@ -290,11 +341,10 @@ fn gate_is_exact_for_a_non_dyadic_operation_ratio() {
     let mf_at = iron_used(&at, BuildingType::MilitaryFactory);
     let mf_below = iron_used(&below, BuildingType::MilitaryFactory);
     assert!((mf_at - 30.0 * t).abs() < 1e-5, "at gate: {mf_at}");
-    // D0: 稼働率 min(t, 0.5) = 0.5(`t`なしの消費)。Factoryが先に 20 を消費し、MilitaryFactoryは
-    // 残り(備蓄 − 20)をFIX1のクランプで受け取る。at-gate(30t)とは異なる。
-    assert!((iron_used(&below, BuildingType::Factory) - 20.0).abs() < 1e-4, "below gate factory");
-    assert!((mf_below - (iron - 20.0)).abs() < 1e-4, "below gate: {mf_below}");
-    assert!(mf_at > mf_below);
+    // P29-007: 直下(α = 1 − ε)は優先配分と連続する(旧: D0 へ飛躍して mf_at > mf_below)。
+    // ちょうど 3 か月分は包含的に α = 1(ビット一致)。
+    assert!((mf_below - mf_at).abs() < 1e-6, "below gate: {mf_below} vs {mf_at}");
+    assert!((iron_used(&below, BuildingType::Factory) - iron_used(&at, BuildingType::Factory)).abs() < 1e-6);
 }
 
 /// 州の挿入順・生産entryの登録順を変えても結果が同じ(全720順列、ゲートの両側)。
@@ -476,4 +526,14 @@ fn others_never_spend_more_than_their_budget_when_t_is_below_one() {
         assert!(f <= budget + 1e-5, "iron={iron}: factory spent {f} > budget {budget}");
         assert!((iron_used(&o, BuildingType::MilitaryFactory) - 30.0f64.min(iron)).abs() < 1e-5, "iron={iron}");
     }
+}
+
+/// P29-007: α = 0(IG 備蓄 0)は需要比例配分(D0)と一致する。MilitaryFactory は IG が無く稼働
+/// できないため、Factory が比例配分の充足率(50/70)で Iron を消費する(旧仕様の IG < 3 か月分と同じ)。
+#[test]
+fn zero_ig_stock_matches_the_proportional_allocation() {
+    let o = scarce_case(0.0);
+    assert_eq!(op(&o, BuildingType::MilitaryFactory), 0.0);
+    assert!((op(&o, BuildingType::Factory) - 50.0 / 70.0).abs() < 1e-5);
+    assert!((iron_used(&o, BuildingType::Factory) - 40.0 * 50.0 / 70.0).abs() < 1e-4);
 }

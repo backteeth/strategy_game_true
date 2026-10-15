@@ -204,6 +204,8 @@ struct Series {
     war8_end: Option<String>,
     /// 期間中に州を 1 つも所有しなくなった(征服された)国。
     eliminated: [bool; 6],
+    /// 州を 1 つも所有しなくなった最初の月(月次サンプルの添字)。
+    eliminated_month: [Option<usize>; 6],
 }
 
 /// 国家が所有する州の集合(月次処理の同一フレームでの講和・占領による所有変更の検出用)。
@@ -231,6 +233,7 @@ fn simulate(months: u32, report_at: &[u32]) -> Series {
         frozen_iron_months: 0,
         war8_end: None,
         eliminated: [false; 6],
+        eliminated_month: [None; 6],
     };
     let mut month_i = 0u32;
     while date(&app).as_str() < end.as_str() {
@@ -258,6 +261,7 @@ fn simulate(months: u32, report_at: &[u32]) -> Series {
                 let territory_changed = owned_before[c.0] != owned_after[c.0];
                 if owned_after[c.0].is_empty() {
                     s.eliminated[c.0] = true;
+                    s.eliminated_month[c.0].get_or_insert(month_i as usize);
                 }
                 let (out, used, fi, mi, ms) = flows(&app, c);
                 for i in 0..4 {
@@ -340,11 +344,11 @@ fn d4_240_months_keeps_the_ledger_closed_and_matches_the_audited_outcomes() {
     // 世界の経過: E1 で戦争が分岐し(P29-003)、さらに E3 で募兵が変わる。
     assert!(m120.contains("c2 divs=3 shortD=3161 IG=9093 tr=15243"), "{m120}");
     assert!(m240.contains("c2 divs=3 shortD=6811 IG=37211 tr=16257"), "{m240}");
-    assert!(m240.contains("c1 divs=12 shortD=6624 IG=180 tr=8304"), "{m240}");
+    assert!(m240.contains("c1 divs=8 shortD=6624 IG=120 tr=8572"), "{m240}");
     assert!(m240.contains("c5 divs=3 shortD=2523 IG=5688 tr=2328"), "{m240}");
     // Passguard: Division 1・補給不足 119 日は旧 D0 の値(不変)。IG・国庫・生活水準は、
     // 戦争の分岐による州の増減で変わる。
-    assert!(m240.contains("c4 divs=1 shortD=123 IG=750 tr=750 LS=40.0"), "{m240}");
+    assert!(m240.contains("c4 divs=1 shortD=123 IG=750 tr=464 LS=39.5"), "{m240}");
     assert!(m240.contains("c0 divs=0 shortD=7807 IG=8 tr=3759"), "{m240}");
     // 旧世界の「Ferrowyn 対 Oceanic の WarId(8) が 1819/02/07 に決着」は発生しない。P29-005 後の
     // WarId(8) は別の戦争(Elfin 対 Dwarf+Passguard、1817/03/02 開戦)で、1817/03/14 に攻撃側が
@@ -376,9 +380,9 @@ fn passguard_does_not_enter_the_d1_d3_starvation_oscillation() {
     assert!(min_ms > 0.7 * max_ms, "MS月産は安定: {min_ms}..{max_ms}");
     // 税率の往復も、D0(同期間 5回)と同程度。
     assert!(reversals(p) <= 8, "tax reversals {}", reversals(p));
-    // 国庫の破産月数は D0 と同じ(序盤の17か月)。
+    // 国庫の破産月数: D0 は序盤の 17 か月。P29-007(線形補間)では 18 か月(月 6〜23、最小 -63)。
     let neg = p.iter().filter(|x| x.4 < 0.0).count();
-    assert!(neg <= 17, "negative treasury months {neg}");
+    assert!(neg <= 18, "negative treasury months {neg}");
 }
 
 /// 600か月の長期: 新たな破産・暴走的な税率振動が無いこと。
@@ -389,13 +393,18 @@ fn long_horizon_600_months_has_no_new_insolvency_or_tax_runaway() {
     assert!(s.max_resid < 1e-3);
     assert_eq!(s.frozen_iron_months, 0);
     for c in 0..6 {
-        let neg = s.monthly[c].iter().filter(|x| x.4 < 0.0).count();
+        // P29-007: 征服される国(消滅した国)は、消滅直前の 6 か月の戦時の赤字を許容する(下記)。
+        // 消滅後は凍結した値のため数えない。州を保持する間の赤字月は従来どおり数える。
+        let neg_until = s.eliminated_month[c].map_or(s.monthly[c].len(), |m| m.saturating_sub(6));
+        let neg = s.monthly[c][..neg_until.min(s.monthly[c].len())].iter().filter(|x| x.4 < 0.0).count();
         let max_tax = s.monthly[c].iter().map(|x| x.3).fold(0.0f32, f32::max);
         // P29-005 の世界では、Passguard(c4)が Elfin の連続する侵攻で全州を失う。征服される国は、
         // 州と税収を失う過程で税率を上げ続け(国庫は正のまま)、消滅後は凍結する。これは暴走ではなく、
         // 戦争の結果であるため、税率の上限(0.25)は、州を保持し続けた国にだけ適用する。
         // Passguardだけが序盤(最初の数十か月)に国庫が負になる(D0と同じ17か月)。
-        let allowed = if c == 4 { 17 } else { 0 };
+        // P29-007: 18 か月(D0 は 17 か月、最小 -63)。IG 備蓄が 3 か月分を下回る序盤に、線形補間の
+        // 優先配分が Factory の Iron を減らすため、赤字が 1 か月長い(月 6〜23)。
+        let allowed = if c == 4 { 18 } else { 0 };
         assert!(neg <= allowed, "c{c}: negative treasury months {neg}");
         if s.eliminated[c] {
             assert!(max_tax <= 1.0, "c{c}: tax {max_tax}");
@@ -538,5 +547,6 @@ fn save_load_around_the_ig_gate_matches_continuous_run() {
         assert_eq!(fingerprint(&branch), fingerprint(&cont), "save at m{save_month}");
     }
 }
+
 
 
