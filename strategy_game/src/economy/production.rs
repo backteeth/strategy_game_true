@@ -220,6 +220,15 @@ pub struct CountryProductionOutcome {
     pub science: f64,
     pub magic: f64,
     pub military_supplies_produced: Option<f64>,
+    /// P29-009: MilitaryFactory の **Iron 未充足の要求量**(Iron/月)。労働力・物流・Iron 以外の入力
+    /// (月初の充足率と、消費前の備蓄による引き下げ)で既に制約された稼働率の上限と、実際の稼働率の
+    /// 差に、Iron の基本入力 × レベルを掛けた値。実消費だけでは見えない「供給が足りず消費も減った」
+    /// 状態を識別する観測値で、生産会計・配分には使わない。
+    pub iron_unmet_military: f64,
+    /// P29-009: Factory の Iron 未充足の要求量(同じ定義。観測用で、建設判断の需要には使わない)。
+    pub iron_unmet_other: f64,
+    /// P29-009: Mine がこの月に備蓄へ加えた Iron の量(供給能力の観測)。
+    pub iron_produced: f64,
 }
 
 /// 1つの国家が所有する州の生産・消費をまとめて一括処理する
@@ -357,6 +366,10 @@ pub fn process_country_production_with_outcome(
     // P26-003から維持する——1国家が複数州に複数のMilitaryFactoryを持つ場合でも、
     // 真に1回のcommitで確定させるため。
     let mut military_supplies_units = SuppliesUnitsAccumulation::Accumulating(0);
+    // P29-009: Iron の未充足の要求量・Mine 産出の観測(配分・会計には影響しない)。
+    let mut iron_unmet_military = 0.0f64;
+    let mut iron_unmet_other = 0.0f64;
+    let mut iron_produced = 0.0f64;
 
     // P26-DET-001-REV-001: 各州ごとの`building_operation_ratios`は、下の全州分
     // 処理が終わってから1回だけ書き戻す(ループ構造をBuildingType外側/State内側へ
@@ -442,6 +455,33 @@ pub fn process_country_production_with_outcome(
             let planned_op =
                 calculate_operation_ratio(wf_ratio, log_ratio, min_res_sat, is_bankrupt);
 
+            // P29-009: Iron を除いた入力で到達できる稼働率の上限(Iron 以外の入力の月初充足率と、
+            // 消費前の備蓄による引き下げ)。実際の稼働率との差が「Iron による未充足」。観測だけで、
+            // 以降の配分・消費には使わない。
+            let iron_free_op = if matches!(
+                b_type,
+                BuildingType::MilitaryFactory | BuildingType::Factory
+            ) && def.input_resources.contains_key(&ResourceType::Iron)
+            {
+                let mut other_sat = 1.0f32;
+                let mut other_inputs: HashMap<ResourceType, f64> = HashMap::new();
+                for (&r, &b) in &def.input_resources {
+                    if r != ResourceType::Iron {
+                        other_inputs.insert(r, b);
+                        if let Some(&s) = resource_satisfaction.get(&r) {
+                            other_sat = other_sat.min(s);
+                        }
+                    }
+                }
+                let cap = calculate_operation_ratio(wf_ratio, log_ratio, other_sat, is_bankrupt);
+                Some(
+                    limit_operation_ratio_to_stock(cap, level, &other_inputs, stockpile)
+                        .unwrap_or(0.0),
+                )
+            } else {
+                None
+            };
+
             // P28-010-IMPL-001: 原子的な入力会計。`sat`は月初備蓄を、`t`込みの需要で
             // 割った値のため、`sat < t`の月は実消費が備蓄を超え得る。この時点の備蓄で
             // 全入力を賄える最大稼働率へ引き下げ、入力が引き落とせた分だけ産出する。
@@ -457,6 +497,19 @@ pub fn process_country_production_with_outcome(
                 _ => 0.0,
             };
             op_ratios_per_state[i].insert(b_type, final_op);
+            if let Some(free_op) = iron_free_op {
+                let base_iron = def
+                    .input_resources
+                    .get(&ResourceType::Iron)
+                    .copied()
+                    .unwrap_or(0.0);
+                let unmet = base_iron * level as f64 * (free_op - final_op).max(0.0) as f64;
+                if b_type == BuildingType::MilitaryFactory {
+                    iron_unmet_military += unmet;
+                } else {
+                    iron_unmet_other += unmet;
+                }
+            }
             if final_op <= 0.0 && planned_op > 0.0 {
                 // 入力を1つも引き落とせなかったentryは産出・研究力を加算しない。
                 continue;
@@ -470,6 +523,9 @@ pub fn process_country_production_with_outcome(
                     if deposit.discovered && deposit.resource_type != ResourceType::MagicCrystal {
                         let out_amount =
                             calculate_actual_output(deposit.base_output, level, final_op);
+                        if deposit.resource_type == ResourceType::Iron {
+                            iron_produced += out_amount;
+                        }
                         stockpile.add(deposit.resource_type, out_amount);
                     }
                 }
@@ -564,6 +620,9 @@ pub fn process_country_production_with_outcome(
         science: science_total,
         magic: magic_total,
         military_supplies_produced,
+        iron_unmet_military,
+        iron_unmet_other,
+        iron_produced,
     }
 }
 

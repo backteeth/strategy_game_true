@@ -449,12 +449,11 @@ fn diag_continuing_wars_600_months() {
     assert!(!traces.values().any(|t| t.start == "1806/03/02" && t.defenders == [0]));
     assert!(!traces.values().any(|t| t.start == "1824/04/02"));
 
-    // P29-007: Oceanic(師団 0)対 Ferrowyn(1818/01/02 開戦、E1 の停滞白紙講和で 365 日後に終結)
-    // の戦争は、この世界では発生しない(終結したのではなく発生しなくなった。D4 の補間で Elfin が
-    // 師団を 8 個に抑える経過の分岐)。E1 の機能は E1 の専用テスト(P29-003)が担保しており、標準
-    // シナリオでは今回は E1 の白紙講和が発生しない。
-    assert!(!traces.values().any(|t| t.start == "1818/01/02" && t.attackers == [3] && t.defenders == [5]));
-    assert!(!traces.values().any(|t| t.end_reason.as_deref() == Some("Stalemate White Peace")));
+    // E1 は引き続き機能する: Oceanic(師団 0)対 Ferrowyn(1817/11/02 開戦)は 365 日後に白紙講和。
+    // (P29-007 の世界では発生しなかったが、P29-009 で Elfin の経過が変わり、再び発生する。)
+    let (_, w_e1) = find("1817/11/02", &[3], &[5]);
+    assert_eq!(w_e1.end.as_deref(), Some("1818/11/02"));
+    assert_eq!(w_e1.end_reason.as_deref(), Some("Stalemate White Peace"));
 
     // Elfin 対 Dwarf+Passguard(1817/03/02): 変更前の世界では 70 日分に届かず攻勢できないまま
     // 継続していた戦争。この世界では、攻勢が始まり、12 日後(1817/03/14)に防御側が降伏する。

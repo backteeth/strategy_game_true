@@ -166,6 +166,11 @@ pub struct CountryAiRegistry {
     #[serde(default)]
     pub supply_production_history:
         HashMap<CountryId, crate::military::supply_production_history::SupplyProductionHistory>,
+    /// P29-009: 建設 AI の Iron 不足認識用の履歴(MilitaryFactory の Iron 未充足の要求量、国別)。
+    /// Save V1 へは追加フィールドとして保存される(旧 Save では空 = 未集計)。
+    #[serde(default)]
+    pub iron_shortage_history:
+        HashMap<CountryId, crate::economy::iron_shortage::IronShortageHistory>,
 }
 
 impl CountryAiRegistry {
@@ -685,6 +690,173 @@ pub struct WartimeSupplyContext {
     pub daily_demand_units: u128,
 }
 
+/// P29-009: Iron の継続的なフロー不足の評価結果。呼び出し側(`process_daily_country_ai`)が、
+/// `economy::iron_shortage::IronShortageHistory`が「継続的な不足」と評価した国家についてだけ構築する。
+/// 未集計・不足なし・一時的な不足のときは構築しない(従来の判断だけが行われる)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IronSupplyContext {
+    /// 直近の窓の月平均の、MilitaryFactory の Iron 未充足の要求量(Iron/月)。
+    pub average_unmet: f64,
+}
+
+/// Mine を 1 レベル追加したときの Iron 産出の見込み(Iron/月)。州の discovered な Iron 鉱床の
+/// 基本出力の合計 × その州の Mine の記録済み稼働率(Mine が未建設・未記録なら`fallback_op`)。
+/// 月次生産の Mine 分岐(`出力 × level × 稼働率`)と同じ式の 1 レベル分。
+fn iron_mine_yield(state: &crate::state::data::StateData, fallback_op: f32) -> f64 {
+    let deposits: f64 = state
+        .resource_deposits
+        .iter()
+        .filter(|d| d.discovered && d.resource_type == ResourceType::Iron)
+        .map(|d| d.base_output)
+        .sum();
+    let op = if state.building_level(BuildingType::Mine) > 0 {
+        state
+            .building_operation_ratios
+            .get(&BuildingType::Mine)
+            .copied()
+            .unwrap_or(fallback_op)
+    } else {
+        fallback_op
+    };
+    deposits * op.clamp(0.0, 1.0) as f64
+}
+
+/// 優先度3(平時の任意開発)と同じ予備資金の要求(P27-002-A): 建設費 + 月次経常支出 × 3 か月分
+/// を国庫が満たすこと。非有限・負の値は安全側(不許可)。
+fn peacetime_reserve_satisfied(country: &CountryData, construction_cost: f64) -> bool {
+    let treasury = country.treasury;
+    let monthly_expenses = country.monthly_expenses;
+    let valid = treasury.is_finite()
+        && construction_cost.is_finite()
+        && construction_cost >= 0.0
+        && monthly_expenses.is_finite()
+        && monthly_expenses >= 0.0;
+    if !valid {
+        return false;
+    }
+    let required = construction_cost + monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
+    required.is_finite() && treasury >= required
+}
+
+/// P29-009: 履歴から、建設 AI へ渡す Iron 不足の文脈を作る。日付(`YYYY/MM/DD`)を解釈できない
+/// ・履歴が未集計・継続的な不足がない場合は`None`。国家の Mine レベル合計は、履歴の各月の値と
+/// 比較して「完成・喪失が実績に反映済みか」を判定するために使う。
+pub fn iron_supply_context(
+    history: &crate::economy::iron_shortage::IronShortageHistory,
+    current_date_str: &str,
+    country_id: CountryId,
+    state_registry: &StateRegistry,
+) -> Option<IronSupplyContext> {
+    use crate::economy::iron_shortage::IronShortageAssessment;
+    let mut parts = current_date_str.split('/');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: u8 = parts.next()?.parse().ok()?;
+    let mine_levels: u32 = state_registry
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == country_id)
+        .map(|s| s.building_level(BuildingType::Mine))
+        .sum();
+    match history.assess((year, month), mine_levels) {
+        IronShortageAssessment::Sustained { average_unmet } => {
+            Some(IronSupplyContext { average_unmet })
+        }
+        IronShortageAssessment::Unavailable | IronShortageAssessment::NoSustainedShortage => None,
+    }
+}
+
+/// P29-009: Iron の継続的な不足を補う Mine を 1 レベル着工する。着工したら`true`。
+///
+/// - 需要: MilitaryFactory の Iron 未充足の要求量の月平均(`context.average_unmet`)。
+/// - 供給の見込み: 候補州の Iron 鉱床の基本出力 × Mine の稼働率(1 レベルあたり)。
+/// - 建設中の Mine(同一更新中の先行注文を含む)の増分は、不足から差し引く(重複計上しない)。
+/// - 残りの不足が 1 レベルの見込みの半分未満なら着工しない(目標を満たした/微小な不足)。
+/// - 候補は、Iron の鉱床があり Mine が増設可能で、建設キューに同じ州の Mine がない州のうち、
+///   1 レベルあたりの Iron 見込みが最大の州(同値は StateId 最小)。
+/// - 予算は優先度3と同じ予備資金の判定。満たさなければ何も変更しない。
+fn try_iron_supply_construction(
+    country: &mut CountryData,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+    context: IronSupplyContext,
+) -> bool {
+    let Some(def) = building_registry.get(BuildingType::Mine) else {
+        return false;
+    };
+    if !context.average_unmet.is_finite() || context.average_unmet <= 0.0 {
+        return false;
+    }
+    // 稼働率が未記録の Mine の見込みには、国内の記録済み Mine 稼働率の平均(なければ 1.0)を使う。
+    let (sum, n) = owned_states
+        .iter()
+        .filter_map(|sid| state_registry.get(*sid))
+        .filter(|s| s.building_level(BuildingType::Mine) > 0)
+        .filter_map(|s| s.building_operation_ratios.get(&BuildingType::Mine).copied())
+        .fold((0.0f32, 0u32), |(a, c), v| (a + v, c + 1));
+    let fallback_op = if n > 0 { sum / n as f32 } else { 1.0 };
+
+    let mut best: Option<(StateId, f64)> = None;
+    for &sid in owned_states {
+        let in_queue = country
+            .construction_queue
+            .iter()
+            .any(|q| q.state_id == sid && q.building_type == BuildingType::Mine);
+        if in_queue {
+            continue;
+        }
+        let Some(state) = state_registry.get(sid) else {
+            continue;
+        };
+        if crate::economy::resources::is_crystal_only_state(&state.resource_deposits) {
+            continue;
+        }
+        if state.building_level(BuildingType::Mine) >= def.max_level {
+            continue;
+        }
+        let y = iron_mine_yield(state, fallback_op);
+        if y <= 0.0 {
+            continue;
+        }
+        if best.is_none_or(|(_, by)| y > by) {
+            best = Some((sid, y));
+        }
+    }
+    let Some((state_id, yield_per_level)) = best else {
+        return false;
+    };
+
+    let pending: f64 = country
+        .construction_queue
+        .iter()
+        .filter(|q| q.building_type == BuildingType::Mine)
+        .filter_map(|q| state_registry.get(q.state_id))
+        .map(|s| iron_mine_yield(s, fallback_op))
+        .sum();
+    let deficit = context.average_unmet - pending;
+    if deficit < 0.5 * yield_per_level {
+        return false;
+    }
+    if !peacetime_reserve_satisfied(country, def.construction_cost) {
+        return false;
+    }
+    let current_level = state_registry
+        .get(state_id)
+        .map(|s| s.building_level(BuildingType::Mine))
+        .unwrap_or(0);
+    country.treasury -= def.construction_cost;
+    country.construction_queue.push(ConstructionQueueItem {
+        state_id,
+        building_type: BuildingType::Mine,
+        target_level: current_level + 1,
+        progress: 0.0,
+        required_progress: def.required_progress,
+        paid_cost: def.construction_cost,
+        status: ConstructionStatus::InQueue,
+    });
+    true
+}
+
 /// この州のMilitaryFactoryが前月に実際に生産したMilitarySupplies(月産)。
 /// `economy::production::process_country_production`と同じく
 /// `出力 × level × 稼働率`で、稼働率は月次生産が書き戻した値をそのまま読む。
@@ -1025,6 +1197,31 @@ pub fn process_construction_ai_with_wartime_supply(
     ai_state: &mut CountryAiState,
     wartime_supply: Option<WartimeSupplyContext>,
 ) {
+    process_construction_ai_with_contexts(
+        country_id,
+        country_registry,
+        state_registry,
+        building_registry,
+        ai_state,
+        wartime_supply,
+        None,
+    );
+}
+
+/// `process_construction_ai_with_wartime_supply`の本体。P29-009: `iron_supply`が`Some`のとき
+/// (呼び出し側が、Iron の継続的な不足を履歴から認識できた国家についてだけ構築する)、優先度 2.7
+/// (Railway)の後・3 の前で、Iron 供給のための Mine 建設(`try_iron_supply_construction`)を
+/// 評価する。着工しなかった場合は優先度 3 へフォールスルーする(従来の判断は変わらない)。
+#[allow(clippy::too_many_arguments)]
+pub fn process_construction_ai_with_contexts(
+    country_id: CountryId,
+    country_registry: &mut CountryRegistry,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    ai_state: &mut CountryAiState,
+    wartime_supply: Option<WartimeSupplyContext>,
+    iron_supply: Option<IronSupplyContext>,
+) {
     let country = match country_registry.get_mut(country_id) {
         Some(c) => c,
         None => return,
@@ -1130,6 +1327,17 @@ pub fn process_construction_ai_with_wartime_supply(
     // P28-002が`WarInProgress`を再利用したのと同じ方針)。
     if try_logistics_railway_construction(country, state_registry, building_registry, &owned_states) {
         ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
+        return;
+    }
+
+    // 優先度2.8 (P29-009): Iron の継続的なフロー不足が履歴から認識できた場合、不足を補う Mine を
+    // 1 件建設する。着工しなかった場合(不足なし・建設中の Mine で目標を満たす・予算不足・候補なし)は、
+    // 優先度3へそのままフォールスルーする(無関係な建設判断を止めない)。判断理由は既存の
+    // `RawMaterialMinePriority`を再利用する(Save V1 の値域を広げない)。
+    if let Some(context) = iron_supply
+        && try_iron_supply_construction(country, state_registry, building_registry, &owned_states, context)
+    {
+        ai_state.decision_reason = CountryAiDecisionReason::RawMaterialMinePriority;
         return;
     }
 
@@ -1509,6 +1717,13 @@ pub fn process_daily_country_ai(
                 && (w.attackers.contains(&country_id) || w.defenders.contains(&country_id))
         });
 
+        // P29-009: 建設 AI の Iron 不足認識用の履歴(ai_state の借用の前に複製する)。
+        let iron_history = country_ai_registry
+            .iron_shortage_history
+            .get(&country_id)
+            .cloned()
+            .unwrap_or_default();
+
         let ai_state = country_ai_registry.get_or_create_mut(country_id);
 
         // 高位モードの設定
@@ -1597,13 +1812,22 @@ pub fn process_daily_country_ai(
             } else {
                 None
             };
-            process_construction_ai_with_wartime_supply(
+            // P29-009: Iron の継続的なフロー不足が履歴から認識できた国家にだけ文脈を渡す。
+            // 未集計・不足なし・一時的な不足のときは`None`(従来の判断)。
+            let iron_supply = iron_supply_context(
+                &iron_history,
+                current_date_str,
+                country_id,
+                state_registry,
+            );
+            process_construction_ai_with_contexts(
                 country_id,
                 country_registry,
                 state_registry,
                 building_registry,
                 ai_state,
                 wartime_supply,
+                iron_supply,
             );
             ai_state.last_monthly_evaluation_day = current_day;
         }

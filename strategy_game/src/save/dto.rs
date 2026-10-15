@@ -235,6 +235,10 @@ pub struct SavedCountryAiRegistry {
     #[serde(default)]
     pub supply_production_history:
         HashMap<CountryId, crate::military::supply_production_history::SupplyProductionHistory>,
+    /// P29-009: 建設 AI の Iron 不足認識用の履歴。追加フィールド(旧 Save では空 = 未集計)。
+    #[serde(default)]
+    pub iron_shortage_history:
+        HashMap<CountryId, crate::economy::iron_shortage::IronShortageHistory>,
 }
 
 /// `war::military_ai::MilitaryAiRegistry`のコンテナDTO。理由は`SavedCountryAiRegistry`と
@@ -464,6 +468,7 @@ mod tests {
             country_ai: SavedCountryAiRegistry {
                 ai_states: country_ai_states,
                 supply_production_history: Default::default(),
+                iron_shortage_history: Default::default(),
             },
             military_ai: SavedMilitaryAiRegistry {
                 ai_states: military_ai_states,
@@ -974,6 +979,7 @@ mod tests {
         let empty_country_ai = SavedCountryAiRegistry {
             ai_states: HashMap::new(),
             supply_production_history: Default::default(),
+            iron_shortage_history: Default::default(),
         };
         let empty_military_ai = SavedMilitaryAiRegistry {
             ai_states: HashMap::new(),
@@ -1019,5 +1025,23 @@ mod tests {
         let text = ron::to_string(&reg).unwrap();
         let back: SavedCountryAiRegistry = ron::from_str(&text).unwrap();
         assert_eq!(back.supply_production_history.get(&CountryId(2)), Some(&h));
+    }
+
+    /// P29-009: 建設 AI の Iron 不足の履歴は追加フィールド。旧 Save(フィールドなし)は空 = 未集計。
+    #[test]
+    fn iron_shortage_history_is_additive_and_round_trips() {
+        let old: SavedCountryAiRegistry =
+            ron::from_str("(ai_states: {})").expect("old-format RON (no history fields) must parse");
+        assert!(old.iron_shortage_history.is_empty());
+
+        let mut reg = SavedCountryAiRegistry::default();
+        let mut h = crate::economy::iron_shortage::IronShortageHistory::default();
+        h.record(1800, 12, Some(12.5), 3);
+        h.record(1801, 1, None, 3);
+        h.record(1801, 2, Some(0.0), 4);
+        reg.iron_shortage_history.insert(CountryId(1), h.clone());
+        let text = ron::to_string(&reg).unwrap();
+        let back: SavedCountryAiRegistry = ron::from_str(&text).unwrap();
+        assert_eq!(back.iron_shortage_history.get(&CountryId(1)), Some(&h));
     }
 }

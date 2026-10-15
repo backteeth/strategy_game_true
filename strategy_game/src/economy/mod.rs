@@ -1,5 +1,6 @@
 pub mod economic_state;
 pub mod finance;
+pub mod iron_shortage;
 pub mod production;
 pub mod resources;
 pub mod supply_balance;
@@ -140,6 +141,7 @@ pub fn handle_monthly_economy(
                 // P29-005: 生産を行わない国の履歴は、次に生産を再開した月から計測し直す。
                 if let Some(reg) = ai_registry.as_mut() {
                     reg.supply_production_history.remove(&country_id);
+                    reg.iron_shortage_history.remove(&country_id);
                 }
                 continue;
             }
@@ -161,6 +163,11 @@ pub fn handle_monthly_economy(
                 update_state_logistics(state, &building_registry);
             }
 
+            // P29-009: この月次生産の時点の Mine レベル合計(Iron 不足の履歴の「設備」の識別に使う)。
+            let mine_levels_total: u32 = owned_states
+                .iter()
+                .map(|s| s.building_level(crate::building::data::BuildingType::Mine))
+                .sum();
             let is_bankrupt = country.treasury < 0.0;
             let outcome = process_country_production_with_outcome(
                 &mut owned_states,
@@ -193,6 +200,22 @@ pub fn handle_monthly_economy(
                     .entry(country_id)
                     .or_default()
                     .record(event.year, event.month, units);
+            }
+
+            // P29-009: 建設 AI 用の Iron 不足の履歴(永続)。MilitaryFactory の Iron 未充足の要求量を、
+            // Mine レベル合計とともに記録する。プレイヤー国は対象外。
+            if let Some(reg) = ai_registry.as_mut()
+                && player_country.0 != Some(country_id)
+            {
+                reg.iron_shortage_history
+                    .entry(country_id)
+                    .or_default()
+                    .record(
+                        event.year,
+                        event.month,
+                        Some(outcome.iron_unmet_military),
+                        mine_levels_total,
+                    );
             }
 
             process_country_finance(country, &mut owned_states, &building_registry);
@@ -305,5 +328,6 @@ fn clear_military_supply_production_ledger(
     // ロード成功時は、Save に保存された履歴で置き換わる(旧 Save では空)。
     if let Some(mut reg) = ai_registry {
         reg.supply_production_history.clear();
+        reg.iron_shortage_history.clear();
     }
 }

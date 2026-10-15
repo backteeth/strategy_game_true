@@ -675,3 +675,45 @@ fn production_history_is_recorded_per_month_without_duplicates_and_is_saved_and_
     send_load(&mut app);
     assert_eq!(snapshot(&app), before, "Save に保存された履歴が、そのまま復元される");
 }
+
+// ── P29-009: 建設 AI の Iron 不足の履歴 ───────────────────────────────────
+
+#[test]
+fn iron_shortage_history_is_recorded_per_month_saved_loaded_and_excludes_the_player() {
+    use strategy_game::economy::iron_shortage::IRON_SHORTAGE_WINDOW;
+    let dir = TempDir(std::env::temp_dir().join(format!(
+        "strategy_game_p29_009_history_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    let mut app = setup_app(&dir.0);
+    for _ in 0..(31 + 28 + 31 + 30 + 31 + 30 + 5) {
+        advance_one_day(&mut app);
+    }
+    let snapshot = |app: &App| {
+        app.world()
+            .resource::<CountryAiRegistry>()
+            .iron_shortage_history
+            .clone()
+    };
+    let before = snapshot(&app);
+    assert!(!before.is_empty());
+    for (id, h) in &before {
+        let months: Vec<(i32, u8)> = h.samples().iter().map(|s| (s.year, s.month)).collect();
+        assert_eq!(months.len(), IRON_SHORTAGE_WINDOW, "{id:?}: 窓幅を超える古い実績を保持しない");
+        assert!(months.windows(2).all(|w| (w[1].0 * 12 + w[1].1 as i32) == (w[0].0 * 12 + w[0].1 as i32) + 1));
+        assert_eq!(*months.last().unwrap(), (1800, 7));
+        assert!(h.samples().iter().all(|s| s.unmet_milli.is_some()));
+    }
+    assert!(!before.contains_key(&CountryId(4)), "プレイヤー国は対象外");
+    send_save(&mut app);
+    for _ in 0..60 {
+        advance_one_day(&mut app);
+    }
+    assert_ne!(snapshot(&app), before);
+    send_load(&mut app);
+    assert_eq!(snapshot(&app), before, "Save に保存された履歴が、そのまま復元される");
+}

@@ -344,7 +344,7 @@ fn d4_240_months_keeps_the_ledger_closed_and_matches_the_audited_outcomes() {
     // 世界の経過: E1 で戦争が分岐し(P29-003)、さらに E3 で募兵が変わる。
     assert!(m120.contains("c2 divs=3 shortD=3161 IG=9093 tr=15243"), "{m120}");
     assert!(m240.contains("c2 divs=3 shortD=6811 IG=37211 tr=16257"), "{m240}");
-    assert!(m240.contains("c1 divs=8 shortD=6624 IG=120 tr=8572"), "{m240}");
+    assert!(m240.contains("c1 divs=12 shortD=6624 IG=1628 tr=9149"), "{m240}");
     assert!(m240.contains("c5 divs=3 shortD=2523 IG=5688 tr=2328"), "{m240}");
     // Passguard: Division 1・補給不足 119 日は旧 D0 の値(不変)。IG・国庫・生活水準は、
     // 戦争の分岐による州の増減で変わる。
@@ -425,9 +425,12 @@ fn long_horizon_600_months_has_no_new_insolvency_or_tax_runaway() {
     // P28-010 が検出対象とした崩壊型(振幅の大きい振動・破産・暴走)ではない。回数の上限は 110 へ
     // 緩め、代わりに「Elfin の振幅が 0.01 以内(m338 以降)・国庫が非負」を直接検査する。
     assert!(rev[1] <= 110 && rev[5] <= 10 && rev[0] <= 6, "{rev:?}");
+    // P29-009(Iron 不足を反映する建設 AI)後の世界: Elfin の税率は 0.13〜0.15 の間の単発の段階的な変更
+    // (600 か月で 13 回、反転 6 回、国庫の最小 2499)に落ち着き、P29-005 後の 0.12/0.13 の往復
+    // (反転 101 回)は消える。帯幅の上限は 0.02、国庫は常に正を維持する。
     let tail: Vec<f32> = s.monthly[1][338..].iter().map(|x| x.3).collect();
     let (lo, hi) = tail.iter().fold((f32::MAX, f32::MIN), |(l, h), &t| (l.min(t), h.max(t)));
-    assert!(hi - lo <= 0.01 + 1e-6, "Elfin tax band {lo}..{hi}");
+    assert!(hi - lo <= 0.02 + 1e-6, "Elfin tax band {lo}..{hi}");
     assert!(s.monthly[1].iter().all(|x| x.4 > 0.0), "Elfin treasury must stay positive");
     for c in 0..6 {
         let max_step = s.monthly[c]
@@ -547,6 +550,7 @@ fn save_load_around_the_ig_gate_matches_continuous_run() {
         assert_eq!(fingerprint(&branch), fingerprint(&cont), "save at m{save_month}");
     }
 }
+
 
 
 
