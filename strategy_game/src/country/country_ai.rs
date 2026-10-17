@@ -742,6 +742,224 @@ fn peacetime_reserve_satisfied(country: &CountryData, construction_cost: f64) ->
     required.is_finite() && treasury >= required
 }
 
+/// P30-002: 軍需基盤の再建の入力。`military_rebuild_context`が、再建需要の認識の条件(AI 国家は
+/// 呼び出し側が保証)のうち、戦力・軍需基盤・履歴に関する条件をすべて満たすと認めた国家にだけ作る。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MilitaryRebuildContext {
+    /// 既存の軍備目標(目標師団数、`calculate_ai_target_divisions`)。
+    pub target_divisions: u64,
+    /// 現在の戦力(生存師団 + 募兵キュー)。目標より小さい。
+    pub current_force: u64,
+    /// P29-005 の履歴(連続 4 か月)の、月平均の実産出(units/月)。
+    pub average_production_units: u128,
+}
+
+/// P30-002: 再建需要の認識(戦力・軍需基盤・履歴の条件)。すべて満たすときだけ`Some`。
+///
+/// 1. 戦力が既存の軍備目標に対して未達: 生存師団 + 募兵キュー < `calculate_ai_target_divisions`
+///    (現在の補給消費量が 0 でも、師団 0 でも、目標から認識する)。
+/// 2. 所有する MilitaryFactory のレベル合計が 0(「過去に持っていた」履歴は参照しない。初期から
+///    ない仮想ケースにも同じ条件が成立する)。
+/// 3. P29-005 の生産履歴が、判断月を最後とする連続 4 か月分ある(旧 Save・New Game 直後は
+///    4 か月の再観測まで保留)。
+///
+/// 補給備蓄が募兵条件未満であることは、再建の禁止条件にしない(平時でも評価する)。
+pub fn military_rebuild_context(
+    country: &CountryData,
+    state_registry: &StateRegistry,
+    military_registry: &MilitaryRegistry,
+    history: &crate::military::supply_production_history::SupplyProductionHistory,
+    current_date_str: &str,
+) -> Option<MilitaryRebuildContext> {
+    let mut parts = current_date_str.split('/');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: u8 = parts.next()?.parse().ok()?;
+    let average_production_units = history.average_units((year, month))?;
+
+    let owned: Vec<&crate::state::data::StateData> = state_registry
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == country.id)
+        .collect();
+    let mf_levels: u32 = owned
+        .iter()
+        .map(|s| s.building_level(BuildingType::MilitaryFactory))
+        .sum();
+    if mf_levels > 0 {
+        return None;
+    }
+
+    let def = military_registry
+        .definitions
+        .get(&crate::military::data::STANDARD_INFANTRY_DEFINITION_ID)?;
+    let population: u64 = owned.iter().map(|s| s.population).sum();
+    let cap = crate::population::growth::compute_manpower_cap(population);
+    let target_divisions =
+        crate::military::ai::calculate_ai_target_divisions(cap, def.required_manpower);
+    let living = military_registry
+        .divisions
+        .values()
+        .filter(|d| d.owner == country.id && crate::military::supply_initialization::is_living(d))
+        .count() as u64;
+    let current_force = living + country.recruitment_queue.len() as u64;
+    if current_force >= target_divisions {
+        return None;
+    }
+    Some(MilitaryRebuildContext {
+        target_divisions,
+        current_force,
+        average_production_units,
+    })
+}
+
+/// P30-002: 軍需基盤の再建: MilitaryFactory lv1 を 1 件着工する。着工したら`true`。
+/// `false`のときは国庫・建設キューを一切変更しない。
+///
+/// 着工条件(`military_rebuild_context`の条件に加えて、すべて):
+/// 1. MilitaryFactory が建設キューにない(建設中・同一更新の先行注文の重複なし)。
+/// 2. 建設先は、所有かつ支配する陸上州のうち、既存の増産見込み(`projected_military_factory_supply_gain`)が
+///    **正で最大**の州(同値は StateId 最小)。見込みが 0 以下の州は選ばない。
+/// 3. **国内供給の見込み**(下記): 新しい工場が見込みの稼働率で動くときの Iron・IG の月間入力を、
+///    国内の**稼働中の供給源の実績**で賄える。有限の初期備蓄だけは供給源として扱わない。
+/// 4. 予算: 国庫 ≥ 建設費 + 月次経常支出 × 3 か月分(優先度 3 と同じ予備資金規則)。
+///
+/// ## 国内供給の定義
+/// - **Iron の供給源**: 国が所有する州の discovered な Iron 鉱床 × その州の Mine レベル × Mine の
+///   **記録済みの稼働率**(月次生産の Mine 分岐と同じ式。未記録は 0 = 未集計は保留)の合計(Iron/月)。
+///   「鉱床がある」だけ・「備蓄が残っている」だけでは供給源としない(Mine が稼働している実績が必要)。
+/// - **IG の供給源**: 国が所有する州の Factory の IG 出力 × レベル × 記録済みの稼働率(実績の月間 IG 産出)。
+///   Factory の稼働実績は、その Iron・Coal の入力が国内で継続供給されていることの観測でもある
+///   (IG 備蓄だけは供給源としない)。
+/// - 必要量: MilitaryFactory の基本入力(Iron・IG)× **見込みの稼働率**(増産見込み ÷ MilitarySupplies の
+///   基本出力)。Iron・IG 以外の入力を要求する定義は(判断できないため)保留する。
+/// - 新しい Mine・Factory の建設計画や交易は追加しない。前提が整っていなければ着工せず保留する。
+///
+/// 正の産出があることと、師団を持続的に維持できることは区別する(1 個の月需要に満たない見込みの
+/// 場合も着工するが、診断では`military_rebuild_gain_units`で別に評価する)。
+fn try_military_rebuild_construction(
+    country: &mut CountryData,
+    state_registry: &StateRegistry,
+    building_registry: &crate::building::data::BuildingRegistry,
+    owned_states: &[StateId],
+    _context: MilitaryRebuildContext,
+) -> bool {
+    let Some(def) = building_registry.get(BuildingType::MilitaryFactory) else {
+        return false;
+    };
+    if country
+        .construction_queue
+        .iter()
+        .any(|q| q.building_type == BuildingType::MilitaryFactory)
+    {
+        return false;
+    }
+    let Some(&ms_output) = def.output_resources.get(&ResourceType::MilitarySupplies) else {
+        return false;
+    };
+    if ms_output <= 0.0 {
+        return false;
+    }
+
+    // 建設先: 増産見込みが正で最大の州。
+    let mut best: Option<(f64, StateId)> = None;
+    for &sid in owned_states {
+        let Some(state) = state_registry.get(sid) else {
+            continue;
+        };
+        if state.building_level(BuildingType::MilitaryFactory) != 0 {
+            continue;
+        }
+        let Some(gain) = projected_military_factory_supply_gain(state, def, building_registry) else {
+            continue;
+        };
+        if gain > 0.0 && best.is_none_or(|(g, _)| gain > g) {
+            best = Some((gain, sid));
+        }
+    }
+    let Some((gain, state_id)) = best else {
+        return false;
+    };
+    let projected_op = (gain / ms_output).clamp(0.0, 1.0);
+
+    // 国内供給(稼働中の供給源の実績)。
+    let mut iron_supply = 0.0f64;
+    let mut ig_supply = 0.0f64;
+    let factory_ig_output = building_registry
+        .get(BuildingType::Factory)
+        .and_then(|d| d.output_resources.get(&ResourceType::IndustrialGoods))
+        .copied()
+        .unwrap_or(0.0);
+    for state in state_registry
+        .states
+        .iter()
+        .filter(|s| s.owner_country_id == country.id)
+    {
+        let mine_level = state.building_level(BuildingType::Mine);
+        if mine_level > 0 {
+            let op = state
+                .building_operation_ratios
+                .get(&BuildingType::Mine)
+                .copied()
+                .unwrap_or(0.0);
+            let deposits: f64 = state
+                .resource_deposits
+                .iter()
+                .filter(|d| d.discovered && d.resource_type == ResourceType::Iron)
+                .map(|d| d.base_output)
+                .sum();
+            iron_supply += deposits * f64::from(mine_level) * f64::from(op.clamp(0.0, 1.0));
+        }
+        let factory_level = state.building_level(BuildingType::Factory);
+        if factory_level > 0 {
+            let op = state
+                .building_operation_ratios
+                .get(&BuildingType::Factory)
+                .copied()
+                .unwrap_or(0.0);
+            ig_supply += factory_ig_output * f64::from(factory_level) * f64::from(op.clamp(0.0, 1.0));
+        }
+    }
+    for (&resource, &base_input) in &def.input_resources {
+        let need = base_input * projected_op;
+        let supply = match resource {
+            ResourceType::Iron => iron_supply,
+            ResourceType::IndustrialGoods => ig_supply,
+            // 判断できない入力は、供給を確認できないものとして保留する。
+            _ => return false,
+        };
+        if supply.is_nan() || supply < need || !supply.is_finite() {
+            return false;
+        }
+    }
+
+    if !peacetime_reserve_satisfied(country, def.construction_cost) {
+        return false;
+    }
+    country.treasury -= def.construction_cost;
+    country.construction_queue.push(ConstructionQueueItem {
+        state_id,
+        building_type: BuildingType::MilitaryFactory,
+        target_level: 1,
+        progress: 0.0,
+        required_progress: def.required_progress,
+        paid_cost: def.construction_cost,
+        status: ConstructionStatus::InQueue,
+    });
+    true
+}
+
+/// P30-002(診断・テスト用): 候補の MilitaryFactory lv1 の月産の見込み(units/月、
+/// `military_supplies_value_to_units`の整数)を返す。1 個の師団の月需要(`ceil(日次需要 × 365 / 12)`)
+/// と比べて、「正の産出」と「師団を持続的に維持できること」を区別するために使う。
+pub fn military_rebuild_gain_units(
+    state: &crate::state::data::StateData,
+    building_registry: &crate::building::data::BuildingRegistry,
+) -> Option<u64> {
+    let def = building_registry.get(BuildingType::MilitaryFactory)?;
+    let gain = projected_military_factory_supply_gain(state, def, building_registry)?;
+    crate::economy::resources::military_supplies_value_to_units(gain.max(0.0)).ok()
+}
+
 /// P29-010: Factory の増設を抑止するか。日付(`YYYY/MM/DD`)を解釈できない・Factory がない
 /// (初回建設)・履歴が不足/古い・設備署名が現在と異なる(完成・増設・所有者変更の直後)・
 /// 全 entry が条件を満たさない場合は`false`(従来の建設判断)。
@@ -1240,6 +1458,7 @@ pub fn process_construction_ai_with_wartime_supply(
         wartime_supply,
         None,
         false,
+        None,
     );
 }
 
@@ -1257,6 +1476,7 @@ pub fn process_construction_ai_with_contexts(
     wartime_supply: Option<WartimeSupplyContext>,
     iron_supply: Option<IronSupplyContext>,
     factory_expansion_blocked: bool,
+    military_rebuild: Option<MilitaryRebuildContext>,
 ) {
     let country = match country_registry.get_mut(country_id) {
         Some(c) => c,
@@ -1379,6 +1599,23 @@ pub fn process_construction_ai_with_contexts(
         && try_iron_supply_construction(country, state_registry, building_registry, &owned_states, context)
     {
         ai_state.decision_reason = CountryAiDecisionReason::RawMaterialMinePriority;
+        return;
+    }
+
+    // 優先度2.9 (P30-002): 軍需基盤(MilitaryFactory)を失った・持たない国家で、国内で Iron・IG を
+    // 継続供給できる見込みがあるとき、最初の MilitaryFactory lv1 を 1 件建設する。条件を満たさない
+    // (供給源なし・予備資金不足・候補なし・建設中)場合は何も変更せず、優先度3へフォールスルーする。
+    // 判断理由は既存の`PeacetimeDevelopment`を再利用する(Save V1 の値域を広げない)。
+    if let Some(context) = military_rebuild
+        && try_military_rebuild_construction(
+            country,
+            state_registry,
+            building_registry,
+            &owned_states,
+            context,
+        )
+    {
+        ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
         return;
     }
 
@@ -1780,6 +2017,12 @@ pub fn process_daily_country_ai(
             .get(&country_id)
             .cloned()
             .unwrap_or_default();
+        // P30-002: 軍需基盤の再建用に、P29-005 の生産履歴(同上)。
+        let supply_history = country_ai_registry
+            .supply_production_history
+            .get(&country_id)
+            .cloned()
+            .unwrap_or_default();
 
         let ai_state = country_ai_registry.get_or_create_mut(country_id);
 
@@ -1891,6 +2134,16 @@ pub fn process_daily_country_ai(
                     country_id,
                     state_registry,
                 ),
+                // P30-002: 軍需基盤の再建の入力(MilitaryFactory なし・戦力が目標未達・履歴 4 か月)。
+                country_registry.get(country_id).and_then(|c| {
+                    military_rebuild_context(
+                        c,
+                        state_registry,
+                        military_registry,
+                        &supply_history,
+                        current_date_str,
+                    )
+                }),
             );
             ai_state.last_monthly_evaluation_day = current_day;
         }
