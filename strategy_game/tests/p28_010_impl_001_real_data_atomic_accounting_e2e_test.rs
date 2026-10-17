@@ -331,8 +331,12 @@ fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     // 120 か月で Division 3(旧 16)。Iron は枯渇せず(2323)、D4 の優先配分が成立する局面自体が
     // 現れない。Passguard は変わらない(下の検査。FIX1 が入力引落しの失敗の無い国を変えない
     // という本テストの目的はこちらで維持される)。
-    assert!(row.contains("c2 divs=3 shortD=3161 Iron=2319 Coal=4156 IG=9093"), "Dwarf: {row}");
-    assert!(row.contains("tr=15243"), "Dwarf treasury: {row}");
+    // P31-002(M1: 両陣営に師団がある停滞戦争の合意白紙講和)で戦争の経過が変わり(世界の分岐、報告書
+    // p31-002 §7)、m120 の Dwarf を Division 3→4・shortD 3161→1837・Iron 2319→507・Coal 4156→2539・
+    // IG 9093→10172・国庫 15243→20043 へ更新した。Passguard は不変(本テストの目的である、入力引落しの
+    // 失敗の無い国を変えないことは維持される)。
+    assert!(row.contains("c2 divs=4 shortD=1837 Iron=507 Coal=2539 IG=10172"), "Dwarf: {row}");
+    assert!(row.contains("tr=20043"), "Dwarf treasury: {row}");
     assert!(row.contains("c4 divs=1 shortD=119 Iron=38 Coal=2897 IG=14"), "Passguard: {row}");
     assert!(row.contains("tr=802"), "Passguard treasury: {row}");
 }

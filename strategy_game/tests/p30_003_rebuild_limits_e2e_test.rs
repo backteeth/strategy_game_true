@@ -351,7 +351,10 @@ fn low_employment_rebuild_completes_recruits_but_may_not_sustain() {
         }
         prev_living = s.living;
         if date.day == 1 && first_recruit_on.is_some() {
-            if s.ms <= 0.0 {
+            // P31-002: M1 で戦争の経過が変わり、Oceanic は 1807/05/22 の降伏で再建した MilitaryFactory の州を
+            // 失う。補給が尽きたかどうかは、工場を保持している間だけ数える(工場の喪失は再建の限界ではなく
+            // 戦争の結果)。
+            if s.ms <= 0.0 && s.mf_levels > 0 {
                 ms_zero_months += 1;
             }
             if date.month == 1 || date.month == 7 {

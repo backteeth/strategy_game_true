@@ -707,6 +707,17 @@ fn run_six_country_36_month_scenario() -> (App, std::collections::HashMap<Countr
     (app, series)
 }
 
+/// 月の通し番号(1 始まり)を、実在する暦(年・月 1〜12)へ変換する。
+///
+/// 従来の簡略暦は月番号をそのまま(13〜60 を含む)メッセージの月として使っていたが、P31-002 で
+/// 長期停滞の白紙講和(休戦期間の日付計算)がこの経路で発動し、存在しない月(例 "1800/54/12")の
+/// 日付計算が範囲外参照になった。消費を追跡する経路だけ、実在する暦を使う(月の長さ 30 日・
+/// 日次の網羅性は従来のまま)。
+fn valid_calendar(month_index: u8) -> (i32, u8) {
+    let zero_based = month_index.saturating_sub(1);
+    (1800 + (zero_based / 12) as i32, zero_based % 12 + 1)
+}
+
 /// P26-004: `advance_one_month`と同じ日次+月次ティックを行いながら、指定した国家群の
 /// MilitarySupplies日次消費量(day-tickだけを挟んだ前後の減少量、この合成harnessでは
 /// `tick_day`は`DayChangedMessage`のみ・`tick_month`は`MonthChangedMessage`のみを
@@ -724,14 +735,16 @@ fn advance_one_month_tracking_supply_consumption(
             .iter()
             .map(|&c| (c, stockpile_of(app, c, ResourceType::MilitarySupplies)))
             .collect();
-        tick_day(app, 1800, current_month_index, day);
+        let (year, month) = valid_calendar(current_month_index);
+        tick_day(app, year, month, day);
         for &c in tracked {
             let after = stockpile_of(app, c, ResourceType::MilitarySupplies);
             let delta = (before[&c] - after).max(0.0);
             *consumed.entry(c).or_insert(0.0) += delta;
         }
     }
-    tick_month(app, 1800, current_month_index.wrapping_add(1));
+    let (next_year, next_month) = valid_calendar(current_month_index.wrapping_add(1));
+    tick_month(app, next_year, next_month);
 }
 
 /// P26-004: `run_six_country_36_month_scenario`と同じ6か国36か月シナリオを実行しながら、

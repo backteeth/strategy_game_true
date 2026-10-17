@@ -6,7 +6,21 @@
 //! (ISS-1・ISS-2、診断報告書 §4.4)。本モジュールは、その停滞した戦争だけを、既存の
 //! 白紙講和 API(`execute_peace_settlement`、`settle_capitulation` 経由)で終結させる。
 //!
-//! ## 停滞の定義(すべてを満たす戦争だけが対象)
+//! ## M1(P31-002): 両陣営に師団がある停滞戦争の合意白紙講和
+//!
+//! E1 は「一方の陣営に師団がない」戦争だけが対象で、双方が武装した戦力拮抗の停滞は終わらなかった
+//! (P31-001 の診断)。M1 は E1 と**同じ停滞記録(`WarStalemateRecord`)を共有する別の分岐**で、
+//! 新しい永続状態を持たない。E1 の条件・期間・結果は変更しない(E1 の判定関数は両陣営が武装している
+//! 戦争で常に`false`を返すため、E1 と M1 は排他的)。
+//!
+//! M1 の成立条件(すべて): E1 と同じ適格判定(AI 同士・戦争目標あり)、進展のない期間が
+//! [`STALEMATE_MUTUAL_WHITE_PEACE_DAYS`](730 日)以上、両陣営(支持国を含む)に生存師団がある、
+//! 生存師団を持つ全参加国に軍事 AI の判断記録がある(未観測を「意思なし」と扱わない)、双方に攻勢の意思が
+//! ない([`side_has_attack_intent`])、この戦争に帰属する占領・戦争目標の達成がない
+//! ([`war_has_occupation_or_goal_achieved`])、既存の白紙講和の受諾判定が両方向で通る。
+//! 終結理由は[`MUTUAL_STALEMATE_END_REASON`]で E1 と区別する。
+//!
+//! ## 停滞の定義(E1: すべてを満たす戦争だけが対象)
 //!
 //! 1. **長期間、実際の軍事的進展がない**: 進展の署名(`progress_signature`)が
 //!    [`STALEMATE_WHITE_PEACE_DAYS`] 日間変化せず、その間に進行中の戦闘もない。
@@ -48,6 +62,33 @@ pub const STALEMATE_WHITE_PEACE_DAYS: i32 = 365;
 
 /// 停滞による白紙講和の`end_reason`(P28-007 の`"Frontline Unreachable"`等と区別する)。
 pub const STALEMATE_END_REASON: &str = "Stalemate White Peace";
+
+/// P31-002(M1): 両陣営に師団がある戦争の合意白紙講和に必要な、軍事的進展のない期間(ゲーム内日数)。
+/// E1 の 2 倍。根拠は「判断→建設→生産→備蓄の橋渡し→募兵」の AI の回復の連鎖の 2 回分で、
+/// 武装した双方が戦力を回復・増強できる戦争に、少なくとも 2 回の機会が結果を生まなかったことを要求する
+/// (P31-001 §5-3)。標準シナリオの戦争件数に合わせた値ではない。
+pub const STALEMATE_MUTUAL_WHITE_PEACE_DAYS: i32 = 730;
+
+/// M1(双方武装停滞の合意白紙講和)の`end_reason`。E1 の[`STALEMATE_END_REASON`]と区別する。
+pub const MUTUAL_STALEMATE_END_REASON: &str = "Mutual Stalemate White Peace";
+
+/// 停滞による白紙講和の種別(終結理由の識別に使う)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StalemateKind {
+    /// E1(P29-003): 一方の陣営に師団がない。
+    OneSidePowerless,
+    /// M1(P31-002): 両陣営に師団があり、双方に攻勢の意思がない。
+    MutualArmed,
+}
+
+impl StalemateKind {
+    pub fn end_reason(self) -> &'static str {
+        match self {
+            StalemateKind::OneSidePowerless => STALEMATE_END_REASON,
+            StalemateKind::MutualArmed => MUTUAL_STALEMATE_END_REASON,
+        }
+    }
+}
 
 /// 1 つの戦争の停滞期間の計測状態(永続化対象)。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,7 +226,119 @@ pub fn is_one_side_powerless_and_other_cannot_attack(
     true
 }
 
+/// M1: `side`のいずれかの国が、いま攻勢の意思を持つか。E1 の`armed_side_is_active`
+/// (移動中・戦闘中・退却中・占領中の師団、Offensive 計画、`SufficientAdvantage` 判断)に加えて、
+/// 直近判断が`SupplyShortage`で、記録済みの戦力比が攻勢の開始条件(own × 1000 ≥ enemy × 1100)を
+/// 満たす国も、補給が回復すれば攻勢に移る陣営として「意思あり」とみなす。
+/// 開始条件の倍率は`evaluate_military_ai_decision`と同じ値を読むだけで、変更しない。
+fn side_has_attack_intent(
+    war: &War,
+    side: &HashSet<CountryId>,
+    military: &MilitaryRegistry,
+    frontlines: &FrontlineRegistry,
+    ai: &MilitaryAiRegistry,
+) -> bool {
+    if armed_side_is_active(war, side, military, frontlines, Some(ai)) {
+        return true;
+    }
+    side.iter().any(|c| {
+        ai.ai_states.get(c).is_some_and(|s| {
+            s.last_decision_reason == MilitaryAiDecisionReason::SupplyShortage
+                && (s.estimated_own_power as u128) * 1000 >= (s.estimated_enemy_power as u128) * 1100
+        })
+    })
+}
+
+/// M1: 生存師団を持つ参加国のすべてに、軍事 AI の判断記録があるか。記録がない、または既定値の
+/// `NoActiveWar`(まだ一度も評価されていない)の国は、攻勢の意思を判断できないため保留にする
+/// (「未観測」を根拠なく「意思なし」と扱わない)。師団を持たない参加国は攻勢できないので対象外。
+fn all_armed_participants_have_a_decision(
+    war: &War,
+    military: &MilitaryRegistry,
+    ai: &MilitaryAiRegistry,
+) -> bool {
+    participants(war).iter().all(|c| {
+        let armed = military
+            .divisions
+            .values()
+            .any(|d| d.owner == *c && d.manpower > 0 && d.status != DivisionStatus::Destroyed);
+        !armed
+            || ai
+                .ai_states
+                .get(c)
+                .is_some_and(|s| s.last_decision_reason != MilitaryAiDecisionReason::NoActiveWar)
+    })
+}
+
+/// M1: この戦争に帰属する占領または戦争目標の達成があるか。
+///
+/// 占領モデル(`military::invasion::occupy_state`は`controller_country`だけを書き、`state.war_id`は
+/// 本番で設定されない)に従い、P28-008 の終結時の正規化と同じ帰属規則を使う: 陸の州で、所有国と
+/// 支配国が異なり、かつ両者がこの戦争の参加国である。加えて、`war.occupied_states`が空でないこと、
+/// 戦争目標の州を攻撃側が(所有せず)支配していることも「成果あり」とする。
+/// **通常の領土要求(戦争目標があるだけ)は係争に数えない**。
+fn war_has_occupation_or_goal_achieved(war: &War, state_registry: &StateRegistry) -> bool {
+    if !war.occupied_states.is_empty() {
+        return true;
+    }
+    let who = participants(war);
+    let occupation = state_registry.states.iter().any(|s| {
+        !s.is_sea
+            && s.owner_country_id != s.controller()
+            && who.contains(&s.owner_country_id)
+            && who.contains(&s.controller())
+    });
+    if occupation {
+        return true;
+    }
+    war.war_goals.iter().flat_map(|g| g.target_states.iter()).any(|id| {
+        state_registry.get(*id).is_some_and(|s| {
+            !war.attackers.contains(&s.owner_country_id) && war.attackers.contains(&s.controller())
+        })
+    })
+}
+
+/// M1: 双方の受諾(攻撃側→防御側、防御側→攻撃側のどちらの白紙講和提案も受諾される)の合成。
+/// 片方向でも失敗すれば不成立。
+fn agreed_by_both(
+    attacker: CountryId,
+    defender: CountryId,
+    accepts: impl Fn(CountryId, CountryId) -> bool,
+) -> bool {
+    accepts(attacker, defender) && accepts(defender, attacker)
+}
+
+/// M1(P31-002)の停滞条件(進展のない期間は呼び出し側が確認済みの前提)。
+/// 両陣営(支持国を含む)に生存師団があり、双方に攻勢の意思がなく、判断が観測済みで、
+/// 占領・戦争目標の達成がない。受諾判定は呼び出し側が行う。
+pub fn is_mutual_stalemate(
+    war: &War,
+    state_registry: &StateRegistry,
+    military: &MilitaryRegistry,
+    frontlines: &FrontlineRegistry,
+    ai: Option<&MilitaryAiRegistry>,
+) -> bool {
+    let Some(ai) = ai else { return false };
+    let attackers: HashSet<CountryId> = war.attackers.iter().copied().collect();
+    let defenders: HashSet<CountryId> = war.defenders.iter().copied().collect();
+    if !(side_has_living_division(&attackers, military)
+        && side_has_living_division(&defenders, military))
+    {
+        return false;
+    }
+    if !all_armed_participants_have_a_decision(war, military, ai) {
+        return false;
+    }
+    if side_has_attack_intent(war, &attackers, military, frontlines, ai)
+        || side_has_attack_intent(war, &defenders, military, frontlines, ai)
+    {
+        return false;
+    }
+    !war_has_occupation_or_goal_achieved(war, state_registry)
+}
+
 /// 毎日 1 回、全 Active War の停滞期間を更新し、白紙講和にすべき戦争の ID(昇順)を返す。
+/// E1・M1 のどちらで終結するかは[`update_stalemate_records_with_kind`]を参照(本関数は ID のみ)。
 ///
 /// - 記録の無い戦争(新規・古い Save)は、今日を起点として記録する(即時満了にしない)。
 /// - 進展があった(署名の変化・進行中の戦闘)日に起点をリセットする。
@@ -205,6 +358,40 @@ pub fn update_stalemate_records(
     player: Option<CountryId>,
     today: &str,
 ) -> Vec<WarId> {
+    update_stalemate_records_with_kind(
+        war_registry,
+        state_registry,
+        military_registry,
+        battle_registry,
+        frontline_registry,
+        country_registry,
+        ai_registry,
+        player,
+        today,
+    )
+    .into_iter()
+    .map(|(id, _)| id)
+    .collect()
+}
+
+/// [`update_stalemate_records`]と同じ評価を行い、終結する戦争を種別(E1 / M1)つきで返す。
+///
+/// 評価順序(戦争ごと): 適格判定(AI のみ・戦争目標あり)→ 進展の署名・進行中の戦闘による起点の
+/// 更新(E1・M1 で共通の記録)→ 365 日以上で E1(一方が無力)を評価 → E1 でなければ 730 日以上で
+/// M1(両陣営が武装)を評価 → 既存の白紙講和の受諾判定(M1 は両方向)。E1 の条件・期間・結果は
+/// M1 の導入前と同一(M1 は E1 が不成立の戦争にだけ働く)。
+#[allow(clippy::too_many_arguments)]
+pub fn update_stalemate_records_with_kind(
+    war_registry: &mut WarRegistry,
+    state_registry: &StateRegistry,
+    military_registry: &MilitaryRegistry,
+    battle_registry: &BattleRegistry,
+    frontline_registry: &FrontlineRegistry,
+    country_registry: &CountryRegistry,
+    ai_registry: Option<&MilitaryAiRegistry>,
+    player: Option<CountryId>,
+    today: &str,
+) -> Vec<(WarId, StalemateKind)> {
     let Some(today_date) = crate::app::time::GameDate::from_string(today) else {
         return Vec::new();
     };
@@ -267,38 +454,60 @@ pub fn update_stalemate_records(
             );
             continue;
         };
-        if today_date.days_since(&last) < STALEMATE_WHITE_PEACE_DAYS {
+        let days = today_date.days_since(&last);
+        if days < STALEMATE_WHITE_PEACE_DAYS {
             continue;
         }
 
         let war = &war_registry.wars[&id];
-        if !is_one_side_powerless_and_other_cannot_attack(
+        // E1(一方が無力)。両陣営に師団がある戦争では常に false なので、M1 とは排他的。
+        let kind = if is_one_side_powerless_and_other_cannot_attack(
             war,
             military_registry,
             frontline_registry,
             ai_registry,
         ) {
-            continue;
-        }
-        // 陣営の代表国どうしの白紙講和提案として、既存の受諾判定を通す。
-        let offer = PeaceOffer {
-            war_id: id,
-            proposer_country_id: war.primary_attacker_id(),
-            recipient_country_id: war.primary_defender_id(),
-            term: PeaceTerm::WhitePeace,
-            created_date: today.to_string(),
-        };
-        if can_accept_peace_offer(
-            &offer,
-            war_registry,
-            Some(state_registry),
-            Some(military_registry),
-            Some(country_registry),
-            today,
-        )
-        .is_ok()
+            StalemateKind::OneSidePowerless
+        } else if days >= STALEMATE_MUTUAL_WHITE_PEACE_DAYS
+            && is_mutual_stalemate(
+                war,
+                state_registry,
+                military_registry,
+                frontline_registry,
+                ai_registry,
+            )
         {
-            to_settle.push(id);
+            StalemateKind::MutualArmed
+        } else {
+            continue;
+        };
+        // 陣営の代表国どうしの白紙講和提案として、既存の受諾判定を通す。M1 は双方の受諾が
+        // 必要なので、両方向で通ることを要求する(E1 は従来どおり攻撃側→防御側のみ)。
+        let accepts = |proposer: CountryId, recipient: CountryId| {
+            let offer = PeaceOffer {
+                war_id: id,
+                proposer_country_id: proposer,
+                recipient_country_id: recipient,
+                term: PeaceTerm::WhitePeace,
+                created_date: today.to_string(),
+            };
+            can_accept_peace_offer(
+                &offer,
+                war_registry,
+                Some(state_registry),
+                Some(military_registry),
+                Some(country_registry),
+                today,
+            )
+            .is_ok()
+        };
+        let (a, d) = (war.primary_attacker_id(), war.primary_defender_id());
+        let agreed = match kind {
+            StalemateKind::OneSidePowerless => accepts(a, d),
+            StalemateKind::MutualArmed => agreed_by_both(a, d, accepts),
+        };
+        if agreed {
+            to_settle.push((id, kind));
         }
     }
     to_settle
@@ -520,7 +729,7 @@ mod tests {
         assert!(run(&mut e, "1802/06/01", None).is_empty());
         assert!(run(&mut e, "1802/06/02", None).is_empty());
         e.battles.battles.clear();
-        assert!(run(&mut e, "1802/06/03", None).is_empty(), "戦闘終了日が新しい起点");
+        assert!(run(&mut e, "1802/06/03", None).is_empty(), "戦闘が最後にあった日が起点");
         assert_eq!(run(&mut e, "1803/06/03", None), vec![WID]);
     }
 
@@ -694,5 +903,385 @@ mod tests {
         let text = ron::to_string(&saved).unwrap();
         let back: crate::save::dto::SavedWarRegistry = ron::from_str(&text).unwrap();
         assert_eq!(back.stalemate, saved.stalemate);
+    }
+
+    // ─── P31-002: M1(両陣営に師団がある戦争の合意白紙講和) ───────────────────────
+
+    const START: &str = "1800/01/15";
+    const DAY_729: &str = "1802/01/14";
+    const DAY_730: &str = "1802/01/15";
+
+    fn observe(e: &mut Env, c: CountryId, reason: MilitaryAiDecisionReason) {
+        let mut st = MilitaryAiState::new(c);
+        st.last_decision_reason = reason;
+        e.ai.ai_states.insert(c, st);
+    }
+
+    /// 両陣営に Idle の師団があり、双方の軍事 AI の直近判断が攻勢に至らない。
+    fn arm_both(e: &mut Env) {
+        e.military.add_division(division(0, ATT, DivisionStatus::Idle));
+        e.military.add_division(division(1, DEF, DivisionStatus::Idle));
+        observe(e, ATT, MilitaryAiDecisionReason::ComparableStrength);
+        observe(e, DEF, MilitaryAiDecisionReason::EnemyStronger);
+    }
+
+    fn run_kind(e: &mut Env, today: &str, player: Option<CountryId>) -> Vec<(WarId, StalemateKind)> {
+        update_stalemate_records_with_kind(
+            &mut e.wars,
+            &e.states,
+            &e.military,
+            &e.battles,
+            &e.frontlines,
+            &e.countries,
+            Some(&e.ai),
+            player,
+            today,
+        )
+    }
+
+    /// 起点を記録した上で、730 日後(`DAY_730`)の評価結果を返す。
+    fn m1_after_the_period(e: &mut Env) -> Vec<(WarId, StalemateKind)> {
+        assert!(run_kind(e, START, None).is_empty());
+        run_kind(e, DAY_730, None)
+    }
+
+    #[test]
+    fn m1_is_not_settled_at_729_days_and_is_settled_at_730_days() {
+        assert_eq!(STALEMATE_MUTUAL_WHITE_PEACE_DAYS, 730);
+        let mut e = env();
+        arm_both(&mut e);
+        assert!(run_kind(&mut e, START, None).is_empty(), "起点の日は満了にしない");
+        assert!(run_kind(&mut e, "1801/01/15", None).is_empty(), "365 日(E1 の期間)では成立しない");
+        assert!(run_kind(&mut e, DAY_729, None).is_empty(), "729 日");
+        assert_eq!(
+            run_kind(&mut e, DAY_730, None),
+            vec![(WID, StalemateKind::MutualArmed)],
+            "730 日"
+        );
+        assert_eq!(StalemateKind::MutualArmed.end_reason(), "Mutual Stalemate White Peace");
+        assert_eq!(StalemateKind::OneSidePowerless.end_reason(), "Stalemate White Peace");
+    }
+
+    #[test]
+    fn m1_period_is_reset_by_a_battle_result_and_an_ongoing_battle() {
+        let mut e = env();
+        arm_both(&mut e);
+        run_kind(&mut e, START, None);
+        e.wars.wars.get_mut(&WID).unwrap().won_defender_battles = 1;
+        assert!(run_kind(&mut e, "1800/06/15", None).is_empty(), "戦闘結果で起点が 1800/06/15 になる");
+        assert!(run_kind(&mut e, "1802/06/14", None).is_empty(), "起点から 729 日");
+        assert_eq!(run_kind(&mut e, "1802/06/15", None), vec![(WID, StalemateKind::MutualArmed)]);
+
+        let mut e = env();
+        arm_both(&mut e);
+        run_kind(&mut e, START, None);
+        let battle = crate::military::battle::Battle {
+            id: crate::common::BattleId(0),
+            war_id: WID,
+            state_id: StateId(1),
+            attacker_country: ATT,
+            defender_country: DEF,
+            attacker_division_ids: vec![],
+            defender_division_ids: vec![],
+            attacker_origins: Default::default(),
+            start_date: "1800/12/01".to_string(),
+            elapsed_days: 0,
+            status: BattleStatus::Ongoing,
+        };
+        e.battles.battles.insert(battle.id, battle);
+        assert!(run_kind(&mut e, "1803/06/15", None).is_empty(), "進行中の戦闘がある間は毎日リセット");
+        e.battles.battles.clear();
+        assert!(run_kind(&mut e, "1803/06/16", None).is_empty(), "戦闘が最後にあった日が起点");
+        assert!(run_kind(&mut e, "1805/06/14", None).is_empty(), "起点(戦闘が最後にあった 1803/06/15)から 729 日");
+        assert_eq!(run_kind(&mut e, "1805/06/15", None), vec![(WID, StalemateKind::MutualArmed)]);
+    }
+
+    #[test]
+    fn m1_is_excluded_while_either_side_is_moving_fighting_retreating_or_occupying() {
+        for status in [
+            DivisionStatus::Moving,
+            DivisionStatus::Fighting,
+            DivisionStatus::Retreating,
+            DivisionStatus::Occupying,
+        ] {
+            for owner in [ATT, DEF, ATT_SUPPORT] {
+                let mut e = env();
+                arm_both(&mut e);
+                e.military.add_division(division(2, owner, status));
+                observe(&mut e, ATT_SUPPORT, MilitaryAiDecisionReason::ComparableStrength);
+                assert!(m1_after_the_period(&mut e).is_empty(), "{owner:?} {status:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn m1_is_excluded_by_an_offensive_plan_or_an_attack_intent_of_either_side_or_a_supporter() {
+        let front = |e: &mut Env| {
+            e.frontlines.frontlines.insert(
+                FrontlineId(0),
+                Frontline {
+                    frontline_id: FrontlineId(0),
+                    war_id: WID,
+                    attacker_country_id: ATT,
+                    defender_country_id: DEF,
+                    attacker_front_regions: vec![StateId(0)],
+                    defender_front_regions: vec![StateId(1)],
+                    border_region_pairs: vec![(StateId(0), StateId(1))],
+                },
+            );
+        };
+        // Offensive 計画(攻撃側・防御側・支持国のどれでも)。
+        for commander in [ATT, DEF, ATT_SUPPORT] {
+            let mut e = env();
+            arm_both(&mut e);
+            front(&mut e);
+            let mut plan = FrontlinePlan::new(FrontlineId(0), commander);
+            plan.stance = FrontlineStance::Offensive;
+            e.frontlines.plans.insert((FrontlineId(0), commander), plan);
+            assert!(m1_after_the_period(&mut e).is_empty(), "Offensive {commander:?}");
+        }
+        // 防御姿勢なら対象。
+        let mut e = env();
+        arm_both(&mut e);
+        front(&mut e);
+        let mut plan = FrontlinePlan::new(FrontlineId(0), ATT);
+        plan.stance = FrontlineStance::Defend;
+        e.frontlines.plans.insert((FrontlineId(0), ATT), plan);
+        assert_eq!(m1_after_the_period(&mut e).len(), 1);
+        // SufficientAdvantage(攻撃側・防御側・支持国)。
+        for c in [ATT, DEF, ATT_SUPPORT] {
+            let mut e = env();
+            arm_both(&mut e);
+            observe(&mut e, c, MilitaryAiDecisionReason::SufficientAdvantage);
+            assert!(m1_after_the_period(&mut e).is_empty(), "SufficientAdvantage {c:?}");
+        }
+    }
+
+    #[test]
+    fn m1_treats_supply_shortage_with_a_favourable_ratio_as_an_attack_intent() {
+        // 補給が回復すれば攻勢に移る陣営(戦力比が開始条件 1.10 以上)は「意思あり」。
+        let mut e = env();
+        arm_both(&mut e);
+        observe(&mut e, ATT, MilitaryAiDecisionReason::SupplyShortage);
+        {
+            let s = e.ai.ai_states.get_mut(&ATT).unwrap();
+            s.estimated_own_power = 22_000;
+            s.estimated_enemy_power = 20_000;
+        }
+        assert!(m1_after_the_period(&mut e).is_empty(), "比 1.10 ちょうど");
+        // 開始条件に届かない戦力比なら、補給不足は攻勢の意思ではない。
+        let mut e = env();
+        arm_both(&mut e);
+        observe(&mut e, ATT, MilitaryAiDecisionReason::SupplyShortage);
+        {
+            let s = e.ai.ai_states.get_mut(&ATT).unwrap();
+            s.estimated_own_power = 21_999;
+            s.estimated_enemy_power = 20_000;
+        }
+        assert_eq!(m1_after_the_period(&mut e).len(), 1);
+    }
+
+    #[test]
+    fn m1_requires_both_sides_including_supporters_to_have_divisions() {
+        // 片側だけが武装 → M1 ではなく E1 の分岐(365 日で終結、種別 E1)。
+        let mut e = env();
+        e.military.add_division(division(0, ATT, DivisionStatus::Idle));
+        run_kind(&mut e, START, None);
+        assert_eq!(
+            run_kind(&mut e, "1801/01/15", None),
+            vec![(WID, StalemateKind::OneSidePowerless)]
+        );
+        // 支持国だけが武装している陣営も「武装」と数え、両陣営が武装なら M1。
+        let mut e = env();
+        e.military.add_division(division(0, ATT_SUPPORT, DivisionStatus::Idle));
+        e.military.add_division(division(1, DEF, DivisionStatus::Idle));
+        observe(&mut e, ATT_SUPPORT, MilitaryAiDecisionReason::ComparableStrength);
+        observe(&mut e, DEF, MilitaryAiDecisionReason::ComparableStrength);
+        assert_eq!(m1_after_the_period(&mut e), vec![(WID, StalemateKind::MutualArmed)]);
+        // 防御側の支持国だけが武装 + 攻撃側が武装。
+        let mut e = env();
+        e.wars.wars.get_mut(&WID).unwrap().defenders.insert(CountryId(3));
+        e.military.add_division(division(0, ATT, DivisionStatus::Idle));
+        e.military.add_division(division(1, CountryId(3), DivisionStatus::Idle));
+        observe(&mut e, ATT, MilitaryAiDecisionReason::ComparableStrength);
+        observe(&mut e, CountryId(3), MilitaryAiDecisionReason::EnemyStronger);
+        assert_eq!(m1_after_the_period(&mut e).len(), 1);
+        // 両陣営とも師団なしは E1(M1 ではない)。
+        let mut e = env();
+        run_kind(&mut e, START, None);
+        assert_eq!(
+            run_kind(&mut e, "1801/01/15", None),
+            vec![(WID, StalemateKind::OneSidePowerless)]
+        );
+    }
+
+    #[test]
+    fn m1_does_not_treat_a_missing_or_unevaluated_military_ai_decision_as_no_intent() {
+        // 軍事 AI の記録そのものがない(旧 Save・ロード直後)。
+        let mut e = env();
+        e.military.add_division(division(0, ATT, DivisionStatus::Idle));
+        e.military.add_division(division(1, DEF, DivisionStatus::Idle));
+        assert!(m1_after_the_period(&mut e).is_empty(), "記録なし");
+        // 片方だけ未観測。
+        let mut e = env();
+        arm_both(&mut e);
+        e.ai.ai_states.remove(&DEF);
+        assert!(m1_after_the_period(&mut e).is_empty(), "防御側が未観測");
+        // 既定値(NoActiveWar = まだ一度も評価されていない)。
+        let mut e = env();
+        arm_both(&mut e);
+        observe(&mut e, ATT, MilitaryAiDecisionReason::NoActiveWar);
+        assert!(m1_after_the_period(&mut e).is_empty(), "NoActiveWar は未評価");
+        // 師団を持つ支持国が未観測。
+        let mut e = env();
+        arm_both(&mut e);
+        e.military.add_division(division(2, ATT_SUPPORT, DivisionStatus::Idle));
+        assert!(m1_after_the_period(&mut e).is_empty(), "武装した支持国が未観測");
+        // 師団を持たない支持国は、記録がなくても攻勢できないので判断を妨げない。
+        let mut e = env();
+        arm_both(&mut e);
+        assert!(!e.ai.ai_states.contains_key(&ATT_SUPPORT));
+        assert_eq!(m1_after_the_period(&mut e).len(), 1);
+        // 軍事 AI レジストリ自体が渡されない場合も成立しない。
+        let mut e = env();
+        arm_both(&mut e);
+        run_kind(&mut e, START, None);
+        let none = update_stalemate_records_with_kind(
+            &mut e.wars,
+            &e.states,
+            &e.military,
+            &e.battles,
+            &e.frontlines,
+            &e.countries,
+            None,
+            None,
+            DAY_730,
+        );
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn m1_is_excluded_by_an_occupation_or_a_war_goal_achievement_but_not_by_a_mere_claim() {
+        // 通常の領土要求(戦争目標があるだけ)は係争ではない: 基本ケースは成立する(上のテスト)。
+        // 占領(所有国≠支配国で、両者がこの戦争の参加国): 防御側による攻撃側の州の占領。
+        let mut e = env();
+        arm_both(&mut e);
+        run_kind(&mut e, START, None);
+        e.states.get_mut(StateId(0)).unwrap().controller_country = Some(DEF);
+        assert!(run_kind(&mut e, "1800/02/15", None).is_empty());
+        assert!(run_kind(&mut e, "1802/02/15", None).is_empty(), "防御側による占領");
+        // 戦争目標の州(StateId(1))を攻撃側が支配している。
+        let mut e = env();
+        arm_both(&mut e);
+        run_kind(&mut e, START, None);
+        e.states.get_mut(StateId(1)).unwrap().controller_country = Some(ATT);
+        assert!(run_kind(&mut e, "1800/02/15", None).is_empty());
+        assert!(run_kind(&mut e, "1802/02/15", None).is_empty(), "戦争目標の達成");
+        // war.occupied_states が空でない。
+        let mut e = env();
+        arm_both(&mut e);
+        e.wars.wars.get_mut(&WID).unwrap().occupied_states.insert(StateId(1));
+        run_kind(&mut e, START, None);
+        assert!(run_kind(&mut e, DAY_730, None).is_empty());
+        // 戦争の参加国でない国の州を参加国が支配している(この戦争の占領ではない)場合、
+        // 起点はその支配変更でリセットされるが、期間満了後は成立する。
+        let mut e = env();
+        arm_both(&mut e);
+        e.states = StateRegistry::build(vec![
+            StateData { id: StateId(0), owner_country_id: ATT, ..Default::default() },
+            StateData { id: StateId(1), owner_country_id: DEF, ..Default::default() },
+            StateData { id: StateId(2), owner_country_id: CountryId(9), ..Default::default() },
+        ]);
+        run_kind(&mut e, START, None);
+        e.states.get_mut(StateId(2)).unwrap().controller_country = Some(ATT);
+        assert!(run_kind(&mut e, "1800/03/15", None).is_empty(), "進展としてリセット");
+        assert_eq!(
+            run_kind(&mut e, "1802/03/15", None),
+            vec![(WID, StalemateKind::MutualArmed)],
+            "参加国でない国の領土の支配は、この戦争の占領ではない"
+        );
+    }
+
+    #[test]
+    fn m1_requires_the_existing_white_peace_acceptance_in_both_directions() {
+        // 既存の受諾判定(戦勝点 -10 以上)を通らない戦争は成立しない。
+        let mut e = env();
+        arm_both(&mut e);
+        e.wars.wars.get_mut(&WID).unwrap().war_score = -50.0;
+        assert!(m1_after_the_period(&mut e).is_empty());
+        // 双方の受諾の合成: 片方向でも失敗すれば不成立。
+        assert!(agreed_by_both(ATT, DEF, |_, _| true));
+        assert!(!agreed_by_both(ATT, DEF, |p, _| p != ATT), "攻撃側→防御側が失敗");
+        assert!(!agreed_by_both(ATT, DEF, |p, _| p != DEF), "防御側→攻撃側が失敗");
+    }
+
+    #[test]
+    fn m1_excludes_player_wars_and_wars_without_goals() {
+        for player in [ATT, DEF, ATT_SUPPORT] {
+            let mut e = env();
+            arm_both(&mut e);
+            run_kind(&mut e, START, Some(player));
+            assert!(e.wars.stalemate_records.is_empty(), "{player:?}");
+            assert!(run_kind(&mut e, DAY_730, Some(player)).is_empty());
+        }
+        let mut e = env();
+        arm_both(&mut e);
+        e.wars.wars.get_mut(&WID).unwrap().war_goals.clear();
+        assert!(m1_after_the_period(&mut e).is_empty());
+    }
+
+    #[test]
+    fn m1_allows_settlement_right_after_an_attack_intent_has_disappeared() {
+        // P31-002 の仕様: 実際の進展が 730 日なく、現在の全条件を満たすなら、攻勢の意思が消えた
+        // 直後でも許可する(猶予状態は持たない)。
+        let mut e = env();
+        arm_both(&mut e);
+        run_kind(&mut e, START, None);
+        observe(&mut e, ATT, MilitaryAiDecisionReason::SufficientAdvantage);
+        assert!(run_kind(&mut e, DAY_729, None).is_empty());
+        assert!(run_kind(&mut e, DAY_730, None).is_empty(), "意思がある日は成立しない");
+        observe(&mut e, ATT, MilitaryAiDecisionReason::ComparableStrength);
+        assert_eq!(
+            run_kind(&mut e, "1802/01/16", None),
+            vec![(WID, StalemateKind::MutualArmed)],
+            "意思が消えた翌日に成立する"
+        );
+    }
+
+    #[test]
+    fn m1_returns_only_the_stalled_war_and_other_wars_are_untouched() {
+        let mut e = env();
+        arm_both(&mut e);
+        let other = WarId(8);
+        let mut w = war(other, "1800/01/01");
+        w.attackers = [CountryId(5)].into_iter().collect();
+        w.defenders = [CountryId(6)].into_iter().collect();
+        w.primary_attacker = Some(CountryId(5));
+        w.primary_defender = Some(CountryId(6));
+        e.wars.wars.insert(other, w);
+        e.military.add_division(division(2, CountryId(5), DivisionStatus::Idle));
+        e.military.add_division(division(3, CountryId(6), DivisionStatus::Moving));
+        observe(&mut e, CountryId(5), MilitaryAiDecisionReason::ComparableStrength);
+        observe(&mut e, CountryId(6), MilitaryAiDecisionReason::ComparableStrength);
+        assert_eq!(m1_after_the_period(&mut e), vec![(WID, StalemateKind::MutualArmed)]);
+        // 終結した戦争の記録は削除され、他の戦争の記録は残る。
+        e.wars.wars.get_mut(&WID).unwrap().status = WarStatus::WhitePeace;
+        run_kind(&mut e, "1802/01/16", None);
+        assert!(!e.wars.stalemate_records.contains_key(&WID));
+        assert!(e.wars.stalemate_records.contains_key(&other));
+        // 終結済みの戦争は再評価されない(二重終結しない)。
+        assert!(run_kind(&mut e, "1804/01/16", None).iter().all(|(id, _)| *id != WID));
+    }
+
+    #[test]
+    fn e1_still_settles_a_one_sided_war_at_365_days_with_its_own_reason() {
+        let mut e = env();
+        e.military.add_division(division(0, ATT, DivisionStatus::Idle));
+        run_kind(&mut e, START, None);
+        assert!(run_kind(&mut e, "1801/01/14", None).is_empty());
+        assert_eq!(
+            run_kind(&mut e, "1801/01/15", None),
+            vec![(WID, StalemateKind::OneSidePowerless)]
+        );
     }
 }

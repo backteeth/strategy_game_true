@@ -407,7 +407,15 @@ fn diag_even_force_stalemate_war() {
     }
     println!("END {} id={:?}", date(&app), war_id);
     assert!(war_id.is_some(), "対象戦争が標準シナリオで宣戦される");
-    // 仕様 M1 の条件(両陣営の攻勢不能・領土の係争なし)は、進展のない期間が 730 日に達した日に成立している。
-    assert!(first_m1_ready.is_some(), "M1 の条件が成立する");
+    // P31-002(M1)の導入後: 診断の予測(M1 の条件が進展のない期間 730 日に達する 1803/07/02)どおりに、
+    // 対象戦争がその日に合意白紙講和で終結する(診断の制御ログは、終結した日のループで止まる)。
+    // 戦闘・支配変更の進展は一度もなかった。
+    let id = war_id.unwrap();
+    {
+        let w = &app.world().resource::<WarRegistry>().wars[&id];
+        assert_eq!(w.status, WarStatus::WhitePeace);
+        assert_eq!(w.end_date.as_deref(), Some("1803/07/02"));
+        assert_eq!(w.end_reason.as_deref(), Some("Mutual Stalemate White Peace"));
+    }
     assert!(last_change_day.is_empty(), "戦闘・支配変更の進展が一度もない");
 }

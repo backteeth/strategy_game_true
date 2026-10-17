@@ -449,36 +449,47 @@ fn diag_continuing_wars_600_months() {
     assert!(!traces.values().any(|t| t.start == "1806/03/02" && t.defenders == [0]));
     assert!(!traces.values().any(|t| t.start == "1824/04/02"));
 
-    // E1 は引き続き機能する: Oceanic(師団 0)対 Ferrowyn(1817/11/02 開戦)は 365 日後に白紙講和。
-    // (P29-007 の世界では発生しなかったが、P29-009 で Elfin の経過が変わり、再び発生する。)
-    let (_, w_e1) = find("1817/11/02", &[3], &[5]);
-    assert_eq!(w_e1.end.as_deref(), Some("1818/11/02"));
-    assert_eq!(w_e1.end_reason.as_deref(), Some("Stalemate White Peace"));
-
-    // Elfin 対 Dwarf+Passguard(1817/03/02): 変更前の世界では 70 日分に届かず攻勢できないまま
-    // 継続していた戦争。この世界では、攻勢が始まり、12 日後(1817/03/14)に防御側が降伏する。
-    // (世界の分岐を含むため、因果は特定していない。攻勢開始日と降伏の記録のみを固定する。)
-    let (_, w_supply) = find("1817/03/02", &[1], &[2, 4]);
-    assert_eq!(w_supply.end.as_deref(), Some("1817/03/13"));
-    assert_eq!(w_supply.end_reason.as_deref(), Some("Defender Capitulation"));
-    assert!(w_supply.offensive_days > 0);
-
-    // 残る継続戦争 1 件: Dwarf 対 Ferrowyn(1801/07/02)。補給ゲートではなく戦力比
-    // (EnemyStronger / ComparableStrength)で攻勢しない(E1 の対象外、戦力拮抗の停滞は未解決)。
-    assert_eq!(still_active.len(), 1);
+    // P31-002(M1: 両陣営に師団がある停滞戦争の合意白紙講和)後の世界の記録。E1(一方が無力)は
+    // 引き続き 365 日で、M1(双方武装)は 730 日で、いずれも既存の白紙講和で終結する。
+    // 世界は分岐し、この 600 か月では継続する戦争がなくなる(結果であり、合格条件ではない)。
+    let m1 = "Mutual Stalemate White Peace";
+    let e1 = "Stalemate White Peace";
+    // E1: 引き続き機能する(365 日)。
+    let (_, w_e1a) = find("1806/06/22", &[5], &[0]);
+    assert_eq!(w_e1a.end.as_deref(), Some("1807/06/22"));
+    assert_eq!(w_e1a.end_reason.as_deref(), Some(e1));
+    let (_, w_e1b) = find("1808/04/27", &[0], &[1]);
+    assert_eq!(w_e1b.end.as_deref(), Some("1809/04/27"));
+    assert_eq!(w_e1b.end_reason.as_deref(), Some(e1));
+    // M1: Dwarf 対 Ferrowyn(1801/07/02、P31-001 の対象戦争)は、診断で予測した 1803/07/02(進展のない
+    // 期間 730 日)に終結する。戦闘・攻勢は一度もなかった。
     let (_, w_mutual) = find("1801/07/02", &[2], &[5]);
+    assert_eq!(w_mutual.end.as_deref(), Some("1803/07/02"));
+    assert_eq!(w_mutual.end_reason.as_deref(), Some(m1));
     assert_eq!(w_mutual.offensive_days, 0);
     assert_eq!(w_mutual.blocked_days, 0);
-    assert!(w_mutual.max_days_cover > 1000.0);
-    assert!(
-        w_mutual.reasons.get("EnemyStronger").copied().unwrap_or(0)
-            + w_mutual.reasons.get("ComparableStrength").copied().unwrap_or(0)
-            > 17_000
-    );
+    // Elfin 対 Arcadia(1801/04/27)も 730 日後に M1 で終結する(変更前は 3,872 日続いて降伏)。
+    let (_, w_m1b) = find("1801/04/27", &[1], &[0]);
+    assert_eq!(w_m1b.end.as_deref(), Some("1803/04/27"));
+    assert_eq!(w_m1b.end_reason.as_deref(), Some(m1));
+    // Passguard 対 Arcadia(1801/04/30)は、期間の途中で進展(当事国が関わる別の戦争の支配変更)が
+    // あり、730 日より後の 1806/05/03 に M1 で終結する(日付だけを合わせていない: 起点の更新による)。
+    let (_, w_m1c) = find("1801/04/30", &[4], &[0]);
+    assert_eq!(w_m1c.end.as_deref(), Some("1806/05/03"));
+    assert_eq!(w_m1c.end_reason.as_deref(), Some(m1));
+    let count = |reason: &str| {
+        traces
+            .values()
+            .filter(|t| t.end_reason.as_deref() == Some(reason))
+            .count()
+    };
+    assert_eq!(count(m1), 3);
+    assert_eq!(count(e1), 2);
+    assert!(still_active.is_empty(), "継続中の戦争: {still_active:?}");
 
-    // 募兵の抑止: Dwarf は生産能力を超える師団(旧 16)を持たない。
+    // 募兵の抑止(E3): Dwarf は月産が月需要を賄える範囲の師団数。
     let dwarf = supply_row(&app, DWARF);
-    assert_eq!(dwarf.divisions, 3);
+    assert_eq!(dwarf.divisions, 16);
     assert!(dwarf.produced.unwrap() >= dwarf.demand * 30.4);
     let _ = std::fs::remove_dir_all(dir);
 }

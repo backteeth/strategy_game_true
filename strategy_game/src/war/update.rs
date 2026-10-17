@@ -288,7 +288,9 @@ pub fn handle_daily_war_resolution(
         // (停滞期間の更新は Active War のみを対象にするため、ここで改めて取得し直される)。
         // 条件の詳細は`crate::war::stalemate`。講和は既存の`settle_capitulation`
         // (`execute_peace_settlement`、領土移転なしの白紙講和)で行う。
-        let stalemate_war_ids = crate::war::stalemate::update_stalemate_records(
+        // P31-002: 両陣営に師団がある戦争の合意白紙講和(M1)も同じ記録を共有する別分岐で、
+        // 終結理由(`Mutual Stalemate White Peace`)で E1 と区別する。
+        let stalemate_war_ids = crate::war::stalemate::update_stalemate_records_with_kind(
             &mut war_registry,
             &state_registry,
             &military_registry,
@@ -299,11 +301,15 @@ pub fn handle_daily_war_resolution(
             player_country.0,
             &current_date_str,
         );
-        for war_id in stalemate_war_ids {
+        for (war_id, kind) in stalemate_war_ids {
+            bevy::log::info!(
+                "[StalemateWhitePeace] {war_id:?} settling on {current_date_str}: {}",
+                kind.end_reason()
+            );
             let outcome = settle_capitulation(
                 war_id,
                 crate::war::peace::PeaceTerm::WhitePeace,
-                crate::war::stalemate::STALEMATE_END_REASON,
+                kind.end_reason(),
                 &current_date_str,
                 &mut state_registry,
                 &mut war_registry,
