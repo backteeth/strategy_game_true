@@ -27,24 +27,28 @@ fn parse(s: &str) -> Result<HexMap, HexMapError> {
 
 #[test]
 fn real_map_counts_and_attributes() {
+    // P32-002: 修正版JSONへ差し替わるため件数は固定せず、生JSONから独立に集計して照合する。
     let m = real();
-    assert_eq!(m.cells().len(), 96_760);
-    assert_eq!(m.rivers().len(), 3_297);
+    let raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(DEFAULT_MAP_PATH).unwrap()).unwrap();
+    let cells = raw["cells"].as_array().unwrap();
+    assert_eq!(m.cells().len(), cells.len());
+    assert_eq!(m.rivers().len(), raw["rivers"].as_array().unwrap().len());
     let c = m.attribute_counts();
-    let t = |x: Terrain| c.terrain[Terrain::ALL.iter().position(|y| *y == x).unwrap()];
-    assert_eq!(t(Terrain::Sea), 62_055);
-    assert_eq!(t(Terrain::Lake), 194);
-    assert_eq!(t(Terrain::Plains), 17_276);
-    assert_eq!(t(Terrain::Hills), 7_553);
-    assert_eq!(t(Terrain::Plateau), 4_793);
-    assert_eq!(t(Terrain::Highland), 2_997);
-    assert_eq!(t(Terrain::Mountain), 1_892);
-    assert_eq!(t(Terrain::Unclassified), 0);
-    assert_eq!(c.climate, [4_996, 7_523, 11_686, 8_337, 1_945, 62_273]);
-    assert_eq!(c.vegetation, [4_355, 5_886, 17_487, 5_529, 63_503]);
-    assert_eq!(c.land_cells, 34_511);
-    assert_eq!(c.land_climate_unclassified, 24);
-    assert_eq!(c.land_vegetation_unclassified, 1_254);
+    for (i, t) in Terrain::ALL.iter().enumerate() {
+        let n = cells.iter().filter(|x| x["terrain"] == t.id()).count();
+        assert_eq!(c.terrain[i], n, "terrain {}", t.id());
+    }
+    for (i, t) in Climate::ALL.iter().enumerate() {
+        let n = cells.iter().filter(|x| x["climate"] == t.id()).count();
+        assert_eq!(c.climate[i], n, "climate {}", t.id());
+    }
+    for (i, t) in Vegetation::ALL.iter().enumerate() {
+        let n = cells.iter().filter(|x| x["vegetation"] == t.id()).count();
+        assert_eq!(c.vegetation[i], n, "vegetation {}", t.id());
+    }
+    assert_eq!(c.terrain.iter().sum::<usize>(), cells.len());
+    assert_eq!(c.land_cells, cells.len() - c.terrain[0] - c.terrain[1]);
 }
 
 #[test]

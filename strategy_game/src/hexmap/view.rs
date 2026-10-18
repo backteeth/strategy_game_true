@@ -8,8 +8,8 @@
 use super::data::{self, Climate, HexMap, Terrain, Vegetation};
 use super::geometry::{pick_cell_world, world_bounds};
 use super::render::{
-    self, HexViewMode, build_fill_mesh, build_grid_mesh, build_ring_mesh, plan_chunks,
-    vertex_colors,
+    self, HexViewMode, build_fill_mesh, build_grid_mesh, build_ring_mesh, build_river_mesh,
+    plan_chunks, vertex_colors,
 };
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -59,6 +59,10 @@ struct ModeButton(HexViewMode);
 struct FitButton;
 #[derive(Component)]
 struct GridButton;
+#[derive(Component)]
+struct RiverButton;
+#[derive(Component)]
+pub struct RiverLayer;
 
 /// 読み込み済みマップ。確認画面を閉じると破棄する。
 #[derive(Resource)]
@@ -72,6 +76,7 @@ pub struct HexLoadError(pub String);
 pub struct HexViewSettings {
     pub mode: HexViewMode,
     pub grid_enabled: bool,
+    pub rivers_enabled: bool,
 }
 
 /// 選択中セルの配列インデックス(`LoadedHexMap`のインスタンス寿命の間のみ有効)。
@@ -86,6 +91,9 @@ pub struct HexLoadStats {
     pub cells: usize,
     pub chunks: usize,
     pub rivers: usize,
+    /// 正規化後の河川の辺(描画本数)。
+    pub river_edges: usize,
+    pub river_edges_open_border: usize,
     pub mesh_assets: usize,
     pub spawned_entities: usize,
 }
@@ -119,6 +127,10 @@ struct SharedHandles {
     ring_mesh: Handle<Mesh>,
     halo_mesh: Handle<Mesh>,
     last_ring: Option<(Option<u32>, i32)>,
+    river_mesh: Handle<Mesh>,
+    casing_mesh: Handle<Mesh>,
+    last_river_level: Option<i32>,
+    river_rebuilds: usize,
 }
 
 type SelectionMarkers = Or<(With<SelectionHalo>, With<SelectionRing>)>;
@@ -154,6 +166,7 @@ impl Plugin for HexPreviewPlugin {
                     clamp_camera,
                     sync_mode,
                     sync_grid_visibility,
+                    sync_rivers,
                     sync_selection_visual,
                     update_texts,
                 )
@@ -231,6 +244,18 @@ pub fn zoom_about_cursor(cursor: Vec2, window: Vec2, cam_pos: Vec2, old: f32, ne
     anchor - ndc * window * 0.5 * new
 }
 
+/// ズーム段階(scaleを2^0.5刻みに量子化)。
+pub fn river_zoom_level(scale: f32) -> i32 {
+    (scale.max(1e-6).log2() * 2.0).round() as i32
+}
+
+/// 段階ごとの河川の線幅(ワールド単位)。画面上でおよそ1.6pxを保ち、
+/// 遠景ではセル一辺の4割(0.4・size)で頭打ちにして地図を覆わない。
+pub fn river_width(size: f32, level: i32) -> f32 {
+    let scale = 2f32.powf(level as f32 / 2.0);
+    (1.6 * scale).min(0.4 * size)
+}
+
 /// 選択枠の半径(ワールド)。ズームしても約3px幅を保つ。
 fn ring_thickness(size: f32, scale: f32) -> f32 {
     (3.0 * scale).max(size * 0.12)
@@ -271,6 +296,7 @@ fn enter_preview(
     let settings = HexViewSettings {
         mode: HexViewMode::Terrain,
         grid_enabled: true,
+        rivers_enabled: true,
     };
     let t1 = Instant::now();
     let chunks = plan_chunks(&map);
@@ -322,8 +348,27 @@ fn enter_preview(
         SelectionRing,
         HexPreviewEntity,
     ));
-    spawned += 2;
-    mesh_count += 2;
+    // 河川(縁取り+本体)。メッシュはズーム段階が変わった時だけ作り直す。
+    let river_mat = materials.add(ColorMaterial::from(Color::srgb(0.25, 0.75, 1.0)));
+    let casing_mat = materials.add(ColorMaterial::from(Color::srgb(0.02, 0.08, 0.2)));
+    let river_mesh = meshes.add(build_river_mesh(&map, 0.0));
+    let casing_mesh = meshes.add(build_river_mesh(&map, 0.0));
+    commands.spawn((
+        Mesh2d(casing_mesh.clone()),
+        MeshMaterial2d(casing_mat),
+        Transform::from_xyz(0.0, 0.0, 1.5),
+        RiverLayer,
+        HexPreviewEntity,
+    ));
+    commands.spawn((
+        Mesh2d(river_mesh.clone()),
+        MeshMaterial2d(river_mat),
+        Transform::from_xyz(0.0, 0.0, 1.6),
+        RiverLayer,
+        HexPreviewEntity,
+    ));
+    spawned += 4;
+    mesh_count += 4;
     let mesh_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
     let stats = HexLoadStats {
@@ -332,6 +377,12 @@ fn enter_preview(
         cells: map.cells().len(),
         chunks: chunks.len(),
         rivers: map.rivers().len(),
+        river_edges: map.river_edges().len(),
+        river_edges_open_border: map
+            .river_edges()
+            .iter()
+            .filter(|e| !e.neighbor_exists)
+            .count(),
         mesh_assets: mesh_count,
         spawned_entities: spawned,
     };
@@ -352,6 +403,10 @@ fn enter_preview(
         ring_mesh,
         halo_mesh,
         last_ring: None,
+        river_mesh,
+        casing_mesh,
+        last_river_level: None,
+        river_rebuilds: 0,
     });
     commands.insert_resource(stats);
     commands.insert_resource(settings);
@@ -441,6 +496,7 @@ fn spawn_ui(commands: &mut Commands) {
             }
             p.spawn(button_bundle(FitButton, "全体表示 (Home)"));
             p.spawn(button_bundle(GridButton, "境界線 切替 (G)"));
+            p.spawn(button_bundle(RiverButton, "河川 表示切替 (R)"));
             p.spawn((
                 LegendRoot,
                 Node {
@@ -450,7 +506,7 @@ fn spawn_ui(commands: &mut Commands) {
                 },
             ));
             p.spawn(label(
-                "操作: ホイール=ズーム / 右・中・左ドラッグ=パン / 左クリック=選択\n1,2,3=モード  Tab=画面を閉じる/開く  Esc=終了",
+                "操作: ホイール=ズーム / 右・中・左ドラッグ=パン / 左クリック=選択\n1,2,3=モード  G=境界線  R=河川  Tab=画面を閉じる/開く  Esc=終了",
                 12.0,
             ));
         });
@@ -466,6 +522,7 @@ fn handle_buttons(
     modes: Query<(&Interaction, &ModeButton), Changed<Interaction>>,
     fits: Query<&Interaction, (Changed<Interaction>, With<FitButton>)>,
     grids: Query<&Interaction, (Changed<Interaction>, With<GridButton>)>,
+    rivers: Query<&Interaction, (Changed<Interaction>, With<RiverButton>)>,
     settings: Option<ResMut<HexViewSettings>>,
     viewport: Option<ResMut<HexViewport>>,
 ) {
@@ -478,6 +535,11 @@ fn handle_buttons(
         for i in &grids {
             if *i == Interaction::Pressed {
                 s.grid_enabled = !s.grid_enabled;
+            }
+        }
+        for i in &rivers {
+            if *i == Interaction::Pressed {
+                s.rivers_enabled = !s.rivers_enabled;
             }
         }
     }
@@ -516,6 +578,9 @@ fn handle_keys(
         }
         if keys.just_pressed(KeyCode::KeyG) {
             s.grid_enabled = !s.grid_enabled;
+        }
+        if keys.just_pressed(KeyCode::KeyR) {
+            s.rivers_enabled = !s.rivers_enabled;
         }
     }
     if let Some(mut v) = viewport
@@ -778,6 +843,45 @@ fn sync_grid_visibility(
     }
 }
 
+/// 河川の表示切替と、ズーム段階(scaleの2乗根刻み)が変わった時だけ線幅を作り直す。
+/// パン中・同一段階のズーム中は何も再構築しない。
+fn sync_rivers(
+    settings: Option<Res<HexViewSettings>>,
+    map: Option<Res<LoadedHexMap>>,
+    handles: Option<ResMut<SharedHandles>>,
+    cam: Query<&Transform, With<HexCamera>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut layers: Query<&mut Visibility, With<RiverLayer>>,
+) {
+    let (Some(settings), Some(map), Some(mut h), Ok(tf)) = (settings, map, handles, cam.single())
+    else {
+        return;
+    };
+    let want = if settings.rivers_enabled {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut layers {
+        if *v != want {
+            *v = want;
+        }
+    }
+    let level = river_zoom_level(tf.scale.x);
+    if h.last_river_level == Some(level) {
+        return;
+    }
+    h.last_river_level = Some(level);
+    h.river_rebuilds += 1;
+    let w = river_width(map.0.grid.size as f32, level);
+    if let Some(mut m) = meshes.get_mut(&h.river_mesh) {
+        *m = build_river_mesh(&map.0, w as f64);
+    }
+    if let Some(mut m) = meshes.get_mut(&h.casing_mesh) {
+        *m = build_river_mesh(&map.0, (w * 1.9) as f64);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn sync_selection_visual(
     map: Option<Res<LoadedHexMap>>,
@@ -873,9 +977,10 @@ fn update_texts(
     if let (Ok(mut t), Some(stats)) = (status.single_mut(), stats) {
         let scale = cam.single().map(|t| t.scale.x).unwrap_or(1.0);
         t.0 = format!(
-            "\n--- 状態 ---\nセル {} / 河川レコード {} (河川描画は未実装: direction定義が未確認)\nチャンク {} / メッシュ {} / マップEntity {}\n読込 {:.0} ms / メッシュ生成 {:.0} ms\nフレーム {:.1} ms (最大 {:.1} ms)\nズーム scale {:.3}",
+            "\n--- 状態 ---\nセル {} / 河川レコード {} / 河川の辺 {}\nチャンク {} / メッシュ {} / マップEntity {}\n読込 {:.0} ms / メッシュ生成 {:.0} ms\nフレーム {:.1} ms (最大 {:.1} ms)\nズーム scale {:.3}",
             stats.cells,
             stats.rivers,
+            stats.river_edges,
             stats.chunks,
             stats.mesh_assets,
             stats.spawned_entities,

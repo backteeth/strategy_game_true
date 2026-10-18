@@ -124,3 +124,17 @@ pub fn image_overflow_cells(map: &HexMap) -> usize {
         })
         .count()
 }
+
+/// direction(0=東,1=北東,2=北西,3=西,4=南西,5=南東。画面上が北)の辺の両端を表す頂点番号。
+/// 頂点`i`は画像座標の角度 `60°·i − 30°`(`corner_image`)。確認済み仕様の
+/// `theta = −direction·60°`、端点角 `theta ∓ 30°` と照合すると、頂点 `(−d) mod 6` と `(1−d) mod 6`。
+pub fn river_edge_corner_indices(direction: u8) -> (usize, usize) {
+    let d = direction as usize % 6;
+    ((6 - d) % 6, (7 - d) % 6)
+}
+
+/// 河川の辺の両端(ワールド座標)。セル描画と同じ`corner_world`(Y反転の唯一の経路)を通す。
+pub fn river_edge_world(grid: &HexGrid, q: i32, r: i32, direction: u8) -> ((f64, f64), (f64, f64)) {
+    let (a, b) = river_edge_corner_indices(direction);
+    (grid.corner_world(q, r, a), grid.corner_world(q, r, b))
+}

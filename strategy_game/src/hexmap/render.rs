@@ -6,7 +6,7 @@
 //! セルごとのEntity/Mesh/Materialは作らない。
 
 use super::data::{Climate, HexCell, HexMap, Terrain, Vegetation};
-use super::geometry::image_to_world;
+use super::geometry::{image_to_world, river_edge_world};
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -300,6 +300,43 @@ pub fn build_ring_mesh(center: (f64, f64), r_in: f64, r_out: f64) -> Mesh {
         let (i0, o0) = (k * 2, k * 2 + 1);
         let (i1, o1) = (((k + 1) % 6) * 2, ((k + 1) % 6) * 2 + 1);
         idx.extend_from_slice(&[i0, o1, o0, i0, i1, o1]);
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    mesh.insert_indices(Indices::U32(idx));
+    mesh
+}
+
+/// 河川メッシュ。正規化済みの各辺を、両端を半幅ぶん延長した幅`width`(ワールド単位)の
+/// 帯にする(隣り合う辺が角で途切れない)。隣接先セルが無い境界辺も描く。
+pub fn build_river_mesh(map: &HexMap, width: f64) -> Mesh {
+    let half = width * 0.5;
+    let mut pos: Vec<[f32; 3]> = Vec::with_capacity(map.river_edges().len() * 4);
+    let mut idx: Vec<u32> = Vec::with_capacity(map.river_edges().len() * 6);
+    for e in map.river_edges() {
+        let (a, b) = river_edge_world(&map.grid, e.q, e.r, e.direction);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= 0.0 {
+            continue;
+        }
+        let (ux, uy) = (dx / len, dy / len);
+        let (nx, ny) = (-uy * half, ux * half);
+        let (ax, ay) = (a.0 - ux * half, a.1 - uy * half);
+        let (bx, by) = (b.0 + ux * half, b.1 + uy * half);
+        let base = pos.len() as u32;
+        for (x, y) in [
+            (ax + nx, ay + ny),
+            (ax - nx, ay - ny),
+            (bx - nx, by - ny),
+            (bx + nx, by + ny),
+        ] {
+            pos.push([x as f32, y as f32, 0.0]);
+        }
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,

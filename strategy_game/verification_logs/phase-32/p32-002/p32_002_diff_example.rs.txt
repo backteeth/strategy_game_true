@@ -1,0 +1,30 @@
+use std::collections::HashSet;
+use strategy_game::hexmap::data::*;
+fn main() {
+    let a: Vec<String> = std::env::args().collect();
+    let old = load_from_path(&a[1]).unwrap();
+    let new = load_from_path(&a[2]).unwrap();
+    println!("grid old {:?}\ngrid new {:?}\ngrid same: {}", old.grid, new.grid, old.grid == new.grid);
+    let oc: HashSet<_> = old.cells().iter().map(|c| (c.q, c.r)).collect();
+    let nc: HashSet<_> = new.cells().iter().map(|c| (c.q, c.r)).collect();
+    println!("cells old {} new {} added {} removed {}", oc.len(), nc.len(), nc.difference(&oc).count(), oc.difference(&nc).count());
+    let changed = new.cells().iter().filter(|c| old.cell(c.q, c.r).map(|o| o != *c).unwrap_or(false)).count();
+    println!("attribute-changed cells {changed}");
+    let (mut t, mut cl, mut v) = (0, 0, 0);
+    for c in new.cells() { if let Some(o) = old.cell(c.q, c.r) { if o.terrain != c.terrain {t+=1} if o.climate != c.climate {cl+=1} if o.vegetation != c.vegetation {v+=1} } }
+    println!("  terrain {t} climate {cl} vegetation {v}");
+    let orr: HashSet<_> = old.rivers().iter().copied().collect();
+    let nr: HashSet<_> = new.rivers().iter().copied().collect();
+    println!("river records old {} new {} added {} removed {}", orr.len(), nr.len(), nr.difference(&orr).count(), orr.difference(&nr).count());
+    let oe: HashSet<_> = old.river_edges().iter().map(|e| (e.q,e.r,e.direction)).collect();
+    let ne: HashSet<_> = new.river_edges().iter().map(|e| (e.q,e.r,e.direction)).collect();
+    println!("river edges (normalized) old {} new {} added {} removed {}", oe.len(), ne.len(), ne.difference(&oe).count(), oe.difference(&ne).count());
+    let mut dirs = [0usize; 6];
+    for r in new.rivers() { dirs[r.direction as usize] += 1; }
+    println!("new record direction histogram {:?}", dirs);
+    let two = new.river_edges().iter().filter(|e| e.records == 2).count();
+    let open = new.river_edges().iter().filter(|e| !e.neighbor_exists).count();
+    println!("new edges: both-sided {two}, open border {open}");
+    let c = new.attribute_counts();
+    println!("terrain {:?}\nclimate {:?}\nveg {:?}\nland {} climUnc {} vegUnc {}", c.terrain, c.climate, c.vegetation, c.land_cells, c.land_climate_unclassified, c.land_vegetation_unclassified);
+}

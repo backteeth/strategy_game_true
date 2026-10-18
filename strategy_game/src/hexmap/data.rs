@@ -241,13 +241,67 @@ pub struct HexGrid {
 }
 
 /// 河川レコード `(q, r, direction)`。
-/// directionが指す辺・流下方向の意味は制作ツール側の定義が未確認のため、
-/// ここでは値(0..=5)の範囲検証のみを行い、意味づけをしない。
+/// directionは「河川が存在する辺」(0=東,1=北東,2=北西,3=西,4=南西,5=南東)。流下方向ではない。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RiverRecord {
     pub q: i32,
     pub r: i32,
     pub direction: u8,
+}
+
+/// 河川directionの隣接オフセット(制作ツール仕様・ユーザー確認済み)。
+/// 画面上が北。右辺を0として反時計回り: 0=東, 1=北東, 2=北西, 3=西, 4=南西, 5=南東。
+/// directionは「河川が存在する辺」を表し、流下方向ではない。
+pub const RIVER_NEIGHBOR_OFFSETS: [(i32, i32); 6] =
+    [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)];
+
+/// 辺の反対側から見たdirection。
+pub fn opposite_direction(direction: u8) -> u8 {
+    (direction + 3) % 6
+}
+
+/// セル`(q,r)`のdirection側の隣接座標。
+pub fn river_neighbor(q: i32, r: i32, direction: u8) -> (i32, i32) {
+    let (dq, dr) = RIVER_NEIGHBOR_OFFSETS[direction as usize % 6];
+    (q + dq, r + dr)
+}
+
+/// 正規化済みの河川の辺(物理的な1本)。同じ辺を両側のセルから表した2レコードは1つにまとまる。
+/// 正規化は整数座標のみで行い、(q,r)が辞書順で小さい側を`(q, r, direction)`として持つ。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RiverEdge {
+    pub q: i32,
+    pub r: i32,
+    pub direction: u8,
+    /// 辺の両側のセルがどちらも存在するか(falseなら地図境界の辺。参照元セルは検証済みで必ず片側は存在する)。存在しない境界辺も削除せず保持する。
+    pub neighbor_exists: bool,
+    /// この辺を表す入力レコードの数(1または2)。
+    pub records: u8,
+}
+
+fn normalize_river_edges(map: &HexMap) -> Vec<RiverEdge> {
+    use std::collections::BTreeMap;
+    let mut edges: BTreeMap<(i32, i32, u8), RiverEdge> = BTreeMap::new();
+    for rec in &map.rivers {
+        let (nq, nr) = river_neighbor(rec.q, rec.r, rec.direction);
+        let (q, r, d) = if (rec.q, rec.r) <= (nq, nr) {
+            (rec.q, rec.r, rec.direction)
+        } else {
+            (nq, nr, opposite_direction(rec.direction))
+        };
+        let (oq, or) = river_neighbor(q, r, d);
+        edges
+            .entry((q, r, d))
+            .and_modify(|e| e.records += 1)
+            .or_insert(RiverEdge {
+                q,
+                r,
+                direction: d,
+                neighbor_exists: map.cell(q, r).is_some() && map.cell(oq, or).is_some(),
+                records: 1,
+            });
+    }
+    edges.into_values().collect()
 }
 
 /// 検証済みの不変ヘックスマップ。
@@ -262,6 +316,7 @@ pub struct HexMap {
     /// extent矩形に対応する密な検索表。欠損セルは`NO_CELL`(格子は疎でありうる)。
     lookup: Vec<u32>,
     rivers: Vec<RiverRecord>,
+    river_edges: Vec<RiverEdge>,
 }
 
 /// 属性ごとの件数(診断用。ローダーの仕様ではない)。
@@ -279,6 +334,10 @@ pub struct AttributeCounts {
 impl HexMap {
     pub fn cells(&self) -> &[HexCell] {
         &self.cells
+    }
+    /// 正規化後の河川の辺(描画単位)。入力レコード数は`rivers().len()`。
+    pub fn river_edges(&self) -> &[RiverEdge] {
+        &self.river_edges
     }
     pub fn rivers(&self) -> &[RiverRecord] {
         &self.rivers
@@ -477,6 +536,7 @@ fn validate(dto: MapDto) -> Result<HexMap, HexMapError> {
         cells: Vec::with_capacity(dto.cells.len()),
         lookup: vec![NO_CELL; (width * height) as usize],
         rivers: Vec::with_capacity(dto.rivers.len()),
+        river_edges: Vec::new(),
     };
 
     for c in &dto.cells {
@@ -537,5 +597,6 @@ fn validate(dto: MapDto) -> Result<HexMap, HexMapError> {
         map.rivers.push(rec);
     }
 
+    map.river_edges = normalize_river_edges(&map);
     Ok(map)
 }

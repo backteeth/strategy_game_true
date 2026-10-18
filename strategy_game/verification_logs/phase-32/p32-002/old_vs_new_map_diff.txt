@@ -1,0 +1,14 @@
+grid old HexGrid { size: 2.5, origin_x: 2.1650635094610964, origin_y: 2.5, image_width: 1774, image_height: 887, extent: Extent { min_q: -118, max_q: 409, min_r: 0, max_r: 235 } }
+grid new HexGrid { size: 2.5, origin_x: 2.1650635094610964, origin_y: 2.5, image_width: 1774, image_height: 887, extent: Extent { min_q: -118, max_q: 409, min_r: 0, max_r: 235 } }
+grid same: true
+cells old 96760 new 96760 added 0 removed 0
+attribute-changed cells 1352
+  terrain 8 climate 24 vegetation 1349
+river records old 3297 new 3398 added 101 removed 0
+river edges (normalized) old 3297 new 3398 added 101 removed 0
+new record direction histogram [1133, 0, 0, 0, 1108, 1157]
+new edges: both-sided 0, open border 0
+terrain [62055, 202, 17276, 7546, 4793, 2996, 1892, 0]
+climate [5006, 7521, 11683, 8337, 1945, 62268]
+veg [4347, 5900, 17508, 6569, 62436]
+land 34503 climUnc 11 vegUnc 179
