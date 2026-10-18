@@ -4,12 +4,15 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\manual_check\run.ps1 normal   # 通常の New Game・保存/ロード
 #   powershell -ExecutionPolicy Bypass -File scripts\manual_check\run.ps1 m1       # M1 の人工 Save
 #   powershell -ExecutionPolicy Bypass -File scripts\manual_check\run.ps1 e1       # E1 の人工 Save
+#   powershell -ExecutionPolicy Bypass -File scripts\manual_check\run.ps1 player_war  # プレイヤー自身の戦争・講和(P31-006)
+#   powershell -ExecutionPolicy Bypass -File scripts\manual_check\run.ps1 victory     # 勝利直前の人工 Save(P31-006)
+#   powershell -ExecutionPolicy Bypass -File scripts\manual_check\run.ps1 defeat      # 敗北直前の人工 Save(P31-006)
 #
 # 作業ディレクトリを target\manual_check\<環境名> にして、確認対象の実行ファイルを起動する。
 # ゲームが読み書きする Save と assets は、その作業ディレクトリの saves\ と assets\ だけで、
 # ユーザーの saves\savegame_v1.ron(リポジトリ直下の saves\)には触れない。
 param(
-    [Parameter(Mandatory = $true)][ValidateSet("normal", "m1", "e1")][string]$Environment
+    [Parameter(Mandatory = $true)][ValidateSet("normal", "m1", "e1", "player_war", "victory", "defeat")][string]$Environment
 )
 $ErrorActionPreference = "Stop"
 
