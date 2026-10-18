@@ -1,0 +1,52 @@
+use std::collections::{HashMap, VecDeque};
+use strategy_game::hexmap::data::*;
+fn main() {
+    let m = load_from_path(DEFAULT_MAP_PATH).unwrap();
+    let n = m.cells().len();
+    let mut comp = vec![u32::MAX; n];
+    let mut stats: Vec<(bool, Terrain, usize)> = Vec::new();
+    for s in 0..n {
+        if comp[s] != u32::MAX { continue; }
+        let kind = m.cell_by_index(s as u32).terrain;
+        let water = kind.is_water();
+        let id = stats.len() as u32;
+        let mut q = VecDeque::new();
+        q.push_back(s);
+        comp[s] = id;
+        let mut size = 0usize;
+        while let Some(i) = q.pop_front() {
+            size += 1;
+            let c = m.cell_by_index(i as u32);
+            for d in 0..6u8 {
+                let (nq, nr) = river_neighbor(c.q, c.r, d);
+                if let Some(j) = m.cell_index(nq, nr) {
+                    let t = m.cell_by_index(j).terrain;
+                    // 同種(陸/海/湖)でつなぐ
+                    let same = if water { t == kind } else { !t.is_water() };
+                    if same && comp[j as usize] == u32::MAX { comp[j as usize] = id; q.push_back(j as usize); }
+                }
+            }
+        }
+        stats.push((water, kind, size));
+    }
+    let mut land: Vec<usize> = stats.iter().filter(|s| !s.0).map(|s| s.2).collect();
+    land.sort_unstable_by(|a, b| b.cmp(a));
+    let sea: Vec<usize> = stats.iter().filter(|s| s.1 == Terrain::Sea).map(|s| s.2).collect();
+    let lake: Vec<usize> = stats.iter().filter(|s| s.1 == Terrain::Lake).map(|s| s.2).collect();
+    println!("land components {} (largest {:?}; singletons {}; <=10 cells {})", land.len(), &land[..land.len().min(8)], land.iter().filter(|x| **x == 1).count(), land.iter().filter(|x| **x <= 10).count());
+    println!("land cells total {}", land.iter().sum::<usize>());
+    println!("sea components {} (largest {:?})", sea.len(), { let mut s = sea.clone(); s.sort_unstable_by(|a,b| b.cmp(a)); s.truncate(5); s });
+    println!("lake components {} (sizes sum {}; singletons {})", lake.len(), lake.iter().sum::<usize>(), lake.iter().filter(|x| **x == 1).count());
+    // 陸に接する湖/接しない湖、海岸陸セル数
+    let mut coast = 0usize; let mut lake_touch_sea = 0usize;
+    for c in m.cells() {
+        let mut touches_sea = false;
+        for d in 0..6u8 { let (nq,nr)=river_neighbor(c.q,c.r,d); if let Some(o)=m.cell(nq,nr){ if o.terrain==Terrain::Sea { touches_sea=true; } } }
+        if !c.terrain.is_water() && touches_sea { coast += 1; }
+        if c.terrain == Terrain::Lake && touches_sea { lake_touch_sea += 1; }
+    }
+    println!("coastal land cells {coast}; lake cells adjacent to sea {lake_touch_sea}");
+    let mut hist: HashMap<usize, usize> = HashMap::new();
+    for e in m.river_edges() { let n = river_neighbor(e.q,e.r,e.direction); let a=m.cell(e.q,e.r).map(|c|c.terrain); let b=m.cell(n.0,n.1).map(|c|c.terrain); *hist.entry(a.map(|t| t.is_water() as usize).unwrap_or(9)*10 + b.map(|t| t.is_water() as usize).unwrap_or(9)).or_default() += 1; }
+    println!("river edge side kinds (00=land|land,01/10=land|water,11=water|water): {:?}", hist);
+}

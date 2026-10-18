@@ -1,0 +1,6 @@
+land components 110 (largest [17475, 5220, 3202, 2139, 1738, 1576, 1038, 308]; singletons 18; <=10 cells 52)
+land cells total 34503
+sea components 1 (largest [62055])
+lake components 10 (sizes sum 202; singletons 0)
+coastal land cells 4882; lake cells adjacent to sea 0
+river edge side kinds (00=land|land,01/10=land|water,11=water|water): {1: 74, 0: 3275, 11: 4, 10: 45}
