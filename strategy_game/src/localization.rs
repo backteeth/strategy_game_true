@@ -367,7 +367,7 @@ const NOTO_SANS_JP_DATA: &[u8] = include_bytes!("../assets/fonts/NotoSansJP-Vari
 /// `TextFont::default()`は`FontSource::Handle(Handle::default())`を指すため、既存の
 /// 全`TextFont { ..default() }`呼び出し箇所を一切変更せずにフォントだけを差し替えられる。
 /// OSインストール済みフォントには一切依存しない(system_font_discovery機能は未使用)。
-fn install_japanese_capable_font(mut fonts: ResMut<Assets<Font>>) {
+pub fn install_japanese_capable_font(mut fonts: ResMut<Assets<Font>>) {
     let font = Font::from_bytes(NOTO_SANS_JP_DATA.to_vec());
     fonts
         .insert(AssetId::<Font>::default(), font)

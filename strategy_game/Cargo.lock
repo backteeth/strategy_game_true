@@ -5199,6 +5199,7 @@ dependencies = [
  "image",
  "ron",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

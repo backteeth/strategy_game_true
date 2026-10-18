@@ -5,6 +5,7 @@ pub mod country;
 pub mod debug;
 pub mod diplomacy;
 pub mod economy;
+pub mod hexmap;
 pub mod localization;
 pub mod logistics;
 pub mod map;
