@@ -52,7 +52,7 @@ use crate::military::data::{DivisionStatus, MilitaryRegistry};
 use crate::state::data::StateRegistry;
 use crate::war::data::{War, WarRegistry, WarStatus};
 use crate::war::frontline::{FrontlineRegistry, FrontlineStance};
-use crate::war::military_ai::{MilitaryAiDecisionReason, MilitaryAiRegistry};
+use crate::war::military_ai::{MilitaryAiDecisionReason, MilitaryAiRegistry, evaluate_powers};
 use crate::war::peace::{PeaceOffer, PeaceTerm, can_accept_peace_offer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -228,12 +228,18 @@ pub fn is_one_side_powerless_and_other_cannot_attack(
 
 /// M1: `side`のいずれかの国が、いま攻勢の意思を持つか。E1 の`armed_side_is_active`
 /// (移動中・戦闘中・退却中・占領中の師団、Offensive 計画、`SufficientAdvantage` 判断)に加えて、
-/// 直近判断が`SupplyShortage`で、記録済みの戦力比が攻勢の開始条件(own × 1000 ≥ enemy × 1100)を
-/// 満たす国も、補給が回復すれば攻勢に移る陣営として「意思あり」とみなす。
-/// 開始条件の倍率は`evaluate_military_ai_decision`と同じ値を読むだけで、変更しない。
+/// **この戦争の前線計画**が補給待ち(`offensive_supply_blocked`)で、かつ前線の戦力比が攻勢の開始条件
+/// (own × 1000 ≥ enemy × 1100、`evaluate_powers` と`evaluate_military_ai_decision`と同じ式)を満たす国も、
+/// 補給が回復すれば攻勢に移る陣営として「意思あり」とみなす。
+///
+/// 軍事 AI の直近判断(`last_decision_reason`)は国単位で、複数の戦争がある国では、最後に評価した前線の
+/// 判断で上書きされる(別の戦争の評価で、この戦争の補給待ちが見えなくなる。P31-003 の診断)。そのため、
+/// 補給待ちの判定には国単位の判断ではなく、(前線, 指揮国)単位の計画の状態を使う。開始条件の倍率は
+/// 読むだけで、変更しない。
 fn side_has_attack_intent(
     war: &War,
     side: &HashSet<CountryId>,
+    state_registry: &StateRegistry,
     military: &MilitaryRegistry,
     frontlines: &FrontlineRegistry,
     ai: &MilitaryAiRegistry,
@@ -241,11 +247,24 @@ fn side_has_attack_intent(
     if armed_side_is_active(war, side, military, frontlines, Some(ai)) {
         return true;
     }
+    let Some(frontline) = frontlines.get_frontline_for_war(war.id) else {
+        return false;
+    };
     side.iter().any(|c| {
-        ai.ai_states.get(c).is_some_and(|s| {
-            s.last_decision_reason == MilitaryAiDecisionReason::SupplyShortage
-                && (s.estimated_own_power as u128) * 1000 >= (s.estimated_enemy_power as u128) * 1100
-        })
+        frontlines
+            .plans
+            .get(&(frontline.frontline_id, *c))
+            .is_some_and(|plan| {
+                if !plan.offensive_supply_blocked {
+                    return false;
+                }
+                let (own, enemy) = evaluate_powers(frontline, plan, *c, military, state_registry);
+                if enemy == 0 {
+                    own > 0
+                } else {
+                    (own as u128) * 1000 >= (enemy as u128) * 1100
+                }
+            })
     })
 }
 
@@ -329,8 +348,8 @@ pub fn is_mutual_stalemate(
     if !all_armed_participants_have_a_decision(war, military, ai) {
         return false;
     }
-    if side_has_attack_intent(war, &attackers, military, frontlines, ai)
-        || side_has_attack_intent(war, &defenders, military, frontlines, ai)
+    if side_has_attack_intent(war, &attackers, state_registry, military, frontlines, ai)
+        || side_has_attack_intent(war, &defenders, state_registry, military, frontlines, ai)
     {
         return false;
     }
@@ -1057,26 +1076,79 @@ mod tests {
         }
     }
 
+    fn war_front(e: &mut Env) {
+        e.frontlines.frontlines.insert(
+            FrontlineId(0),
+            Frontline {
+                frontline_id: FrontlineId(0),
+                war_id: WID,
+                attacker_country_id: ATT,
+                defender_country_id: DEF,
+                attacker_front_regions: vec![StateId(0)],
+                defender_front_regions: vec![StateId(1)],
+                border_region_pairs: vec![(StateId(0), StateId(1))],
+            },
+        );
+    }
+
+    /// ATT の前線計画を、補給待ち(`blocked`)・割当師団(兵力 `own_manpower`)つきで登録する。
+    /// 敵(DEF)の戦力は師団 1 個(兵力 10,000)。
+    fn att_plan_blocked(e: &mut Env, blocked: bool, own_manpower: u64) {
+        war_front(e);
+        let mut d = division(5, ATT, DivisionStatus::Idle);
+        d.manpower = own_manpower;
+        let id = e.military.add_division(d);
+        let mut plan = FrontlinePlan::new(FrontlineId(0), ATT);
+        plan.stance = FrontlineStance::Defend;
+        plan.offensive_supply_blocked = blocked;
+        plan.assigned_division_ids = vec![id];
+        e.frontlines.plans.insert((FrontlineId(0), ATT), plan);
+    }
+
     #[test]
-    fn m1_treats_supply_shortage_with_a_favourable_ratio_as_an_attack_intent() {
-        // 補給が回復すれば攻勢に移る陣営(戦力比が開始条件 1.10 以上)は「意思あり」。
+    fn m1_treats_a_supply_blocked_war_plan_with_a_favourable_ratio_as_an_attack_intent() {
+        // この戦争の前線計画が補給待ちで、戦力比が開始条件(1.10)以上の陣営は「意思あり」。
         let mut e = env();
         arm_both(&mut e);
-        observe(&mut e, ATT, MilitaryAiDecisionReason::SupplyShortage);
-        {
-            let s = e.ai.ai_states.get_mut(&ATT).unwrap();
-            s.estimated_own_power = 22_000;
-            s.estimated_enemy_power = 20_000;
-        }
+        att_plan_blocked(&mut e, true, 11_000); // own 11,000 対 enemy 10,000 = 1.10 ちょうど
         assert!(m1_after_the_period(&mut e).is_empty(), "比 1.10 ちょうど");
-        // 開始条件に届かない戦力比なら、補給不足は攻勢の意思ではない。
+        // 開始条件に届かない戦力比なら、補給待ちは攻勢の意思ではない。
         let mut e = env();
         arm_both(&mut e);
+        att_plan_blocked(&mut e, true, 10_999);
+        assert_eq!(m1_after_the_period(&mut e).len(), 1, "1.10 未満");
+        // 補給待ちでなければ(戦力比が高くても)意思とみなさない。
+        let mut e = env();
+        arm_both(&mut e);
+        att_plan_blocked(&mut e, false, 30_000);
+        assert_eq!(m1_after_the_period(&mut e).len(), 1, "補給待ちでない");
+    }
+
+    #[test]
+    fn m1_intent_is_judged_per_war_and_not_by_the_country_wide_last_decision() {
+        // P31-003: 国単位の直近判断は、別の戦争の前線の評価で上書きされる。この戦争の計画が
+        // 補給待ち・戦力比が有利のままなら、国単位の判断が別の値(別の戦争の評価)でも成立させない。
+        for masked in [
+            MilitaryAiDecisionReason::NoAvailableDivision,
+            MilitaryAiDecisionReason::EnemyStronger,
+            MilitaryAiDecisionReason::ComparableStrength,
+        ] {
+            let mut e = env();
+            arm_both(&mut e);
+            att_plan_blocked(&mut e, true, 20_000);
+            observe(&mut e, ATT, masked);
+            assert!(m1_after_the_period(&mut e).is_empty(), "{masked:?}");
+        }
+        // 逆に、国単位の判断が SupplyShortage でも、この戦争の計画が補給待ちでなければ(別の戦争の
+        // 補給待ち)、この戦争の M1 を妨げない。
+        let mut e = env();
+        arm_both(&mut e);
+        att_plan_blocked(&mut e, false, 20_000);
         observe(&mut e, ATT, MilitaryAiDecisionReason::SupplyShortage);
         {
             let s = e.ai.ai_states.get_mut(&ATT).unwrap();
-            s.estimated_own_power = 21_999;
-            s.estimated_enemy_power = 20_000;
+            s.estimated_own_power = 40_000;
+            s.estimated_enemy_power = 10_000;
         }
         assert_eq!(m1_after_the_period(&mut e).len(), 1);
     }

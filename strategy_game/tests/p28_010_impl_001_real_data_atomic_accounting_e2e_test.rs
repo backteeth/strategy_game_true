@@ -337,6 +337,9 @@ fn passguard_keeps_pre_change_values_and_dwarf_follows_d4_at_month_120() {
     // 失敗の無い国を変えないことは維持される)。
     assert!(row.contains("c2 divs=4 shortD=1837 Iron=507 Coal=2539 IG=10172"), "Dwarf: {row}");
     assert!(row.contains("tr=20043"), "Dwarf treasury: {row}");
-    assert!(row.contains("c4 divs=1 shortD=119 Iron=38 Coal=2897 IG=14"), "Passguard: {row}");
-    assert!(row.contains("tr=802"), "Passguard treasury: {row}");
+    // P31-003: M1 の攻勢意思を前線計画単位に直した(報告書 p31-003 §3)ことで世界が再び分岐し、m120 の
+    // Passguard を Division 1→3・Iron 38→35・Coal 2897→2891・IG 14→17・国庫 802→1079 へ更新した
+    // (補給不足 119 日は不変、Dwarf は不変)。
+    assert!(row.contains("c4 divs=3 shortD=119 Iron=35 Coal=2891 IG=17"), "Passguard: {row}");
+    assert!(row.contains("tr=1079"), "Passguard treasury: {row}");
 }

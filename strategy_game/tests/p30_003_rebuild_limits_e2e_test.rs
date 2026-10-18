@@ -326,6 +326,8 @@ fn low_employment_rebuild_completes_recruits_but_may_not_sustain() {
     let mut recruits: Vec<String> = Vec::new();
     let mut prev_living = 0usize;
     let mut ms_zero_months = 0u32;
+    let mut input_zero_months = 0u32;
+    let mut mf_lost_to: Option<strategy_game::common::CountryId> = None;
     while app.world().resource::<GameDate>().year < 1808 {
         advance_one_day(&mut app);
         let date = app.world().resource::<GameDate>().clone();
@@ -357,6 +359,17 @@ fn low_employment_rebuild_completes_recruits_but_may_not_sustain() {
             if s.ms <= 0.0 && s.mf_levels > 0 {
                 ms_zero_months += 1;
             }
+            // 工場を保持している間に、原料(Iron)や IG の備蓄が尽きていないこと(原料枯渇・供給不足を
+            // 工場の喪失で隠さない)。
+            if s.mf_levels > 0 && (s.fe <= 0.0 || s.ig <= 0.0) {
+                input_zero_months += 1;
+            }
+            // 工場を失った場合、その州の所有者が Oceanic でなくなっている(戦争で州を失った)こと。
+            if completed_on.is_some() && s.mf_levels == 0 && mf_lost_to.is_none() {
+                let sr = app.world().resource::<StateRegistry>();
+                let sid = strategy_game::common::StateId(predicted.unwrap().0);
+                mf_lost_to = Some(sr.get(sid).unwrap().owner_country_id);
+            }
             if date.month == 1 || date.month == 7 {
                 let sr = app.world().resource::<StateRegistry>();
                 let op = sr
@@ -378,11 +391,15 @@ fn low_employment_rebuild_completes_recruits_but_may_not_sustain() {
     }
     let end = snap(&app);
     println!(
-        "LOWEMP_SUMMARY predicted={predicted:?} completed={completed_on:?} first_recruit={first_recruit_on:?} recruits={recruits:?} end_living={} end_ms={:.1} ms_zero_months_after_first_recruit={ms_zero_months}",
+        "LOWEMP_SUMMARY mf_lost_to={mf_lost_to:?} input_zero_months={input_zero_months} predicted={predicted:?} completed={completed_on:?} first_recruit={first_recruit_on:?} recruits={recruits:?} end_living={} end_ms={:.1} ms_zero_months_after_first_recruit={ms_zero_months}",
         end.living, end.ms
     );
     assert!(predicted.is_some(), "再建が着工される");
     assert!(completed_on.is_some(), "工場は完成する");
     assert!(first_recruit_on.is_some(), "低雇用でも初回の募兵は起きる");
     assert_eq!(ms_zero_months, 0, "補給が尽きて止まってはいない");
+    assert_eq!(input_zero_months, 0, "工場を保持している間に原料・IG が尽きない");
+    if let Some(owner) = mf_lost_to {
+        assert_ne!(owner, OCEANIC, "工場の喪失は、戦争で州を失った結果である");
+    }
 }

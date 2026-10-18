@@ -449,18 +449,11 @@ fn diag_continuing_wars_600_months() {
     assert!(!traces.values().any(|t| t.start == "1806/03/02" && t.defenders == [0]));
     assert!(!traces.values().any(|t| t.start == "1824/04/02"));
 
-    // P31-002(M1: 両陣営に師団がある停滞戦争の合意白紙講和)後の世界の記録。E1(一方が無力)は
-    // 引き続き 365 日で、M1(双方武装)は 730 日で、いずれも既存の白紙講和で終結する。
-    // 世界は分岐し、この 600 か月では継続する戦争がなくなる(結果であり、合格条件ではない)。
+    // P31-002(M1: 両陣営に師団がある停滞戦争の合意白紙講和)と P31-003(M1 の攻勢意思を前線計画単位に
+    // 修正)後の世界の記録。E1(一方が無力)は 365 日、M1(双方武装)は 730 日で、いずれも既存の白紙講和で
+    // 終結する。世界は分岐し、この 600 か月では継続する戦争がなくなる(結果であり、合格条件ではない)。
     let m1 = "Mutual Stalemate White Peace";
     let e1 = "Stalemate White Peace";
-    // E1: 引き続き機能する(365 日)。
-    let (_, w_e1a) = find("1806/06/22", &[5], &[0]);
-    assert_eq!(w_e1a.end.as_deref(), Some("1807/06/22"));
-    assert_eq!(w_e1a.end_reason.as_deref(), Some(e1));
-    let (_, w_e1b) = find("1808/04/27", &[0], &[1]);
-    assert_eq!(w_e1b.end.as_deref(), Some("1809/04/27"));
-    assert_eq!(w_e1b.end_reason.as_deref(), Some(e1));
     // M1: Dwarf 対 Ferrowyn(1801/07/02、P31-001 の対象戦争)は、診断で予測した 1803/07/02(進展のない
     // 期間 730 日)に終結する。戦闘・攻勢は一度もなかった。
     let (_, w_mutual) = find("1801/07/02", &[2], &[5]);
@@ -468,22 +461,29 @@ fn diag_continuing_wars_600_months() {
     assert_eq!(w_mutual.end_reason.as_deref(), Some(m1));
     assert_eq!(w_mutual.offensive_days, 0);
     assert_eq!(w_mutual.blocked_days, 0);
-    // Elfin 対 Arcadia(1801/04/27)も 730 日後に M1 で終結する(変更前は 3,872 日続いて降伏)。
-    let (_, w_m1b) = find("1801/04/27", &[1], &[0]);
-    assert_eq!(w_m1b.end.as_deref(), Some("1803/04/27"));
+    // Passguard 対 Arcadia(1801/04/30)も、730 日後の 1803/04/30 に M1 で終結する。
+    let (_, w_m1b) = find("1801/04/30", &[4], &[0]);
+    assert_eq!(w_m1b.end.as_deref(), Some("1803/04/30"));
     assert_eq!(w_m1b.end_reason.as_deref(), Some(m1));
-    // Passguard 対 Arcadia(1801/04/30)は、期間の途中で進展(当事国が関わる別の戦争の支配変更)が
-    // あり、730 日より後の 1806/05/03 に M1 で終結する(日付だけを合わせていない: 起点の更新による)。
-    let (_, w_m1c) = find("1801/04/30", &[4], &[0]);
-    assert_eq!(w_m1c.end.as_deref(), Some("1806/05/03"));
-    assert_eq!(w_m1c.end_reason.as_deref(), Some(m1));
+    // E1: 引き続き機能する(365 日)。Ferrowyn 対 Arcadia(1806/06/22)。
+    let (_, w_e1a) = find("1806/06/22", &[5], &[0]);
+    assert_eq!(w_e1a.end.as_deref(), Some("1807/06/22"));
+    assert_eq!(w_e1a.end_reason.as_deref(), Some(e1));
+    // Elfin 対 Arcadia(1801/04/27)は、Arcadia の前線計画が補給待ちで、前線の戦力比も攻勢の開始条件以上
+    // (自軍 20,000 対 敵 10,000)のため、M1 の攻勢の意思により 730 日では終わらない。1806/05 に Dwarf 対
+    // Arcadia(別の戦争)の占領で Arcadia が戦力を失い、同じ州の支配変更で停滞記録の起点が更新された
+    // (1806/05/07・05/12・05/18。他の戦争の進展が起点を更新する設計。P31-003 §3)後、365 日後の
+    // 1807/05/18 に E1 で終結する。
+    let (_, w_e1b) = find("1801/04/27", &[1], &[0]);
+    assert_eq!(w_e1b.end.as_deref(), Some("1807/05/18"));
+    assert_eq!(w_e1b.end_reason.as_deref(), Some(e1));
     let count = |reason: &str| {
         traces
             .values()
             .filter(|t| t.end_reason.as_deref() == Some(reason))
             .count()
     };
-    assert_eq!(count(m1), 3);
+    assert_eq!(count(m1), 2);
     assert_eq!(count(e1), 2);
     assert!(still_active.is_empty(), "継続中の戦争: {still_active:?}");
 
