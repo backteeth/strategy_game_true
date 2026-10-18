@@ -600,3 +600,12 @@ fn validate(dto: MapDto) -> Result<HexMap, HexMapError> {
     map.river_edges = normalize_river_edges(&map);
     Ok(map)
 }
+
+/// 軸座標の6近傍(順序は`RIVER_NEIGHBOR_OFFSETS`と同じ)。河川以外の隣接判定にも使う地理上の事実。
+pub fn hex_neighbors(q: i32, r: i32) -> [(i32, i32); 6] {
+    let mut out = [(0, 0); 6];
+    for (d, o) in out.iter_mut().enumerate() {
+        *o = river_neighbor(q, r, d as u8);
+    }
+    out
+}

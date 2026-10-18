@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 9,
+  "kind": "hex-atlas-game-map",
+  "grid": {
+    "orientation": "pointy",
+    "size": 2.5,
+    "origin": { "x": 2.1650635094610964, "y": 2.5 },
+    "imageWidth": 100,
+    "imageHeight": 60,
+    "extent": { "minQ": 0, "maxQ": 4, "minR": 0, "maxR": 2 }
+  },
+  "cells": [
+    { "q": 0, "r": 0, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 1, "r": 0, "terrain": "plains", "climate": "C", "vegetation": "grassland" },
+    { "q": 2, "r": 0, "terrain": "plains", "climate": "C", "vegetation": "forest" },
+    { "q": 3, "r": 0, "terrain": "hills", "climate": "C", "vegetation": "forest" },
+    { "q": 4, "r": 0, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 0, "r": 1, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 1, "r": 1, "terrain": "plains", "climate": "C", "vegetation": "none" },
+    { "q": 2, "r": 1, "terrain": "lake", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 3, "r": 1, "terrain": "plains", "climate": "B", "vegetation": "grassland" },
+    { "q": 4, "r": 1, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 0, "r": 2, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 1, "r": 2, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" },
+    { "q": 2, "r": 2, "terrain": "plains", "climate": "B", "vegetation": "none" },
+    { "q": 3, "r": 2, "terrain": "plateau", "climate": "B", "vegetation": "none" },
+    { "q": 4, "r": 2, "terrain": "sea", "climate": "unclassified", "vegetation": "unclassified" }
+  ],
+  "rivers": [
+    { "q": 1, "r": 1, "direction": 0 },
+    { "q": 3, "r": 0, "direction": 5 }
+  ]
+}
