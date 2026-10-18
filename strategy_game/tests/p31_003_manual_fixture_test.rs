@@ -330,18 +330,55 @@ fn generate_the_artificial_m1_manual_fixture_save() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut app = setup_app(&dir, Some(BYSTANDER));
     let (id, keep) = add_even_war(&mut app);
-    // 停滞記録の起点から 725 日目(M1 の発動 5 日前)まで進める。起点は最初の評価日(1800/01/02)。
-    run_until(&mut app, &keep, "1801/12/28");
+    // 停滞記録の起点(最後の進展の日)から 725 日目(M1 の発動 5 日前)まで進めて Save する。
+    let mut last_progress = String::new();
+    while date(&app).as_str() < "1805/01/01" {
+        maintain(&mut app, &keep);
+        advance_one_day(&mut app);
+        if let Some(r) = app.world().resource::<WarRegistry>().stalemate_records.get(&id) {
+            last_progress = r.last_progress_date.clone();
+            let due = GameDate::from_string(&last_progress).unwrap().add_days(725).display();
+            if date(&app).as_str() >= due.as_str() {
+                break;
+            }
+        }
+    }
     assert_eq!(status(&app, id), WarStatus::Active, "Save 時点では戦争は継続している");
     send_save(&mut app);
     let saved = date(&app);
     let path = dir.join("savegame_v1.ron");
     assert!(path.exists(), "Save が書き出される");
-    println!("M1_FIXTURE_SAVE path={} date={saved} player=Passguard war_id={id:?}", path.display());
-    // 確認: そのまま進めると、5 日後(最後の進展の 730 日後)に M1 で終結する。
-    run_until_ended(&mut app, id, &keep, "1802/02/01");
+    let expected_end = GameDate::from_string(&last_progress).unwrap().add_days(730).display();
+    println!(
+        "M1_FIXTURE_SAVE path={} date={saved} player=Passguard war_id={id:?} last_progress={last_progress} expected_end={expected_end}",
+        path.display()
+    );
+    // 確認: Load 後は fixture の維持(毎日の戦力の固定)が無い状態で進む。そのまま進めても、最後の進展の
+    // 730 日後に M1 で終結する。
+    for _ in 0..12 {
+        if status(&app, id) != WarStatus::Active {
+            break;
+        }
+        advance_one_day(&mut app);
+    }
     let (st, end, reason) = war_end(&app, id);
-    assert_ne!(st, WarStatus::Active);
-    assert_eq!(end.as_deref(), Some("1802/01/02"));
+    assert_ne!(st, WarStatus::Active, "進めると終結する");
+    assert_eq!(end.as_deref(), Some(expected_end.as_str()));
     assert_eq!(reason.as_deref(), Some("Mutual Stalemate White Peace"));
+    // 確認: 生成した Save ファイルそのものを、新しい App に Load しても、同じ日に M1 で終結する
+    // (ユーザーがゲームで Load するのと同じ経路。fixture の維持なし)。
+    let mut app2 = setup_app(&dir, Some(BYSTANDER));
+    send_load(&mut app2);
+    assert_eq!(date(&app2), saved, "Save 時点の日付へ復元される");
+    assert_eq!(status(&app2, id), WarStatus::Active);
+    for _ in 0..12 {
+        if status(&app2, id) != WarStatus::Active {
+            break;
+        }
+        advance_one_day(&mut app2);
+    }
+    let (st2, end2, reason2) = war_end(&app2, id);
+    assert_ne!(st2, WarStatus::Active, "Load した Save でも終結する");
+    assert_eq!(end2.as_deref(), Some(expected_end.as_str()));
+    assert_eq!(reason2.as_deref(), Some("Mutual Stalemate White Peace"));
 }
