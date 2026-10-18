@@ -1,6 +1,8 @@
 //! P32-001: ヘックスマップ確認画面の起動用バイナリ。
 //!
 //! 起動: `cargo run --bin hex_map_preview` (カレントは`strategy_game/`。`assets/data/hex_atlas_map.json`を読む)
+//! `--world-preview`: 検証用ワールド設定(P32-005。正式な世界設定ではない)を重ねて表示する。
+//!       追加操作: 4=ステート塗り / B=ステート境界の切替 / F=検証地域へ移動(Home=全体表示)
 //! 操作: ホイール=ズーム / ドラッグ=パン / 左クリック=選択 / 1,2,3=地形・気候・植生 /
 //!       Home=全体表示 / G=境界線 / R=河川 / Tab=画面を閉じる・開く / Esc=終了
 //! `--shots <dir>`: 同じコード経路(モード切替・選択・ズーム・全体表示)を自動で順に実行し、
@@ -14,6 +16,8 @@ use strategy_game::hexmap::view::{
     HexCamera, HexPreviewEntity, HexPreviewPlugin, HexPreviewState, HexSelection, HexViewSettings,
     HexViewport, LoadedHexMap,
 };
+use strategy_game::hexmap::world_view::{LoadedWorld, WorldPreviewPaths};
+use strategy_game::world::{BoundaryKind, CellStatus, cell_status};
 
 #[derive(Resource)]
 struct ShotDir(std::path::PathBuf);
@@ -25,6 +29,26 @@ fn main() {
         .position(|a| a == "--shots")
         .and_then(|i| args.get(i + 1))
         .map(std::path::PathBuf::from);
+
+    // --world-preview: 検証用ワールド設定(assets/data/world/preview/)を重ねる。
+    // --world-provinces <path> / --world-states <path> で別ファイルを指定できる(読み込み失敗の確認用)。
+    let arg_after = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
+    let world_preview = args.iter().any(|a| a == "--world-preview").then(|| {
+        let mut p = WorldPreviewPaths::default_preview();
+        if let Some(v) = arg_after("--world-provinces") {
+            p.provinces = v;
+        }
+        if let Some(v) = arg_after("--world-states") {
+            p.states = v;
+        }
+        p
+    });
+    let with_world = world_preview.is_some();
 
     let mut app = App::new();
     app.add_plugins(
@@ -48,11 +72,16 @@ fn main() {
     )
     .add_plugins(HexPreviewPlugin {
         open_at_start: true,
+        world_preview,
     });
     if let Some(dir) = shots {
         std::fs::create_dir_all(&dir).expect("create shot dir");
-        app.insert_resource(ShotDir(dir))
-            .add_systems(Update, shot_script);
+        app.insert_resource(ShotDir(dir));
+        if with_world {
+            app.add_systems(Update, world_shot_script);
+        } else {
+            app.add_systems(Update, shot_script);
+        }
     }
     app.run();
 }
@@ -189,6 +218,141 @@ fn shot_script(
                 preview_entities.iter().count()
             );
         }
+        300 => {
+            exit.write(AppExit::Success);
+        }
+        _ => {}
+    }
+}
+
+/// `--world-preview --shots`用の自動スクリプト(実マウス操作の代替ではない)。
+#[allow(clippy::too_many_arguments)]
+fn world_shot_script(
+    mut commands: Commands,
+    dir: Res<ShotDir>,
+    mut frame: Local<u32>,
+    settings: Option<ResMut<HexViewSettings>>,
+    selection: Option<ResMut<HexSelection>>,
+    viewport: Option<ResMut<HexViewport>>,
+    map: Option<Res<LoadedHexMap>>,
+    world: Option<Res<LoadedWorld>>,
+    mut cam: Query<&mut Transform, With<HexCamera>>,
+    preview_entities: Query<Entity, With<HexPreviewEntity>>,
+    mut next: ResMut<NextState<HexPreviewState>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    *frame += 1;
+    let f = *frame;
+    if f == 250 {
+        info!(
+            "[WorldShots] entities before close: {}",
+            preview_entities.iter().count()
+        );
+        next.set(HexPreviewState::Closed);
+        return;
+    }
+    if f == 262 {
+        info!(
+            "[WorldShots] entities while closed: {}",
+            preview_entities.iter().count()
+        );
+        next.set(HexPreviewState::Open);
+        return;
+    }
+    if f == 285 {
+        info!(
+            "[WorldShots] entities after reopen: {}",
+            preview_entities.iter().count()
+        );
+    }
+    let (Some(mut settings), Some(mut selection), Some(mut viewport), Some(map)) =
+        (settings, selection, viewport, map)
+    else {
+        return;
+    };
+    let shot = |commands: &mut Commands, name: &str| {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(dir.0.join(name)));
+    };
+    let Some(world) = world else {
+        // ワールド設定の読み込みに失敗した場合(エラー表示の確認)
+        if f == 40 {
+            shot(&mut commands, "w_error_geography_only.png");
+        }
+        if f == 60 {
+            exit.write(AppExit::Success);
+        }
+        return;
+    };
+    let m = &world.data.model;
+    let status = |q: i32, r: i32| cell_status(m, &map.0, q, r);
+    let pick_cell = |want: &dyn Fn(CellStatus) -> bool| {
+        map.0
+            .cells()
+            .iter()
+            .filter(|c| (c.q - 83).abs() <= 8 && (c.r - 81).abs() <= 8)
+            .find(|c| want(status(c.q, c.r)))
+            .copied()
+    };
+    let focus_cell = |tf: &mut Transform, q: i32, r: i32, scale: f32| {
+        let (x, y) = map.0.grid.center_world(q, r);
+        tf.translation.x = x as f32;
+        tf.translation.y = y as f32;
+        tf.scale = Vec3::splat(scale);
+    };
+    let border = world
+        .data
+        .boundaries
+        .iter()
+        .find(|b| b.kind == BoundaryKind::StateBorder)
+        .copied();
+    match f {
+        40 => shot(&mut commands, "01_world_focus_terrain.png"),
+        50 => settings.mode = HexViewMode::State,
+        70 => shot(&mut commands, "02_world_state_mode.png"),
+        75 => {
+            if let Some(b) = border {
+                selection.0 = map.0.cell_index(b.q, b.r);
+            }
+        }
+        95 => shot(&mut commands, "03_selected_assigned.png"),
+        100 => {
+            if let Some(c) = pick_cell(&|s| matches!(s, CellStatus::Unassigned { .. })) {
+                selection.0 = map.0.cell_index(c.q, c.r);
+            }
+        }
+        120 => shot(&mut commands, "04_selected_unassigned.png"),
+        125 => {
+            if let Some(c) = pick_cell(&|s| matches!(s, CellStatus::OutOfScope)) {
+                selection.0 = map.0.cell_index(c.q, c.r);
+            }
+        }
+        145 => shot(&mut commands, "05_selected_out_of_scope.png"),
+        150 => {
+            if let Some(c) = pick_cell(&|s| matches!(s, CellStatus::Water)) {
+                selection.0 = map.0.cell_index(c.q, c.r);
+            }
+        }
+        170 => shot(&mut commands, "06_selected_water.png"),
+        175 => settings.mode = HexViewMode::Climate,
+        190 => shot(&mut commands, "07_borders_over_climate.png"),
+        195 => {
+            settings.mode = HexViewMode::Terrain;
+            if let Some(b) = border {
+                selection.0 = map.0.cell_index(b.q, b.r);
+                if let Ok(mut tf) = cam.single_mut() {
+                    focus_cell(&mut tf, b.q, b.r, 0.05);
+                }
+            }
+        }
+        215 => shot(
+            &mut commands,
+            "08_border_closeup_with_river_and_selection.png",
+        ),
+        220 => viewport.needs_fit = true,
+        240 => shot(&mut commands, "09_after_full_map_return.png"),
+        290 => shot(&mut commands, "10_after_reopen.png"),
         300 => {
             exit.write(AppExit::Success);
         }

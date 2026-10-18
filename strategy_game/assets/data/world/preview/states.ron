@@ -1,0 +1,57 @@
+// P32-005 検証用ステート配置(正式な州境界・国家配置ではない)。
+// provinces は provinces.ron のID。ここが所属関係の正本。未割当のプロヴィンスは意図的に残してある。
+(
+    format_version: 1,
+    states: [
+        (
+            id: 20,
+            name_key: "world_preview.state.alpha",
+            provinces: [
+                18109,
+                18308,
+                18309,
+                18310,
+                18311,
+                18499,
+                18500,
+            ],
+            representative: None,
+            allow_disconnected: false,
+        ),
+        (
+            id: 21,
+            name_key: "world_preview.state.beta",
+            provinces: [
+                17269,
+                17486,
+                17487,
+                17694,
+                17695,
+                17696,
+                17904,
+                17905,
+                17906,
+                18111,
+                18112,
+                18312,
+                18502,
+            ],
+            representative: None,
+            allow_disconnected: false,
+        ),
+        (
+            id: 22,
+            name_key: "world_preview.state.gamma",
+            provinces: [
+                17266,
+                17267,
+                17268,
+                17484,
+                17485,
+                17693,
+            ],
+            representative: None,
+            allow_disconnected: false,
+        ),
+    ],
+)

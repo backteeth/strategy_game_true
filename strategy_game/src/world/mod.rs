@@ -17,6 +17,7 @@ pub mod fingerprint;
 pub mod ids;
 pub mod issue;
 pub mod model;
+pub mod overlay;
 pub mod validate;
 
 pub use files::{
@@ -28,4 +29,8 @@ pub use fingerprint::{GeographyChange, GeographyFingerprint, compute_fingerprint
 pub use ids::{HexCoord, MapStateId, ProvinceId};
 pub use issue::{IssueCode, Severity, WorldIssue};
 pub use model::{MapStateDef, ProvinceDef, WorldModel};
+pub use overlay::{
+    BoundaryEdge, BoundaryKind, CellStatus, WorldPreviewData, cell_status, compute_boundaries,
+    load_world_preview, state_color,
+};
 pub use validate::{ValidationMode, ValidationReport, validate_against_geography};

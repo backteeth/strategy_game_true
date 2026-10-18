@@ -718,4 +718,9 @@
 
     // ── war_error.peace.auto_settlement_failed (P21-020: daily auto-capitulation) ─
     ("war_error.peace.auto_settlement_failed", "この戦争の自動降伏講和に失敗しました: {reason}"),
+
+    // ── world_preview (P32-005: 検証用ステートの表示名。正式な州名ではない) ─
+    ("world_preview.state.alpha", "検証ステートA(アルファ)"),
+    ("world_preview.state.beta", "検証ステートB(ベータ)"),
+    ("world_preview.state.gamma", "検証ステートC(ガンマ)"),
 ]

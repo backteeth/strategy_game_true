@@ -719,4 +719,9 @@
 
     // ── war_error.peace.auto_settlement_failed (P21-020: daily auto-capitulation) ─
     ("war_error.peace.auto_settlement_failed", "This war's automatic surrender settlement failed: {reason}"),
+
+    // ── world_preview (P32-005: preview state names, not official state names) ─
+    ("world_preview.state.alpha", "Preview State A (Alpha)"),
+    ("world_preview.state.beta", "Preview State B (Beta)"),
+    ("world_preview.state.gamma", "Preview State C (Gamma)"),
 ]

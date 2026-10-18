@@ -1,0 +1,50 @@
+use std::collections::{BTreeMap, HashSet};
+use strategy_game::hexmap::data::*;
+use strategy_game::world::*;
+fn dist(a:(i32,i32), b:(i32,i32)) -> i32 { let dq=a.0-b.0; let dr=a.1-b.1; (dq.abs()+dr.abs()+(dq+dr).abs())/2 }
+fn main() {
+    let m = load_from_path(DEFAULT_MAP_PATH).unwrap();
+    let full = generate_initial_province_table(&m, Coverage::World);
+    let id_of: BTreeMap<(i32,i32), u32> = full.provinces.iter().map(|p| ((p.q,p.r), p.id)).collect();
+    let ctr = (83, 81);
+    let mut cells: Vec<(i32,i32)> = m.cells().iter().filter(|c| !c.terrain.is_water() && dist((c.q,c.r), ctr) <= 3).map(|c| (c.q,c.r)).collect();
+    cells.sort_by_key(|&(q,r)| (r,q));
+    let x = |c:(i32,i32)| 2.0*c.0 as f64 + c.1 as f64; // 画面x順(2q+r)
+    let s1 = *cells.iter().min_by(|a,b| x(**a).partial_cmp(&x(**b)).unwrap().then(a.cmp(b))).unwrap();
+    let s2 = *cells.iter().max_by(|a,b| x(**a).partial_cmp(&x(**b)).unwrap().then(b.cmp(a))).unwrap();
+    let s3 = *cells.iter().max_by_key(|c| (dist(**c,s1).min(dist(**c,s2)), std::cmp::Reverse(**c))).unwrap();
+    let seeds = [s1, s2, s3];
+    let mut assign: BTreeMap<(i32,i32), usize> = BTreeMap::new();
+    for &c in &cells { let (i,_) = seeds.iter().enumerate().min_by_key(|(i,s)| (dist(c,**s), *i)).unwrap(); assign.insert(c, i); }
+    // 未割当: 3つの種から最も遠い3セル(領域の端)
+    let mut far: Vec<(i32,i32)> = cells.clone();
+    far.sort_by_key(|c| (std::cmp::Reverse(seeds.iter().map(|s| dist(*c,*s)).min().unwrap()), *c));
+    let unassigned: HashSet<(i32,i32)> = far.into_iter().take(3).collect();
+    for u in &unassigned { assign.remove(u); }
+    println!("seeds {:?}; cells {} unassigned {:?}", seeds, cells.len(), unassigned);
+    let mut table = ProvinceTableFile { format_version: 1, coverage: Coverage::Partial, geography: compute_fingerprint(&m), next_province_id: full.next_province_id, retired: vec![], provinces: vec![] };
+    for c in &cells { table.provinces.push(ProvinceEntry { id: id_of[c], q: c.0, r: c.1 }); }
+    table.provinces.sort_by_key(|p| p.id);
+    let cfg = ron::ser::PrettyConfig::default();
+    std::fs::write("assets/data/world/preview/provinces.ron", format!("// P32-005 検証用データ(正式な世界設定ではない)。IDは明示保存された安定値。\n// 対象: 中心(q=83,r=81)から距離3以内の陸ヘックス。詳細は README.md。\n{}\n", ron::ser::to_string_pretty(&table, cfg.clone()).unwrap())).unwrap();
+    let names = ["world_preview.state.alpha", "world_preview.state.beta", "world_preview.state.gamma"];
+    let mut states = vec![];
+    for (i, n) in names.iter().enumerate() {
+        let mut ids: Vec<u32> = assign.iter().filter(|(_, s)| **s == i).map(|(c, _)| id_of[c]).collect();
+        ids.sort();
+        println!("state {} ({}) provinces {}", 20 + i, n, ids.len());
+        states.push(StateEntry { id: 20 + i as u32, name_key: n.to_string(), provinces: ids, representative: None, allow_disconnected: false });
+    }
+    let layout = StateLayoutFile { format_version: 1, states };
+    std::fs::write("assets/data/world/preview/states.ron", format!("// P32-005 検証用ステート配置(正式な州境界・国家配置ではない)。\n// provinces は provinces.ron のID。ここが所属関係の正本。未割当のプロヴィンスは意図的に残してある。\n{}\n", ron::ser::to_string_pretty(&layout, cfg).unwrap())).unwrap();
+    for (i, id) in unassigned.iter().map(|c| id_of[c]).enumerate() { println!("unassigned {i}: {id}"); }
+    // 連結性と検証
+    let t = load_province_table("assets/data/world/preview/provinces.ron").unwrap();
+    let l = load_state_layout("assets/data/world/preview/states.ron").unwrap();
+    let model = WorldModel::build(t, l).unwrap();
+    let r = validate_against_geography(&model, &m, ValidationMode::Authoring);
+    for i in &r.issues { println!("{i}"); }
+    let (mut minq, mut maxq, mut minr, mut maxr) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    for c in &cells { minq=minq.min(c.0); maxq=maxq.max(c.0); minr=minr.min(c.1); maxr=maxr.max(c.1); }
+    println!("range q {minq}..{maxq} r {minr}..{maxr}");
+}

@@ -7,6 +7,7 @@
 
 use super::data::{Climate, HexCell, HexMap, Terrain, Vegetation};
 use super::geometry::{image_to_world, river_edge_world};
+use crate::world::{BoundaryKind, CellStatus, WorldModel, cell_status, state_color};
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -21,6 +22,8 @@ pub enum HexViewMode {
     Terrain,
     Climate,
     Vegetation,
+    /// ステート所属の塗り(検証用ワールド設定を読み込んだ場合のみ意味を持つ。無ければ地形色)。
+    State,
 }
 
 impl HexViewMode {
@@ -30,6 +33,7 @@ impl HexViewMode {
             Self::Terrain => "地形",
             Self::Climate => "気候",
             Self::Vegetation => "植生",
+            Self::State => "ステート",
         }
     }
 }
@@ -117,7 +121,7 @@ fn water_color(t: Terrain) -> [f32; 3] {
 /// その値の色を水色と半々に混ぜて両方が読み取れるようにする。
 pub fn cell_color(mode: HexViewMode, cell: &HexCell) -> [f32; 3] {
     let own = match mode {
-        HexViewMode::Terrain => return terrain_color(cell.terrain),
+        HexViewMode::Terrain | HexViewMode::State => return terrain_color(cell.terrain),
         HexViewMode::Climate => (
             cell.climate == Climate::Unclassified,
             climate_color(cell.climate),
@@ -175,6 +179,8 @@ pub fn legend(mode: HexViewMode) -> Vec<(String, [f32; 3])> {
             v.push(("海(水域は未分類を含む)".into(), SEA));
             v.push(("湖・池(同上)".into(), LAKE));
         }
+        // ステートモードの凡例はワールド設定(ステート名・件数)を持つ view 側が組み立てる。
+        HexViewMode::State => {}
     }
     v
 }
@@ -345,4 +351,96 @@ pub fn build_river_mesh(map: &HexMap, width: f64) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
     mesh.insert_indices(Indices::U32(idx));
     mesh
+}
+
+// ---------------------------------------------------------------- P32-005: ステート表示
+
+/// 未割当(ID表にあるがステート未所属)の塗り色。ステート色・範囲外と区別する明るい灰色。
+pub const UNASSIGNED_FILL: [f32; 3] = [0.88, 0.86, 0.80];
+
+/// ステートモードのセル色(sRGB)。所属済み=ステート色、未割当=明るい灰、
+/// 検証範囲外の陸=地形色を暗くしたもの、水域=従来の水色。
+pub fn world_cell_color(world: &WorldModel, map: &HexMap, cell: &HexCell) -> [f32; 3] {
+    match cell_status(world, map, cell.q, cell.r) {
+        CellStatus::Assigned { state, .. } => state_color(state),
+        CellStatus::Unassigned { .. } => UNASSIGNED_FILL,
+        CellStatus::OutOfScope => {
+            let t = terrain_color(cell.terrain);
+            [t[0] * 0.35, t[1] * 0.35, t[2] * 0.35]
+        }
+        CellStatus::Water | CellStatus::NoCell => terrain_color(cell.terrain),
+    }
+}
+
+/// 頂点色。`State`モードでワールドがあればステート色、それ以外は従来の`vertex_colors`。
+pub fn vertex_colors_world(
+    map: &HexMap,
+    cells: &[u32],
+    mode: HexViewMode,
+    world: Option<&WorldModel>,
+) -> Vec<[f32; 4]> {
+    match (mode, world) {
+        (HexViewMode::State, Some(w)) => {
+            let mut out = Vec::with_capacity(cells.len() * 6);
+            for &i in cells {
+                let cell = map.cell_by_index(i);
+                let c = lin(world_cell_color(w, map, cell));
+                out.extend_from_slice(&[c; 6]);
+            }
+            out
+        }
+        _ => vertex_colors(map, cells, mode),
+    }
+}
+
+/// 色つきの辺の帯メッシュ(ステート境界など)。`edges`は`(q, r, direction, 線形RGBA)`。
+/// 帯は`build_river_mesh`と同じ辺の端点(`river_edge_world`=セル描画と共通の座標変換)を使い、
+/// 両端を半幅延長して角で途切れないようにする。
+pub fn build_edge_mesh(map: &HexMap, edges: &[(i32, i32, u8, [f32; 4])], width: f64) -> Mesh {
+    let half = width * 0.5;
+    let mut pos: Vec<[f32; 3]> = Vec::with_capacity(edges.len() * 4);
+    let mut col: Vec<[f32; 4]> = Vec::with_capacity(edges.len() * 4);
+    let mut idx: Vec<u32> = Vec::with_capacity(edges.len() * 6);
+    for &(q, r, d, color) in edges {
+        let (a, b) = river_edge_world(&map.grid, q, r, d);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= 0.0 {
+            continue;
+        }
+        let (ux, uy) = (dx / len, dy / len);
+        let (nx, ny) = (-uy * half, ux * half);
+        let (ax, ay) = (a.0 - ux * half, a.1 - uy * half);
+        let (bx, by) = (b.0 + ux * half, b.1 + uy * half);
+        let base = pos.len() as u32;
+        for (x, y) in [
+            (ax + nx, ay + ny),
+            (ax - nx, ay - ny),
+            (bx - nx, by - ny),
+            (bx + nx, by + ny),
+        ] {
+            pos.push([x as f32, y as f32, 0.0]);
+            col.push(color);
+        }
+        idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
+    mesh.insert_indices(Indices::U32(idx));
+    mesh
+}
+
+/// 境界の辺の描画色(線形RGBA)。`Coast`は描画しない(`None`)。
+/// `bold`=ステート同士の共有辺の本体、それ以外は未割当/範囲外/地図端との細い外周線。
+pub fn boundary_edge_color(kind: BoundaryKind) -> Option<[f32; 4]> {
+    match kind {
+        BoundaryKind::StateBorder => Some(lin([1.0, 1.0, 0.85])),
+        BoundaryKind::ToUnassigned => Some(lin([1.0, 0.55, 0.10])),
+        BoundaryKind::ToOutOfScope | BoundaryKind::MapEdge => Some(lin([0.70, 0.30, 0.95])),
+        BoundaryKind::Coast => None,
+    }
 }

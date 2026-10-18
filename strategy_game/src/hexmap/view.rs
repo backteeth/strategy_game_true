@@ -9,7 +9,7 @@ use super::data::{self, Climate, HexMap, Terrain, Vegetation};
 use super::geometry::{pick_cell_world, world_bounds};
 use super::render::{
     self, HexViewMode, build_fill_mesh, build_grid_mesh, build_ring_mesh, build_river_mesh,
-    plan_chunks, vertex_colors,
+    plan_chunks,
 };
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -54,7 +54,10 @@ struct InfoText;
 #[derive(Component)]
 struct StatusText;
 #[derive(Component)]
-struct ModeButton(HexViewMode);
+pub(super) struct ModeButton(pub(super) HexViewMode);
+/// 左パネル(ワールド設定のUIを挿入する位置の目印)。
+#[derive(Component)]
+pub(super) struct LeftPanel;
 #[derive(Component)]
 struct FitButton;
 #[derive(Component)]
@@ -107,7 +110,7 @@ pub struct HexViewport {
 }
 
 #[derive(Resource, Default)]
-struct DragState {
+pub(super) struct DragState {
     pressed_at: Option<Vec2>,
     last_cursor: Option<Vec2>,
     dragging: bool,
@@ -138,11 +141,16 @@ type SelectionMarkers = Or<(With<SelectionHalo>, With<SelectionRing>)>;
 pub struct HexPreviewPlugin {
     /// trueなら起動直後に確認画面を開く。
     pub open_at_start: bool,
+    /// Some なら検証用ワールド設定(プロヴィンス表・ステート配置)を読み込んで重ねる(P32-005)。
+    pub world_preview: Option<super::world_view::WorldPreviewPaths>,
 }
 
 impl Plugin for HexPreviewPlugin {
     fn build(&self, app: &mut App) {
         let open = self.open_at_start;
+        if let Some(paths) = self.world_preview.clone() {
+            app.add_plugins(super::world_view::WorldPreviewPlugin { paths });
+        }
         app.init_state::<HexPreviewState>()
             .init_resource::<DragState>()
             .init_resource::<FrameTimes>()
@@ -264,7 +272,7 @@ fn ring_thickness(size: f32, scale: f32) -> f32 {
 // ------------------------------------------------------------ 開く/閉じる
 
 #[allow(clippy::too_many_arguments)]
-fn enter_preview(
+pub(super) fn enter_preview(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -461,7 +469,7 @@ fn panel_node(left: bool) -> Node {
     n
 }
 
-fn label(text: impl Into<String>, size: f32) -> impl Bundle {
+pub(super) fn label(text: impl Into<String>, size: f32) -> impl Bundle {
     (
         Text::new(text),
         TextFont {
@@ -472,7 +480,7 @@ fn label(text: impl Into<String>, size: f32) -> impl Bundle {
     )
 }
 
-fn button_bundle<M: Component>(marker: M, text: &str) -> impl Bundle {
+pub(super) fn button_bundle<M: Component>(marker: M, text: &str) -> impl Bundle {
     (
         marker,
         Button,
@@ -488,7 +496,7 @@ fn button_bundle<M: Component>(marker: M, text: &str) -> impl Bundle {
 fn spawn_ui(commands: &mut Commands) {
     let bg = BackgroundColor(Color::srgba(0.08, 0.09, 0.12, 0.92));
     commands
-        .spawn((panel_node(true), Button, bg, HexPreviewEntity))
+        .spawn((panel_node(true), Button, bg, HexPreviewEntity, LeftPanel))
         .with_children(|p| {
             p.spawn(label("ヘックスマップ確認 (P32-001)", 15.0));
             for m in HexViewMode::ALL {
@@ -506,7 +514,7 @@ fn spawn_ui(commands: &mut Commands) {
                 },
             ));
             p.spawn(label(
-                "操作: ホイール=ズーム / 右・中・左ドラッグ=パン / 左クリック=選択\n1,2,3=モード  G=境界線  R=河川  Tab=画面を閉じる/開く  Esc=終了",
+                "操作: ホイール=ズーム / 右・中・左ドラッグ=パン / 左クリック=選択\n1,2,3=モード  G=境界線  R=河川  (--world-preview: 4=ステート B=ステート境界 F=検証地域)  Tab=画面を閉じる/開く  Esc=終了",
                 12.0,
             ));
         });
@@ -687,7 +695,7 @@ fn camera_input(
     }
 }
 
-fn apply_fit(
+pub(super) fn apply_fit(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cam: Query<&mut Transform, With<HexCamera>>,
     viewport: Option<ResMut<HexViewport>>,
@@ -741,6 +749,7 @@ fn sync_mode(
     legend_root: Query<Entity, With<LegendRoot>>,
     mut last_mode: Local<Option<HexViewMode>>,
     loaded_flag: Option<Res<HexLoadStats>>,
+    world: Option<Res<super::world_view::LoadedWorld>>,
 ) {
     let (Some(settings), Some(map), Some(_)) = (settings, map, loaded_flag) else {
         *last_mode = None;
@@ -755,7 +764,12 @@ fn sync_mode(
         if let Some(mut mesh) = meshes.get_mut(&m.0) {
             mesh.insert_attribute(
                 Mesh::ATTRIBUTE_COLOR,
-                vertex_colors(&map.0, &chunk.cells, settings.mode),
+                render::vertex_colors_world(
+                    &map.0,
+                    &chunk.cells,
+                    settings.mode,
+                    world.as_ref().map(|w| &w.data.model),
+                ),
             );
         }
     }
@@ -766,7 +780,15 @@ fn sync_mode(
     commands.entity(root).despawn_children();
     commands.entity(root).with_children(|p| {
         p.spawn(label(format!("凡例: {}", settings.mode.label()), 14.0));
-        for (name, color) in render::legend(settings.mode) {
+        let entries = match (settings.mode, world.as_ref()) {
+            (HexViewMode::State, Some(w)) => super::world_view::state_legend(w, &map.0),
+            (HexViewMode::State, None) => vec![(
+                "ワールド設定なし(--world-preview)".to_string(),
+                [0.5, 0.5, 0.5],
+            )],
+            _ => render::legend(settings.mode),
+        };
+        for (name, color) in entries {
             let n = legend_count(settings.mode, &name, &counts);
             p.spawn(Node {
                 flex_direction: FlexDirection::Row,
@@ -805,13 +827,14 @@ fn legend_count(mode: HexViewMode, name: &str, c: &data::AttributeCounts) -> Str
                 .iter()
                 .position(|t| render::vegetation_label(*t) == label)
                 .map(|i| c.vegetation[i]),
+            HexViewMode::State => None,
         }
     };
     let n = if name == "未分類(陸上)" {
         match mode {
             HexViewMode::Climate => Some(c.land_climate_unclassified),
             HexViewMode::Vegetation => Some(c.land_vegetation_unclassified),
-            HexViewMode::Terrain => None,
+            HexViewMode::Terrain | HexViewMode::State => None,
         }
     } else if name.starts_with("海") {
         Some(c.terrain[0])
@@ -936,6 +959,8 @@ fn update_texts(
     selection: Option<Res<HexSelection>>,
     error: Option<Res<HexLoadError>>,
     stats: Option<Res<HexLoadStats>>,
+    world: Option<Res<super::world_view::LoadedWorld>>,
+    world_err: Option<Res<super::world_view::WorldLoadError>>,
     cam: Query<&Transform, With<HexCamera>>,
     mut info: Query<&mut Text, (With<InfoText>, Without<StatusText>)>,
     mut status: Query<&mut Text, (With<StatusText>, Without<InfoText>)>,
@@ -960,8 +985,12 @@ fn update_texts(
             None => "選択なし\n地図のセルをクリックしてください".to_string(),
             Some(i) => {
                 let c = map.0.cell_by_index(i);
+                let world_lines = world
+                    .as_ref()
+                    .map(|w| super::world_view::selection_lines(w, &map.0, c.q, c.r))
+                    .unwrap_or_default();
                 format!(
-                    "選択セル\nq = {}\nr = {}\n地形: {} ({})\n気候: {} ({})\n植生: {} ({})",
+                    "選択セル\nq = {}\nr = {}\n地形: {} ({})\n気候: {} ({})\n植生: {} ({}){}",
                     c.q,
                     c.r,
                     render::terrain_label(c.terrain),
@@ -970,6 +999,7 @@ fn update_texts(
                     c.climate.id(),
                     render::vegetation_label(c.vegetation),
                     c.vegetation.id(),
+                    world_lines,
                 )
             }
         };
@@ -990,6 +1020,10 @@ fn update_texts(
             frames.max_ms,
             scale
         );
+        t.0.push_str(&super::world_view::status_lines(
+            world.as_deref(),
+            world_err.as_deref(),
+        ));
     }
 }
 
