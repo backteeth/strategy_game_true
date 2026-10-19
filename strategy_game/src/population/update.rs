@@ -68,11 +68,35 @@ pub fn update_state_population_and_employment(
     building_registry: &BuildingRegistry,
     mobilized_burden: u64,
 ) {
-    let total_wf = calculate_workforce(state.population, state.workforce_ratio)
-        .saturating_sub(mobilized_burden);
+    // P32-007: 計算の中核は`compute_employment`へ集約し、旧`StateData`も新ステートも同じ関数を通る。
+    crate::economy::state_access::update_employment(state, building_registry, mobilized_burden);
+}
+
+/// 雇用計算の結果(`compute_employment`)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmploymentResult {
+    /// 動員負担を控除した後の民間労働力。
+    pub civilian_workforce: u64,
+    pub employed: u64,
+    pub unemployed: u64,
+}
+
+/// 月次雇用計算の中核(純粋関数、P32-007でStateData依存から切り出し)。式・丸め・処理は
+/// 従来の`update_state_population_and_employment`と同一: 潜在労働力(`calculate_workforce`)から
+/// 動員負担を`saturating_sub`で控除し、施設の必要労働力(`required_workforce * level`の合計)
+/// までを雇用、残りを失業とする。
+pub fn compute_employment(
+    population: u64,
+    workforce_ratio: f32,
+    buildings: &std::collections::HashMap<crate::building::data::BuildingType, u32>,
+    building_registry: &BuildingRegistry,
+    mobilized_burden: u64,
+) -> EmploymentResult {
+    let total_wf =
+        calculate_workforce(population, workforce_ratio).saturating_sub(mobilized_burden);
 
     let mut total_required_wf: u64 = 0;
-    for (&b_type, &level) in &state.buildings {
+    for (&b_type, &level) in buildings {
         if level == 0 {
             continue;
         }
@@ -87,8 +111,11 @@ pub fn update_state_population_and_employment(
         total_wf
     };
 
-    state.employed_workforce = employed;
-    state.unemployed_workforce = calculate_unemployed_workforce(total_wf, employed);
+    EmploymentResult {
+        civilian_workforce: total_wf,
+        employed,
+        unemployed: calculate_unemployed_workforce(total_wf, employed),
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,9 @@ pub mod factory_starvation;
 pub mod finance;
 pub mod iron_shortage;
 pub mod production;
+pub mod map_state;
 pub mod resources;
+pub mod state_access;
 pub mod supply_balance;
 
 use crate::app::game_state::GameState;
@@ -17,8 +19,6 @@ use crate::economy::production::process_country_production_with_outcome;
 use crate::economy::supply_balance::MilitarySupplyProductionLedger;
 use crate::economy::resources::ResourceType;
 use crate::localization::{CurrentLocale, TranslationCatalog, t, tf};
-use crate::logistics::update::update_state_logistics;
-use crate::population::update::update_state_population_and_employment;
 use crate::state::data::StateRegistry;
 use crate::ui::notification::{GameNotification, NotificationHistory};
 use bevy::prelude::*;
@@ -152,18 +152,13 @@ pub fn handle_monthly_economy(
             // 動員済み人的資源(mobilized_manpower)を州の人口比で按分する。永続化せず、
             // 毎月このSystem内で再導出する派生値であり、他国の州へは一切漏れない
             // (owned_statesは現在この国家が所有する州だけ)。
-            let population_pairs: Vec<(crate::common::StateId, u64)> =
-                owned_states.iter().map(|s| (s.id, s.population)).collect();
-            let mobilized_burdens = crate::population::mobilization::apportion_mobilized_manpower(
+            // P32-007: 按分→雇用→物流は、新ステートの検証経路と共通の1つの関数を通る
+            // (`economy::state_access`)。計算式・処理順は従来と同一。
+            crate::economy::state_access::update_monthly_workforce_and_logistics(
+                &mut owned_states,
                 country.mobilized_manpower,
-                &population_pairs,
+                &building_registry,
             );
-
-            for state in owned_states.iter_mut() {
-                let burden = mobilized_burdens.get(&state.id).copied().unwrap_or(0);
-                update_state_population_and_employment(state, &building_registry, burden);
-                update_state_logistics(state, &building_registry);
-            }
 
             // P29-009: この月次生産の時点の Mine レベル合計(Iron 不足の履歴の「設備」の識別に使う)。
             let mine_levels_total: u32 = owned_states

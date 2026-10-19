@@ -34,7 +34,19 @@ pub fn apportion_mobilized_manpower(
     mobilized_manpower: u64,
     states: &[(StateId, u64)],
 ) -> HashMap<StateId, u64> {
-    let mut burdens: HashMap<StateId, u64> = HashMap::with_capacity(states.len());
+    apportion_mobilized_manpower_by(mobilized_manpower, states, |id| id.0 as u64)
+}
+
+/// `apportion_mobilized_manpower`と同一の按分(最大剰余法)を、任意の地域キー型で行う共通実装。
+/// `order`は剰余が同率のときの決定順(昇順)を与える安定した数値で、旧`StateId`でも新ステートの
+/// `MapStateId`でも、それぞれの集合の中だけで意味を持つ(異なる種類のIDの同一視には使わない)。
+/// 旧経路(`apportion_mobilized_manpower`)はこの関数へ委譲するため、計算式は1か所だけ。
+pub fn apportion_mobilized_manpower_by<K: Copy + Eq + std::hash::Hash>(
+    mobilized_manpower: u64,
+    states: &[(K, u64)],
+    order: impl Fn(K) -> u64,
+) -> HashMap<K, u64> {
+    let mut burdens: HashMap<K, u64> = HashMap::with_capacity(states.len());
     if states.is_empty() || mobilized_manpower == 0 {
         for &(id, _) in states {
             burdens.insert(id, 0);
@@ -51,7 +63,7 @@ pub fn apportion_mobilized_manpower(
     }
 
     let m = mobilized_manpower as u128;
-    let mut remainders: Vec<(StateId, u64, u128)> = Vec::with_capacity(states.len());
+    let mut remainders: Vec<(K, u64, u128)> = Vec::with_capacity(states.len());
     let mut allocated: u128 = 0;
     for &(id, population) in states {
         let product = m * (population as u128);
@@ -69,7 +81,7 @@ pub fn apportion_mobilized_manpower(
 
     // 剰余降順、同率はStateId昇順(安定した既存の順序基準)でソートする。
     // 人口0の州は剰余が常に0なので、人口>0かつ剰余>0の州が存在する限り選ばれない。
-    remainders.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.0.cmp(&b.0.0)));
+    remainders.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| order(a.0).cmp(&order(b.0))));
 
     for (id, _population, _remainder) in remainders {
         if deficit == 0 {

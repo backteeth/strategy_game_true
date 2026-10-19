@@ -396,7 +396,7 @@ fn checked_military_supplies_addition(
 }
 
 /// 州の資源鉱床
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StateResourceDeposit {
     pub resource_type: ResourceType,
     pub base_output: f64,

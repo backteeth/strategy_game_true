@@ -272,3 +272,19 @@ struct StateDef      { id: StateAreaId, name_key: String, provinces: Vec<Provinc
 - 本書、`p32-002_user_manual_verification_record.md`(P32-002 のユーザー手動確認と完了判定)、`hex_map_geography_stats.txt` とその生成コード `p32_003_geo_stats_example.rs.txt`(読み取り専用の一時計測)。
 - 調査で確認した主なコード: `state/data.rs`・`state/ownership.rs`・`military/{data,pathfinding,movement,capital_connectivity,daily_supply,invasion,update}.rs`・`war/{occupation,frontline,peace,data,war_score,capitulation}.rs`・`country/{mod,elimination}.rs`・`population/*`・`economy/*`・`logistics/update.rs`・`save/{dto,validate,apply}.rs`・`map/{selection,rendering,division_render}.rs`・`ui/state_panel.rs`・`app/loader.rs`。
 - 未確認(今回は調査対象を参照数・主要型・主要関数の確認に限った): `country_ai.rs`・`war/military_ai.rs` 内部の個別ロジックの網羅、各 UI パネルの全 `StateId` 利用箇所。これらの詳細は各移行段階の開始時に再調査する。
+
+---
+
+## 15. 追記(P32-007 / 2026-10): D9 の採用方針
+
+ユーザーが D9(施設・資源のプロヴィンス/ステートへの置き場)について、次の管理方針を承認した。本節は P32-003 の当初の推奨(「第一案は S に集約、P 配置は後続」)を、承認された範囲で更新する。**この承認だけでは、下記の「確定しない事項」は決まらない。**
+
+| 対象 | 管理単位(承認) |
+|---|---|
+| 人口・雇用 | **ステート単位** |
+| 工場・農場・採掘施設などの経済施設(規模・雇用・生産) | **ステート単位** |
+| 天然資源(鉱床・埋蔵量などの所在地) | **プロヴィンス単位**。経済処理に必要な利用可能量等は**ステートへ集計**して渡す |
+| 位置が重要な施設(港・要塞・鉄道駅など) | **プロヴィンス単位** |
+
+確定しない事項(維持): 資源量・施設数の具体的な配置 / 資源の枯渇・再生・採掘速度 / 占領時の施設利用や生産の扱い / 施設の破壊・接収ルール / 法的所有と部分割譲 / 補給の具体的な計算方法 / 旧セーブの廃止と V2 移行。
+P32-007 は人口・雇用・経済施設(ステート単位)の接続だけを実装し、天然資源の所在地(プロヴィンス単位)と位置施設は未実装である(`MapStateEconomy.resource_deposits` は「ステート単位に集計済みの利用可能な鉱床」を受け取る入力でしかなく、プロヴィンスごとの所在地は持たない)。

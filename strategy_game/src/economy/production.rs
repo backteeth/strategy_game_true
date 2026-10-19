@@ -4,7 +4,7 @@ use crate::economy::resources::{
     military_supplies_value_to_units,
 };
 use crate::population::update::calculate_economic_workforce_ratio;
-use crate::state::data::StateData;
+use crate::economy::state_access::StateEconomyAccess;
 use bevy::log::warn;
 use std::collections::HashMap;
 
@@ -237,8 +237,8 @@ pub struct CountryProductionOutcome {
 }
 
 /// 1つの国家が所有する州の生産・消費をまとめて一括処理する
-pub fn process_country_production(
-    states: &mut [&mut StateData],
+pub fn process_country_production<S: StateEconomyAccess>(
+    states: &mut [&mut S],
     stockpile: &mut CountryStockpile,
     building_registry: &BuildingRegistry,
     is_bankrupt: bool,
@@ -250,8 +250,8 @@ pub fn process_country_production(
 
 /// `process_country_production`と同一の処理を行い、MilitarySuppliesの実産出も返す
 /// (P29-002、表示専用の実績。生産式・処理順・配分は`process_country_production`と同一)。
-pub fn process_country_production_with_outcome(
-    states: &mut [&mut StateData],
+pub fn process_country_production_with_outcome<S: StateEconomyAccess>(
+    states: &mut [&mut S],
     stockpile: &mut CountryStockpile,
     building_registry: &BuildingRegistry,
     is_bankrupt: bool,
@@ -277,7 +277,7 @@ pub fn process_country_production_with_outcome(
     // 使う。Bevy Entity ID、メモリアドレス、HashMap内部順、生成順のいずれにも
     // 依存しない。
     let mut order: Vec<usize> = (0..states.len()).collect();
-    order.sort_by_key(|&i| states[i].id.0);
+    order.sort_by_key(|&i| states[i].economy_key());
 
     // Step 1: 各州の各建物での入力資源要求量を集計する
     let mut total_inputs_needed: HashMap<ResourceType, f64> = HashMap::new();
@@ -288,9 +288,9 @@ pub fn process_country_production_with_outcome(
         // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
         // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
         let wf_ratio =
-            calculate_economic_workforce_ratio(state.employed_workforce, state.total_workforce())
+            calculate_economic_workforce_ratio(state.employed_workforce(), state.total_workforce())
                 .clamp(0.0, 1.0);
-        let log_ratio = state.logistics_ratio;
+        let log_ratio = state.logistics_ratio();
 
         // P26-DET-001: `state.buildings`(`HashMap<BuildingType, u32>`)の反復順は
         // Rust既定のRandomState(プロセスごとにランダムなSipHashシード)に依存し、
@@ -299,7 +299,7 @@ pub fn process_country_production_with_outcome(
         // `country_ai.rs::find_proactive_mine_state`が`ResourceType::ALL`で
         // 既に用いているのと同じ方針)で固定する。
         for b_type in BuildingType::ALL {
-            let level = state.buildings.get(&b_type).copied().unwrap_or(0);
+            let level = state.buildings().get(&b_type).copied().unwrap_or(0);
             if level == 0 {
                 continue;
             }
@@ -408,13 +408,13 @@ pub fn process_country_production_with_outcome(
             // 経済用労働力比率(P23-004: population::update::calculate_economic_workforce_ratio
             // へ集約。ここでのみ既存どおり[0.0, 1.0]へクランプする)。
             let wf_ratio = calculate_economic_workforce_ratio(
-                state.employed_workforce,
+                state.employed_workforce(),
                 state.total_workforce(),
             )
             .clamp(0.0, 1.0);
-            let log_ratio = state.logistics_ratio;
+            let log_ratio = state.logistics_ratio();
 
-            let Some(&level) = state.buildings.get(&b_type) else {
+            let Some(&level) = state.buildings().get(&b_type) else {
                 continue;
             };
             if level == 0 {
@@ -536,7 +536,7 @@ pub fn process_country_production_with_outcome(
             // P21-009: MagicCrystal鉱床は専用のCrystalMine(固定産出量・鉱床ゲート付き)の
             // 管轄とし、汎用Mineでは採掘しない(精製ステップを迂回する経路を作らないため)。
             if b_type == BuildingType::Mine {
-                for deposit in &state.resource_deposits {
+                for deposit in state.resource_deposits() {
                     if deposit.discovered && deposit.resource_type != ResourceType::MagicCrystal {
                         let out_amount =
                             calculate_actual_output(deposit.base_output, level, final_op);
@@ -581,7 +581,7 @@ pub fn process_country_production_with_outcome(
     }
 
     for (i, state) in states.iter_mut().enumerate() {
-        state.building_operation_ratios = std::mem::take(&mut op_ratios_per_state[i]);
+        state.set_building_operation_ratios(std::mem::take(&mut op_ratios_per_state[i]));
     }
 
     // P26-003-REV-002: 全州の集計が終わった後、この国家についてただ1回だけ正規APIへ
