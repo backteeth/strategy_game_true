@@ -6,7 +6,7 @@
 //! (地理マップの確認はそのまま可能)。確認画面を閉じると、リソースもEntityも全部破棄する
 //! (`HexPreviewEntity`の一括削除+`exit_world`)ため、開き直しても重複しない。
 
-use super::data::HexMap;
+use super::data::{Climate, HexMap, Terrain, Vegetation};
 use super::render::{self, HexViewMode, boundary_edge_color, build_edge_mesh};
 use super::view::{
     HexCamera, HexPreviewEntity, HexPreviewState, HexViewSettings, HexViewport, LeftPanel,
@@ -347,8 +347,11 @@ pub fn describe_cell(world: &LoadedWorld, map: &HexMap, q: i32, r: i32) -> Strin
                 .cloned()
                 .unwrap_or_else(|| state.to_string());
             format!(
-                "\n--- ワールド(検証用) ---\nプロヴィンス: {}\nステート: {} (MapState#{})\n所属: 所属済み",
-                province.0, name, state.0
+                "\n--- ワールド(検証用) ---\nプロヴィンス: {}\nステート: {} (MapState#{})\n所属: 所属済み{}",
+                province.0,
+                name,
+                state.0,
+                state_summary_text(world, state)
             )
         }
         CellStatus::Unassigned { province } => format!(
@@ -417,4 +420,73 @@ pub fn state_legend(world: &LoadedWorld, map: &HexMap) -> Vec<(String, [f32; 3])
     ));
     let _ = map;
     v
+}
+
+/// 内訳のうち件数が1以上の項目だけを「ラベル件数」で並べる(0件の項目は出さない)。
+fn breakdown<T: Copy>(items: &[T], counts: &[usize], label: impl Fn(T) -> String) -> String {
+    let parts: Vec<String> = items
+        .iter()
+        .zip(counts)
+        .filter(|(_, n)| **n > 0)
+        .map(|(it, n)| format!("{} {}", label(*it), n))
+        .collect();
+    if parts.is_empty() {
+        "なし".to_string()
+    } else {
+        parts.join(" / ")
+    }
+}
+
+/// 所属済みステートの地理集計と隣接ステートの確認用テキスト(導出済みデータの表示のみ。
+/// 選択のたびに集計を再生成しない)。人口・施設などのシミュレーション値ではない。
+pub fn state_summary_text(world: &LoadedWorld, state: MapStateId) -> String {
+    let d = &world.data.derived;
+    let Some(s) = d.summary(state) else {
+        return String::new();
+    };
+    let name_of = |id: MapStateId| {
+        world
+            .names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| id.to_string())
+    };
+    let mut t = format!(
+        "\n--- ステート集計(地理) ---\n{} (MapState#{})\nプロヴィンス数: {}(面積ではない)\n地形: {}\n気候: {}\n植生: {}",
+        name_of(state),
+        state.0,
+        s.province_count,
+        breakdown(&Terrain::ALL, &s.terrain, |x| render::terrain_label(x)
+            .to_string()),
+        breakdown(&Climate::ALL, &s.climate, |x| render::climate_label(x)
+            .to_string()),
+        breakdown(&Vegetation::ALL, &s.vegetation, |x| {
+            render::vegetation_label(x).to_string()
+        }),
+    );
+    let neighbors = d.neighbors_of(state);
+    if neighbors.is_empty() {
+        t.push_str("\n隣接ステート: 確認できた範囲では なし");
+    } else {
+        t.push_str("\n隣接ステート:");
+        for (other, adj) in neighbors {
+            t.push_str(&format!(
+                "\n  {} (#{}): 共有辺 {} / 河川辺 {}",
+                name_of(other),
+                other.0,
+                adj.shared_edges,
+                adj.shared_river_edges
+            ));
+        }
+    }
+    let c = d.completeness();
+    if c.is_complete() {
+        t.push_str("\n(全域を網羅した完全な結果)");
+    } else {
+        t.push_str(&format!(
+            "\n※検証用の部分データ(coverage {:?}、未割当 {}、範囲外の陸 {})。記録のない隣接は「存在しない」とは限りません",
+            c.coverage, c.unassigned_provinces, c.out_of_scope_land_cells
+        ));
+    }
+    t
 }

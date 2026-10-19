@@ -12,6 +12,7 @@
 //! 所属関係の正本は**ステート配置ファイルの`provinces`**(ステート→プロヴィンス)のみ。
 //! プロヴィンス→ステートの逆引きは読み込み時に導出する索引で、保存しない。
 
+pub mod aggregate;
 pub mod files;
 pub mod fingerprint;
 pub mod ids;
@@ -20,6 +21,10 @@ pub mod model;
 pub mod overlay;
 pub mod validate;
 
+pub use aggregate::{
+    AdjacencyLookup, Completeness, DeriveError, StateAdjacency, StateGeoSummary, WorldGeoDerived,
+    derive_world_geo,
+};
 pub use files::{
     Coverage, ProvinceEntry, ProvinceTableFile, StateEntry, StateLayoutFile, WORLD_FORMAT_VERSION,
     WorldDataError, generate_initial_province_table, load_province_table, load_state_layout,

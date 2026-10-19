@@ -353,7 +353,25 @@ fn world_shot_script(
         220 => viewport.needs_fit = true,
         240 => shot(&mut commands, "09_after_full_map_return.png"),
         290 => shot(&mut commands, "10_after_reopen.png"),
-        300 => {
+        // P32-006: ステート集計の確認(別ステートへ移ると集計が切り替わる)
+        295 => {
+            settings.mode = HexViewMode::State;
+            selection.0 = map.0.cell_index(86, 78); // MapState#21
+            viewport.needs_fit = true;
+        }
+        320 => shot(&mut commands, "11_state_summary_beta.png"),
+        325 => selection.0 = map.0.cell_index(80, 83), // MapState#20
+        345 => shot(&mut commands, "12_state_summary_alpha.png"),
+        350 => selection.0 = map.0.cell_index(83, 78), // MapState#22
+        370 => shot(&mut commands, "13_state_summary_gamma.png"),
+        375 => {
+            // 未割当を選ぶと、前の集計が残らない
+            if let Some(c) = pick_cell(&|s| matches!(s, CellStatus::Unassigned { .. })) {
+                selection.0 = map.0.cell_index(c.q, c.r);
+            }
+        }
+        395 => shot(&mut commands, "14_unassigned_no_stale_summary.png"),
+        400 => {
             exit.write(AppExit::Success);
         }
         _ => {}

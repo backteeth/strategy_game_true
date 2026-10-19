@@ -11,6 +11,7 @@
 //! - `Coast`: ステートと水域(海・湖)との辺。出力はするが、海岸線は地形の塗りで見えるため
 //!   通常は描画しない(描画しないという方針の根拠をテストで固定)。
 
+use super::aggregate::{WorldGeoDerived, derive_world_geo};
 use super::files::{load_province_table, load_state_layout};
 use super::ids::{MapStateId, ProvinceId};
 use super::issue::Severity;
@@ -143,6 +144,8 @@ pub struct WorldPreviewData {
     pub model: WorldModel,
     pub report: ValidationReport,
     pub boundaries: Vec<BoundaryEdge>,
+    /// ステートの地理集計・隣接(読み込み時に1回だけ導出。保存しない)。
+    pub derived: WorldGeoDerived,
     /// ID表の対象セルを囲むワールド座標の矩形 `(min_x, min_y, max_x, max_y)`(カメラ移動用)。
     pub focus_bounds: Option<(f64, f64, f64, f64)>,
 }
@@ -177,11 +180,13 @@ pub fn load_world_preview(
             .join("\n"));
     }
     let boundaries = compute_boundaries(&model, map);
+    let derived = derive_world_geo(&model, map).map_err(|e| e.to_string())?;
     let focus_bounds = focus_bounds(&model, map);
     Ok(WorldPreviewData {
         model,
         report,
         boundaries,
+        derived,
         focus_bounds,
     })
 }
