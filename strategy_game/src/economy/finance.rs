@@ -1,5 +1,6 @@
-use crate::building::data::BuildingRegistry;
+use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::country::CountryData;
+use crate::economy::state_access::StateEconomyAccess;
 use crate::population::update::calculate_economic_workforce_ratio;
 use crate::state::data::StateData;
 
@@ -120,52 +121,94 @@ pub fn calculate_monthly_balance(income: f64, expenses: f64) -> f64 {
     income - expenses
 }
 
-/// 1つの国家の税収・支出・財政を計算して適用する
-pub fn process_country_finance(
-    country: &mut CountryData,
-    states: &mut [&mut StateData],
+/// 国家の月次財政の計算結果(`compute_country_finance`)。国庫などの国家データへの反映は
+/// 呼び出し側(旧`process_country_finance`、新ステートの検証経路)が1回だけ行う。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CountryFinanceResult {
+    pub income: f64,
+    pub expenses: f64,
+    pub balance: f64,
+    pub total_population: u64,
+}
+
+/// 国家の税収・支出を、その国家に対応づけられた地域の集合から計算する共通実装
+/// (P32-008で`process_country_finance`から切り出し。旧`StateData`も新ステートも同じ関数を通る)。
+/// 各地域は**ちょうど1回**だけ集計し、国庫などは変更しない(純粋な計算)。
+///
+/// 式は従来どおり: 税収 = `calculate_state_tax`、建物維持費 = `maintenance_cost × level × 稼働率`、
+/// 物流維持費 = 物流容量 × 係数、行政費 = 総人口 × 係数。建物維持費の合計は、従来は`HashMap`の
+/// 反復順(プロセスごとに不定)で加算していたため、ここでは`BuildingType::ALL`の宣言順で加算する
+/// (数式は同一で、f64の加算順を決定的にしただけ)。地域の集計順は渡されたスライスの順。
+pub fn compute_country_finance<S: StateEconomyAccess>(
+    tax_rate: f32,
+    states: &[&mut S],
     building_registry: &BuildingRegistry,
-) {
+) -> CountryFinanceResult {
     let mut total_income = 0.0;
     let mut total_expenses = 0.0;
     let mut total_pop = 0u64;
 
     for state in states.iter() {
-        total_pop += state.population;
+        total_pop += state.population();
 
         // 税収
-        let tax = calculate_state_tax(state.population, state.living_standard, country.tax_rate);
+        let tax = calculate_state_tax(state.population(), state.living_standard(), tax_rate);
         total_income += tax;
 
         // 建物維持費
-        for (&b_type, &level) in &state.buildings {
+        for b_type in BuildingType::ALL {
+            let level = state.building_level(b_type);
             if level == 0 {
                 continue;
             }
             if let Some(def) = building_registry.get(b_type) {
-                let op = state.building_operation(b_type);
+                let op = state.building_operation_ratio(b_type);
                 total_expenses += def.maintenance_cost * (level as f64) * (op as f64);
             }
         }
 
         // 物流維持費
-        total_expenses += (state.logistics_capacity as f64) * LOGISTICS_MAINTENANCE_COEFFICIENT;
+        total_expenses += (state.logistics_capacity() as f64) * LOGISTICS_MAINTENANCE_COEFFICIENT;
     }
 
     // 行政費
     let admin_cost = calculate_admin_cost(total_pop);
     total_expenses += admin_cost;
 
-    let balance = calculate_monthly_balance(total_income, total_expenses);
-    country.monthly_income = total_income;
-    country.monthly_expenses = total_expenses;
-    country.monthly_balance = balance;
-    country.treasury += balance;
+    CountryFinanceResult {
+        income: total_income,
+        expenses: total_expenses,
+        balance: calculate_monthly_balance(total_income, total_expenses),
+        total_population: total_pop,
+    }
+}
+
+/// 1つの国家の税収・支出・財政を計算して適用する
+pub fn process_country_finance(
+    country: &mut CountryData,
+    states: &mut [&mut StateData],
+    building_registry: &BuildingRegistry,
+) {
+    let r = compute_country_finance(country.tax_rate, states, building_registry);
+    country.monthly_income = r.income;
+    country.monthly_expenses = r.expenses;
+    country.monthly_balance = r.balance;
+    country.treasury += r.balance;
 }
 
 /// 州の生活水準と不満度を更新する
 pub fn update_state_welfare_and_unrest(
     state: &mut StateData,
+    tax_rate: f32,
+    has_food: bool,
+    is_bankrupt: bool,
+) {
+    update_welfare_and_unrest(state, tax_rate, has_food, is_bankrupt);
+}
+
+/// 地域の生活水準と不満度の更新の共通実装(P32-008で切り出し。式は従来どおり)。
+pub fn update_welfare_and_unrest<S: StateEconomyAccess>(
+    state: &mut S,
     tax_rate: f32,
     has_food: bool,
     is_bankrupt: bool,
@@ -185,7 +228,7 @@ pub fn update_state_welfare_and_unrest(
     // へ集約。UI用のcivilian employment rate(P23-003)とは分母が異なる別指標であり、
     // 混同しない——詳細は同関数のドキュメントコメントを参照)。
     let emp_rate =
-        calculate_economic_workforce_ratio(state.employed_workforce, state.total_workforce());
+        calculate_economic_workforce_ratio(state.employed_workforce(), state.total_workforce());
     if emp_rate >= 0.9 {
         ls_delta += 0.5;
     } else if emp_rate < 0.7 {
@@ -194,9 +237,9 @@ pub fn update_state_welfare_and_unrest(
     }
 
     // 物流
-    if state.logistics_ratio >= LOGISTICS_WELFARE_BONUS_RATIO {
+    if state.logistics_ratio() >= LOGISTICS_WELFARE_BONUS_RATIO {
         ls_delta += 0.3;
-    } else if state.logistics_ratio < 0.5 {
+    } else if state.logistics_ratio() < 0.5 {
         ls_delta -= 0.5;
         unrest_delta += 0.5;
     }
@@ -219,8 +262,9 @@ pub fn update_state_welfare_and_unrest(
     let ls_change = ls_delta.clamp(-2.0, 2.0);
     let unrest_change = unrest_delta.clamp(-2.0, 2.0);
 
-    state.living_standard = (state.living_standard + ls_change).clamp(0.0, 100.0);
-    state.unrest = (state.unrest + unrest_change).clamp(0.0, 100.0);
+    let living_standard = (state.living_standard() + ls_change).clamp(0.0, 100.0);
+    let unrest = (state.unrest() + unrest_change).clamp(0.0, 100.0);
+    state.set_welfare(living_standard, unrest);
 }
 
 #[cfg(test)]

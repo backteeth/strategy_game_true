@@ -12,6 +12,7 @@
 use crate::app::time::MonthChangedMessage;
 use crate::common::CountryId;
 use crate::country::CountryRegistry;
+use crate::economy::state_access::StateEconomyAccess;
 use crate::state::data::StateRegistry;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -46,9 +47,25 @@ pub fn grow_state_population(population: u64) -> u64 {
 
 /// `StateRegistry`内の全州人口を1か月ぶん成長させる(O(州数)、1回の走査)。
 pub fn grow_all_state_populations(state_registry: &mut StateRegistry) {
-    for state in state_registry.states.iter_mut() {
-        state.population = grow_state_population(state.population);
+    // P32-008: 成長の中核は`grow_populations`へ集約し、旧`StateData`も新ステートも同じ関数を通る。
+    let mut refs: Vec<&mut crate::state::data::StateData> = state_registry.states.iter_mut().collect();
+    grow_populations(&mut refs);
+}
+
+/// 地域の人口を1か月ぶん成長させる共通実装。各地域を**ちょうど1回**だけ更新し(所属プロヴィンス数・
+/// 配列の順序・呼び出し回数以外の要因で増幅しない)、式は`grow_state_population`のまま。
+pub fn grow_populations<S: StateEconomyAccess>(states: &mut [&mut S]) {
+    for s in states.iter_mut() {
+        let grown = grow_state_population(s.population());
+        s.set_population(grown);
     }
+}
+
+/// 国家の人的資源の月次回復(所有人口から基準上限を求め、`recover_manpower`で1か月ぶん回復)。
+/// 旧`handle_monthly_population_growth`と新ステートの検証経路が共通で使う。国家の値は
+/// 国家ごとに1回だけ更新し、各ステートから重複して更新しない。
+pub fn recover_country_manpower(available_manpower: u64, owned_population: u64) -> u64 {
+    recover_manpower(available_manpower, compute_manpower_cap(owned_population))
 }
 
 /// 州の法的所有国(`owner_country_id`、占領による実効支配ではない)ごとに人口を集計する
@@ -111,8 +128,8 @@ pub fn handle_monthly_population_growth(
                 continue;
             }
             let population = population_by_owner.get(&country.id).copied().unwrap_or(0);
-            let cap = compute_manpower_cap(population);
-            country.available_manpower = recover_manpower(country.available_manpower, cap);
+            country.available_manpower =
+                recover_country_manpower(country.available_manpower, population);
         }
     }
 }

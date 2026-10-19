@@ -52,7 +52,7 @@ impl ResourceType {
 }
 
 /// 国家単位の資源備蓄
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CountryStockpile {
     pub amounts: HashMap<ResourceType, f64>,
 }

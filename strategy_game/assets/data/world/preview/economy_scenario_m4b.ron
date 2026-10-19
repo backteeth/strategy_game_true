@@ -1,0 +1,67 @@
+// P32-008 (M4-B) 検証用の複数国家・複数月の経済シナリオ。**正式な人口・税率・国家所属・ゲームバランスではない。**
+// 地理配置(provinces.ron / states.ron)とは別のデータ。通常の地理プレビューや旧ゲームには注入されない。
+// `countries[].states` は「経済計算上の対応関係」(どのステートをどの国家の月次計算に含めるか)であり、
+// 法的所有・占領のモデルではない(それらは未決)。各ステートはちょうど1つの国家に含める。
+// state は provinces/states.ron の MapStateId(20/21/22)。国家ラベルは旧 CountryId とは無関係。
+(
+    format_version: 1,
+    description: "P32-008 multi-country multi-month validation scenario (not official data or balance)",
+    months: 6,
+    countries: [
+        // 国家1: 黒字側。動員 12000 > 回復途中の人的資源。生産に必要な備蓄を明示。
+        (
+            label: 1,
+            treasury: 500.0,
+            tax_rate: 0.15,
+            available_manpower: 10000,
+            mobilized_manpower: 12000,
+            stockpile: { Iron: 2000.0, Coal: 2000.0, Food: 50.0 },
+            states: [20, 21],
+        ),
+        // 国家2: 国庫が負(破産ペナルティ)、高税率(>0.25 の福祉減少)、食料なし、動員なし。
+        (
+            label: 2,
+            treasury: -200.0,
+            tax_rate: 0.30,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: {},
+            states: [22],
+        ),
+    ],
+    states: [
+        // 20: 施設あり・失業者あり(労働力 300000、必要労働力 58000)。人口成長の端数あり。
+        (
+            state: 20,
+            population: 600001,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 100.0,
+            buildings: { Farm: 3, Mine: 2, Factory: 1, Railway: 1 },
+            resource_deposits: [
+                (resource_type: Iron, base_output: 40.0, discovered: true, development_level: 1),
+                (resource_type: Coal, base_output: 30.0, discovered: true, development_level: 1),
+            ],
+        ),
+        // 21: 労働力不足。
+        (
+            state: 21,
+            population: 100000,
+            workforce_ratio: 0.4,
+            living_standard: 40.0,
+            unrest: 25.0,
+            base_logistics_capacity: 60.0,
+            buildings: { Farm: 6, Factory: 1 },
+        ),
+        // 22: 施設ゼロ(別の国家)。
+        (
+            state: 22,
+            population: 250000,
+            workforce_ratio: 0.45,
+            living_standard: 50.0,
+            unrest: 15.0,
+            base_logistics_capacity: 100.0,
+        ),
+    ],
+)

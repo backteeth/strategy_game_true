@@ -21,6 +21,7 @@ pub trait StateEconomyAccess {
     fn economy_key(&self) -> u64;
 
     fn population(&self) -> u64;
+    fn set_population(&mut self, population: u64);
     fn workforce_ratio(&self) -> f32;
     fn buildings(&self) -> &HashMap<BuildingType, u32>;
 
@@ -30,7 +31,16 @@ pub trait StateEconomyAccess {
 
     fn base_logistics_capacity(&self) -> f32;
     fn logistics_ratio(&self) -> f32;
+    fn logistics_capacity(&self) -> f32;
     fn set_logistics(&mut self, capacity: f32, usage: f32, ratio: f32);
+
+    /// 生活水準(0.0〜100.0)と不満度(0.0〜100.0)。福祉更新(`economy::finance`)が読み書きする。
+    fn living_standard(&self) -> f32;
+    fn unrest(&self) -> f32;
+    fn set_welfare(&mut self, living_standard: f32, unrest: f32);
+
+    /// 建物の稼働率(生産処理が書き込んだ値。未記録は0.0)。
+    fn building_operation_ratio(&self, b_type: BuildingType) -> f32;
 
     /// 生産で使う、この地域で利用可能な鉱床(入力データ)。
     fn resource_deposits(&self) -> &[StateResourceDeposit];
@@ -58,6 +68,9 @@ impl StateEconomyAccess for StateData {
     fn population(&self) -> u64 {
         self.population
     }
+    fn set_population(&mut self, population: u64) {
+        self.population = population;
+    }
     fn workforce_ratio(&self) -> f32 {
         self.workforce_ratio
     }
@@ -84,6 +97,22 @@ impl StateEconomyAccess for StateData {
         self.logistics_capacity = capacity;
         self.logistics_usage = usage;
         self.logistics_ratio = ratio;
+    }
+    fn logistics_capacity(&self) -> f32 {
+        self.logistics_capacity
+    }
+    fn living_standard(&self) -> f32 {
+        self.living_standard
+    }
+    fn unrest(&self) -> f32 {
+        self.unrest
+    }
+    fn set_welfare(&mut self, living_standard: f32, unrest: f32) {
+        self.living_standard = living_standard;
+        self.unrest = unrest;
+    }
+    fn building_operation_ratio(&self, b_type: BuildingType) -> f32 {
+        self.building_operation(b_type)
     }
     fn resource_deposits(&self) -> &[StateResourceDeposit] {
         &self.resource_deposits

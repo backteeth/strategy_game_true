@@ -118,5 +118,91 @@ fn run() -> Result<(), String> {
         stock.get(ResourceType::Food),
         stock.get(ResourceType::IndustrialGoods)
     );
+    run_multi_month(&world.model, &buildings)?;
+    Ok(())
+}
+
+/// M4-B: 複数国家・複数月の検証用シナリオ(`economy_scenario_m4b.ron`)を新経路で実行して表示する。
+/// 旧経路(実際の旧System)との月ごとの一致は`tests/p32_008_map_state_finance_test.rs`で検証する。
+fn run_multi_month(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<(), String> {
+    use strategy_game::economy::map_state::{MapStateEconomyRegistry, parse_multi_month_scenario};
+    let text = std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4b.ron")
+        .map_err(|e| e.to_string())?;
+    let sc = parse_multi_month_scenario(&text)?;
+    println!(
+        "
+
+=== M4-B 複数国家・複数月の検証用シナリオ(正式な配置・バランスではない) ==="
+    );
+    println!("{} / {} か月", sc.description, sc.months);
+    println!("国家への対応づけは経済計算上のもので、法的所有・占領モデルではない。");
+    let (mut reg, mut countries) =
+        MapStateEconomyRegistry::from_multi_scenario(&sc, world, buildings).map_err(|issues| {
+            issues
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(
+                    "
+",
+                )
+        })?;
+    println!(
+        "
+[初期状態]"
+    );
+    for s in reg.iter() {
+        println!(
+            "  MapState#{}: 人口 {} 生活水準 {} 不満度 {}",
+            s.state.0, s.population, s.living_standard, s.unrest
+        );
+    }
+    for c in &countries {
+        println!(
+            "  国家{}: 国庫 {} 税率 {} 人的資源 {} 動員 {} ステート {:?}",
+            c.label,
+            c.treasury,
+            c.tax_rate,
+            c.available_manpower,
+            c.mobilized_manpower,
+            c.states.iter().map(|s| s.0).collect::<Vec<_>>()
+        );
+    }
+    for m in 1..=sc.months {
+        println!(
+            "
+[{m}か月目]"
+        );
+        for c in countries.iter_mut() {
+            let r = reg.run_country_month(c, buildings);
+            println!(
+                "  国家{}: 所有人口 {} / 破産 {} / 収入 {:.4} 支出 {:.4} 収支 {:.4} / 国庫 {:.4} / 人的資源 {}",
+                r.label,
+                r.owned_population,
+                r.is_bankrupt,
+                r.finance.income,
+                r.finance.expenses,
+                r.finance.balance,
+                c.treasury,
+                c.available_manpower
+            );
+            for id in &c.states {
+                let s = reg.get(*id).unwrap();
+                println!(
+                    "    MapState#{}: 人口 {} 雇用 {} 失業 {} 物流比 {:.3} 生活水準 {:.2} 不満度 {:.2}",
+                    s.state.0,
+                    s.population,
+                    s.employed_workforce,
+                    s.unemployed_workforce,
+                    s.logistics_ratio,
+                    s.living_standard,
+                    s.unrest
+                );
+            }
+        }
+    }
     Ok(())
 }

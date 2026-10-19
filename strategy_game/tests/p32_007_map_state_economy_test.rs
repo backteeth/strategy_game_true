@@ -51,6 +51,8 @@ fn input(state: u32, pop: u64, ratio: f32, b: &[(BuildingType, u32)]) -> MapStat
         state,
         population: pop,
         workforce_ratio: ratio,
+        living_standard: 50.0,
+        unrest: 10.0,
         base_logistics_capacity: 100.0,
         buildings: b.iter().copied().collect(),
         resource_deposits: vec![],
