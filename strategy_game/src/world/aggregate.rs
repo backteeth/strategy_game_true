@@ -134,7 +134,7 @@ impl std::fmt::Display for DeriveError {
 impl std::error::Error for DeriveError {}
 
 /// 所属関係の署名(ステートID・所属プロヴィンスID・各プロヴィンスの座標)。順序に依存しない。
-fn membership_signature(model: &WorldModel) -> u64 {
+pub(crate) fn membership_signature(model: &WorldModel) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut put = |v: u64| {
         for b in v.to_le_bytes() {

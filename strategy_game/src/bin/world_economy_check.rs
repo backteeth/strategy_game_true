@@ -119,6 +119,7 @@ fn run() -> Result<(), String> {
         stock.get(ResourceType::IndustrialGoods)
     );
     run_multi_month(&world.model, &buildings)?;
+    run_province_resources(&world.model, &buildings)?;
     Ok(())
 }
 
@@ -204,5 +205,134 @@ fn run_multi_month(
             }
         }
     }
+    Ok(())
+}
+
+/// P32-009: プロヴィンス別の天然資源(入力の正本)→ステート集計 → 生産計算への入力と結果を表示する。
+fn run_province_resources(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<(), String> {
+    use strategy_game::economy::province_resources::{
+        StateResourceSetup, derive_state_resources, load_province_resources,
+    };
+    let file = load_province_resources("assets/data/world/preview/province_resources.ron")?;
+    let derived = derive_state_resources(world, &file).map_err(|i| {
+        i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        )
+    })?;
+    println!(
+        "
+
+=== P32-009 プロヴィンス別の天然資源(検証用。正式な分布・バランスではない) ==="
+    );
+    println!(
+        "scope = {:?}(Partial は全世界の資源配置が完了したことを意味しない)。base_output = Mine 1レベルあたりの月間産出能力(埋蔵量・在庫ではない)",
+        derived.scope()
+    );
+    for st in derived.states() {
+        let setup = match st.setup {
+            StateResourceSetup::Complete => "設定済み(全プロヴィンス)",
+            StateResourceSetup::Incomplete => "一部未設定",
+            StateResourceSetup::Unconfigured => "未設定",
+        };
+        println!(
+            "
+[MapState#{}] {setup}: 設定 {} (うち資源なし明示 {}) / 未設定 {}",
+            st.state.0,
+            st.configured_provinces,
+            st.explicit_none_provinces,
+            st.unset_provinces.len()
+        );
+        for src in &st.sources {
+            println!(
+                "  出典 Province#{}: {:?} base_output {} discovered {} development_level {}",
+                src.province.0,
+                src.deposit.resource_type,
+                src.deposit.base_output,
+                src.deposit.discovered,
+                src.deposit.development_level
+            );
+        }
+        for d in &st.deposits {
+            println!(
+                "  集計(経済への入力) {:?}: base_output {} discovered {}",
+                d.resource_type, d.base_output, d.discovered
+            );
+        }
+    }
+    println!(
+        "
+どのステートにも属さない設定済みプロヴィンス(集計しない): {:?}",
+        derived
+            .unassigned_configured()
+            .iter()
+            .map(|p| p.0)
+            .collect::<Vec<_>>()
+    );
+
+    // 生産計算: ステート単位の鉱床入力を空にしたシナリオへ、プロヴィンス別の資源を接続して1か月実行する。
+    let text = std::fs::read_to_string("assets/data/world/preview/economy_scenario.ron")
+        .map_err(|e| e.to_string())?;
+    let legacy = parse_economy_scenario(&text)?;
+    let mut province_based = legacy.clone();
+    for s in &mut province_based.states {
+        s.resource_deposits.clear();
+    }
+    let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
+        e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        )
+    };
+    let mut reg_legacy =
+        MapStateEconomyRegistry::from_scenario(&legacy, world, buildings).map_err(fmt)?;
+    let mut reg_new =
+        MapStateEconomyRegistry::from_scenario(&province_based, world, buildings).map_err(fmt)?;
+    reg_new
+        .attach_province_resources(&derived, world, &file)
+        .map_err(fmt)?;
+    let (mut s_old, mut s_new) = (
+        stockpile_from_scenario(&legacy),
+        stockpile_from_scenario(&legacy),
+    );
+    reg_legacy.run_month(
+        legacy.country_mobilized_manpower,
+        &mut s_old,
+        buildings,
+        legacy.is_bankrupt,
+    );
+    reg_new.run_month(
+        legacy.country_mobilized_manpower,
+        &mut s_new,
+        buildings,
+        legacy.is_bankrupt,
+    );
+    println!(
+        "
+[生産計算への入力と結果(MapState#20のMine 2レベル)]"
+    );
+    let m = reg_new.get(strategy_game::world::MapStateId(20)).unwrap();
+    println!(
+        "  入力: 鉱床 {:?} / Mine稼働率 {:.4}",
+        m.resource_deposits
+            .iter()
+            .map(|d| format!("{:?}={}", d.resource_type, d.base_output))
+            .collect::<Vec<_>>(),
+        m.building_operation_ratios
+            .get(&BuildingType::Mine)
+            .copied()
+            .unwrap_or(0.0)
+    );
+    println!(
+        "  結果(備蓄): Iron {} Coal {} (旧入力=ステート単位の鉱床 との一致: {})",
+        s_new.get(ResourceType::Iron),
+        s_new.get(ResourceType::Coal),
+        ResourceType::ALL
+            .iter()
+            .all(|r| s_old.get(*r) == s_new.get(*r))
+    );
     Ok(())
 }

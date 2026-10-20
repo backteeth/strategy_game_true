@@ -3,6 +3,7 @@ pub mod factory_starvation;
 pub mod finance;
 pub mod iron_shortage;
 pub mod production;
+pub mod province_resources;
 pub mod map_state;
 pub mod resources;
 pub mod state_access;

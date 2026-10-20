@@ -1,0 +1,31 @@
+// P32-009 検証用のプロヴィンス別天然資源(入力の正本)。**正式な資源分布・ゲームバランスではない。**
+// 地形JSON・プロヴィンス表・ステート所属とは別のファイル。通常の地理プレビューや旧ゲームには注入されない。
+//
+// 値の意味(既存の StateResourceDeposit と同じ):
+//   base_output = 採掘施設(Mine)1レベルあたりの月間産出能力(埋蔵量でも採掘済み在庫でもない)
+//   discovered  = trueの鉱床だけが産出に使われる
+//   development_level = 保持されるだけのメタデータ(現行の計算では未使用)
+// 載っているプロヴィンスだけが「設定済み」。deposits: [] は「資源なし(明示)」。載っていないものは「未設定」。
+// scope: Partial = 検証地域の一部だけを設定した(全世界の資源配置が完了したことを意味しない)。
+(
+    format_version: 1,
+    scope: Partial,
+    provinces: [
+        // ── MapState#20(7プロヴィンス): 全プロヴィンスを設定(Mineを持つため必須)。
+        //    同一ステート内の複数プロヴィンスに分かれた同種資源: Iron 25 + 15 = 40、Coal 30。
+        (province: 18109, deposits: []),
+        (province: 18308, deposits: []),
+        (province: 18309, deposits: [(resource_type: Iron, base_output: 25.0, discovered: true, development_level: 1)]),
+        (province: 18310, deposits: [(resource_type: Iron, base_output: 15.0, discovered: true, development_level: 2)]),
+        (province: 18311, deposits: [(resource_type: Coal, base_output: 30.0, discovered: true, development_level: 1)]),
+        (province: 18499, deposits: []),
+        (province: 18500, deposits: []),
+        // ── MapState#21(13プロヴィンス): 一部だけ設定(未設定を残す)。異なるステートの同種資源 Iron、未発見の鉱床。
+        (province: 17694, deposits: [(resource_type: Iron, base_output: 20.0, discovered: true, development_level: 1)]),
+        (province: 17695, deposits: [(resource_type: Iron, base_output: 12.0, discovered: false, development_level: 1)]),
+        (province: 17696, deposits: []),
+        // ── MapState#22(6プロヴィンス): 何も設定しない(未設定)。
+        // ── 未割当プロヴィンス 17903: 資源は設定されているが、どのステートにも集計されない。
+        (province: 17903, deposits: [(resource_type: Iron, base_output: 99.0, discovered: true, development_level: 1)]),
+    ],
+)

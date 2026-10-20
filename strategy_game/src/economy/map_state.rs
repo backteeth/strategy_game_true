@@ -208,6 +208,18 @@ pub enum EconomyDataIssue {
     InvalidCountryMapping {
         what: String,
     },
+    /// ステートの鉱床が、シナリオ入力(ステート単位)とプロヴィンス別の資源定義の両方にある
+    /// (二重入力。プロヴィンス別の資源定義を正本とする場合、ステート単位の入力は空でなければならない)。
+    ResourceDoubleSource {
+        state: MapStateId,
+    },
+    /// 鉱床を必要とする施設(Mine)があるのに、所属プロヴィンスの資源が未設定。
+    ResourcesNotConfigured {
+        state: MapStateId,
+        unset_provinces: Vec<u32>,
+    },
+    /// 導出済みの資源集計が、現在の所属・資源定義に対して古い。
+    StaleResources,
 }
 
 impl std::fmt::Display for EconomyDataIssue {
@@ -235,6 +247,20 @@ impl std::fmt::Display for EconomyDataIssue {
             Self::InvalidCountryMapping { what } => {
                 write!(f, "invalid country mapping: {what}")
             }
+            Self::ResourceDoubleSource { state } => write!(
+                f,
+                "{state} has deposits in both the scenario state input and the province resources (single source required)"
+            ),
+            Self::ResourcesNotConfigured { state, unset_provinces } => write!(
+                f,
+                "{state} has a Mine but {} province(s) have no resource setup: {:?}",
+                unset_provinces.len(),
+                unset_provinces.iter().take(10).collect::<Vec<_>>()
+            ),
+            Self::StaleResources => write!(
+                f,
+                "derived province resources are stale for the current membership or resource file"
+            ),
         }
     }
 }
@@ -528,6 +554,62 @@ impl MapStateEconomyRegistry {
     }
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
+    }
+
+    /// プロヴィンス別の資源定義(の所属ステートへの集計)を、生産処理が使う各ステートの鉱床入力へ
+    /// 接続する(P32-009)。**プロヴィンス別の資源定義が鉱床入力の唯一の正本**になるため、
+    /// シナリオのステート単位の`resource_deposits`が空でないステートはエラー(二重入力・二重計上の防止)。
+    /// 鉱床を必要とする施設(Mine)があるステートは、所属プロヴィンスの資源がすべて設定済み
+    /// (資源なしの明示を含む)でなければエラー(未設定を資源ゼロへ黙って変換しない)。
+    /// 古い集計(所属・資源定義が変わった後のもの)もエラー。エラー時はレジストリを一切変更しない。
+    /// 地理上の資源値は国家備蓄へ直接加算しない(産出は生産処理が備蓄へ加える)。
+    pub fn attach_province_resources(
+        &mut self,
+        derived: &crate::economy::province_resources::StateResourcesDerived,
+        world: &WorldModel,
+        file: &crate::economy::province_resources::ProvinceResourcesFile,
+    ) -> Result<(), Vec<EconomyDataIssue>> {
+        use crate::economy::province_resources::StateResourceSetup;
+        let mut issues = Vec::new();
+        if !derived.is_current_for(world, file) {
+            return Err(vec![EconomyDataIssue::StaleResources]);
+        }
+        let mut updates: Vec<(MapStateId, Vec<StateResourceDeposit>)> = Vec::new();
+        for (id, s) in &self.states {
+            if !s.resource_deposits.is_empty() {
+                issues.push(EconomyDataIssue::ResourceDoubleSource { state: *id });
+                continue;
+            }
+            let Some(summary) = derived.state(*id) else {
+                issues.push(EconomyDataIssue::UnknownState { state: *id });
+                continue;
+            };
+            let needs = s.building_level(BuildingType::Mine) > 0;
+            if needs && summary.setup != StateResourceSetup::Complete {
+                issues.push(EconomyDataIssue::ResourcesNotConfigured {
+                    state: *id,
+                    unset_provinces: if summary.setup == StateResourceSetup::Unconfigured {
+                        world
+                            .provinces_of(*id)
+                            .map(|p| p.iter().map(|x| x.0).collect())
+                            .unwrap_or_default()
+                    } else {
+                        summary.unset_provinces.iter().map(|p| p.0).collect()
+                    },
+                });
+                continue;
+            }
+            updates.push((*id, summary.deposits.clone()));
+        }
+        if !issues.is_empty() {
+            return Err(issues);
+        }
+        for (id, deposits) in updates {
+            if let Some(s) = self.states.get_mut(&id) {
+                s.resource_deposits = deposits;
+            }
+        }
+        Ok(())
     }
 
     /// 1か月分の人口・雇用・物流・生産(旧経路と同じ中核計算)を実行する(M4-A)。
