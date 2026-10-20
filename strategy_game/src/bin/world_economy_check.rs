@@ -121,6 +121,7 @@ fn run() -> Result<(), String> {
     run_multi_month(&world.model, &buildings)?;
     run_province_resources(&world.model, &buildings)?;
     run_m4c(&world.model, &buildings)?;
+    run_location_facilities(&world.model, &map)?;
     Ok(())
 }
 
@@ -415,5 +416,81 @@ fn run_m4c(
             }
         }
     }
+    Ok(())
+}
+
+/// P32-011: 位置施設(港・要塞・鉄道駅)の所在地・所属・索引・港の周辺水域を表示する(検証用)。
+fn run_location_facilities(
+    world: &strategy_game::world::WorldModel,
+    map: &strategy_game::hexmap::data::HexMap,
+) -> Result<(), String> {
+    use strategy_game::world::{
+        LocationFacilityKind, LocationFacilityRegistry, ProvinceFacilitySetup, StateFacilitySetup,
+        ProvinceId, load_location_facilities, water_adjacency,
+    };
+    let file = load_location_facilities("assets/data/world/preview/province_facilities.ron")?;
+    let reg = LocationFacilityRegistry::build(&file, world).map_err(|i| {
+        i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n")
+    })?;
+    println!();
+    println!();
+    println!("=== P32-011 位置施設の入力層(検証用。正式な配置ではなく、施設効果は未接続) ===");
+    println!(
+        "scope = {:?}(Partial は全世界の施設配置が完了したことを意味しない)。施設 {} 件。補給・貿易・防御・鉄道接続・費用・維持費・雇用は未接続。",
+        reg.scope(),
+        reg.len()
+    );
+    for d in reg.iter() {
+        let p = world.province(ProvinceId(d.province)).ok_or("province vanished")?;
+        let state = match reg.state_of_facility(world, strategy_game::world::LocationFacilityId(d.id)) {
+            Some(s) => format!("MapState#{}", s.0),
+            None => "ステート未割当".to_string(),
+        };
+        let mut line = format!(
+            "Facility#{} {:?} 所在地 Province#{} {} 所属 {state}",
+            d.id, d.kind, d.province, p.cell
+        );
+        if d.kind == LocationFacilityKind::Port {
+            let w = water_adjacency(map, p.cell);
+            line += &format!(
+                " / 周辺水域: 海 {} 湖 {} 範囲外 {}(地理上の事実。建設可否の判定ではない)",
+                w.sea, w.lake, w.unmapped
+            );
+        }
+        println!("{line}");
+    }
+    println!("-- 索引(所在地と現在の所属から導出) --");
+    for s in world.states() {
+        let ids: Vec<String> = reg
+            .facilities_in_state(world, s.id)
+            .unwrap_or_default()
+            .iter()
+            .map(|d| format!("#{}({:?})", d.id, d.kind))
+            .collect();
+        let setup = match reg.state_setup(world, s.id) {
+            Some(StateFacilitySetup::Complete) => "全プロヴィンス設定済み",
+            Some(StateFacilitySetup::Incomplete) => "一部未設定",
+            _ => "未設定",
+        };
+        println!("MapState#{}: {setup} / 施設 [{}]", s.id.0, ids.join(" "));
+    }
+    let un: Vec<String> = reg
+        .unassigned_facilities(world)
+        .iter()
+        .map(|d| format!("#{}({:?})", d.id, d.kind))
+        .collect();
+    println!("ステート未割当の施設 [{}](架空のステートへは集計しない)", un.join(" "));
+    for k in LocationFacilityKind::ALL {
+        println!("種別 {k:?}: {} 件", reg.facilities_of_kind(k).len());
+    }
+    let (mut has, mut empty, mut unset) = (0, 0, 0);
+    for p in world.provinces() {
+        match reg.province_setup(p.id) {
+            ProvinceFacilitySetup::HasFacilities => has += 1,
+            ProvinceFacilitySetup::ConfirmedEmpty => empty += 1,
+            ProvinceFacilitySetup::Unset => unset += 1,
+        }
+    }
+    println!("プロヴィンス設定: 施設あり {has} / 設定済みで施設なし {empty} / 未設定 {unset}");
     Ok(())
 }
