@@ -91,6 +91,7 @@ fn country(
         .collect(),
         states: states.to_vec(),
         ai_controlled: false,
+        military: None,
     }
 }
 

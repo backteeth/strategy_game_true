@@ -1,0 +1,100 @@
+// P32-012 (M4-D) 検証用シナリオ: 軍事状況を参照する経済AI(優先度2.5 / 2.8 / 2.9)と履歴に基づく判断。
+// **正式な人口・施設・国家配置・バランスではない。** 地理配置とは別データで、通常の地理プレビューや旧ゲームには注入されない。
+// 鉱床は `province_resources_m4d.ron`(プロヴィンス別の資源定義)から接続する。
+// `countries[].states` は経済計算上の対応関係(法的所有・占領モデルではない)。label は評価周期と履歴の国家識別にだけ使う。
+// 建設の期間は通常どおり(短縮しない)。months は実行する月数(日数 = months × 30)。
+//
+// `military` は軍事状況の**明示的な入力**(新マップ上の軍隊・戦争・前線ではない。省略すると「入力なし」で、
+// 平和や脅威ゼロとは扱わず、優先度2.5・2.9は評価されない)。値の出典: 標準歩兵師団(必要人的資源 10000)を
+// `living_divisions` 個持つ国家について、旧経路の `military_ai_facts` が算出した値
+// (10個 → 日次需要 10,000,000 units/日。テストが同じ関数で一致を確認する)。
+(
+    format_version: 1,
+    description: "P32-012 military-status economy AI validation scenario (not official data or balance)",
+    months: 10,
+    countries: [
+        // 国家1(AI・戦時): 優先度2.5(戦時MilitaryFactory)が発火する。
+        (
+            label: 1,
+            treasury: 9000.0,
+            tax_rate: 0.15,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: { Iron: 3000.0, Coal: 3000.0, Food: 900.0, Wood: 900.0, IndustrialGoods: 900.0 },
+            states: [20],
+            ai_controlled: true,
+            military: Some((
+                at_war: true,
+                daily_demand_units: Some(10000000),
+                living_divisions: 10,
+                recruitment_queue_len: 0,
+                infantry_required_manpower: Some(10000),
+            )),
+        ),
+        // 国家2(AI・平時): MilitaryFactoryのIron未充足が履歴に続き、優先度2.8(Iron供給のMine)とFactory増設抑止が発火する。
+        (
+            label: 2,
+            treasury: 9000.0,
+            tax_rate: 0.15,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: { Coal: 3000.0, Food: 900.0, Wood: 900.0, IndustrialGoods: 900.0 },
+            states: [21],
+            ai_controlled: true,
+            military: Some((
+                at_war: false,
+                daily_demand_units: None,
+                living_divisions: 5,
+                recruitment_queue_len: 0,
+                infantry_required_manpower: Some(10000),
+            )),
+        ),
+        // 国家3(AI・平時): MilitaryFactoryを持たず、戦力が目標未満で、生産履歴が4か月揃うと優先度2.9(再建)が発火する。
+        (
+            label: 3,
+            treasury: 9000.0,
+            tax_rate: 0.15,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: { Iron: 3000.0, Coal: 3000.0, Food: 900.0, Wood: 900.0 },
+            states: [22],
+            ai_controlled: true,
+            military: Some((
+                at_war: false,
+                daily_demand_units: None,
+                living_divisions: 0,
+                recruitment_queue_len: 0,
+                infantry_required_manpower: Some(10000),
+            )),
+        ),
+    ],
+    states: [
+        (
+            state: 20,
+            population: 600001,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 200.0,
+            buildings: { Farm: 3, Mine: 2, Factory: 1, Railway: 1 },
+        ),
+        (
+            state: 21,
+            population: 400000,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 200.0,
+            buildings: { Farm: 2, Mine: 1, Factory: 1, MilitaryFactory: 4, Railway: 1 },
+        ),
+        (
+            state: 22,
+            population: 250000,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 200.0,
+            buildings: { Farm: 2, Mine: 1, Factory: 1, Railway: 1 },
+        ),
+    ],
+)

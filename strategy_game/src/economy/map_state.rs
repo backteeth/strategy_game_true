@@ -26,9 +26,16 @@ use crate::building::construction::{
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::common::CountryId;
 use crate::country::ai_core::{
-    AiCountry, AiRegions, NoHooks, OrderBlock, next_ai_tax_rate, run_construction_priorities,
+    AiCountry, AiRegions, OrderBlock, next_ai_tax_rate, run_construction_priorities,
 };
 use crate::country::country_ai::{CountryAiDecisionReason, CountryAiState};
+use crate::country::ai_military::{
+    MilitaryAiFacts, MilitaryHooks, MilitaryPriority, factory_expansion_blocked_from,
+    iron_supply_context_from, military_rebuild_context_for, wartime_supply_context_from,
+};
+use crate::economy::factory_starvation::FactoryStarvationHistory;
+use crate::economy::iron_shortage::IronShortageHistory;
+use crate::military::supply_production_history::SupplyProductionHistory;
 use crate::economy::economic_state::{
     EconomicState, calculate_economic_state, compute_economic_metrics,
 };
@@ -103,6 +110,9 @@ impl StateEconomyAccess for MapStateEconomy {
     }
     fn logistics_capacity(&self) -> f32 {
         self.logistics_capacity
+    }
+    fn logistics_usage(&self) -> f32 {
+        self.logistics_usage
     }
     fn set_logistics(&mut self, capacity: f32, usage: f32, ratio: f32) {
         self.logistics_capacity = capacity;
@@ -190,6 +200,10 @@ pub struct ScenarioCountryInput {
     /// trueならAI国家(税率調整と経済施設の建設判断を月次の周期で実行する。評価周期の識別には`label`を使う)。
     /// falseはプレイヤー等で、AIは何も変更しない。明示が必要(既定値で補わない)。
     pub ai_controlled: bool,
+    /// 軍事状況の明示的な入力(P32-012。出典は検証用シナリオで、新マップ上の軍隊・戦争の状態ではない)。
+    /// `None` = 入力なし(「平和」「脅威ゼロ」ではなく、軍事に関わる優先度2.5・2.9は評価されない)。
+    #[serde(default)]
+    pub military: Option<MilitaryAiFacts>,
 }
 
 /// 複数国家・複数月の検証用シナリオ(M4-B)。**正式な人口・税率・国家所属ではない。**
@@ -553,6 +567,7 @@ impl MapStateEconomyRegistry {
                 construction_queue: Vec::new(),
                 economic_state: EconomicState::default(),
                 ai: c.ai_controlled.then(ScenarioAi::new),
+                military: c.military,
             });
         }
         for id in out.keys() {
@@ -745,6 +760,7 @@ impl MapStateEconomyRegistry {
             finance,
             science: production.science,
             magic: production.magic,
+            production,
         }
     }
 }
@@ -770,6 +786,8 @@ pub struct ScenarioCountry {
     pub economic_state: EconomicState,
     /// AI国家の評価状態(AI国家でなければ`None`)。
     pub ai: Option<ScenarioAi>,
+    /// 軍事状況の入力(`None` = 入力なし。暗黙の既定値へ置き換えない)。
+    pub military: Option<MilitaryAiFacts>,
 }
 
 /// `run_country_month`が返す、その月の国家単位の結果。
@@ -781,6 +799,8 @@ pub struct CountryMonthReport {
     pub finance: crate::economy::finance::CountryFinanceResult,
     pub science: f64,
     pub magic: f64,
+    /// 生産処理の観測値(軍需生産・Iron未充足・Factoryの飢餓。AIの履歴の元データ)。
+    pub production: CountryProductionOutcome,
 }
 
 /// シナリオの備蓄(`ResourceType`→量)から国家備蓄を作る。
@@ -822,6 +842,20 @@ pub struct ScenarioAi {
     pub dirty: bool,
     pub last_decision_reason: CountryAiDecisionReason,
     pub last_monthly_evaluation_day: u32,
+    /// 判断に使う実行時の履歴(国家ごと。永続化しない: ロードで空、New Gameで空、寿命はこの実行の間)。
+    pub history: AiHistories,
+}
+
+/// 国家1つ分の、AIの履歴(旧`CountryAiRegistry`の3つの履歴と同じ型・同じ更新の規則)。国家ごとに
+/// 独立しており、他国家の履歴とは混ざらない。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AiHistories {
+    /// 軍需物資の月次産出の履歴(優先度2.9)。
+    pub supply: SupplyProductionHistory,
+    /// MilitaryFactoryのIron未充足の履歴(優先度2.8)。
+    pub iron: IronShortageHistory,
+    /// Factoryの飢餓の履歴(増設の抑止)。
+    pub factory: FactoryStarvationHistory,
 }
 
 impl ScenarioAi {
@@ -830,6 +864,7 @@ impl ScenarioAi {
             dirty: true,
             last_decision_reason: CountryAiDecisionReason::default(),
             last_monthly_evaluation_day: 0,
+            history: AiHistories::default(),
         }
     }
 }
@@ -897,10 +932,31 @@ pub struct DayReport {
     pub tax_changes: Vec<(u32, f32, f32)>,
     /// この日に月次経済を実行したか。
     pub monthly_ran: bool,
+    /// この日に評価したAI国家ごとの入力・文脈・判断(検証・表示用)。
+    pub evaluations: Vec<AiEvaluation>,
+}
+
+/// AI国家1回分の評価の記録(軍事状況の入力、履歴から作られた文脈、判断の結果)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AiEvaluation {
+    pub label: u32,
+    /// 軍事状況の入力。`None` = 入力なし(優先度2.5・2.9は評価されない。平和とは扱わない)。
+    pub military_input: Option<MilitaryAiFacts>,
+    /// 戦時MilitaryFactory(2.5)の文脈が作られたか。
+    pub wartime_context: bool,
+    /// Iron供給(2.8)の文脈(履歴の月平均の未充足量)。作られなければ`None`。
+    pub iron_shortage_average: Option<f64>,
+    /// 軍需基盤の再建(2.9)の文脈が作られたか。
+    pub rebuild_context: bool,
+    /// 履歴によりFactoryの増設が抑止されたか。
+    pub factory_blocked: bool,
+    /// 着工した軍事に関わる優先度(なければ`None`)。
+    pub fired: Option<MilitaryPriority>,
+    pub decision_reason: CountryAiDecisionReason,
 }
 
 /// 簡易暦の日付(`app::time::GameDate`と同じ月の日数)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SimDate {
     pub year: i32,
     pub month: u8,
@@ -957,6 +1013,13 @@ impl AiCountry for ScenarioCountry {
             .iter()
             .any(|o| o.building_type == building)
     }
+    fn queued_regions(&self, building: BuildingType) -> Vec<MapStateId> {
+        self.construction_queue
+            .iter()
+            .filter(|o| o.building_type == building)
+            .map(|o| o.state)
+            .collect()
+    }
     fn push_order(
         &mut self,
         region: MapStateId,
@@ -1008,6 +1071,9 @@ impl AiRegions<MapStateId> for MapAiRegions<'_> {
             .map(|s| s.logistics_ratio)
             .unwrap_or(1.0)
     }
+    fn state(&self, region: MapStateId) -> Option<&dyn StateEconomyAccess> {
+        self.states.get(&region).map(|s| s as &dyn StateEconomyAccess)
+    }
     /// Mineは、プロヴィンス別の資源定義を接続している場合、そのステートの全プロヴィンスの資源が
     /// 設定済み(資源なしの明示を含む)であることを要求する(完成後の月次経済が入力不備で失敗する
     /// 経路を、受付・候補評価の時点で塞ぐ)。未設定と資源なしを区別する。
@@ -1030,6 +1096,48 @@ impl AiRegions<MapStateId> for MapAiRegions<'_> {
 }
 
 impl MapStateEconomyRegistry {
+    /// 月次生産の観測値を、AI国家の履歴へ記録する(旧`handle_monthly_economy`が`CountryAiRegistry`の
+    /// 3つの履歴へ記録するのと同じ値・同じ規則。記録は月次生産の直後=その月の判断より前)。
+    /// 経済計算の対象ステートが無い国家は、履歴を空にする(旧経路が生産を行わない国の履歴を消すのと同じ)。
+    /// AI国家でなければ何もしない。履歴は国家ごとに独立で、永続化しない。
+    fn record_ai_history(
+        &self,
+        country: &mut ScenarioCountry,
+        month: &CountryMonthReport,
+        now: (i32, u8),
+    ) {
+        let ids = &country.states;
+        let Some(ai) = country.ai.as_mut() else {
+            return;
+        };
+        let states: Vec<&MapStateEconomy> = ids.iter().filter_map(|id| self.states.get(id)).collect();
+        if states.is_empty() {
+            ai.history = AiHistories::default();
+            return;
+        }
+        let mine_levels: u32 = states.iter().map(|s| s.building_level(BuildingType::Mine)).sum();
+        let p = &month.production;
+        let units = p
+            .military_supplies_produced
+            .and_then(|v| crate::economy::resources::military_supplies_value_to_units(v).ok());
+        ai.history.supply.record(now.0, now.1, units);
+        ai.history
+            .iron
+            .record(now.0, now.1, Some(p.iron_unmet_military), mine_levels);
+        let entries: Vec<(usize, u32)> = states
+            .iter()
+            .map(|s| (s.economy_key() as usize, s.building_level(BuildingType::Factory)))
+            .filter(|(_, l)| *l > 0)
+            .collect();
+        let starved = p.factory_entries > 0 && p.factory_iron_starved_entries == p.factory_entries;
+        ai.history.factory.record(
+            now.0,
+            now.1,
+            crate::economy::factory_starvation::factory_signature(&entries),
+            starved,
+        );
+    }
+
     fn ai_regions(&self) -> MapAiRegions<'_> {
         MapAiRegions {
             states: &self.states,
@@ -1168,7 +1276,8 @@ impl MapStateEconomyRegistry {
         if month_changed {
             report.monthly_ran = true;
             for c in countries.iter_mut() {
-                self.run_country_month(c, building_registry);
+                let month = self.run_country_month(c, building_registry);
+                self.record_ai_history(c, &month, (date.year, date.month));
             }
         }
 
@@ -1195,17 +1304,55 @@ impl MapStateEconomyRegistry {
                 let owned = c.states.clone();
                 let mut ai_state = CountryAiState::new(CountryId(c.label as usize));
                 ai_state.dirty = ai.dirty;
-                // 位置施設の判断・軍事の優先度(戦時・Iron供給・再建)・履歴に基づく増設抑止は、
-                // 新経路では未対応(差し込みなし・抑止なし)。
+                // 履歴と軍事状況から、旧経路と同じ文脈を作る(判断本体は`ai_military`で共通)。
+                let now = (date.year, date.month);
+                let regions = self.ai_regions();
+                let mine_levels: u32 = owned
+                    .iter()
+                    .map(|id| regions.building_level(*id, BuildingType::Mine))
+                    .sum();
+                let factory_entries: Vec<(usize, u32)> = owned
+                    .iter()
+                    .filter_map(|id| self.states.get(id))
+                    .map(|s| (s.economy_key() as usize, s.building_level(BuildingType::Factory)))
+                    .filter(|(_, l)| *l > 0)
+                    .collect();
+                let iron_supply = iron_supply_context_from(&ai.history.iron, now, mine_levels);
+                let factory_blocked =
+                    factory_expansion_blocked_from(&ai.history.factory, now, &factory_entries);
+                let wartime_supply = c.military.as_ref().and_then(wartime_supply_context_from);
+                let military_rebuild = c.military.as_ref().and_then(|facts| {
+                    military_rebuild_context_for(&regions, &owned, facts, &ai.history.supply, now)
+                });
+                let mut hooks = MilitaryHooks {
+                    regions: &regions,
+                    building_registry,
+                    all_owned: &owned,
+                    owned: &owned,
+                    wartime_supply,
+                    iron_supply,
+                    military_rebuild,
+                    fired: None,
+                };
                 run_construction_priorities(
                     c,
-                    &self.ai_regions(),
+                    &regions,
                     building_registry,
                     &owned,
                     &mut ai_state,
-                    false,
-                    &mut NoHooks,
+                    factory_blocked,
+                    &mut hooks,
                 );
+                report.evaluations.push(AiEvaluation {
+                    label: c.label,
+                    military_input: c.military,
+                    wartime_context: wartime_supply.is_some(),
+                    iron_shortage_average: iron_supply.map(|x| x.average_unmet),
+                    rebuild_context: military_rebuild.is_some(),
+                    factory_blocked,
+                    fired: hooks.fired,
+                    decision_reason: ai_state.decision_reason,
+                });
                 for o in c.construction_queue.iter().skip(queue_before) {
                     report
                         .ordered

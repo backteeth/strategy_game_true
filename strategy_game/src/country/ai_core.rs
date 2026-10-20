@@ -13,6 +13,7 @@
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::country::country_ai::{CountryAiDecisionReason, CountryAiState};
 use crate::economy::resources::{ResourceType, StateResourceDeposit, is_crystal_only_state};
+use crate::economy::state_access::StateEconomyAccess;
 use std::collections::{HashMap, HashSet};
 
 /// 優先度3(任意的な平時開発)が、建設費支払い後に国家の運転資金(直近の月次経常支出の何か月分)を
@@ -38,6 +39,8 @@ pub trait AiCountry {
     fn queue_len(&self) -> usize;
     fn queue_has(&self, region: Self::Key, building: BuildingType) -> bool;
     fn queue_has_building(&self, building: BuildingType) -> bool;
+    /// 建設キューにある、指定施設の注文の対象地域(キュー順)。
+    fn queued_regions(&self, building: BuildingType) -> Vec<Self::Key>;
     fn push_order(
         &mut self,
         region: Self::Key,
@@ -55,6 +58,8 @@ pub trait AiRegions<K: Copy> {
     fn buildings(&self, region: K) -> Option<&HashMap<BuildingType, u32>>;
     fn deposits(&self, region: K) -> &[StateResourceDeposit];
     fn logistics_ratio(&self, region: K) -> f32;
+    /// 地域の経済データ(軍事に関わる優先度が読む)。存在しなければ`None`。
+    fn state(&self, region: K) -> Option<&dyn StateEconomyAccess>;
     /// 注文の前提条件。`Err`の候補は採用せず、他の候補の評価を続ける。既定は常に受理。
     fn order_precondition(&self, _region: K, _building: BuildingType) -> Result<(), OrderBlock> {
         Ok(())
@@ -599,6 +604,13 @@ impl AiCountry for CountryData {
             .iter()
             .any(|item| item.building_type == building)
     }
+    fn queued_regions(&self, building: BuildingType) -> Vec<StateId> {
+        self.construction_queue
+            .iter()
+            .filter(|item| item.building_type == building)
+            .map(|item| item.state_id)
+            .collect()
+    }
     fn push_order(
         &mut self,
         region: StateId,
@@ -634,5 +646,8 @@ impl AiRegions<StateId> for StateRegistry {
     }
     fn logistics_ratio(&self, region: StateId) -> f32 {
         self.get(region).map(|s| s.logistics_ratio).unwrap_or(1.0)
+    }
+    fn state(&self, region: StateId) -> Option<&dyn StateEconomyAccess> {
+        self.get(region).map(|s| s as &dyn StateEconomyAccess)
     }
 }

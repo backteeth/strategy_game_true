@@ -32,6 +32,8 @@ pub trait StateEconomyAccess {
     fn base_logistics_capacity(&self) -> f32;
     fn logistics_ratio(&self) -> f32;
     fn logistics_capacity(&self) -> f32;
+    /// 現在の物流使用量(月次の物流更新が書き込んだ値)。
+    fn logistics_usage(&self) -> f32;
     fn set_logistics(&mut self, capacity: f32, usage: f32, ratio: f32);
 
     /// 生活水準(0.0〜100.0)と不満度(0.0〜100.0)。福祉更新(`economy::finance`)が読み書きする。
@@ -102,6 +104,9 @@ impl StateEconomyAccess for StateData {
     }
     fn logistics_capacity(&self) -> f32 {
         self.logistics_capacity
+    }
+    fn logistics_usage(&self) -> f32 {
+        self.logistics_usage
     }
     fn living_standard(&self) -> f32 {
         self.living_standard

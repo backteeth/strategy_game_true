@@ -121,6 +121,7 @@ fn run() -> Result<(), String> {
     run_multi_month(&world.model, &buildings)?;
     run_province_resources(&world.model, &buildings)?;
     run_m4c(&world.model, &buildings)?;
+    run_m4d(&world.model, &buildings)?;
     run_location_facilities(&world.model, &map)?;
     Ok(())
 }
@@ -492,5 +493,83 @@ fn run_location_facilities(
         }
     }
     println!("プロヴィンス設定: 施設あり {has} / 設定済みで施設なし {empty} / 未設定 {unset}");
+    Ok(())
+}
+
+/// P32-012 (M4-D): 軍事状況を参照する経済AI(優先度2.5 / 2.8 / 2.9)と履歴に基づく判断(Factory増設の抑止)を、
+/// 明示した軍事状況の入力で新経路に通し、入力・判断理由・行動・履歴の更新を表示する(検証用)。
+fn run_m4d(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<(), String> {
+    use strategy_game::economy::map_state::{
+        MapStateEconomyRegistry, SimDate, parse_multi_month_scenario,
+    };
+    use strategy_game::economy::province_resources::{derive_state_resources, load_province_resources};
+    let text = std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4d.ron")
+        .map_err(|e| e.to_string())?;
+    let sc = parse_multi_month_scenario(&text)?;
+    let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
+        e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n")
+    };
+    println!();
+    println!();
+    println!("=== P32-012 M4-D 軍事状況を参照する経済AIと履歴(検証用。正式な配置・バランスではない) ===");
+    println!(
+        "{} / {} か月 = {} 日(建設期間は通常どおり)。軍事状況は明示した入力で、新マップ上の軍隊・戦争・前線ではない。",
+        sc.description,
+        sc.months,
+        sc.months * 30
+    );
+    for c in &sc.countries {
+        match &c.military {
+            Some(m) => println!(
+                "入力 国家{}: at_war={} 日次需要={:?} 生存師団={} 募兵キュー={} 標準歩兵の必要人的資源={:?}",
+                c.label, m.at_war, m.daily_demand_units, m.living_divisions, m.recruitment_queue_len, m.infantry_required_manpower
+            ),
+            None => println!("入力 国家{}: 軍事状況の入力なし(平和とは扱わない。優先度2.5・2.9は評価されない)", c.label),
+        }
+    }
+    let res_file = load_province_resources("assets/data/world/preview/province_resources_m4d.ron")?;
+    let derived = derive_state_resources(world, &res_file)
+        .map_err(|i| i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n"))?;
+    let (mut reg, mut countries) =
+        MapStateEconomyRegistry::from_multi_scenario(&sc, world, buildings).map_err(fmt)?;
+    reg.attach_province_resources(&derived, world, &res_file).map_err(fmt)?;
+
+    let mut date = SimDate { year: 1800, month: 1, day: 1 };
+    for _ in 0..sc.months * 30 {
+        let (d, changed) = date.next();
+        date = d;
+        let r = reg.run_day(&mut countries, date, changed, buildings);
+        let stamp = format!("{}/{:02}/{:02}", date.year, date.month, date.day);
+        for e in &r.evaluations {
+            if e.fired.is_some() || e.iron_shortage_average.is_some() || e.factory_blocked {
+                println!(
+                    "{stamp} 国家{} 判断: 戦時文脈={} Iron不足(月平均)={:?} 再建文脈={} Factory増設抑止={} 着工した軍事優先度={:?} 判断理由={:?}",
+                    e.label, e.wartime_context, e.iron_shortage_average, e.rebuild_context, e.factory_blocked, e.fired, e.decision_reason
+                );
+            }
+        }
+        for (label, state, b, cost) in &r.ordered {
+            println!("{stamp} 国家{label} AIが注文: MapState#{} {:?} (費用 {cost})", state.0, b);
+        }
+        for (label, state, b, level) in &r.completed {
+            println!("{stamp} 国家{label} 建設完成: MapState#{} {:?} -> Lv{level}", state.0, b);
+        }
+        if r.monthly_ran {
+            for c in &countries {
+                if let Some(a) = &c.ai {
+                    println!(
+                        "{stamp} 履歴更新 国家{}: 軍需生産 {} 件 / Iron未充足 {} 件 / Factory飢餓 {} 件",
+                        c.label,
+                        a.history.supply.samples().len(),
+                        a.history.iron.samples().len(),
+                        a.history.factory.samples().len()
+                    );
+                }
+            }
+        }
+    }
     Ok(())
 }
