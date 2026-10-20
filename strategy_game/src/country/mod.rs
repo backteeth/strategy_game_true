@@ -845,6 +845,7 @@ impl CountryRegistry {
     }
 }
 
+pub mod ai_core;
 pub mod country_ai;
 pub mod elimination;
 pub mod power;

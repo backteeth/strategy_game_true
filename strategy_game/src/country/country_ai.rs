@@ -22,7 +22,6 @@ use crate::war::military_ai::{MilitaryAiRegistry, evaluate_division_power};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 /// AI発の宣戦布告のうち、まだ通知(GameNotification)を発行していないもののキュー。
 /// `process_war_declaration_ai`は純粋関数として保つため、直接通知を書かず
@@ -296,325 +295,8 @@ fn land_states_for(states_by_controller: &[Vec<StateId>], country_id: CountryId)
         .unwrap_or(&[])
 }
 
-/// Mine建設候補州の探索結果 (P26-004-PRE-002)。
-enum ConstructOutcome {
-    /// 建設キューへ1件追加し国庫を減算した。
-    Built,
-    /// 建設可能な候補州が存在しない(資金は足りているが、対象が見つからない)。
-    NoCandidate,
-    /// 国庫が建設費に満たない。
-    InsufficientFunds,
-}
-
-/// `target_building` の建設候補州を1件探す (StateId昇順で最初に条件を満たす州)。
-/// Mineの場合、P26-004-PRE-002でクリスタル専用州の除外に加え、実際に採掘可能な
-/// 鉱床(discoveredかつ非MagicCrystal、`process_country_production`のMine分岐
-/// [`src/economy/production.rs`]と同一条件)が存在することを新たに要求する。
-/// これにより、鉱床が一切ない州・国家へMineが選ばれることを防ぐ。
-fn find_candidate_state(
-    country: &CountryData,
-    state_registry: &StateRegistry,
-    owned_states: &[StateId],
-    target_building: BuildingType,
-    max_level: u32,
-) -> Option<StateId> {
-    owned_states.iter().copied().find(|&sid| {
-        let in_queue = country
-            .construction_queue
-            .iter()
-            .any(|item| item.state_id == sid && item.building_type == target_building);
-        if in_queue {
-            return false;
-        }
-        let Some(state_data) = state_registry.get(sid) else {
-            return false;
-        };
-        if target_building == BuildingType::Mine {
-            // P21-009-FIX-001: クリスタル専用州には通常Mineの対象鉱床が存在しないため、
-            // AIも新規建設候補から除外する(CrystalMineはAIの建設判断対象外のまま)。
-            if crate::economy::resources::is_crystal_only_state(&state_data.resource_deposits) {
-                return false;
-            }
-            // P26-004-PRE-002: 実際に採掘可能な鉱床(discoveredかつ非MagicCrystal)が
-            // 一切ない州は、鉱床皆無国家(Elfin/Oceanic等)がMineへ国庫を浪費しないよう
-            // 候補から除外する。
-            let has_usable_deposit = state_data
-                .resource_deposits
-                .iter()
-                .any(|d| d.discovered && d.resource_type != ResourceType::MagicCrystal);
-            if !has_usable_deposit {
-                return false;
-            }
-        }
-        state_data.building_level(target_building) < max_level
-    })
-}
-
-/// `target_building` の建設を1件だけ試みる。資金不足・候補州なしのいずれの場合も
-/// 国庫・建設キューを一切変更しない(原子性、P26-004-PRE-002 spec §6)。
-fn try_construct(
-    country: &mut CountryData,
-    state_registry: &StateRegistry,
-    building_registry: &crate::building::data::BuildingRegistry,
-    owned_states: &[StateId],
-    target_building: BuildingType,
-) -> ConstructOutcome {
-    let Some(def) = building_registry.get(target_building) else {
-        return ConstructOutcome::NoCandidate;
-    };
-    if country.treasury < def.construction_cost {
-        return ConstructOutcome::InsufficientFunds;
-    }
-    match find_candidate_state(country, state_registry, owned_states, target_building, def.max_level) {
-        Some(state_id) => {
-            let current_level = state_registry
-                .get(state_id)
-                .map(|s| s.building_level(target_building))
-                .unwrap_or(0);
-            country.treasury -= def.construction_cost;
-            country.construction_queue.push(ConstructionQueueItem {
-                state_id,
-                building_type: target_building,
-                target_level: current_level + 1,
-                progress: 0.0,
-                required_progress: def.required_progress,
-                paid_cost: def.construction_cost,
-                status: ConstructionStatus::InQueue,
-            });
-            ConstructOutcome::Built
-        }
-        None => ConstructOutcome::NoCandidate,
-    }
-}
-
-/// P27-002-A: 優先度3(任意的な平時開発)が、建設費支払い後に国家の運転資金
-/// (直近の月次経常支出の何か月分)を侵食しないよう要求する予備月数。優先度1
-/// (Food緊急)・優先度2(P26-008-Cの供給網修復)には適用しない(spec §6)。
-/// 正規定数は本モジュール内のここ1か所だけに定義する(spec §3)。
-pub const PEACETIME_CONSTRUCTION_RESERVE_MONTHS: f64 = 3.0;
-
-/// `try_construct`(優先度1・2が今も直接使う既存の共有関数、シグネチャ変更なし)を
-/// 変更せず、優先度3専用のラッパーとして予備資金判定を追加する(spec §3・§6)。
-///
-/// 判定式(spec §3):
-/// ```text
-/// required_treasury = construction_cost + monthly_recurring_expenses × 3
-/// allowed = treasury >= required_treasury
-/// ```
-///
-/// `country.monthly_expenses`(`economy::finance::process_country_finance`が
-/// 月次で確定させる既存の正規経常支出値、spec §4——建設費・軍事費・募兵費の
-/// いずれも含まない)をそのまま再利用し、新しい式を複製しない。
-///
-/// 数値安全性(spec §5): `treasury`・`construction_cost`・`monthly_expenses`の
-/// いずれかが非有限(NaN/Infinity)または負の場合、あるいは`required_treasury`
-/// 自体の計算が非有限になる場合は、無効な財政値を0へ丸めて建設可能とはせず、
-/// 安全側(`InsufficientFunds`、mutationなし)へ倒す。`def`が存在しない場合は
-/// 財務判定を行わずそのまま`try_construct`へ委譲する(既存の`NoCandidate`挙動を
-/// 変更しない)。
-///
-/// 予備判定に落ちた場合、`try_construct`自体は一切呼び出さない——候補探索・
-/// 国庫・建設キューへの変更は発生しない(spec §7: 予備不足時に安価な代替候補を
-/// 新たに探索しない、原子性を維持する)。
-fn try_construct_peacetime(
-    country: &mut CountryData,
-    state_registry: &StateRegistry,
-    building_registry: &crate::building::data::BuildingRegistry,
-    owned_states: &[StateId],
-    target_building: BuildingType,
-) -> ConstructOutcome {
-    if let Some(def) = building_registry.get(target_building) {
-        let treasury = country.treasury;
-        let construction_cost = def.construction_cost;
-        let monthly_expenses = country.monthly_expenses;
-
-        let values_valid = treasury.is_finite()
-            && construction_cost.is_finite()
-            && construction_cost >= 0.0
-            && monthly_expenses.is_finite()
-            && monthly_expenses >= 0.0;
-
-        if !values_valid {
-            return ConstructOutcome::InsufficientFunds;
-        }
-
-        let reserve = monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
-        let required_treasury = construction_cost + reserve;
-
-        if !required_treasury.is_finite() || treasury < required_treasury {
-            return ConstructOutcome::InsufficientFunds;
-        }
-    }
-
-    try_construct(country, state_registry, building_registry, owned_states, target_building)
-}
-
-/// 国家が現在保有する生産建物(level>0)が入力資源として要求する`ResourceType`集合を
-/// 求める(`BuildingDefinition.input_resources`を汎用的に参照し、特定資源名を
-/// 列挙しない、P26-004-PRE-002 spec §5.3)。HashMap/HashSetの反復順には最終結果が
-/// 依存しない(呼び出し側が`ResourceType::ALL`の宣言順で走査するため)。
-fn resource_types_required_by_owned_buildings(
-    state_registry: &StateRegistry,
-    building_registry: &crate::building::data::BuildingRegistry,
-    owned_states: &[StateId],
-) -> HashSet<ResourceType> {
-    let mut needed = HashSet::new();
-    for &sid in owned_states {
-        let Some(state_data) = state_registry.get(sid) else {
-            continue;
-        };
-        for (&b_type, &level) in state_data.buildings.iter() {
-            if level == 0 {
-                continue;
-            }
-            if let Some(def) = building_registry.get(b_type) {
-                needed.extend(def.input_resources.keys().copied());
-            }
-        }
-    }
-    needed
-}
-
-/// 領内のいずれかの州で、指定`resource`のdiscovered鉱床とMineレベル>0が同居して
-/// いるか(=その資源について既に稼働中の採掘経路を持つか)を判定する。
-/// 既に稼働中なら、Dwarfのような既存供給網を持つ国家に事前開発規則を
-/// 不必要に発火させない(P26-004-PRE-002 spec §5.3・Test E)。
-fn has_active_mine_for_resource(
-    state_registry: &StateRegistry,
-    owned_states: &[StateId],
-    resource: ResourceType,
-) -> bool {
-    owned_states.iter().any(|&sid| {
-        state_registry.get(sid).is_some_and(|s| {
-            s.building_level(BuildingType::Mine) > 0
-                && s
-                    .resource_deposits
-                    .iter()
-                    .any(|d| d.discovered && d.resource_type == resource)
-        })
-    })
-}
-
-/// 事前開発対象の未活用鉱床州を、指定`resource`について1件探す
-/// (`find_candidate_state`のMine条件と同じ実採掘可能性・増設余地・重複キュー除外を
-/// 満たす州のうち、StateId最小のもの)。
-fn find_undeveloped_deposit_state(
-    country: &CountryData,
-    state_registry: &StateRegistry,
-    owned_states: &[StateId],
-    mine_max_level: u32,
-    resource: ResourceType,
-) -> Option<StateId> {
-    owned_states.iter().copied().find(|&sid| {
-        let in_queue = country.construction_queue.iter().any(|item| {
-            item.state_id == sid && item.building_type == BuildingType::Mine
-        });
-        if in_queue {
-            return false;
-        }
-        let Some(state_data) = state_registry.get(sid) else {
-            return false;
-        };
-        if crate::economy::resources::is_crystal_only_state(&state_data.resource_deposits) {
-            return false;
-        }
-        let has_resource_deposit = state_data
-            .resource_deposits
-            .iter()
-            .any(|d| d.discovered && d.resource_type == resource);
-        has_resource_deposit && state_data.building_level(BuildingType::Mine) < mine_max_level
-    })
-}
-
-/// 領内の有効な州にFactory(level>0)が1つでも存在するか(=IndustrialGoods生産経路が
-/// 構造的に存在するか、P26-008-C spec §7)。当月の実生産量(Coal入力不足・
-/// workforce不足・財政破綻による稼働率低下等)とは無関係に判定する――既に存在する
-/// Factoryを「稼働していないから存在しない」と誤認して重複建設しないための、
-/// `has_active_mine_for_resource`と対になる構造的判定。
-///
-/// 完成済み(level>0)のFactoryに加え、**建設queue内に未完成のFactoryが1件でも
-/// あれば**同様に「対応済み」とみなす(spec §7・§16.D: Factory建設中に同じ目的で
-/// 別州へもう1件発注しない)。`find_candidate_state`自体は州単位の重複(同じ州へ
-/// 同じ建物種別を二重に積む)しか排除しないため、複数州が候補になり得る場合の
-/// 国家単位の重複はこの関数側で防ぐ。
-fn has_active_factory_for_industrial_goods(
-    country: &CountryData,
-    state_registry: &StateRegistry,
-    owned_states: &[StateId],
-) -> bool {
-    let already_built = owned_states
-        .iter()
-        .any(|&sid| state_registry.get(sid).is_some_and(|s| s.building_level(BuildingType::Factory) > 0));
-    if already_built {
-        return true;
-    }
-    country
-        .construction_queue
-        .iter()
-        .any(|item| item.building_type == BuildingType::Factory)
-}
-
-/// P26-004-PRE-002が確立した「事前開発」対象を、鉱床由来の資源(Mine)だけでなく
-/// IndustrialGoods(Factory)へ拡張したもの(P26-008-C)。
-enum ProactiveDevelopmentTarget {
-    Mine(StateId),
-    Factory(StateId),
-}
-
-/// 保有する生産建物の入力資源のうち、対応する構造的生産経路がまだ存在しない資源に
-/// ついて、事前開発すべき建物種別と建設候補州を1件だけ決定的に選ぶ。
-/// 複数の資源が該当する場合は`ResourceType::ALL`の宣言順(Food,Wood,Iron,Coal,
-/// MagicCrystal,IndustrialGoods,...)をtie-breakとして用いる(P26-004-PRE-002
-/// spec §5.5、P26-008-C spec §9で維持)。
-///
-/// 鉱床由来の資源(Wood/Iron/Coal等)は既存どおりMine+未活用鉱床州で扱う。
-/// `ResourceType::IndustrialGoods`だけは特別扱いし(鉱床を持たないため
-/// `find_undeveloped_deposit_state`は使えない)、既存の汎用候補選択API
-/// `find_candidate_state`をFactory向けにそのまま再利用する(P26-008-C spec §10:
-/// 新しい生産グラフ探索を実装しない、既存APIの再利用に留める)。
-/// MagicCrystalは対象外(CrystalRefinery系統の管轄)のまま。
-fn find_proactive_development_target(
-    country: &CountryData,
-    state_registry: &StateRegistry,
-    building_registry: &crate::building::data::BuildingRegistry,
-    owned_states: &[StateId],
-    mine_max_level: u32,
-    factory_max_level: u32,
-) -> Option<ProactiveDevelopmentTarget> {
-    let needed = resource_types_required_by_owned_buildings(state_registry, building_registry, owned_states);
-    if needed.is_empty() {
-        return None;
-    }
-    for &resource in ResourceType::ALL.iter() {
-        if resource == ResourceType::MagicCrystal || !needed.contains(&resource) {
-            continue;
-        }
-        if resource == ResourceType::IndustrialGoods {
-            if has_active_factory_for_industrial_goods(country, state_registry, owned_states) {
-                continue;
-            }
-            if let Some(sid) = find_candidate_state(
-                country,
-                state_registry,
-                owned_states,
-                BuildingType::Factory,
-                factory_max_level,
-            ) {
-                return Some(ProactiveDevelopmentTarget::Factory(sid));
-            }
-            continue;
-        }
-        if has_active_mine_for_resource(state_registry, owned_states, resource) {
-            continue;
-        }
-        if let Some(sid) =
-            find_undeveloped_deposit_state(country, state_registry, owned_states, mine_max_level, resource)
-        {
-            return Some(ProactiveDevelopmentTarget::Mine(sid));
-        }
-    }
-    None
-}
+/// P27-002-A: 優先度3の予備月数。正規定数は`ai_core`にあり、ここは従来の公開パスのための再公開。
+pub use crate::country::ai_core::PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
 
 /// 財政AI(P27-002-C候補4、月次評価: game_day % 30 == country_id % 30 または dirty、
 /// 建設AIより先に評価する)。
@@ -646,30 +328,18 @@ pub fn process_tax_rate_ai(
         return;
     };
 
-    // 人口加重平均生活水準(この加重平均を使う理由は`decide_ai_tax_rate_delta`の
-    // doc参照: candidate_rate==tax_rateのとき予測値が実際のmonthly_incomeと
-    // 数学的に完全一致するようにするため)。
-    let mut total_population = 0u64;
-    let mut weighted_living_standard = 0.0f64;
-    for state in state_registry.states.iter().filter(|s| s.owner_country_id == country_id) {
-        total_population += state.population;
-        weighted_living_standard += state.population as f64 * state.living_standard as f64;
-    }
-    let average_living_standard = if total_population == 0 {
-        0.0
-    } else {
-        (weighted_living_standard / total_population as f64) as f32
-    };
-
-    if let Some(delta) = crate::economy::finance::decide_ai_tax_rate_delta(
+    // 人口加重平均生活水準での判定と適用は、新ステートの検証経路と共通の
+    // `ai_core::next_ai_tax_rate`(旧本体をそのまま移した関数)で行う(P32-010)。
+    country.tax_rate = crate::country::ai_core::next_ai_tax_rate(
         country.monthly_balance,
         country.tax_rate,
-        total_population,
-        average_living_standard,
         country.monthly_expenses,
-    ) {
-        country.tax_rate = crate::economy::finance::apply_tax_rate_delta(country.tax_rate, delta);
-    }
+        state_registry
+            .states
+            .iter()
+            .filter(|s| s.owner_country_id == country_id)
+            .map(|s| (s.population, s.living_standard)),
+    );
 }
 
 // ─── P28-002: 戦時MilitaryFactory建設 ────────────────────────────────────────
@@ -1232,87 +902,6 @@ fn wartime_supply_inputs_covered(
 // -PRE-002のR1)は、雇用率が境界付近で推移する州で保護が断続的に外れ、新たな
 // 崩壊経路を生むことが実測で確認されたため、雇用率による絞り込みは行わない。
 
-/// 優先度2.7(P28-005)。着工した場合だけ`true`(国庫・建設キューを変更する)。
-/// `false`のときは国庫・建設キューを一切変更しない。
-///
-/// 着工条件(すべて満たす場合):
-/// 1. 自国が所有かつ支配する陸上州のうち、物流比率が
-///    `economy::finance::LOGISTICS_WELFARE_BONUS_RATIO`未満の州がある
-///    (雇用率による絞り込みはしない)
-/// 2. その州のRailwayが最大レベル未満
-/// 3. その州にRailwayが建設キューにない(未完了の同種建設を重複発注しない)
-/// 4. 候補が複数あれば物流比率が最も低い州を選ぶ(同値は`StateId`昇順。
-///    `owned_states`は呼び出し側で既に`StateId`昇順に整列済みのため、走査順を
-///    崩さず「厳密に低い場合だけ更新」する通常の規則で決定的になる)
-/// 5. `国庫 ≥ 建設費 + 月次経常支出 × PEACETIME_CONSTRUCTION_RESERVE_MONTHS`
-///    (非有限・負の値は着工しない側に倒す。優先度3・戦時MilitaryFactoryと同じ
-///    数値安全規約)
-fn try_logistics_railway_construction(
-    country: &mut CountryData,
-    state_registry: &StateRegistry,
-    building_registry: &crate::building::data::BuildingRegistry,
-    owned_states: &[StateId],
-) -> bool {
-    let Some(def) = building_registry.get(BuildingType::Railway) else {
-        return false;
-    };
-
-    let mut worst: Option<(f32, StateId, u32)> = None;
-    for &state_id in owned_states {
-        let Some(state) = state_registry.get(state_id) else {
-            continue;
-        };
-        let level = state.building_level(BuildingType::Railway);
-        if level >= def.max_level {
-            continue;
-        }
-        if state.logistics_ratio >= crate::economy::finance::LOGISTICS_WELFARE_BONUS_RATIO {
-            continue;
-        }
-        let queued = country
-            .construction_queue
-            .iter()
-            .any(|item| item.state_id == state_id && item.building_type == BuildingType::Railway);
-        if queued {
-            continue;
-        }
-        if worst.is_none_or(|(worst_ratio, _, _)| state.logistics_ratio < worst_ratio) {
-            worst = Some((state.logistics_ratio, state_id, level));
-        }
-    }
-    let Some((_, state_id, current_level)) = worst else {
-        return false;
-    };
-
-    let treasury = country.treasury;
-    let cost = def.construction_cost;
-    let monthly_expenses = country.monthly_expenses;
-    if !(treasury.is_finite()
-        && cost.is_finite()
-        && cost >= 0.0
-        && monthly_expenses.is_finite()
-        && monthly_expenses >= 0.0)
-    {
-        return false;
-    }
-    let required_treasury = cost + monthly_expenses * PEACETIME_CONSTRUCTION_RESERVE_MONTHS;
-    if !required_treasury.is_finite() || treasury < required_treasury {
-        return false;
-    }
-
-    country.treasury -= cost;
-    country.construction_queue.push(ConstructionQueueItem {
-        state_id,
-        building_type: BuildingType::Railway,
-        target_level: current_level + 1,
-        progress: 0.0,
-        required_progress: def.required_progress,
-        paid_cost: cost,
-        status: ConstructionStatus::InQueue,
-    });
-    true
-}
-
 /// 優先度2.5(P28-002)。着工した場合だけ`true`(国庫・建設キューを変更する)。
 /// `false`のときは国庫・建設キューを一切変更しない。
 ///
@@ -1483,7 +1072,7 @@ pub fn process_construction_ai_with_contexts(
         None => return,
     };
 
-    // 最大2件までの建設キュー制限
+    // 最大2件までの建設キュー制限(新ステートの検証経路と共通の判断は`ai_core`)
     if country.construction_queue.len() >= 2 {
         return;
     }
@@ -1497,173 +1086,77 @@ pub fn process_construction_ai_with_contexts(
         .collect();
     owned_states.sort_by_key(|s| s.0);
 
-    if owned_states.is_empty() {
-        ai_state.decision_reason = CountryAiDecisionReason::NoBuildableState;
-        return;
-    }
-
-    // 優先度1: 食料緊急(既存仕様のまま変更しない)
-    if country.stockpile.get(ResourceType::Food) < 50.0 {
-        ai_state.decision_reason = CountryAiDecisionReason::FoodShortageFarmPriority;
-        try_construct(country, state_registry, building_registry, &owned_states, BuildingType::Farm);
-        return;
-    }
-
-    // 優先度2 (P26-004-PRE-002、P26-008-CでIndustrialGoods/Factoryへ拡張):
-    // 保有建物が要求する入力資源のうち、構造的な生産経路(鉱床由来はMine、
-    // IndustrialGoodsはFactory)がまだ存在しないものを1件だけ事前開発する。
-    // 既存の資源不足トリガー(Wood/Iron/Coal<30)より先に評価する。候補州が
-    // 見つかっても、対応する建物の建設費を支払えない場合はこの規則を発火させず
-    // (spec §5.3の前提条件を維持)、優先度3へフォールスルーする。
-    let mine_max_level = building_registry.get(BuildingType::Mine).map(|d| d.max_level).unwrap_or(0);
-    let factory_max_level = building_registry.get(BuildingType::Factory).map(|d| d.max_level).unwrap_or(0);
-    if let Some(target) = find_proactive_development_target(
+    // P32-010: 優先度1・2・2.7・3(経済の判断)は`ai_core::run_construction_priorities`へ移し、
+    // 旧`StateData`も新ステートも同じ判断を通す。軍事の優先度(2.5・2.8・2.9)は、従来の位置で
+    // 呼ばれるよう`OldConstructionHooks`として差し込む(判断の順序・条件は従来と同一)。
+    let mut hooks = OldConstructionHooks {
+        country_id,
+        state_registry,
+        building_registry,
+        owned_states: &owned_states,
+        wartime_supply,
+        iron_supply,
+        military_rebuild,
+    };
+    crate::country::ai_core::run_construction_priorities(
         country,
         state_registry,
         building_registry,
         &owned_states,
-        mine_max_level,
-        factory_max_level,
-    ) {
-        let (target_building, state_id, decision_reason) = match target {
-            ProactiveDevelopmentTarget::Mine(sid) => {
-                (BuildingType::Mine, sid, CountryAiDecisionReason::RawMaterialMinePriority)
-            }
-            // P26-008-C: 既存のSteelShortageSteelMillPriority(定義済み・
-            // localization済みだが、これまで一度も生成側で使われていなかった)を
-            // IndustrialGoods不足によるFactory優先の理由として再利用する――
-            // 新しいOutcome/reasonを不必要に追加しない(spec §13)。
-            ProactiveDevelopmentTarget::Factory(sid) => {
-                (BuildingType::Factory, sid, CountryAiDecisionReason::SteelShortageSteelMillPriority)
-            }
-        };
-        // P29-010: 入力不足で低稼働の Factory の増設は、構造的な IG 開発でも除外する(候補なしとして
-        // 優先度 2.5 以降へ。予算・キュー枠は消費しない)。
-        let factory_excluded =
-            target_building == BuildingType::Factory && factory_expansion_blocked;
-        if !factory_excluded
-            && let Some(def) = building_registry.get(target_building)
-            && country.treasury >= def.construction_cost
-        {
-            ai_state.decision_reason = decision_reason;
-            let current_level = state_registry
-                .get(state_id)
-                .map(|s| s.building_level(target_building))
-                .unwrap_or(0);
-            country.treasury -= def.construction_cost;
-            country.construction_queue.push(ConstructionQueueItem {
-                state_id,
-                building_type: target_building,
-                target_level: current_level + 1,
-                progress: 0.0,
-                required_progress: def.required_progress,
-                paid_cost: def.construction_cost,
-                status: ConstructionStatus::InQueue,
-            });
-            return;
+        ai_state,
+        factory_expansion_blocked,
+        &mut hooks,
+    );
+}
+
+/// 旧経路が`ai_core`の判断へ差し込む、軍事に関わる優先度(戦時MilitaryFactory・Iron供給のMine・
+/// 軍需基盤の再建)。いずれも従来の関数をそのまま呼ぶ。
+struct OldConstructionHooks<'a> {
+    country_id: CountryId,
+    state_registry: &'a StateRegistry,
+    building_registry: &'a crate::building::data::BuildingRegistry,
+    owned_states: &'a [StateId],
+    wartime_supply: Option<WartimeSupplyContext>,
+    iron_supply: Option<IronSupplyContext>,
+    military_rebuild: Option<MilitaryRebuildContext>,
+}
+
+impl crate::country::ai_core::ConstructionHooks<CountryData> for OldConstructionHooks<'_> {
+    fn wartime_supply(&mut self, country: &mut CountryData) -> bool {
+        match self.wartime_supply.take() {
+            Some(context) => try_wartime_supply_construction(
+                country,
+                self.country_id,
+                self.state_registry,
+                self.building_registry,
+                self.owned_states,
+                context,
+            ),
+            None => false,
         }
     }
-
-    // 優先度2.5 (P28-002): 戦時のAI国家だけ、MilitarySuppliesの実生産が現在需要に
-    // 届かない場合にMilitaryFactoryを1件建設する。着工しなかった場合は、優先度3へ
-    // そのままフォールスルーする(優先度3の予備資金契約は変更しない)。
-    if let Some(context) = wartime_supply
-        && try_wartime_supply_construction(
-            country,
-            country_id,
-            state_registry,
-            building_registry,
-            &owned_states,
-            context,
-        )
-    {
-        ai_state.decision_reason = CountryAiDecisionReason::WarInProgress;
-        return;
-    }
-
-    // 優先度2.7 (P28-005): 物流比率がLOGISTICS_WELFARE_BONUS_RATIO(0.9)未満の
-    // 州へRailwayを1件建設する。着工しなかった場合は、優先度3へそのまま
-    // フォールスルーする(優先度3の予備資金契約は変更しない)。判断理由は
-    // 既存の`PeacetimeDevelopment`を再利用する(Save V1の値域を広げないため、
-    // P28-002が`WarInProgress`を再利用したのと同じ方針)。
-    if try_logistics_railway_construction(country, state_registry, building_registry, &owned_states) {
-        ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
-        return;
-    }
-
-    // 優先度2.8 (P29-009): Iron の継続的なフロー不足が履歴から認識できた場合、不足を補う Mine を
-    // 1 件建設する。着工しなかった場合(不足なし・建設中の Mine で目標を満たす・予算不足・候補なし)は、
-    // 優先度3へそのままフォールスルーする(無関係な建設判断を止めない)。判断理由は既存の
-    // `RawMaterialMinePriority`を再利用する(Save V1 の値域を広げない)。
-    if let Some(context) = iron_supply
-        && try_iron_supply_construction(country, state_registry, building_registry, &owned_states, context)
-    {
-        ai_state.decision_reason = CountryAiDecisionReason::RawMaterialMinePriority;
-        return;
-    }
-
-    // 優先度2.9 (P30-002): 軍需基盤(MilitaryFactory)を失った・持たない国家で、国内で Iron・IG を
-    // 継続供給できる見込みがあるとき、最初の MilitaryFactory lv1 を 1 件建設する。条件を満たさない
-    // (供給源なし・予備資金不足・候補なし・建設中)場合は何も変更せず、優先度3へフォールスルーする。
-    // 判断理由は既存の`PeacetimeDevelopment`を再利用する(Save V1 の値域を広げない)。
-    if let Some(context) = military_rebuild
-        && try_military_rebuild_construction(
-            country,
-            state_registry,
-            building_registry,
-            &owned_states,
-            context,
-        )
-    {
-        ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
-        return;
-    }
-
-    // 優先度3: 既存の通常判断(原材料不足 -> Mine、それ以外 -> Factory)
-    let target_building = if country.stockpile.get(ResourceType::Wood) < 30.0
-        || country.stockpile.get(ResourceType::Iron) < 30.0
-        || country.stockpile.get(ResourceType::Coal) < 30.0
-    {
-        ai_state.decision_reason = CountryAiDecisionReason::RawMaterialMinePriority;
-        BuildingType::Mine
-    } else {
-        ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
-        BuildingType::Factory
-    };
-
-    // P29-010 (B2): 入力不足で低稼働の Factory の増設候補を除外する。優先度 3 の選択肢は Mine か
-    // Factory の二択のため、Factory が除外された場合は他の有効候補がなく、建設を保留する
-    // (支出を続けるためだけの代替建設はしない。着工・予算・キューは一切変更しない)。
-    if target_building == BuildingType::Factory && factory_expansion_blocked {
-        return;
-    }
-
-    match try_construct_peacetime(country, state_registry, building_registry, &owned_states, target_building) {
-        ConstructOutcome::Built => {}
-        ConstructOutcome::InsufficientFunds => {
-            ai_state.decision_reason = CountryAiDecisionReason::FundsShortage;
+    fn iron_supply(&mut self, country: &mut CountryData) -> bool {
+        match self.iron_supply.take() {
+            Some(context) => try_iron_supply_construction(
+                country,
+                self.state_registry,
+                self.building_registry,
+                self.owned_states,
+                context,
+            ),
+            None => false,
         }
-        ConstructOutcome::NoCandidate => {
-            if target_building == BuildingType::Mine {
-                // P26-004-PRE-002 spec §5.2: 鉱床皆無国家ではMine候補が存在しない。
-                // 同じ月の建設判断を無駄にしないよう、次候補(Factory)へフォールバック
-                // する(架空の採掘能力は作らず、既存Factory建設ルールをそのまま再利用)。
-                // P27-002-A: このフォールバックも優先度3の一部であり、同じ予備資金
-                // 判定(`try_construct_peacetime`)を適用する。
-                ai_state.decision_reason = CountryAiDecisionReason::PeacetimeDevelopment;
-                if factory_expansion_blocked {
-                    return;
-                }
-                if let ConstructOutcome::InsufficientFunds = try_construct_peacetime(
-                    country,
-                    state_registry,
-                    building_registry,
-                    &owned_states,
-                    BuildingType::Factory,
-                ) {
-                    ai_state.decision_reason = CountryAiDecisionReason::FundsShortage;
-                }
-            }
+    }
+    fn military_rebuild(&mut self, country: &mut CountryData) -> bool {
+        match self.military_rebuild.take() {
+            Some(context) => try_military_rebuild_construction(
+                country,
+                self.state_registry,
+                self.building_registry,
+                self.owned_states,
+                context,
+            ),
+            None => false,
         }
     }
 }

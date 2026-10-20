@@ -41,6 +41,8 @@ pub trait StateEconomyAccess {
 
     /// 建物の稼働率(生産処理が書き込んだ値。未記録は0.0)。
     fn building_operation_ratio(&self, b_type: BuildingType) -> f32;
+    /// 建物ごとの稼働率の記録(生産処理が書き込んだ値)。
+    fn operation_ratios(&self) -> &HashMap<BuildingType, f32>;
 
     /// 生産で使う、この地域で利用可能な鉱床(入力データ)。
     fn resource_deposits(&self) -> &[StateResourceDeposit];
@@ -113,6 +115,9 @@ impl StateEconomyAccess for StateData {
     }
     fn building_operation_ratio(&self, b_type: BuildingType) -> f32 {
         self.building_operation(b_type)
+    }
+    fn operation_ratios(&self) -> &HashMap<BuildingType, f32> {
+        &self.building_operation_ratios
     }
     fn resource_deposits(&self) -> &[StateResourceDeposit] {
         &self.resource_deposits

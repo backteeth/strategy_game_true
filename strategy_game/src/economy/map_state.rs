@@ -20,7 +20,19 @@
 //! 明示する「経済計算上の対応関係」であり、法的所有・占領のモデルではない(それらは未決で、
 //! この対応関係を正式な領有モデルとして固定しない)。
 
+use crate::building::construction::{
+    CompletionOutcome, ConstructionOrder, ConstructionStatus, advance_construction_queue,
+};
 use crate::building::data::{BuildingRegistry, BuildingType};
+use crate::common::CountryId;
+use crate::country::ai_core::{
+    AiCountry, AiRegions, NoHooks, OrderBlock, next_ai_tax_rate, run_construction_priorities,
+};
+use crate::country::country_ai::{CountryAiDecisionReason, CountryAiState};
+use crate::economy::economic_state::{
+    EconomicState, calculate_economic_state, compute_economic_metrics,
+};
+use crate::economy::province_resources::StateResourceSetup;
 use crate::economy::finance::{compute_country_finance, update_welfare_and_unrest};
 use crate::economy::production::{
     CountryProductionOutcome, process_country_production_with_outcome,
@@ -113,6 +125,9 @@ impl StateEconomyAccess for MapStateEconomy {
             .copied()
             .unwrap_or(0.0)
     }
+    fn operation_ratios(&self) -> &HashMap<BuildingType, f32> {
+        &self.building_operation_ratios
+    }
     fn resource_deposits(&self) -> &[StateResourceDeposit] {
         &self.resource_deposits
     }
@@ -172,6 +187,9 @@ pub struct ScenarioCountryInput {
     pub mobilized_manpower: u64,
     pub stockpile: HashMap<ResourceType, f64>,
     pub states: Vec<u32>,
+    /// trueならAI国家(税率調整と経済施設の建設判断を月次の周期で実行する。評価周期の識別には`label`を使う)。
+    /// falseはプレイヤー等で、AIは何も変更しない。明示が必要(既定値で補わない)。
+    pub ai_controlled: bool,
 }
 
 /// 複数国家・複数月の検証用シナリオ(M4-B)。**正式な人口・税率・国家所属ではない。**
@@ -298,6 +316,9 @@ pub fn parse_multi_month_scenario(text: &str) -> Result<MultiMonthScenario, Stri
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MapStateEconomyRegistry {
     states: BTreeMap<MapStateId, MapStateEconomy>,
+    /// `attach_province_resources`で接続した、ステートごとの資源設定の状況(接続前は`None`)。
+    /// Mineの注文受付・完成時に、完成後の月次経済に必要な資源入力の整合を確認するために使う。
+    resource_setup: Option<BTreeMap<MapStateId, StateResourceSetup>>,
 }
 
 fn finite_nonneg(v: f64) -> bool {
@@ -441,7 +462,10 @@ impl MapStateEconomyRegistry {
         check_stockpile(&scenario.stockpile, &mut issues);
         let out = build_states(&scenario.states, world, buildings, &mut issues);
         if issues.is_empty() {
-            Ok(Self { states: out })
+            Ok(Self {
+                states: out,
+                resource_setup: None,
+            })
         } else {
             Err(issues)
         }
@@ -526,6 +550,9 @@ impl MapStateEconomyRegistry {
                 monthly_income: 0.0,
                 monthly_expenses: 0.0,
                 monthly_balance: 0.0,
+                construction_queue: Vec::new(),
+                economic_state: EconomicState::default(),
+                ai: c.ai_controlled.then(ScenarioAi::new),
             });
         }
         for id in out.keys() {
@@ -536,7 +563,13 @@ impl MapStateEconomyRegistry {
             }
         }
         if issues.is_empty() {
-            Ok((Self { states: out }, countries))
+            Ok((
+                Self {
+                    states: out,
+                    resource_setup: None,
+                },
+                countries,
+            ))
         } else {
             Err(issues)
         }
@@ -609,6 +642,13 @@ impl MapStateEconomyRegistry {
                 s.resource_deposits = deposits;
             }
         }
+        // 完成後の月次経済に必要な資源入力の整合(Mine)を、注文受付・完成時に確認するための記録。
+        self.resource_setup = Some(
+            self.states
+                .keys()
+                .filter_map(|id| derived.state(*id).map(|s| (*id, s.setup)))
+                .collect(),
+        );
         Ok(())
     }
 
@@ -690,6 +730,14 @@ impl MapStateEconomyRegistry {
             update_welfare_and_unrest(&mut **s, country.tax_rate, has_food, is_bankrupt);
         }
 
+        // 6. 経済状態の分類(旧`handle_monthly_economy`の最後と同じ。福祉の更新後の指標で判定)
+        let metrics = compute_economic_metrics(
+            &refs,
+            country.monthly_balance,
+            country.stockpile.get(ResourceType::Food),
+        );
+        country.economic_state = calculate_economic_state(&metrics);
+
         CountryMonthReport {
             label: country.label,
             is_bankrupt,
@@ -716,6 +764,12 @@ pub struct ScenarioCountry {
     pub monthly_income: f64,
     pub monthly_expenses: f64,
     pub monthly_balance: f64,
+    /// ステートを対象にした建設キュー(国家ごとに1つ。ステートへ複製しない)。
+    pub construction_queue: Vec<MapConstructionOrder>,
+    /// 月次経済の最後に判定される経済状態(`economy::economic_state`)。
+    pub economic_state: EconomicState,
+    /// AI国家の評価状態(AI国家でなければ`None`)。
+    pub ai: Option<ScenarioAi>,
 }
 
 /// `run_country_month`が返す、その月の国家単位の結果。
@@ -736,4 +790,436 @@ pub fn stockpile_from_scenario(scenario: &EconomyScenario) -> CountryStockpile {
         s.set(*res, *amount);
     }
     s
+}
+
+// ================================================================ M4-C: 建設キュー・経済AI
+
+/// 新ステートを対象にした建設注文。旧`ConstructionQueueItem`(旧`StateId`が対象)とは別の型で、
+/// 対象に`MapStateId`しか渡せない(旧`StateId`との相互変換は無い)。費用・期間・段階の意味は旧と同じ。
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapConstructionOrder {
+    pub state: MapStateId,
+    pub building_type: BuildingType,
+    pub target_level: u32,
+    pub progress: f64,
+    pub required_progress: f64,
+    pub paid_cost: f64,
+    pub status: ConstructionStatus,
+}
+
+impl ConstructionOrder for MapConstructionOrder {
+    fn advance_one_day(&mut self) -> bool {
+        self.status = ConstructionStatus::InProgress;
+        self.progress += 1.0;
+        self.progress >= self.required_progress
+    }
+}
+
+/// AI国家の評価状態(`CountryAiState`のうち、検証用国家が保持する分)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScenarioAi {
+    /// 初回は評価周期に関わらず評価する(旧`CountryAiState::new`と同じ)。
+    pub dirty: bool,
+    pub last_decision_reason: CountryAiDecisionReason,
+    pub last_monthly_evaluation_day: u32,
+}
+
+impl ScenarioAi {
+    pub fn new() -> Self {
+        Self {
+            dirty: true,
+            last_decision_reason: CountryAiDecisionReason::default(),
+            last_monthly_evaluation_day: 0,
+        }
+    }
+}
+
+impl Default for ScenarioAi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 施設がステート単位の経済施設か(D9)。現在の`BuildingType`はすべて**ステート単位の経済施設**で、
+/// 港・要塞・鉄道駅のような位置施設は`BuildingType`に存在しない(プロヴィンス単位の実装は後続)。
+/// この関数の網羅的な`match`が、新しい種別を追加する際に置き場所の判断を強制する。
+/// 注: `Railway`は現行ではステート単位の物流容量の加算(`railway_capacity_bonus`)として扱われる
+/// 経済施設であり、鉄道駅(位置施設)ではない。
+pub fn is_state_level_economic_facility(b: BuildingType) -> bool {
+    match b {
+        BuildingType::Farm
+        | BuildingType::LoggingCamp
+        | BuildingType::Mine
+        | BuildingType::Factory
+        | BuildingType::MilitaryFactory
+        | BuildingType::Railway
+        | BuildingType::University
+        | BuildingType::MagicAcademy
+        | BuildingType::CrystalMine
+        | BuildingType::CrystalRefinery => true,
+    }
+}
+
+/// 建設注文の受付エラー。エラー時は国庫・キュー・施設を一切変更しない。
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderError {
+    UnknownState(MapStateId),
+    /// このステートは、その国家の経済計算に含まれていない(別国家のステートへは注文できない)。
+    NotMappedToCountry(MapStateId),
+    UndefinedBuilding(BuildingType),
+    /// ステート単位の経済施設ではない(位置施設など)。
+    UnsupportedFacility(BuildingType),
+    /// クリスタル専用ステートへの汎用Mine(既存のプレイヤー建設の規則と同じ)。
+    CrystalOnlyState(MapStateId),
+    MaxLevel {
+        level: u32,
+        max: u32,
+    },
+    AlreadyQueued,
+    InsufficientFunds {
+        cost: f64,
+        treasury: f64,
+    },
+    /// 完成後の月次経済に必要な前提(資源入力など)が満たされない。
+    Precondition(OrderBlock),
+}
+
+/// 1日の処理で起きた出来事(検証・表示用)。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DayReport {
+    /// (国家ラベル, ステート, 施設, 完成後のレベル)
+    pub completed: Vec<(u32, MapStateId, BuildingType, u32)>,
+    /// 完成条件を満たしたが、前提(資源入力など)が不足して反映を保留した注文。
+    pub blocked: Vec<(u32, MapStateId, BuildingType, OrderBlock)>,
+    /// AIが出した注文 (国家ラベル, ステート, 施設, 支払った費用)
+    pub ordered: Vec<(u32, MapStateId, BuildingType, f64)>,
+    /// AIの税率変更 (国家ラベル, 旧, 新)
+    pub tax_changes: Vec<(u32, f32, f32)>,
+    /// この日に月次経済を実行したか。
+    pub monthly_ran: bool,
+}
+
+/// 簡易暦の日付(`app::time::GameDate`と同じ月の日数)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimDate {
+    pub year: i32,
+    pub month: u8,
+    pub day: u8,
+}
+
+impl SimDate {
+    /// AI評価の周期判定に使う通算日(旧`handle_daily_country_ai`と同じ式)。
+    pub fn day_number(&self) -> u32 {
+        (self.year * 365 + self.month as i32 * 30 + self.day as i32) as u32
+    }
+    /// 翌日と、月が変わったか。
+    pub fn next(self) -> (SimDate, bool) {
+        let max_day = crate::app::time::GameDate::days_in_month(self.month).unwrap_or(30);
+        let mut d = self;
+        d.day += 1;
+        if d.day > max_day {
+            d.day = 1;
+            d.month += 1;
+            if d.month > 12 {
+                d.month = 1;
+                d.year += 1;
+            }
+            return (d, true);
+        }
+        (d, false)
+    }
+}
+
+impl AiCountry for ScenarioCountry {
+    type Key = MapStateId;
+    fn treasury(&self) -> f64 {
+        self.treasury
+    }
+    fn set_treasury(&mut self, value: f64) {
+        self.treasury = value;
+    }
+    fn monthly_expenses(&self) -> f64 {
+        self.monthly_expenses
+    }
+    fn stock(&self, resource: ResourceType) -> f64 {
+        self.stockpile.get(resource)
+    }
+    fn queue_len(&self) -> usize {
+        self.construction_queue.len()
+    }
+    fn queue_has(&self, region: MapStateId, building: BuildingType) -> bool {
+        self.construction_queue
+            .iter()
+            .any(|o| o.state == region && o.building_type == building)
+    }
+    fn queue_has_building(&self, building: BuildingType) -> bool {
+        self.construction_queue
+            .iter()
+            .any(|o| o.building_type == building)
+    }
+    fn push_order(
+        &mut self,
+        region: MapStateId,
+        building: BuildingType,
+        target_level: u32,
+        required_progress: f64,
+        paid_cost: f64,
+    ) {
+        self.construction_queue.push(MapConstructionOrder {
+            state: region,
+            building_type: building,
+            target_level,
+            progress: 0.0,
+            required_progress,
+            paid_cost,
+            status: ConstructionStatus::InQueue,
+        });
+    }
+}
+
+/// 経済AIが参照する、新ステート側の読み取り窓口。
+pub struct MapAiRegions<'a> {
+    states: &'a BTreeMap<MapStateId, MapStateEconomy>,
+    resource_setup: Option<&'a BTreeMap<MapStateId, StateResourceSetup>>,
+}
+
+impl AiRegions<MapStateId> for MapAiRegions<'_> {
+    fn exists(&self, region: MapStateId) -> bool {
+        self.states.contains_key(&region)
+    }
+    fn building_level(&self, region: MapStateId, building: BuildingType) -> u32 {
+        self.states
+            .get(&region)
+            .map(|s| s.building_level(building))
+            .unwrap_or(0)
+    }
+    fn buildings(&self, region: MapStateId) -> Option<&HashMap<BuildingType, u32>> {
+        self.states.get(&region).map(|s| &s.buildings)
+    }
+    fn deposits(&self, region: MapStateId) -> &[StateResourceDeposit] {
+        self.states
+            .get(&region)
+            .map(|s| s.resource_deposits.as_slice())
+            .unwrap_or(&[])
+    }
+    fn logistics_ratio(&self, region: MapStateId) -> f32 {
+        self.states
+            .get(&region)
+            .map(|s| s.logistics_ratio)
+            .unwrap_or(1.0)
+    }
+    /// Mineは、プロヴィンス別の資源定義を接続している場合、そのステートの全プロヴィンスの資源が
+    /// 設定済み(資源なしの明示を含む)であることを要求する(完成後の月次経済が入力不備で失敗する
+    /// 経路を、受付・候補評価の時点で塞ぐ)。未設定と資源なしを区別する。
+    fn order_precondition(
+        &self,
+        region: MapStateId,
+        building: BuildingType,
+    ) -> Result<(), OrderBlock> {
+        if building != BuildingType::Mine {
+            return Ok(());
+        }
+        match self.resource_setup {
+            None => Ok(()),
+            Some(map) => match map.get(&region) {
+                Some(StateResourceSetup::Complete) => Ok(()),
+                _ => Err(OrderBlock::ResourcesNotConfigured),
+            },
+        }
+    }
+}
+
+impl MapStateEconomyRegistry {
+    fn ai_regions(&self) -> MapAiRegions<'_> {
+        MapAiRegions {
+            states: &self.states,
+            resource_setup: self.resource_setup.as_ref(),
+        }
+    }
+
+    /// 建設注文を受け付ける(AI以外の注文。プレイヤー相当の入力)。旧`ui::state_panel`の受付と同じ
+    /// 順序で、存在・上限・重複・資金を確認し、**支払いとキューへの追加を1回だけ**行う。
+    /// 受付時に、完成後に必要となる前提(Mineの資源入力)も確認する。エラー時は何も変更しない。
+    pub fn place_order(
+        &self,
+        country: &mut ScenarioCountry,
+        state: MapStateId,
+        building: BuildingType,
+        building_registry: &BuildingRegistry,
+    ) -> Result<(), OrderError> {
+        let Some(s) = self.states.get(&state) else {
+            return Err(OrderError::UnknownState(state));
+        };
+        if !country.states.contains(&state) {
+            return Err(OrderError::NotMappedToCountry(state));
+        }
+        if !is_state_level_economic_facility(building) {
+            return Err(OrderError::UnsupportedFacility(building));
+        }
+        let Some(def) = building_registry.get(building) else {
+            return Err(OrderError::UndefinedBuilding(building));
+        };
+        if building == BuildingType::Mine
+            && crate::economy::resources::is_crystal_only_state(&s.resource_deposits)
+        {
+            return Err(OrderError::CrystalOnlyState(state));
+        }
+        let level = s.building_level(building);
+        if level >= def.max_level {
+            return Err(OrderError::MaxLevel {
+                level,
+                max: def.max_level,
+            });
+        }
+        if country.queue_has(state, building) {
+            return Err(OrderError::AlreadyQueued);
+        }
+        if country.treasury < def.construction_cost {
+            return Err(OrderError::InsufficientFunds {
+                cost: def.construction_cost,
+                treasury: country.treasury,
+            });
+        }
+        if let Err(b) = self.ai_regions().order_precondition(state, building) {
+            return Err(OrderError::Precondition(b));
+        }
+        country.treasury -= def.construction_cost;
+        country.push_order(
+            state,
+            building,
+            level + 1,
+            def.required_progress,
+            def.construction_cost,
+        );
+        Ok(())
+    }
+
+    /// `start`の翌日から`days`日ぶん、`run_day`を実行する(旧`advance_game_date`と同じく、
+    /// 日付を進めてからその新しい日付で日次処理を行う)。各日の日付と出来事を返す。
+    pub fn run_days(
+        &mut self,
+        countries: &mut [ScenarioCountry],
+        start: SimDate,
+        days: u32,
+        building_registry: &BuildingRegistry,
+    ) -> Vec<(SimDate, DayReport)> {
+        let mut date = start;
+        let mut out = Vec::with_capacity(days as usize);
+        for _ in 0..days {
+            let (next, month_changed) = date.next();
+            date = next;
+            let report = self.run_day(countries, date, month_changed, building_registry);
+            out.push((date, report));
+        }
+        out
+    }
+
+    /// 1日分の処理。旧スケジュールと同じ順序: (1) 建設の進捗と完成(`handle_daily_construction`) →
+    /// (2) 月が変わった日は月次経済(人口成長・人的資源・雇用・物流・生産・財政・福祉・経済状態) →
+    /// (3) AI国家の月次評価(`handle_daily_country_ai`: 税率調整 → 建設判断)。
+    /// `date`はこの日の日付、`month_changed`はこの日に月が変わったか。
+    pub fn run_day(
+        &mut self,
+        countries: &mut [ScenarioCountry],
+        date: SimDate,
+        month_changed: bool,
+        building_registry: &BuildingRegistry,
+    ) -> DayReport {
+        let mut report = DayReport::default();
+
+        // (1) 建設の進捗・完成。完成した施設は、対応するステートへちょうど1回だけ反映する。
+        for c in countries.iter_mut() {
+            let label = c.label;
+            let setup = self.resource_setup.clone();
+            let states = &mut self.states;
+            advance_construction_queue(&mut c.construction_queue, |o| {
+                let Some(s) = states.get_mut(&o.state) else {
+                    report.blocked.push((
+                        label,
+                        o.state,
+                        o.building_type,
+                        OrderBlock::Other("state no longer exists".into()),
+                    ));
+                    return CompletionOutcome::Blocked;
+                };
+                // 完成時の前提(注文後に資源や所属が変わっていないか)
+                if o.building_type == BuildingType::Mine
+                    && let Some(map) = &setup
+                    && map.get(&o.state) != Some(&StateResourceSetup::Complete)
+                {
+                    report.blocked.push((
+                        label,
+                        o.state,
+                        o.building_type,
+                        OrderBlock::ResourcesNotConfigured,
+                    ));
+                    return CompletionOutcome::Blocked;
+                }
+                let current = s.building_level(o.building_type);
+                s.buildings.insert(o.building_type, current + 1);
+                report
+                    .completed
+                    .push((label, o.state, o.building_type, current + 1));
+                CompletionOutcome::Applied
+            });
+        }
+
+        // (2) 月次経済
+        if month_changed {
+            report.monthly_ran = true;
+            for c in countries.iter_mut() {
+                self.run_country_month(c, building_registry);
+            }
+        }
+
+        // (3) AI国家の評価(旧: `current_day % 30 == country_id % 30` または初回(dirty))
+        let day_number = date.day_number();
+        for c in countries.iter_mut() {
+            let Some(ai) = c.ai.clone() else { continue };
+            let due = (day_number as usize % 30 == c.label as usize % 30) || ai.dirty;
+            if due {
+                let before_tax = c.tax_rate;
+                c.tax_rate = next_ai_tax_rate(
+                    c.monthly_balance,
+                    c.tax_rate,
+                    c.monthly_expenses,
+                    c.states
+                        .iter()
+                        .filter_map(|id| self.states.get(id))
+                        .map(|s| (s.population, s.living_standard)),
+                );
+                if c.tax_rate != before_tax {
+                    report.tax_changes.push((c.label, before_tax, c.tax_rate));
+                }
+                let queue_before = c.construction_queue.len();
+                let owned = c.states.clone();
+                let mut ai_state = CountryAiState::new(CountryId(c.label as usize));
+                ai_state.dirty = ai.dirty;
+                // 位置施設の判断・軍事の優先度(戦時・Iron供給・再建)・履歴に基づく増設抑止は、
+                // 新経路では未対応(差し込みなし・抑止なし)。
+                run_construction_priorities(
+                    c,
+                    &self.ai_regions(),
+                    building_registry,
+                    &owned,
+                    &mut ai_state,
+                    false,
+                    &mut NoHooks,
+                );
+                for o in c.construction_queue.iter().skip(queue_before) {
+                    report
+                        .ordered
+                        .push((c.label, o.state, o.building_type, o.paid_cost));
+                }
+                if let Some(a) = c.ai.as_mut() {
+                    a.last_decision_reason = ai_state.decision_reason;
+                    a.last_monthly_evaluation_day = day_number;
+                    a.dirty = false;
+                }
+            } else if let Some(a) = c.ai.as_mut() {
+                a.dirty = false;
+            }
+        }
+        report
+    }
 }

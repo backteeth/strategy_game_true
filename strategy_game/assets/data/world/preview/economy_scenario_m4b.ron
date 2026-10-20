@@ -17,6 +17,7 @@
             mobilized_manpower: 12000,
             stockpile: { Iron: 2000.0, Coal: 2000.0, Food: 50.0 },
             states: [20, 21],
+            ai_controlled: false,
         ),
         // 国家2: 国庫が負(破産ペナルティ)、高税率(>0.25 の福祉減少)、食料なし、動員なし。
         (
@@ -27,6 +28,7 @@
             mobilized_manpower: 0,
             stockpile: {},
             states: [22],
+            ai_controlled: false,
         ),
     ],
     states: [

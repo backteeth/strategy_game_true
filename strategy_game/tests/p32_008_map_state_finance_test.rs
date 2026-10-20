@@ -90,6 +90,7 @@ fn country(
         .into_iter()
         .collect(),
         states: states.to_vec(),
+        ai_controlled: false,
     }
 }
 

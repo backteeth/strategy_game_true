@@ -1,0 +1,63 @@
+// P32-010 (M4-C) 検証用シナリオ: 経済状態・建設キュー・経済AI。**正式な人口・施設・国家配置・バランスではない。**
+// 地理配置とは別データ。通常の地理プレビューや旧ゲームには注入されない。
+// 鉱床は、ステート単位の入力を空にし、プロヴィンス別の資源定義(province_resources.ron)を接続して使う。
+// `countries[].states` は経済計算上の対応関係(法的所有・占領モデルではない)。`ai_controlled: true` の
+// 国家は、月次の評価周期(label % 30)で税率調整と経済施設の建設判断を行う(label は評価周期の識別にだけ使う)。
+// 建設の期間は通常どおり(Mine 60日、Farm 30日など。短縮しない)。months は実行する月数(日数 = months × 30)。
+(
+    format_version: 1,
+    description: "P32-010 economy state / construction queue / economy AI validation scenario (not official data or balance)",
+    months: 4,
+    countries: [
+        // 国家1(AI): 資金・備蓄とも十分。木材不足(Wood<30)で平時のMine建設へ → MapState#20(資源設定済み)が候補。
+        (
+            label: 1,
+            treasury: 5000.0,
+            tax_rate: 0.15,
+            available_manpower: 10000,
+            mobilized_manpower: 12000,
+            stockpile: { Iron: 2000.0, Coal: 2000.0, Food: 500.0 },
+            states: [20],
+            ai_controlled: true,
+        ),
+        // 国家2(AI): 食料なし(Food<50)→ 食料緊急のFarm建設。高税率・低収入。
+        (
+            label: 2,
+            treasury: 800.0,
+            tax_rate: 0.30,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: {},
+            states: [21, 22],
+            ai_controlled: true,
+        ),
+    ],
+    states: [
+        (
+            state: 20,
+            population: 600001,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 100.0,
+            buildings: { Farm: 3, Mine: 2, Factory: 1, Railway: 1 },
+        ),
+        (
+            state: 21,
+            population: 100000,
+            workforce_ratio: 0.4,
+            living_standard: 40.0,
+            unrest: 25.0,
+            base_logistics_capacity: 60.0,
+            buildings: { Farm: 6, Factory: 1 },
+        ),
+        (
+            state: 22,
+            population: 250000,
+            workforce_ratio: 0.45,
+            living_standard: 50.0,
+            unrest: 15.0,
+            base_logistics_capacity: 100.0,
+        ),
+    ],
+)

@@ -11,10 +11,10 @@ pub mod supply_balance;
 
 use crate::app::game_state::GameState;
 use crate::app::time::{DailySimulationSet, DayChangedMessage, MonthChangedMessage};
-use crate::building::construction::ConstructionStatus;
+use crate::building::construction::{CompletionOutcome, advance_construction_queue};
 use crate::building::data::BuildingRegistry;
 use crate::country::{CountryRegistry, PlayerCountry};
-use crate::economy::economic_state::{EconomicMetrics, calculate_economic_state};
+use crate::economy::economic_state::calculate_economic_state;
 use crate::economy::finance::{process_country_finance, update_state_welfare_and_unrest};
 use crate::economy::production::process_country_production_with_outcome;
 use crate::economy::supply_balance::MilitarySupplyProductionLedger;
@@ -66,47 +66,35 @@ pub fn handle_daily_construction(
 ) {
     for _event in day_events.read() {
         for country in country_registry.countries.iter_mut() {
-            let mut completed_indices = Vec::new();
+            // P32-010: 進捗・完成判定・キューからの除去は、新ステートの検証経路と共通の
+            // `advance_construction_queue`で行う。完成した注文の施設反映と通知だけがここの責務
+            // (旧経路は完成した注文を常にキューから外す=`Applied`)。
+            let country_id = country.id;
+            advance_construction_queue(&mut country.construction_queue, |item| {
+                if let Some(state) = state_registry.get_mut(item.state_id) {
+                    let current = state.building_level(item.building_type);
+                    state.buildings.insert(item.building_type, current + 1);
 
-            for (idx, item) in country.construction_queue.iter_mut().enumerate() {
-                item.status = ConstructionStatus::InProgress;
-                item.progress += 1.0;
-
-                if item.progress >= item.required_progress {
-                    completed_indices.push(idx);
-
-                    if let Some(state) = state_registry.get_mut(item.state_id) {
-                        let current = state.building_level(item.building_type);
-                        state.buildings.insert(item.building_type, current + 1);
-
-                        if Some(country.id) == player_country.0 {
-                            notif_writer.write(GameNotification {
-                                message: tf(
-                                    &catalog,
-                                    locale.0,
-                                    "notif.build_complete",
-                                    vec![
-                                        (
-                                            "building",
-                                            t(
-                                                &catalog,
-                                                locale.0,
-                                                item.building_type.display_name(),
-                                            ),
-                                        ),
-                                        ("state", state.name.clone()),
-                                        ("level", (current + 1).to_string()),
-                                    ],
-                                ),
-                            });
-                        }
+                    if Some(country_id) == player_country.0 {
+                        notif_writer.write(GameNotification {
+                            message: tf(
+                                &catalog,
+                                locale.0,
+                                "notif.build_complete",
+                                vec![
+                                    (
+                                        "building",
+                                        t(&catalog, locale.0, item.building_type.display_name()),
+                                    ),
+                                    ("state", state.name.clone()),
+                                    ("level", (current + 1).to_string()),
+                                ],
+                            ),
+                        });
                     }
                 }
-            }
-
-            for idx in completed_indices.into_iter().rev() {
-                country.construction_queue.remove(idx);
-            }
+                CompletionOutcome::Applied
+            });
         }
     }
 }
@@ -250,55 +238,13 @@ pub fn handle_monthly_economy(
             // 確定させた実値)を分母にする。total_workforce()(人口とworkforce_ratioから
             // 動員を考慮せず再導出する潜在労働力)を使うと、動員中でも見かけ上の雇用率が
             // 下がらず、この値から導出されるeconomic_state表示指標が実態とずれていた。
-            let total_wf: u64 = owned_states.iter().map(|s| s.civilian_workforce()).sum();
-            let total_emp: u64 = owned_states.iter().map(|s| s.employed_workforce).sum();
-
-            let emp_rate = if total_wf > 0 {
-                total_emp as f32 / total_wf as f32
-            } else {
-                1.0
-            };
-
-            let avg_ls: f32 = if !owned_states.is_empty() {
-                owned_states.iter().map(|s| s.living_standard).sum::<f32>()
-                    / owned_states.len() as f32
-            } else {
-                50.0
-            };
-
-            let avg_log: f32 = if !owned_states.is_empty() {
-                owned_states.iter().map(|s| s.logistics_ratio).sum::<f32>()
-                    / owned_states.len() as f32
-            } else {
-                1.0
-            };
-
-            let avg_op: f32 = if !owned_states.is_empty() {
-                let mut sum_op = 0.0f32;
-                let mut count = 0;
-                for s in owned_states.iter() {
-                    for &op in s.building_operation_ratios.values() {
-                        sum_op += op;
-                        count += 1;
-                    }
-                }
-                if count > 0 {
-                    sum_op / count as f32
-                } else {
-                    1.0
-                }
-            } else {
-                1.0
-            };
-
-            let metrics = EconomicMetrics {
-                employment_rate: emp_rate,
-                avg_living_standard: avg_ls,
-                avg_logistics_ratio: avg_log,
-                monthly_balance: country.monthly_balance,
-                avg_building_operation: avg_op,
-                food_stockpile: country.stockpile.get(ResourceType::Food),
-            };
+            // P32-010: 経済指標の算出(雇用率・平均生活水準・平均物流比率・平均稼働率)は、新ステートの
+            // 検証経路と共通の`compute_economic_metrics`で行う。
+            let metrics = crate::economy::economic_state::compute_economic_metrics(
+                &owned_states,
+                country.monthly_balance,
+                country.stockpile.get(ResourceType::Food),
+            );
 
             country.economic_state = calculate_economic_state(&metrics);
 

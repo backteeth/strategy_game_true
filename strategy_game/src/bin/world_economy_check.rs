@@ -120,6 +120,7 @@ fn run() -> Result<(), String> {
     );
     run_multi_month(&world.model, &buildings)?;
     run_province_resources(&world.model, &buildings)?;
+    run_m4c(&world.model, &buildings)?;
     Ok(())
 }
 
@@ -334,5 +335,85 @@ fn run_province_resources(
             .iter()
             .all(|r| s_old.get(*r) == s_new.get(*r))
     );
+    Ok(())
+}
+
+/// P32-010: 経済状態・建設キュー・経済AIの検証用シナリオ(`economy_scenario_m4c.ron`)を、
+/// プロヴィンス別の資源入力(P32-009)を接続して新経路で実行し、判断・注文・進捗・完成・
+/// 経済の変化を表示する。旧経路との一致は`tests/p32_010_map_state_ai_test.rs`で検証する。
+fn run_m4c(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<(), String> {
+    use strategy_game::economy::economic_state::EconomicState;
+    use strategy_game::economy::map_state::{
+        MapStateEconomyRegistry, SimDate, parse_multi_month_scenario,
+    };
+    use strategy_game::economy::province_resources::{derive_state_resources, load_province_resources};
+    let text = std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4c.ron")
+        .map_err(|e| e.to_string())?;
+    let sc = parse_multi_month_scenario(&text)?;
+    let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
+        e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n")
+    };
+    println!("\n\n=== P32-010 M4-C 経済状態・建設キュー・経済AI(検証用。正式な配置・バランスではない) ===");
+    println!("{} / {} か月 = {} 日(建設期間は通常どおり)", sc.description, sc.months, sc.months * 30);
+    let res_file = load_province_resources("assets/data/world/preview/province_resources.ron")?;
+    let derived = derive_state_resources(world, &res_file)
+        .map_err(|i| i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n"))?;
+    let (mut reg, mut countries) =
+        MapStateEconomyRegistry::from_multi_scenario(&sc, world, buildings).map_err(fmt)?;
+    reg.attach_province_resources(&derived, world, &res_file).map_err(fmt)?;
+    println!("鉱床入力: プロヴィンス別の資源定義(P32-009)。Mineの注文は、ステートの資源が設定済みであることを要求する。");
+
+    let start = SimDate { year: 1800, month: 1, day: 1 };
+    let name = |s: EconomicState| match s {
+        EconomicState::Depression => "Depression",
+        EconomicState::Recession => "Recession",
+        EconomicState::Stable => "Stable",
+        EconomicState::Boom => "Boom",
+        EconomicState::Prosperity => "Prosperity",
+    };
+    let mut date = start;
+    for _ in 0..sc.months * 30 {
+        let (d, changed) = date.next();
+        date = d;
+        let r = reg.run_day(&mut countries, date, changed, buildings);
+        for (label, state, b, cost) in &r.ordered {
+            println!("{}/{:02}/{:02} 国家{label} AIが注文: MapState#{} {:?} (費用 {cost})", date.year, date.month, date.day, state.0, b);
+        }
+        for (label, from, to) in &r.tax_changes {
+            println!("{}/{:02}/{:02} 国家{label} AIが税率を調整: {from} -> {to}", date.year, date.month, date.day);
+        }
+        for (label, state, b, level) in &r.completed {
+            println!("{}/{:02}/{:02} 国家{label} 建設完成: MapState#{} {:?} -> Lv{level}", date.year, date.month, date.day, state.0, b);
+        }
+        for (label, state, b, why) in &r.blocked {
+            println!("{}/{:02}/{:02} 国家{label} 完成を保留: MapState#{} {:?} ({why:?})", date.year, date.month, date.day, state.0, b);
+        }
+        if r.monthly_ran {
+            println!("{}/{:02}/{:02} --- 月次経済 ---", date.year, date.month, date.day);
+            for c in &countries {
+                println!(
+                    "  国家{}: 国庫 {:.2} 収支 {:.2} 税率 {:.2} 経済状態 {} 建設キュー {}",
+                    c.label, c.treasury, c.monthly_balance, c.tax_rate, name(c.economic_state), c.construction_queue.len()
+                );
+                for id in &c.states {
+                    let s = reg.get(*id).unwrap();
+                    let mut lv: Vec<String> = BuildingType::ALL
+                        .iter()
+                        .filter(|b| s.buildings.get(b).copied().unwrap_or(0) > 0)
+                        .map(|b| format!("{b:?}{}", s.buildings[b]))
+                        .collect();
+                    lv.sort();
+                    println!(
+                        "    MapState#{}: 雇用 {} 失業 {} 施設 [{}] 稼働率 Mine {:.3}",
+                        s.state.0, s.employed_workforce, s.unemployed_workforce, lv.join(" "),
+                        s.building_operation_ratios.get(&BuildingType::Mine).copied().unwrap_or(0.0)
+                    );
+                }
+            }
+        }
+    }
     Ok(())
 }
