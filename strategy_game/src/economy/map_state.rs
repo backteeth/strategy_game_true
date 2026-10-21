@@ -565,6 +565,8 @@ impl MapStateEconomyRegistry {
                 monthly_expenses: 0.0,
                 monthly_balance: 0.0,
                 construction_queue: Vec::new(),
+                next_order_seq: 1,
+                order_log: Vec::new(),
                 economic_state: EconomicState::default(),
                 ai: c.ai_controlled.then(ScenarioAi::new),
                 military: c.military,
@@ -782,6 +784,11 @@ pub struct ScenarioCountry {
     pub monthly_balance: f64,
     /// ステートを対象にした建設キュー(国家ごとに1つ。ステートへ複製しない)。
     pub construction_queue: Vec<MapConstructionOrder>,
+    /// 次に発行する注文識別子の連番(国家ごと。実行時のみ。永続化しない)。
+    pub next_order_seq: u64,
+    /// 完了・取消しで建設キューを離れた注文の記録(実行時のみ。二度目のキャンセルや完成済みの注文の
+    /// キャンセルを、「存在しない注文」と区別して拒否するために使う)。
+    pub order_log: Vec<(ConstructionOrderId, OrderEnd)>,
     /// 月次経済の最後に判定される経済状態(`economy::economic_state`)。
     pub economic_state: EconomicState,
     /// AI国家の評価状態(AI国家でなければ`None`)。
@@ -818,6 +825,8 @@ pub fn stockpile_from_scenario(scenario: &EconomyScenario) -> CountryStockpile {
 /// 対象に`MapStateId`しか渡せない(旧`StateId`との相互変換は無い)。費用・期間・段階の意味は旧と同じ。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapConstructionOrder {
+    /// 注文の識別子(発行した国家+連番。キュー上の位置が変わっても変わらない)。
+    pub id: ConstructionOrderId,
     pub state: MapStateId,
     pub building_type: BuildingType,
     pub target_level: u32,
@@ -825,6 +834,69 @@ pub struct MapConstructionOrder {
     pub required_progress: f64,
     pub paid_cost: f64,
     pub status: ConstructionStatus,
+}
+
+/// 建設注文の識別子。発行した国家のラベルと、国家ごとの連番。**配列上の位置ではない**ので、他の注文が
+/// 完成・取消しされてキューの位置がずれても変わらない。実行時だけの識別子で、セーブには保存しない。
+/// 旧`ConstructionQueueItem`(識別子を持たない)とは別の型で、`ProvinceId`・`MapStateId`・国家IDとも
+/// 数値で互換にならない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ConstructionOrderId {
+    pub country: u32,
+    pub seq: u64,
+}
+
+impl std::fmt::Display for ConstructionOrderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Order#{}-{}", self.country, self.seq)
+    }
+}
+
+/// 建設キューを離れた注文の終わり方。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderEnd {
+    /// 完成し、施設へ反映された。
+    Completed,
+    /// 取り消され、返金された。
+    Cancelled,
+}
+
+/// キャンセルの対象。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelTarget {
+    /// 識別子で指定した注文。
+    Order(ConstructionOrderId),
+    /// その国家の最後に登録された注文(旧UIの「C」キーの動作)。
+    Latest,
+}
+
+/// キャンセルの結果(返金の内訳)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct CancelReceipt {
+    pub id: ConstructionOrderId,
+    pub state: MapStateId,
+    pub building_type: BuildingType,
+    pub progress: f64,
+    pub required_progress: f64,
+    pub paid_cost: f64,
+    /// 返金額(`building::construction::cancel_refund` = 支払済み費用 × `REFUND_RATIO`)。
+    pub refund: f64,
+}
+
+/// キャンセルの拒否理由。拒否時は国庫・キュー・施設・記録を一切変更しない。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CancelError {
+    UnknownCountry(u32),
+    /// 注文主体の建設キューが空(`Latest`)。
+    EmptyQueue,
+    /// 別の国家が発行した注文(キャンセルできない。その国家の国庫へも触れない)。
+    NotIssuersOrder(ConstructionOrderId),
+    /// 完成済み(未完成として返金しない)。
+    AlreadyCompleted(ConstructionOrderId),
+    /// 取消し済み(二重に返金しない)。
+    AlreadyCancelled(ConstructionOrderId),
+    /// この国家が発行した記録のない識別子。
+    NoSuchOrder(ConstructionOrderId),
 }
 
 impl ConstructionOrder for MapConstructionOrder {
@@ -898,12 +970,16 @@ pub fn is_state_level_economic_facility(b: BuildingType) -> bool {
 /// 建設注文の受付エラー。エラー時は国庫・キュー・施設を一切変更しない。
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrderError {
+    /// 注文主体のラベルが検証用シナリオに無い。
+    UnknownCountry(u32),
     UnknownState(MapStateId),
     /// このステートは、その国家の経済計算に含まれていない(別国家のステートへは注文できない)。
     NotMappedToCountry(MapStateId),
     UndefinedBuilding(BuildingType),
     /// ステート単位の経済施設ではない(位置施設など)。
     UnsupportedFacility(BuildingType),
+    /// 発見済みのクリスタル鉱床が無いステートへのクリスタル採掘施設(既存のプレイヤー建設の規則と同じ)。
+    NoCrystalDeposit(MapStateId),
     /// クリスタル専用ステートへの汎用Mine(既存のプレイヤー建設の規則と同じ)。
     CrystalOnlyState(MapStateId),
     MaxLevel {
@@ -986,6 +1062,18 @@ impl SimDate {
     }
 }
 
+impl ScenarioCountry {
+    /// 次の注文識別子を発行する(国家ごとの連番。再利用しない)。
+    fn allocate_order_id(&mut self) -> ConstructionOrderId {
+        let id = ConstructionOrderId {
+            country: self.label,
+            seq: self.next_order_seq,
+        };
+        self.next_order_seq += 1;
+        id
+    }
+}
+
 impl AiCountry for ScenarioCountry {
     type Key = MapStateId;
     fn treasury(&self) -> f64 {
@@ -1028,7 +1116,9 @@ impl AiCountry for ScenarioCountry {
         required_progress: f64,
         paid_cost: f64,
     ) {
+        let id = self.allocate_order_id();
         self.construction_queue.push(MapConstructionOrder {
+            id,
             state: region,
             building_type: building,
             target_level,
@@ -1145,16 +1235,19 @@ impl MapStateEconomyRegistry {
         }
     }
 
-    /// 建設注文を受け付ける(AI以外の注文。プレイヤー相当の入力)。旧`ui::state_panel`の受付と同じ
-    /// 順序で、存在・上限・重複・資金を確認し、**支払いとキューへの追加を1回だけ**行う。
-    /// 受付時に、完成後に必要となる前提(Mineの資源入力)も確認する。エラー時は何も変更しない。
+    /// 手動の建設注文を受け付ける(AIの候補選択を経由しない。注文主体は`country`)。旧`ui::state_panel`の
+    /// 受付と**同じ判定**(`building::construction::check_manual_build_order`)を、対象の存在・注文主体との
+    /// 対応・ステート単位の経済施設であることの確認の後に通し、さらに完成後の月次経済に必要な前提
+    /// (Mineの資源設定)も確認する。**支払いとキューへの追加は、全部通った後に1回だけ**。エラー時は何も変更しない。
+    /// 戻り値は発行した注文の識別子。
     pub fn place_order(
         &self,
         country: &mut ScenarioCountry,
         state: MapStateId,
         building: BuildingType,
         building_registry: &BuildingRegistry,
-    ) -> Result<(), OrderError> {
+    ) -> Result<ConstructionOrderId, OrderError> {
+        use crate::building::construction::{ManualBuildRejection, check_manual_build_order};
         let Some(s) = self.states.get(&state) else {
             return Err(OrderError::UnknownState(state));
         };
@@ -1164,30 +1257,25 @@ impl MapStateEconomyRegistry {
         if !is_state_level_economic_facility(building) {
             return Err(OrderError::UnsupportedFacility(building));
         }
-        let Some(def) = building_registry.get(building) else {
-            return Err(OrderError::UndefinedBuilding(building));
-        };
-        if building == BuildingType::Mine
-            && crate::economy::resources::is_crystal_only_state(&s.resource_deposits)
-        {
-            return Err(OrderError::CrystalOnlyState(state));
-        }
         let level = s.building_level(building);
-        if level >= def.max_level {
-            return Err(OrderError::MaxLevel {
-                level,
-                max: def.max_level,
-            });
-        }
-        if country.queue_has(state, building) {
-            return Err(OrderError::AlreadyQueued);
-        }
-        if country.treasury < def.construction_cost {
-            return Err(OrderError::InsufficientFunds {
-                cost: def.construction_cost,
-                treasury: country.treasury,
-            });
-        }
+        let def = check_manual_build_order(
+            building_registry.get(building),
+            building,
+            &s.resource_deposits,
+            level,
+            country.queue_has(state, building),
+            country.treasury,
+        )
+        .map_err(|r| match r {
+            ManualBuildRejection::UndefinedBuilding => OrderError::UndefinedBuilding(building),
+            ManualBuildRejection::NoCrystalDeposit => OrderError::NoCrystalDeposit(state),
+            ManualBuildRejection::CrystalOnlyState => OrderError::CrystalOnlyState(state),
+            ManualBuildRejection::MaxLevel { level, max } => OrderError::MaxLevel { level, max },
+            ManualBuildRejection::AlreadyQueued => OrderError::AlreadyQueued,
+            ManualBuildRejection::InsufficientFunds { cost, treasury } => {
+                OrderError::InsufficientFunds { cost, treasury }
+            }
+        })?;
         if let Err(b) = self.ai_regions().order_precondition(state, building) {
             return Err(OrderError::Precondition(b));
         }
@@ -1199,7 +1287,77 @@ impl MapStateEconomyRegistry {
             def.required_progress,
             def.construction_cost,
         );
-        Ok(())
+        Ok(country
+            .construction_queue
+            .last()
+            .map(|o| o.id)
+            .expect("order was just pushed"))
+    }
+
+    /// 注文主体のラベルで指定する手動の建設注文(要求: 注文主体・対象`MapStateId`・施設)。
+    pub fn request_build(
+        &self,
+        countries: &mut [ScenarioCountry],
+        issuer: u32,
+        state: MapStateId,
+        building: BuildingType,
+        building_registry: &BuildingRegistry,
+    ) -> Result<ConstructionOrderId, OrderError> {
+        let Some(country) = countries.iter_mut().find(|c| c.label == issuer) else {
+            return Err(OrderError::UnknownCountry(issuer));
+        };
+        self.place_order(country, state, building, building_registry)
+    }
+
+    /// 建設注文のキャンセルと返金。返金は**注文主体の国庫だけ**へ、旧UIと同じ規則(支払済み費用 ×
+    /// `REFUND_RATIO`、進捗・状態に依存せず丸めない)で加える。完成済み・取消し済み・他国家の注文・
+    /// 存在しない注文は拒否し、何も変更しない。資源設定の変更で完成を保留されているMineも、同じ規則で
+    /// キャンセルできる(保留時の新しいペナルティや返金率は無い)。
+    pub fn cancel_order(
+        &self,
+        countries: &mut [ScenarioCountry],
+        issuer: u32,
+        target: CancelTarget,
+    ) -> Result<CancelReceipt, CancelError> {
+        let Some(country) = countries.iter_mut().find(|c| c.label == issuer) else {
+            return Err(CancelError::UnknownCountry(issuer));
+        };
+        let position = match target {
+            CancelTarget::Latest => {
+                if country.construction_queue.is_empty() {
+                    return Err(CancelError::EmptyQueue);
+                }
+                country.construction_queue.len() - 1
+            }
+            CancelTarget::Order(id) => {
+                if id.country != issuer {
+                    return Err(CancelError::NotIssuersOrder(id));
+                }
+                match country.construction_queue.iter().position(|o| o.id == id) {
+                    Some(p) => p,
+                    None => {
+                        return Err(match country.order_log.iter().find(|(x, _)| *x == id) {
+                            Some((_, OrderEnd::Completed)) => CancelError::AlreadyCompleted(id),
+                            Some((_, OrderEnd::Cancelled)) => CancelError::AlreadyCancelled(id),
+                            None => CancelError::NoSuchOrder(id),
+                        });
+                    }
+                }
+            }
+        };
+        let order = country.construction_queue.remove(position);
+        let refund = crate::building::construction::cancel_refund(order.paid_cost);
+        country.treasury += refund;
+        country.order_log.push((order.id, OrderEnd::Cancelled));
+        Ok(CancelReceipt {
+            id: order.id,
+            state: order.state,
+            building_type: order.building_type,
+            progress: order.progress,
+            required_progress: order.required_progress,
+            paid_cost: order.paid_cost,
+            refund,
+        })
     }
 
     /// `start`の翌日から`days`日ぶん、`run_day`を実行する(旧`advance_game_date`と同じく、
@@ -1240,6 +1398,7 @@ impl MapStateEconomyRegistry {
             let label = c.label;
             let setup = self.resource_setup.clone();
             let states = &mut self.states;
+            let order_log = &mut c.order_log;
             advance_construction_queue(&mut c.construction_queue, |o| {
                 let Some(s) = states.get_mut(&o.state) else {
                     report.blocked.push((
@@ -1268,6 +1427,7 @@ impl MapStateEconomyRegistry {
                 report
                     .completed
                     .push((label, o.state, o.building_type, current + 1));
+                order_log.push((o.id, OrderEnd::Completed));
                 CompletionOutcome::Applied
             });
         }

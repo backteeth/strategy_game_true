@@ -122,6 +122,7 @@ fn run() -> Result<(), String> {
     run_province_resources(&world.model, &buildings)?;
     run_m4c(&world.model, &buildings)?;
     run_m4d(&world.model, &buildings)?;
+    run_manual_orders(&world.model, &buildings)?;
     run_location_facilities(&world.model, &map)?;
     Ok(())
 }
@@ -570,6 +571,87 @@ fn run_m4d(
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// P32-013: 新ステート(`MapStateId`)の手動建設注文・キャンセル・返金を、明示した要求の列で実行して表示する(検証用)。
+fn run_manual_orders(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<(), String> {
+    use strategy_game::economy::manual_script::{
+        ManualAction, ManualLogEntry, RequestOutcome, parse_manual_script, run_manual_script,
+    };
+    use strategy_game::economy::map_state::parse_multi_month_scenario;
+    use strategy_game::economy::province_resources::load_province_resources;
+    let scenario = parse_multi_month_scenario(
+        &std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4e.ron")
+            .map_err(|e| e.to_string())?,
+    )?;
+    let script = parse_manual_script(
+        &std::fs::read_to_string("assets/data/world/preview/manual_orders_m4e.ron")
+            .map_err(|e| e.to_string())?,
+    )?;
+    let resources = load_province_resources("assets/data/world/preview/province_resources_m4d.ron")?;
+    println!();
+    println!();
+    println!("=== P32-013 手動建設注文・キャンセル・返金(検証用。プレイヤーUIへは未接続) ===");
+    println!("{} / {} 日。入力ファイルは読み取りのみ。", script.description, script.days);
+    let run = run_manual_script(&scenario, world, buildings, &resources, &script)?;
+    let mut seen_blocked = std::collections::HashSet::new();
+    for entry in &run.log {
+        match entry {
+            ManualLogEntry::Request { elapsed_days, index, action, outcome, treasury } => {
+                let t = treasury
+                    .map(|(a, b)| format!(" 国庫 {a:.1} -> {b:.1}"))
+                    .unwrap_or_default();
+                let what = match action {
+                    ManualAction::Build { country, state, building } => {
+                        format!("国家{country} 注文 MapState#{state} {building:?}")
+                    }
+                    ManualAction::Cancel { country, target } => format!("国家{country} キャンセル {target:?}"),
+                    ManualAction::OmitResourceProvince(p) => format!("資源変更 Province#{p} の設定を外す"),
+                };
+                let result = match outcome {
+                    RequestOutcome::BuildAccepted { id, cost } => format!("受理 {id} 費用 {cost}"),
+                    RequestOutcome::BuildRejected(e) => format!("拒否 {e:?}"),
+                    RequestOutcome::CancelAccepted(r) => format!(
+                        "受理 {} {:?} MapState#{} 進捗 {}/{} 支払済み {} 返金 {}",
+                        r.id, r.building_type, r.state.0, r.progress, r.required_progress, r.paid_cost, r.refund
+                    ),
+                    RequestOutcome::CancelRejected(e) => format!("拒否 {e:?}"),
+                    RequestOutcome::CancelTargetNotIssued(i) => format!("拒否 要求{i}は注文を発行していない"),
+                    RequestOutcome::ResourcesReplaced => "資源の接続をやり直した".to_string(),
+                };
+                println!("[{elapsed_days}日経過] 要求{index}: {what} => {result}{t}");
+            }
+            ManualLogEntry::Day { date, report } => {
+                for (label, state, b, level) in &report.completed {
+                    println!("{}/{:02}/{:02} 国家{label} 建設完成: MapState#{} {:?} -> Lv{level}", date.year, date.month, date.day, state.0, b);
+                }
+                for (label, state, b, why) in &report.blocked {
+                    if seen_blocked.insert((*label, state.0)) {
+                        println!("{}/{:02}/{:02} 国家{label} 完成を保留: MapState#{} {:?} ({why:?})", date.year, date.month, date.day, state.0, b);
+                    }
+                }
+                for (label, state, b, cost) in &report.ordered {
+                    println!("{}/{:02}/{:02} 国家{label} AIが注文: MapState#{} {:?} (費用 {cost})", date.year, date.month, date.day, state.0, b);
+                }
+            }
+        }
+    }
+    for c in &run.countries {
+        println!(
+            "終了時 国家{}: 国庫 {:.1} キュー [{}]",
+            c.label,
+            c.treasury,
+            c.construction_queue
+                .iter()
+                .map(|o| format!("{} {:?}@MapState#{} {}/{}", o.id, o.building_type, o.state.0, o.progress, o.required_progress))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
     Ok(())
 }

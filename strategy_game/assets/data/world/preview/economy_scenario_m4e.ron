@@ -1,0 +1,70 @@
+// P32-013 検証用シナリオ: 新ステート経路の手動建設注文・キャンセル・返金。**正式な人口・施設・国家配置・バランスではない。**
+// 地理配置とは別データで、通常の地理プレビューや旧ゲームには注入されない。鉱床は `province_resources_m4d.ron` から接続する。
+// `countries[].states` は経済計算上の対応関係(法的所有・占領モデルではない)。
+// 国家1・2は手動の注文だけ(ai_controlled: false)、国家3はAIも同じ国庫・キューを使う(予算の共有を確認する)。
+(
+    format_version: 1,
+    description: "P32-013 manual construction order / cancel / refund validation scenario (not official data or balance)",
+    months: 4,
+    countries: [
+        (
+            label: 1,
+            treasury: 5000.0,
+            tax_rate: 0.15,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: { Iron: 3000.0, Coal: 3000.0, Food: 900.0, Wood: 900.0 },
+            states: [20],
+            ai_controlled: false,
+        ),
+        (
+            label: 2,
+            treasury: 800.0,
+            tax_rate: 0.15,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: { Iron: 3000.0, Coal: 3000.0, Food: 900.0, Wood: 900.0 },
+            states: [21],
+            ai_controlled: false,
+        ),
+        (
+            label: 3,
+            treasury: 1500.0,
+            tax_rate: 0.15,
+            available_manpower: 0,
+            mobilized_manpower: 0,
+            stockpile: { Iron: 3000.0, Coal: 3000.0, Food: 900.0, Wood: 900.0 },
+            states: [22],
+            ai_controlled: true,
+        ),
+    ],
+    states: [
+        (
+            state: 20,
+            population: 600001,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 200.0,
+            buildings: { Farm: 3, Mine: 2, Factory: 1, Railway: 1 },
+        ),
+        (
+            state: 21,
+            population: 400000,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 200.0,
+            buildings: { Farm: 6, Railway: 1 },
+        ),
+        (
+            state: 22,
+            population: 250000,
+            workforce_ratio: 0.5,
+            living_standard: 60.0,
+            unrest: 10.0,
+            base_logistics_capacity: 200.0,
+            buildings: { Farm: 2, Factory: 1, Railway: 1 },
+        ),
+    ],
+)

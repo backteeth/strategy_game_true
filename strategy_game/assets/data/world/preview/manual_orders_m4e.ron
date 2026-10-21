@@ -1,0 +1,41 @@
+// P32-013 検証用の手動要求の列(入力。実行時の状態は実行ごとに作られ、このファイルへ書き戻さない)。
+// 各要求は「その日数が経過した後、次の日の処理の前」に順番どおり実行される。
+// Cancel の target: Request(i) = i番目(0始まり)の要求が発行した注文 / Latest = その国家の最後の注文。
+// state は MapStateId(旧 StateId ではない)。country は検証用シナリオのラベル。
+(
+    format_version: 1,
+    description: "P32-013 manual order / cancel / refund validation requests (not official data)",
+    days: 100,
+    // 検証用の変種: MapState#22 の 17268 の資源設定を外す(未設定のMine注文を確認する。入力ファイルは変更しない)。
+    omit_resource_provinces: [17268],
+    steps: [
+        // 0: 有効な注文(Farm 200)
+        (day: 0, action: Build(country: 1, state: 20, building: Farm)),
+        // 1: 予算不足(国家2の国庫800 < Factory 1000)
+        (day: 0, action: Build(country: 2, state: 21, building: Factory)),
+        // 2: 他国家の対象(MapState#21 は国家1の経済計算に含まれない)
+        (day: 0, action: Build(country: 1, state: 21, building: Farm)),
+        // 3: 有効な注文(Mine 500)。後でキャンセルする
+        (day: 0, action: Build(country: 1, state: 20, building: Mine)),
+        // 4: 資源未設定のMine(MapState#22 は 17268 が未設定)
+        (day: 0, action: Build(country: 3, state: 22, building: Mine)),
+        // 5: 国家3の手動注文(Factory 1000)。AIは同じ国庫の残り(500)で動く
+        (day: 0, action: Build(country: 3, state: 22, building: Factory)),
+        // 6: 国家2のMine(500)。資源変更で完成が保留される
+        (day: 0, action: Build(country: 2, state: 21, building: Mine)),
+        // 7: 建設途中(10/60)のキャンセル → 返金 500 × 0.5 = 250
+        (day: 10, action: Cancel(country: 1, target: Request(3))),
+        // 8: 二度目のキャンセル
+        (day: 10, action: Cancel(country: 1, target: Request(3))),
+        // 9: 他国家の注文のキャンセル
+        (day: 10, action: Cancel(country: 2, target: Request(0))),
+        // 10: キャンセル後の再注文
+        (day: 12, action: Build(country: 1, state: 20, building: Mine)),
+        // 11: 資源変更(MapState#21 の 17696 の設定を外す。国家2のMineの前提が崩れる)
+        (day: 20, action: OmitResourceProvince(17696)),
+        // 12: 完成後(Farm は30日で完成)のキャンセル要求
+        (day: 40, action: Cancel(country: 1, target: Request(0))),
+        // 13: 完成を保留されているMine(60日経過後)のキャンセル → 既存の規則どおり 500 × 0.5
+        (day: 65, action: Cancel(country: 2, target: Request(6))),
+    ],
+)

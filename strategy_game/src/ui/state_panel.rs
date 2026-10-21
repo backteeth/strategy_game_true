@@ -1,9 +1,11 @@
 use crate::app::game_state::GameState;
 use crate::app::time::DailySimulationSet;
-use crate::building::construction::{ConstructionQueueItem, ConstructionStatus, REFUND_RATIO};
+use crate::building::construction::{
+    ConstructionQueueItem, ConstructionStatus, ManualBuildRejection, cancel_refund,
+    check_manual_build_order,
+};
 use crate::building::data::{BuildingRegistry, BuildingType};
 use crate::country::{CountryRegistry, PlayerCountry};
-use crate::economy::resources::{ResourceType, has_discovered_deposit, is_crystal_only_state};
 use crate::localization::{
     CurrentLocale, LocalizedText, TranslationCatalog, localized_text, t, tf,
 };
@@ -297,7 +299,7 @@ fn update_state_panel(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_build_buttons(
+pub fn handle_build_buttons(
     mut interaction_q: Query<
         (&Interaction, &BuildButton, &mut BackgroundColor),
         Changed<Interaction>,
@@ -343,99 +345,79 @@ fn handle_build_buttons(
                     continue;
                 }
 
-                let def = match building_registry.get(btn.0) {
-                    Some(d) => d,
-                    None => continue,
-                };
-
-                if btn.0.requires_magic_crystal_deposit()
-                    && !has_discovered_deposit(&state.resource_deposits, ResourceType::MagicCrystal)
-                {
-                    notif_writer.write(GameNotification {
-                        message: tf(
-                            &catalog,
-                            locale.0,
-                            "state_panel.build_failed_no_deposit",
-                            vec![
-                                ("building", t(&catalog, locale.0, btn.0.display_name())),
-                                ("state", state.name.clone()),
-                            ],
-                        ),
-                    });
-                    continue;
-                }
-
-                // P21-009-FIX-001: クリスタル専用州(MagicCrystal鉱床のみ)には通常Mineの
-                // 対象鉱床が存在しないため、新規建設を許可しない(CrystalMineを使う)。
-                if btn.0 == BuildingType::Mine && is_crystal_only_state(&state.resource_deposits) {
-                    notif_writer.write(GameNotification {
-                        message: tf(
-                            &catalog,
-                            locale.0,
-                            "state_panel.build_failed_crystal_only_state",
-                            vec![
-                                ("building", t(&catalog, locale.0, btn.0.display_name())),
-                                ("state", state.name.clone()),
-                            ],
-                        ),
-                    });
-                    continue;
-                }
-
+                // 受付判定は、新ステート(`MapStateId`)の手動注文と共通の
+                // `building::construction::check_manual_build_order`(判定の順序は従来のUIと同じ)。
                 let current_level = state.building_level(btn.0);
                 let country = match country_registry.get_mut(player_cid) {
                     Some(c) => c,
                     None => continue,
                 };
-
-                if current_level >= def.max_level {
-                    notif_writer.write(GameNotification {
-                        message: tf(
-                            &catalog,
-                            locale.0,
-                            "state_panel.build_failed_max_level",
-                            vec![
-                                ("building", t(&catalog, locale.0, btn.0.display_name())),
-                                ("max_level", def.max_level.to_string()),
-                            ],
-                        ),
-                    });
-                    continue;
-                }
-
                 let in_queue = country
                     .construction_queue
                     .iter()
                     .any(|item| item.state_id == state_id && item.building_type == btn.0);
-                if in_queue {
-                    notif_writer.write(GameNotification {
-                        message: tf(
-                            &catalog,
-                            locale.0,
-                            "state_panel.build_failed_in_queue",
-                            vec![
-                                ("building", t(&catalog, locale.0, btn.0.display_name())),
-                                ("state", state.name.clone()),
-                            ],
-                        ),
-                    });
-                    continue;
-                }
-
-                if country.treasury < def.construction_cost {
-                    notif_writer.write(GameNotification {
-                        message: tf(
-                            &catalog,
-                            locale.0,
-                            "state_panel.build_failed_funds",
-                            vec![
-                                ("cost", format!("{:.0}", def.construction_cost)),
-                                ("treasury", format!("{:.0}", country.treasury)),
-                            ],
-                        ),
-                    });
-                    continue;
-                }
+                let def = match check_manual_build_order(
+                    building_registry.get(btn.0),
+                    btn.0,
+                    &state.resource_deposits,
+                    current_level,
+                    in_queue,
+                    country.treasury,
+                ) {
+                    Ok(d) => d,
+                    Err(rejection) => {
+                        let message = match rejection {
+                            ManualBuildRejection::UndefinedBuilding => continue,
+                            ManualBuildRejection::NoCrystalDeposit => tf(
+                                &catalog,
+                                locale.0,
+                                "state_panel.build_failed_no_deposit",
+                                vec![
+                                    ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                    ("state", state.name.clone()),
+                                ],
+                            ),
+                            ManualBuildRejection::CrystalOnlyState => tf(
+                                &catalog,
+                                locale.0,
+                                "state_panel.build_failed_crystal_only_state",
+                                vec![
+                                    ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                    ("state", state.name.clone()),
+                                ],
+                            ),
+                            ManualBuildRejection::MaxLevel { max, .. } => tf(
+                                &catalog,
+                                locale.0,
+                                "state_panel.build_failed_max_level",
+                                vec![
+                                    ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                    ("max_level", max.to_string()),
+                                ],
+                            ),
+                            ManualBuildRejection::AlreadyQueued => tf(
+                                &catalog,
+                                locale.0,
+                                "state_panel.build_failed_in_queue",
+                                vec![
+                                    ("building", t(&catalog, locale.0, btn.0.display_name())),
+                                    ("state", state.name.clone()),
+                                ],
+                            ),
+                            ManualBuildRejection::InsufficientFunds { cost, treasury } => tf(
+                                &catalog,
+                                locale.0,
+                                "state_panel.build_failed_funds",
+                                vec![
+                                    ("cost", format!("{:.0}", cost)),
+                                    ("treasury", format!("{:.0}", treasury)),
+                                ],
+                            ),
+                        };
+                        notif_writer.write(GameNotification { message });
+                        continue;
+                    }
+                };
 
                 country.treasury -= def.construction_cost;
                 country.construction_queue.push(ConstructionQueueItem {
@@ -471,7 +453,7 @@ fn handle_build_buttons(
     }
 }
 
-fn handle_cancel_queue_buttons(
+pub fn handle_cancel_queue_buttons(
     player_country: Res<PlayerCountry>,
     mut country_registry: ResMut<CountryRegistry>,
     mut notif_writer: MessageWriter<GameNotification>,
@@ -492,7 +474,7 @@ fn handle_cancel_queue_buttons(
         }
 
         if let Some(item) = country.construction_queue.pop() {
-            let refund = item.paid_cost * REFUND_RATIO;
+            let refund = cancel_refund(item.paid_cost);
             country.treasury += refund;
 
             notif_writer.write(GameNotification {
@@ -528,7 +510,7 @@ mod tests {
     use super::*;
     use crate::common::{CountryId, StateId};
     use crate::country::CountryData;
-    use crate::economy::resources::StateResourceDeposit;
+    use crate::economy::resources::{ResourceType, StateResourceDeposit};
     use crate::state::data::{StateData, StateRegistry};
     use bevy::ecs::system::SystemState;
     use std::collections::HashMap;
