@@ -32,7 +32,7 @@
 - 書込(`save/write.rs`): 一時ファイル `<final>.tmp` へ書き、`rename` で置換する。失敗時は既存ファイルを壊さない(テスト済み)。
 - **保存先**: 既定は `saves/savegame_v1.ron` の**単一スロット**。起動直後の「続きから」(`ui::country_selection`)がこのスロットを読む。`saves/savegame_v1.ron` は git で追跡されている(SHA-256 `98b2175639666094dc9c1f11127de1aca740d81b72acbff7c5f1d9a26564130` を確認。この設計では触れない)。
 - **重要な含意**: 新経路の保存を同じスロットへ書くと、既存のV1セーブを上書きする。逆に、新形式のファイルをV1のスロットへ置くと V1 の読込は `UnsupportedVersion` で拒否する。**新旧を保存先で分けないと、取り違えが起きる**。
-- 先例: V1は `SupplyProductionHistory`・`IronShortageHistory`・`FactoryStarvationHistory` を `#[serde(default)]` の追加フィールドとして**既に保存している**(旧経路のAI履歴の永続化)。履歴の型は `Serialize/Deserialize` 済みで、窓幅(供給4か月相当・Iron 4・Factory 側の定数)も定義済み。ただし新経路の履歴は `ScenarioAi.history` に**実行時のみ**で持ち、永続化していない(P32-012 の記録どおり)。
+- 先例: V1は `SupplyProductionHistory`・`IronShortageHistory`・`FactoryStarvationHistory` を `#[serde(default)]` の追加フィールドとして**既に保存している**(旧経路のAI履歴の永続化)。履歴の型は `Serialize/Deserialize` 済みで、窓幅(`SUPPLY_HISTORY_WINDOW`・`IRON_SHORTAGE_WINDOW`・`FACTORY_STARVATION_WINDOW` はいずれも4。P32-015 で `SUPPLY_HISTORY_WINDOW = 4`・`IRON_SHORTAGE_WINDOW = 4`・`FACTORY_STARVATION_WINDOW = 4` を再確認し訂正)も定義済み。ただし新経路の履歴は `ScenarioAi.history` に**実行時のみ**で持ち、永続化していない(P32-012 の記録どおり)。
 
 ### 2.3 P32-003 の旧セーブ方針の位置づけ(提案か承認済みか)
 - P32-003 §10 は「M9で `SaveGameV2` を導入し、**V1は明示的に非対応**にする」と**提案**し、§11 の D11 に「要判断」(推奨: 明示的に非対応)と記した。
@@ -328,3 +328,7 @@ P32-015 を小さく保つため、署名は**値の取得と比較関数**ま�
 - 変更したファイル: 本書のみ。コード・アセット・セーブ形式・`saves/`・地理JSON・`hex_atlas/` は未変更。
 - 全体テスト・clippy・スクリーンショット生成・人工セーブ生成は**行っていない**(設計のみで、規約上必要な変更が無いため)。
 - Phase 32・M4全体は継続。**この設計の完了はセーブ/ロード実装の完了ではない。**
+
+## 12. 追記(P32-015)
+- §2.2 の履歴窓幅の記述を訂正した(3つの定数 `SUPPLY_HISTORY_WINDOW`・`IRON_SHORTAGE_WINDOW`・`FACTORY_STARVATION_WINDOW` はいずれも4)。push済みの記録は書き換えず、P32-015の変更として訂正した。
+- ユーザーが S1〜S7 の方針を確定した(S1 独立した封筒+V2が取り込めるデータ構造、S2 `saves/map_economy/` と `.mapeco.ron`、S3 Strict既定、S4 参照+署名、S5 日と日の間、S6 構造署名、S7 `order_log` 全件保存)。反映内容は `verification_logs/phase-32/p32-015/` の報告書を参照。

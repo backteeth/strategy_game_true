@@ -67,6 +67,24 @@ impl SupplyProductionHistory {
         true
     }
 
+    /// 保存した標本から履歴を再構築する(検証付き)。`record`と同じ不変条件(月 1..=12、暦順に厳密な
+    /// 昇順、窓幅以下)を満たさなければ拒否し、無検証の代入で履歴を作らない。
+    pub fn from_samples(samples: Vec<MonthlyProductionSample>) -> Result<Self, String> {
+        if samples.len() > SUPPLY_HISTORY_WINDOW {
+            return Err(format!(
+                "supply production history has {} samples (window {SUPPLY_HISTORY_WINDOW})",
+                samples.len()
+            ));
+        }
+        if samples.iter().any(|s| !(1..=12).contains(&s.month)) {
+            return Err("supply production history has a sample with an invalid month".to_string());
+        }
+        if samples.windows(2).any(|w| w[0].ordinal() >= w[1].ordinal()) {
+            return Err("supply production history samples are not strictly ascending".to_string());
+        }
+        Ok(Self { samples })
+    }
+
     pub fn clear(&mut self) {
         self.samples.clear();
     }

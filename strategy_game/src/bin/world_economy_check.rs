@@ -123,6 +123,7 @@ fn run() -> Result<(), String> {
     run_m4c(&world.model, &buildings)?;
     run_m4d(&world.model, &buildings)?;
     run_manual_orders(&world.model, &buildings)?;
+    run_snapshot_resume(&world.model, &buildings)?;
     run_location_facilities(&world.model, &map)?;
     Ok(())
 }
@@ -652,6 +653,98 @@ fn run_manual_orders(
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+    }
+    Ok(())
+}
+
+/// P32-015: 新ステート経路の実行時状態のメモリ上のスナップショットを、別の初期状態の集約へ復元して再開し、
+/// 連続実行と各日の結果・状態が一致することを表示する(検証用。ファイルI/Oなし・通常起動へは注入しない)。
+fn run_snapshot_resume(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<(), String> {
+    use strategy_game::economy::map_state::snapshot::MapEconomySimulation;
+    use strategy_game::economy::map_state::{MapStateEconomyRegistry, SimDate, parse_multi_month_scenario};
+    use strategy_game::economy::province_resources::{derive_state_resources, load_province_resources};
+    let scenario = parse_multi_month_scenario(
+        &std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4d.ron")
+            .map_err(|e| e.to_string())?,
+    )?;
+    let resources = load_province_resources("assets/data/world/preview/province_resources_m4d.ron")?;
+    let make = || -> Result<MapEconomySimulation, String> {
+        let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
+            e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n")
+        };
+        let (mut reg, cs) =
+            MapStateEconomyRegistry::from_multi_scenario(&scenario, world, buildings).map_err(fmt)?;
+        let d = derive_state_resources(world, &resources)
+            .map_err(|i| i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n"))?;
+        reg.attach_province_resources(&d, world, &resources).map_err(fmt)?;
+        Ok(MapEconomySimulation::new(SimDate { year: 1800, month: 1, day: 1 }, reg, cs))
+    };
+    println!();
+    println!();
+    println!("=== P32-015 スナップショット取得と検証付き復元(メモリ上。ファイルI/Oなし) ===");
+    println!("m4d(AI3国家・軍事入力あり)を300日。k日完了時点で取得 → 別の初期状態の集約へ復元 → 残りを再開し、連続実行と比較。");
+    const DAYS: usize = 300;
+    let mut cont = make()?;
+    let mut snaps = vec![cont.snapshot(world, buildings)];
+    let mut reports = Vec::new();
+    for _ in 0..DAYS {
+        reports.push(cont.advance_day(buildings));
+        snaps.push(cont.snapshot(world, buildings));
+    }
+    let first_monthly = reports.iter().position(|(_, r)| r.monthly_ran).unwrap_or(0);
+    let first_done = reports.iter().position(|(_, r)| !r.completed.is_empty());
+    let mut points = vec![0, first_monthly, first_monthly + 1, 60, 100, 150, 200, DAYS];
+    if let Some(d) = first_done {
+        points.push(d);
+        points.push(d + 1);
+    }
+    points.sort_unstable();
+    points.dedup();
+    for k in points {
+        let mut r = make()?;
+        if let Err(e) = r.restore(&snaps[k], world, buildings) {
+            println!("k={k}: 復元に失敗: {e}");
+            return Err("snapshot restore failed".to_string());
+        }
+        let mut ok = r.snapshot(world, buildings) == snaps[k];
+        for d in k + 1..=DAYS {
+            let rep = r.advance_day(buildings);
+            ok &= rep == reports[d - 1] && r.snapshot(world, buildings) == snaps[d];
+        }
+        ok &= r == cont;
+        let date = snaps[k].date;
+        println!(
+            "k={k:3} ({}/{:02}/{:02} 完了時点): 再開 {} 日を連続実行と比較 => {}",
+            date.year,
+            date.month,
+            date.day,
+            DAYS - k,
+            if ok { "一致" } else { "不一致" }
+        );
+        if !ok {
+            return Err(format!("resume at day {k} differs from the continuous run"));
+        }
+    }
+    // 不正入力: 別コンテキスト・不正な値は拒否され、現在の状態は変わらない。
+    let mut target = make()?;
+    for _ in 0..30 {
+        target.advance_day(buildings);
+    }
+    let before = target.clone();
+    let mut bad = snaps[100].clone();
+    bad.context ^= 1;
+    let e1 = target.restore(&bad, world, buildings).err().map(|e| e.to_string());
+    let mut bad = snaps[100].clone();
+    bad.countries[0].treasury = f64::NAN;
+    let e2 = target.restore(&bad, world, buildings).err().map(|e| e.to_string());
+    println!("不正入力(別コンテキスト): 拒否 = {:?}", e1);
+    println!("不正入力(国庫がNaN): 拒否 = {:?}", e2);
+    println!("失敗後の現在状態は変更なし: {}", target == before);
+    if e1.is_none() || e2.is_none() || target != before {
+        return Err("invalid snapshot handling failed".to_string());
     }
     Ok(())
 }
