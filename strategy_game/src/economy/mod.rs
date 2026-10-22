@@ -5,6 +5,7 @@ pub mod iron_shortage;
 pub mod production;
 pub mod province_resources;
 pub mod manual_script;
+pub mod map_economy_file;
 pub mod map_state;
 pub mod resources;
 pub mod state_access;

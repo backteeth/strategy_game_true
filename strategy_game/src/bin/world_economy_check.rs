@@ -23,6 +23,10 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a.starts_with("--economy-")) {
+        return run_economy_state_cli(&args);
+    }
     let map = load_from_path("assets/data/hex_atlas_map.json").map_err(|e| e.to_string())?;
     let world = load_world_preview(
         "assets/data/world/preview/provinces.ron",
@@ -745,6 +749,152 @@ fn run_snapshot_resume(
     println!("失敗後の現在状態は変更なし: {}", target == before);
     if e1.is_none() || e2.is_none() || target != before {
         return Err("invalid snapshot handling failed".to_string());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- P32-016: 新経路用ファイルの保存・再開(明示的な操作のみ)
+
+fn m4d_simulation(
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<strategy_game::economy::map_state::snapshot::MapEconomySimulation, String> {
+    use strategy_game::economy::map_state::snapshot::MapEconomySimulation;
+    use strategy_game::economy::map_state::{MapStateEconomyRegistry, SimDate, parse_multi_month_scenario};
+    use strategy_game::economy::province_resources::{derive_state_resources, load_province_resources};
+    let scenario = parse_multi_month_scenario(
+        &std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4d.ron")
+            .map_err(|e| e.to_string())?,
+    )?;
+    let resources = load_province_resources("assets/data/world/preview/province_resources_m4d.ron")?;
+    let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
+        e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n")
+    };
+    let (mut reg, cs) =
+        MapStateEconomyRegistry::from_multi_scenario(&scenario, world, buildings).map_err(fmt)?;
+    let d = derive_state_resources(world, &resources)
+        .map_err(|i| i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n"))?;
+    reg.attach_province_resources(&d, world, &resources).map_err(fmt)?;
+    Ok(MapEconomySimulation::new(SimDate { year: 1800, month: 1, day: 1 }, reg, cs))
+}
+
+fn state_digest(
+    sim: &strategy_game::economy::map_state::snapshot::MapEconomySimulation,
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) -> u64 {
+    let text = ron::to_string(&sim.snapshot(world, buildings)).unwrap_or_default();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in text.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+fn print_day(
+    sim: &strategy_game::economy::map_state::snapshot::MapEconomySimulation,
+    report: &strategy_game::economy::map_state::DayReport,
+    world: &strategy_game::world::WorldModel,
+    buildings: &BuildingRegistry,
+) {
+    let d = sim.date;
+    let treasuries: Vec<String> = sim.countries.iter().map(|c| format!("{}:{:.2}", c.label, c.treasury)).collect();
+    println!(
+        "day {}/{:02}/{:02} digest={:016x} treasuries=[{}] completed={} ordered={} monthly={}",
+        d.year,
+        d.month,
+        d.day,
+        state_digest(sim, world, buildings),
+        treasuries.join(" "),
+        report.completed.len(),
+        report.ordered.len(),
+        report.monthly_ran
+    );
+}
+
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
+}
+
+/// `--economy-run <日数> [--digest-from <日数>]`(連続実行・保存なし)/
+/// `--economy-save <日数> --save-base <dir> --name <名前>`(進めて、日と日の間で保存)/
+/// `--economy-resume <日数> --save-base <dir> --name <名前>`(同じ静的入力を用意し、ファイルから復元して翌日から再開)。
+/// 通常起動(引数なし)ではファイルを作らない。保存先は明示した `--save-base` 配下の `map_economy/` だけ。
+fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
+    use strategy_game::economy::map_economy_file::{SaveLocation, load, save};
+    let map = load_from_path("assets/data/hex_atlas_map.json").map_err(|e| e.to_string())?;
+    let world = load_world_preview(
+        "assets/data/world/preview/provinces.ron",
+        "assets/data/world/preview/states.ron",
+        &map,
+    )?;
+    let defs: Vec<BuildingDefinition> = ron::from_str(
+        &std::fs::read_to_string("assets/data/buildings.ron").map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let buildings = BuildingRegistry { definitions: defs.into_iter().map(|d| (d.building_type, d)).collect() };
+    let days_of = |flag: &str| -> Result<u32, String> {
+        flag_value(args, flag)
+            .ok_or_else(|| format!("{flag} needs a day count"))?
+            .parse::<u32>()
+            .map_err(|e| format!("{flag}: {e}"))
+    };
+    let location = || -> Result<(SaveLocation, String), String> {
+        let base = flag_value(args, "--save-base").ok_or("--save-base <dir> is required (no default save location)")?;
+        let name = flag_value(args, "--name").ok_or("--name <name> is required")?;
+        Ok((SaveLocation::new(base), name))
+    };
+    let mut sim = m4d_simulation(&world.model, &buildings)?;
+    if args.iter().any(|a| a == "--economy-run") {
+        let days = days_of("--economy-run")?;
+        let from = flag_value(args, "--digest-from").map(|s| s.parse::<u32>().map_err(|e| e.to_string())).transpose()?.unwrap_or(0);
+        println!("連続実行: {days} 日(出力は {from} 日より後)");
+        for n in 1..=days {
+            let (_, report) = sim.advance_day(&buildings);
+            if n > from {
+                print_day(&sim, &report, &world.model, &buildings);
+            }
+        }
+    } else if args.iter().any(|a| a == "--economy-save") {
+        let days = days_of("--economy-save")?;
+        let (loc, name) = location()?;
+        for _ in 0..days {
+            sim.advance_day(&buildings);
+        }
+        println!("{days} 日進めた(最後に処理を完了した日 {}/{:02}/{:02})。日と日の間で保存する。", sim.date.year, sim.date.month, sim.date.day);
+        match save(&sim, &world.model, &buildings, &loc, &name) {
+            Ok(r) => println!(
+                "保存成功: {} ({} バイト、日付 {}/{:02}/{:02}、既存ファイルの置換 {})",
+                r.path.display(),
+                r.bytes,
+                r.date.year,
+                r.date.month,
+                r.date.day,
+                r.replaced_existing
+            ),
+            Err(e) => return Err(format!("保存失敗(成功ではない): {e}")),
+        }
+    } else if args.iter().any(|a| a == "--economy-resume") {
+        let days = days_of("--economy-resume")?;
+        let (loc, name) = location()?;
+        println!("同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。");
+        match load(&mut sim, &world.model, &buildings, &loc, &name) {
+            Ok(r) => println!(
+                "復元成功: {} (復元した日付 = 最後に処理を完了した日 {}/{:02}/{:02}。再開後の最初の処理日はその翌日)",
+                r.path.display(),
+                r.date.year,
+                r.date.month,
+                r.date.day
+            ),
+            Err(e) => return Err(format!("復元失敗(現在の状態は変更されていない): {e}")),
+        }
+        for _ in 0..days {
+            let (_, report) = sim.advance_day(&buildings);
+            print_day(&sim, &report, &world.model, &buildings);
+        }
+    } else {
+        return Err("unknown --economy-* operation".to_string());
     }
     Ok(())
 }

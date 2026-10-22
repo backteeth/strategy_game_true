@@ -1,0 +1,24 @@
+## 保存 (プロセスA、100日)
+100 日進めた(最後に処理を完了した日 1800/04/11)。日と日の間で保存する。
+保存成功: C:/Users/hirom/AppData/Local/Temp/tmp.na9ERBYLPH\map_economy\demo.mapeco.ron (14842 バイト、日付 1800/04/11、既存ファイルの置換 false)
+exit=0
+## 復元して60日再開 (プロセスB)
+exit=0
+同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+復元成功: C:/Users/hirom/AppData/Local/Temp/tmp.na9ERBYLPH\map_economy\demo.mapeco.ron (復元した日付 = 最後に処理を完了した日 1800/04/11。再開後の最初の処理日はその翌日)
+day 1800/04/12 digest=dbe3ec77ab9d62a4 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+day 1800/04/13 digest=b51aa9e35ac46900 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+day 1800/04/14 digest=7c71ced6a4ab4af2 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+... (計 60 行)
+## 連続実行160日のうち100日より後 (プロセスC)
+exit=0
+行数 60
+DIFF: 60日(60行)すべて一致
+## 失敗例: 存在しないファイル
+同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+world_economy_check failed: 復元失敗(現在の状態は変更されていない): C:/Users/hirom/AppData/Local/Temp/tmp.na9ERBYLPH\map_economy\nothing.mapeco.ron does not exist
+exit=1
+## 失敗例: --save-base 省略
+world_economy_check failed: --save-base <dir> is required (no default save location)
+exit=1
+demo.mapeco.ron

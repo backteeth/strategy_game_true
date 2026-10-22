@@ -90,6 +90,7 @@ impl MapEconomySimulation {
 // ---------------------------------------------------------------- DTO(HashMapを持たない。決定的に直列化できる)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SnapshotDate {
     pub year: i32,
     pub month: u8,
@@ -97,12 +98,14 @@ pub struct SnapshotDate {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OrderIdSnapshot {
     pub country: u32,
     pub seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StateSnapshot {
     pub state: u32,
     pub population: u64,
@@ -120,6 +123,7 @@ pub struct StateSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OrderSnapshot {
     pub id: OrderIdSnapshot,
     pub state: u32,
@@ -139,16 +143,18 @@ pub enum OrderEndSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiSnapshot {
     pub dirty: bool,
     pub last_decision_reason: CountryAiDecisionReason,
     pub last_monthly_evaluation_day: u32,
-    pub supply: Vec<MonthlyProductionSample>,
-    pub iron: Vec<IronShortageSample>,
-    pub factory: Vec<FactoryStarvationSample>,
+    pub supply: Vec<SupplySampleSnapshot>,
+    pub iron: Vec<IronSampleSnapshot>,
+    pub factory: Vec<FactorySampleSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CountrySnapshot {
     pub label: u32,
     pub treasury: f64,
@@ -164,11 +170,13 @@ pub struct CountrySnapshot {
     pub construction_queue: Vec<OrderSnapshot>,
     pub next_order_seq: u64,
     pub order_log: Vec<(OrderIdSnapshot, OrderEndSnapshot)>,
+    #[serde(deserialize_with = "required_option")]
     pub ai: Option<AiSnapshot>,
 }
 
 /// 新ステート経路の実行時状態のスナップショット(メモリ上。ファイル形式ではない)。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MapEconomySnapshot {
     pub section_version: u32,
     pub rules_revision: u32,
@@ -478,9 +486,9 @@ impl MapEconomySimulation {
                         dirty: a.dirty,
                         last_decision_reason: a.last_decision_reason,
                         last_monthly_evaluation_day: a.last_monthly_evaluation_day,
-                        supply: a.history.supply.samples().to_vec(),
-                        iron: a.history.iron.samples().to_vec(),
-                        factory: a.history.factory.samples().to_vec(),
+                        supply: a.history.supply.samples().iter().map(SupplySampleSnapshot::from).collect(),
+                        iron: a.history.iron.samples().iter().map(IronSampleSnapshot::from).collect(),
+                        factory: a.history.factory.samples().iter().map(FactorySampleSnapshot::from).collect(),
                     }),
                 })
                 .collect(),
@@ -726,9 +734,9 @@ impl MapEconomySimulation {
                 (Some(_), Some(a)) => {
                     let history = (|| -> Result<AiHistories, String> {
                         Ok(AiHistories {
-                            supply: SupplyProductionHistory::from_samples(a.supply.clone())?,
-                            iron: IronShortageHistory::from_samples(a.iron.clone())?,
-                            factory: FactoryStarvationHistory::from_samples(a.factory.clone())?,
+                            supply: SupplyProductionHistory::from_samples(a.supply.iter().map(SupplySampleSnapshot::real).collect())?,
+                            iron: IronShortageHistory::from_samples(a.iron.iter().map(IronSampleSnapshot::real).collect())?,
+                            factory: FactoryStarvationHistory::from_samples(a.factory.iter().map(FactorySampleSnapshot::real).collect())?,
                         })
                     })();
                     match history {
@@ -934,14 +942,96 @@ fn validate_country(
                 hist_err("last_monthly_evaluation_day is later than the snapshot date".to_string());
             }
         }
-        if let Err(e) = SupplyProductionHistory::from_samples(a.supply.clone()) {
+        if let Err(e) = SupplyProductionHistory::from_samples(a.supply.iter().map(SupplySampleSnapshot::real).collect()) {
             hist_err(e);
         }
-        if let Err(e) = IronShortageHistory::from_samples(a.iron.clone()) {
+        if let Err(e) = IronShortageHistory::from_samples(a.iron.iter().map(IronSampleSnapshot::real).collect()) {
             hist_err(e);
         }
-        if let Err(e) = FactoryStarvationHistory::from_samples(a.factory.clone()) {
+        if let Err(e) = FactoryStarvationHistory::from_samples(a.factory.iter().map(FactorySampleSnapshot::real).collect()) {
             hist_err(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- 履歴の標本(DTO)
+// 実行時の標本型(他のモジュールの型。旧V1の保存にも使われる)をそのまま直列化せず、このDTO専用の型で持つ。
+// `Option`のフィールドは**必須**(欠落を黙って`None`=「集計失敗」へ補完しない。明示された`None`だけを許す)。
+
+/// 欠落を許さない `Option`(serdeは既定で、欠落した `Option` フィールドを `None` にしてしまう)。
+fn required_option<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupplySampleSnapshot {
+    pub year: i32,
+    pub month: u8,
+    #[serde(deserialize_with = "required_option")]
+    pub units: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IronSampleSnapshot {
+    pub year: i32,
+    pub month: u8,
+    #[serde(deserialize_with = "required_option")]
+    pub unmet_milli: Option<u64>,
+    pub mine_levels: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FactorySampleSnapshot {
+    pub year: i32,
+    pub month: u8,
+    pub signature: u64,
+    pub starved: bool,
+}
+
+impl From<&MonthlyProductionSample> for SupplySampleSnapshot {
+    fn from(s: &MonthlyProductionSample) -> Self {
+        Self { year: s.year, month: s.month, units: s.units }
+    }
+}
+impl SupplySampleSnapshot {
+    fn real(&self) -> MonthlyProductionSample {
+        MonthlyProductionSample { year: self.year, month: self.month, units: self.units }
+    }
+}
+impl From<&IronShortageSample> for IronSampleSnapshot {
+    fn from(s: &IronShortageSample) -> Self {
+        Self { year: s.year, month: s.month, unmet_milli: s.unmet_milli, mine_levels: s.mine_levels }
+    }
+}
+impl IronSampleSnapshot {
+    fn real(&self) -> IronShortageSample {
+        IronShortageSample {
+            year: self.year,
+            month: self.month,
+            unmet_milli: self.unmet_milli,
+            mine_levels: self.mine_levels,
+        }
+    }
+}
+impl From<&FactoryStarvationSample> for FactorySampleSnapshot {
+    fn from(s: &FactoryStarvationSample) -> Self {
+        Self { year: s.year, month: s.month, signature: s.signature, starved: s.starved }
+    }
+}
+impl FactorySampleSnapshot {
+    fn real(&self) -> FactoryStarvationSample {
+        FactoryStarvationSample {
+            year: self.year,
+            month: self.month,
+            signature: self.signature,
+            starved: self.starved,
         }
     }
 }

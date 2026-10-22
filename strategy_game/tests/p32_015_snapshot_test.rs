@@ -11,12 +11,10 @@ use strategy_game::economy::map_state::{
     CancelError, CancelTarget, ConstructionOrderId, DayReport, MapStateEconomyRegistry,
     MultiMonthScenario, SimDate, parse_multi_month_scenario,
 };
-use strategy_game::economy::factory_starvation::FactoryStarvationSample;
-use strategy_game::economy::iron_shortage::IronShortageSample;
 use strategy_game::economy::province_resources::{
     ProvinceResourcesFile, derive_state_resources, load_province_resources,
 };
-use strategy_game::military::supply_production_history::MonthlyProductionSample;
+use strategy_game::economy::map_state::snapshot::{FactorySampleSnapshot, IronSampleSnapshot, SupplySampleSnapshot};
 use strategy_game::world::{MapStateId, WorldModel, load_province_table, load_state_layout};
 
 use BuildingType::{Farm, Mine};
@@ -524,9 +522,9 @@ fn invalid_orders_and_identifiers_are_rejected_without_changing_the_current_stat
 #[test]
 fn invalid_histories_are_rejected_without_changing_the_current_state() {
     let is_hist = |i: &RestoreIssue| matches!(i, RestoreIssue::InvalidHistory(_));
-    let p = |y: i32, m: u8| MonthlyProductionSample { year: y, month: m, units: Some(1) };
-    let iron = |y: i32, m: u8| IronShortageSample { year: y, month: m, unmet_milli: Some(1), mine_levels: 1 };
-    let fac = |y: i32, m: u8| FactoryStarvationSample { year: y, month: m, signature: 1, starved: false };
+    let p = |y: i32, m: u8| SupplySampleSnapshot { year: y, month: m, units: Some(1) };
+    let iron = |y: i32, m: u8| IronSampleSnapshot { year: y, month: m, unmet_milli: Some(1), mine_levels: 1 };
+    let fac = |y: i32, m: u8| FactorySampleSnapshot { year: y, month: m, signature: 1, starved: false };
     reject(|s| s.countries[2].ai.as_mut().unwrap().supply = (1..=5).map(|m| p(1799, m)).collect(), is_hist); // 窓幅超過
     reject(|s| s.countries[2].ai.as_mut().unwrap().supply = vec![p(1799, 3), p(1799, 2)], is_hist); // 逆順
     reject(|s| s.countries[2].ai.as_mut().unwrap().iron = vec![iron(1799, 2), iron(1799, 2)], is_hist); // 重複
