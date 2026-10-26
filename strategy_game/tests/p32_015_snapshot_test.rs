@@ -436,7 +436,7 @@ fn reject(mutate: impl FnOnce(&mut MapEconomySnapshot), expected: impl Fn(&Resto
 
 #[test]
 fn invalid_headers_dates_and_contexts_are_rejected_without_changing_the_current_state() {
-    reject(|s| s.section_version = 2, |i| matches!(i, RestoreIssue::UnsupportedVersion { .. }));
+    reject(|s| s.section_version = 3, |i| matches!(i, RestoreIssue::UnsupportedVersion { .. }));
     reject(|s| s.rules_revision = 9, |i| matches!(i, RestoreIssue::RulesRevisionMismatch { .. }));
     reject(|s| s.context ^= 1, |i| matches!(i, RestoreIssue::ContextMismatch));
     reject(|s| s.date.month = 13, |i| matches!(i, RestoreIssue::InvalidDate(_)));

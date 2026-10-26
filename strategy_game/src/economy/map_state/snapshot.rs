@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// スナップショット(節)の版。意味を変える変更で上げる。
-pub const SNAPSHOT_SECTION_VERSION: u32 = 1;
+pub const SNAPSHOT_SECTION_VERSION: u32 = 2;
 /// 経済計算の規則(コード上の式・定数)の改訂番号。**計算式や定数を変えたら手で上げる**(コードの
 /// ハッシュは取れないため)。再開の一致は同じ規則のもとでしか保証できないので、不一致は拒否する。
 pub const ECONOMY_RULES_REVISION: u32 = 1;
@@ -287,11 +287,11 @@ impl Fnv {
     }
 }
 
-fn building_index(b: BuildingType) -> u64 {
+pub(super) fn building_index(b: BuildingType) -> u64 {
     BuildingType::ALL.iter().position(|x| *x == b).unwrap_or(usize::MAX) as u64
 }
 
-fn resource_index(r: ResourceType) -> u64 {
+pub(super) fn resource_index(r: ResourceType) -> u64 {
     ResourceType::ALL.iter().position(|x| *x == r).unwrap_or(usize::MAX) as u64
 }
 
@@ -301,7 +301,9 @@ impl MapEconomySimulation {
         let mut h = Fnv::new();
         let g = world.geography();
         h.u64(g.algorithm as u64);
-        for s in [&g.grid, &g.coordinates, &g.land_set, &g.attributes, &g.rivers] {
+        // 属性(地形・気候・植生)と河川は含めない: 現在の保存対象の計算が読まない項目で、判定表(`static_identity::RULES`)が
+        // 警告で許す。ここに入れると、警告で許可した差分が内部照合で再び拒否される。
+        for s in [&g.grid, &g.coordinates, &g.land_set] {
             h.str(s);
         }
         for (id, s) in &self.registry.states {

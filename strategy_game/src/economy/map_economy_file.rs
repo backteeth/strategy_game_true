@@ -6,7 +6,8 @@
 //! ## 形式
 //! - 保存先: `<base>/map_economy/<名前>.mapeco.ron`(`<base>` は通常 `saves`)。**名前は英数字・`_`・`-`だけ**で、
 //!   パスの区切り・`..`・絶対パス・拡張子を含められない(保存先の外へは書けない)。
-//! - 封筒: `(kind: "map_economy_state", format_version: 1, snapshot: (...))`。旧V1(`saves/savegame_v1.ron`、
+//! - 封筒: `(kind: "map_economy_state", format_version: 2, identity: (...), snapshot: (...))`。形式1(P32-016)は
+//!   項目別の識別情報を持たず検証できないため非対応(読み込まず、変換せず、上書きもしない)。旧V1(`saves/savegame_v1.ron`、
 //!   `kind` を持たず `version` を持つ)とは**別形式**で、V1を新形式として読まない・新形式をV1として読まない。
 //! - 非対応の版・別の `kind` は拒否し、現行版として推測で読まない。必須項目の欠落は拒否し、既定値で補完しない
 //!   (明示された空の一覧・明示された `None` は許す)。未知のフィールドも拒否する。
@@ -26,15 +27,19 @@
 //! 確認と置換の間に別のプロセスがファイルを書き換える競合(TOCTOU)も防いでいない(単一利用者のローカルな
 //! 保存を想定)。
 //!
-//! ## 静的データとの照合
-//! ファイル内の `context` は復元先の静的入力から求めた値と照合するだけで、採用しない。これは内部の同一性確認
-//! (FNV-1a 64bit。改ざん検知や真正性の保証ではない)で、外部署名による照合(P32-017)ではない。
+//! ## 静的データとの照合(P32-017)
+//! `identity` は静的入力の項目別ダイジェスト(BLAKE3-256。内容識別用で、電子署名・改ざん者の認証・真正性の保証ではない)。
+//! 復元時は、復元先の静的入力(実際に読み込んで使っているデータ)から作り直し、判定表
+//! (`map_state::static_identity::RULES`)で項目別に比べる: 一致 / 警告つきで許可 / 拒否。ファイル内の値は
+//! 復元先の値として採用しない。判定を通った後の P32-015 の内部コンテキスト照合(FNV-1a 64bit)は、拒否項目だけを
+//! 対象にした最後の砦で、警告項目を含まない(警告で許可した差分を再び拒否しない・無効化もしない)。
 
-use crate::building::data::BuildingRegistry;
 use crate::economy::map_state::snapshot::{
     MapEconomySimulation, MapEconomySnapshot, RestoreError, SnapshotDate,
 };
-use crate::world::WorldModel;
+use crate::economy::map_state::static_identity::{
+    IdentityError, SavedIdentity, StaticIdentity, StaticInputs, Verdict, judge,
+};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -42,7 +47,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const MAP_ECONOMY_FILE_KIND: &str = "map_economy_state";
-pub const MAP_ECONOMY_FILE_FORMAT_VERSION: u32 = 1;
+pub const MAP_ECONOMY_FILE_FORMAT_VERSION: u32 = 2;
 pub const MAP_ECONOMY_DIR_NAME: &str = "map_economy";
 pub const MAP_ECONOMY_EXTENSION: &str = ".mapeco.ron";
 /// 読み込みを許すファイルの上限(破損・無関係な巨大ファイルでメモリを使い切らないため)。
@@ -55,6 +60,7 @@ const MAX_NAME_LEN: usize = 64;
 struct FileRef<'a> {
     kind: &'a str,
     format_version: u32,
+    identity: &'a SavedIdentity,
     snapshot: &'a MapEconomySnapshot,
 }
 
@@ -63,6 +69,7 @@ struct FileRef<'a> {
 struct FileOwned {
     kind: String,
     format_version: u32,
+    identity: SavedIdentity,
     snapshot: MapEconomySnapshot,
 }
 
@@ -102,6 +109,10 @@ pub enum FileError {
     /// 自形式ではない(旧V1・別の `kind`)。
     NotThisKind(DetectedKind),
     UnsupportedVersion { found: u32 },
+    /// 静的入力の識別情報を作れない(非有限値など)。
+    Identity(IdentityError),
+    /// 静的入力の判定で復元できない(現在の状態は変更されていない)。保存側の識別情報の欠落・非対応の方式も含む。
+    Incompatible(Verdict),
     /// 構文エラー・途中切れ・必須項目の欠落・未知のフィールド・型の不一致。
     Malformed(String),
     Serialize(String),
@@ -127,10 +138,16 @@ impl std::fmt::Display for FileError {
             FileError::NotThisKind(DetectedKind::Other(k)) => {
                 write!(f, "kind \"{k}\" is not \"{MAP_ECONOMY_FILE_KIND}\"")
             }
+            FileError::UnsupportedVersion { found: 1 } => write!(
+                f,
+                "map economy file format_version 1 (P32-016) has no per-item static identity and cannot be verified; it is not loaded, converted or overwritten (supported: {MAP_ECONOMY_FILE_FORMAT_VERSION}). This is unrelated to the legacy game SaveGameV1"
+            ),
             FileError::UnsupportedVersion { found } => write!(
                 f,
                 "unsupported format_version {found} (supported: {MAP_ECONOMY_FILE_FORMAT_VERSION})"
             ),
+            FileError::Identity(e) => write!(f, "{e}"),
+            FileError::Incompatible(v) => write!(f, "static data is incompatible with this save: {v}"),
             FileError::Malformed(s) => write!(f, "malformed map economy file: {s}"),
             FileError::Serialize(s) => write!(f, "serialization failed: {s}"),
             FileError::OverwriteRefused { path, reason } => write!(
@@ -144,10 +161,18 @@ impl std::fmt::Display for FileError {
 }
 
 /// 封筒へ入れて直列化する(ファイルは触らない)。
-pub fn encode(snapshot: &MapEconomySnapshot) -> Result<String, FileError> {
+/// 解析した封筒(識別情報は判定前の保存側の値で、復元先の値としては使わない)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedFile {
+    pub identity: SavedIdentity,
+    pub snapshot: MapEconomySnapshot,
+}
+
+pub fn encode(snapshot: &MapEconomySnapshot, identity: &SavedIdentity) -> Result<String, FileError> {
     let file = FileRef {
         kind: MAP_ECONOMY_FILE_KIND,
         format_version: MAP_ECONOMY_FILE_FORMAT_VERSION,
+        identity,
         snapshot,
     };
     ron::ser::to_string_pretty(&file, ron::ser::PrettyConfig::default())
@@ -155,7 +180,7 @@ pub fn encode(snapshot: &MapEconomySnapshot) -> Result<String, FileError> {
 }
 
 /// テキストを封筒として解析する(ファイルは触らない)。`kind`・版を先に判定し、本体は厳密に解析する。
-pub fn decode(text: &str) -> Result<MapEconomySnapshot, FileError> {
+pub fn decode(text: &str) -> Result<DecodedFile, FileError> {
     // ヘッダーだけは、値をそのまま(`kind: "..."`)読めるよう `implicit_some` で解析する(本体の `Option` は明示のまま)。
     let header: Header = ron::Options::default()
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
@@ -177,7 +202,7 @@ pub fn decode(text: &str) -> Result<MapEconomySnapshot, FileError> {
         None => return Err(FileError::Malformed("missing `format_version`".to_string())),
     }
     let file: FileOwned = ron::from_str(text).map_err(|e| FileError::Malformed(e.to_string()))?;
-    Ok(file.snapshot)
+    Ok(DecodedFile { identity: file.identity, snapshot: file.snapshot })
 }
 
 // ---------------------------------------------------------------- 保存先
@@ -373,13 +398,6 @@ pub struct SaveReceipt {
     pub replaced_existing: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct LoadReceipt {
-    pub path: PathBuf,
-    /// 復元した日付(最後に処理を完了した日。再開後の最初の処理日はその翌日)。
-    pub date: SnapshotDate,
-}
-
 fn read_limited(path: &Path) -> Result<String, FileError> {
     let meta = fs::metadata(path).map_err(|e| {
         if e.kind() == io::ErrorKind::NotFound {
@@ -399,28 +417,28 @@ fn read_limited(path: &Path) -> Result<String, FileError> {
 /// 成功を返さない。日と日の間(`MapEconomySimulation` の取得契約)でのみ呼べる。
 pub fn save(
     sim: &MapEconomySimulation,
-    world: &WorldModel,
-    buildings: &BuildingRegistry,
+    inputs: &StaticInputs<'_>,
     location: &SaveLocation,
     name: &str,
 ) -> Result<SaveReceipt, FileError> {
-    save_with_io(sim, world, buildings, location, name, &RealIo)
+    save_with_io(sim, inputs, location, name, &RealIo)
 }
 
 /// [`save`] のファイル操作を差し替えられる版(失敗の再現テスト用)。
 pub fn save_with_io(
     sim: &MapEconomySimulation,
-    world: &WorldModel,
-    buildings: &BuildingRegistry,
+    inputs: &StaticInputs<'_>,
     location: &SaveLocation,
     name: &str,
     io: &dyn SaveIo,
 ) -> Result<SaveReceipt, FileError> {
     // 1. 取得 2. 直列化(ここまでファイルは触らない)
-    let snapshot = sim.snapshot(world, buildings);
-    let text = encode(&snapshot)?;
+    let snapshot = sim.snapshot(inputs.world, inputs.buildings);
+    let identity = StaticIdentity::compute(sim, inputs).map_err(FileError::Identity)?.to_saved();
+    let text = encode(&snapshot, &identity)?;
     // 検証: 直列化した結果が、そのまま同じスナップショットとして読めること(書いたものが読めない保存を作らない)。
-    if decode(&text)? != snapshot {
+    let back = decode(&text)?;
+    if back.snapshot != snapshot || back.identity != identity {
         return Err(FileError::Serialize("the encoded text does not decode to the same snapshot".to_string()));
     }
 
@@ -495,24 +513,51 @@ fn cleanup_after(io: &dyn SaveIo, tmp: &Path, err: FileError) -> FileError {
     }
 }
 
-/// ファイルを読み、封筒を検証して、スナップショットを返す(復元はしない)。
-pub fn read_snapshot(location: &SaveLocation, name: &str) -> Result<MapEconomySnapshot, FileError> {
+/// ファイルを読み、封筒を検証して、解析結果を返す(判定も復元もしない)。
+pub fn read_file(location: &SaveLocation, name: &str) -> Result<DecodedFile, FileError> {
     let path = location.target(name, false)?;
     decode(&read_limited(&path)?)
 }
 
-/// ファイルから復元する: 読み込み → 封筒の検証 → DTOと静的コンテキストの検証 → 候補の再構築 →
-/// 成功時だけ `sim` を置き換える。どこで失敗しても `sim` は変更されない。ファイル内の識別情報は
-/// 採用せず、`sim`(復元先)の静的入力から求めた値と照合する。
+/// ファイルを読み、封筒を検証して、スナップショットだけを返す(判定も復元もしない)。
+pub fn read_snapshot(location: &SaveLocation, name: &str) -> Result<MapEconomySnapshot, FileError> {
+    Ok(read_file(location, name)?.snapshot)
+}
+
+/// 復元に成功したときの結果。警告で許可した項目は `verdict.warnings` に入る(呼び出し側が利用者へ見せる)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadReceipt {
+    pub path: PathBuf,
+    /// 復元した日付(最後に処理を完了した日。再開後の最初の処理日はその翌日)。
+    pub date: SnapshotDate,
+    /// 静的入力の判定。拒否と構造の問題は空(あれば復元しない)。
+    pub verdict: Verdict,
+}
+
+/// ファイルから復元する:
+/// 1. 封筒と形式を検証(`kind`・版・厳密な本体)
+/// 2. 保存側の識別情報を検証(方式・版・項目の欠落/未知/重複/形式)
+/// 3. 復元先の静的入力(実際に読み込んで使っているデータ)から識別情報を作る
+/// 4. 項目別に判定表で比較(拒否が一つでもあれば復元しない)
+/// 5. 候補の状態を検証・再構築(P32-015の内部コンテキスト照合を含む)
+/// 6. 成功時だけ `sim` を置き換える
+///
+/// どこで失敗しても `sim` は変更されない。ファイル内の識別情報・`context` は採用せず、復元先の値と比べるだけ。
+/// 警告で許可した差分があっても、人口・国庫・履歴・注文などの動的状態は保存された値のまま復元する
+/// (初期化・再計算しない)。
 pub fn load(
     sim: &mut MapEconomySimulation,
-    world: &WorldModel,
-    buildings: &BuildingRegistry,
+    inputs: &StaticInputs<'_>,
     location: &SaveLocation,
     name: &str,
 ) -> Result<LoadReceipt, FileError> {
     let path = location.target(name, false)?;
-    let snapshot = decode(&read_limited(&path)?)?;
-    sim.restore(&snapshot, world, buildings).map_err(FileError::Restore)?;
-    Ok(LoadReceipt { path, date: snapshot.date })
+    let file = decode(&read_limited(&path)?)?;
+    let current = StaticIdentity::compute(sim, inputs).map_err(FileError::Identity)?;
+    let verdict = judge(&file.identity, &current);
+    if !verdict.is_compatible() {
+        return Err(FileError::Incompatible(verdict));
+    }
+    sim.restore(&file.snapshot, inputs.world, inputs.buildings).map_err(FileError::Restore)?;
+    Ok(LoadReceipt { path, date: file.snapshot.date, verdict })
 }

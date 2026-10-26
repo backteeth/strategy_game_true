@@ -823,17 +823,29 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 /// 通常起動(引数なし)ではファイルを作らない。保存先は明示した `--save-base` 配下の `map_economy/` だけ。
 fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
     use strategy_game::economy::map_economy_file::{SaveLocation, load, save};
-    let map = load_from_path("assets/data/hex_atlas_map.json").map_err(|e| e.to_string())?;
+    use strategy_game::economy::map_state::static_identity::StaticInputs;
+    // 入力ファイルの場所を選ぶだけのオプション(判定の無効化ではない。判定は常にStrict+判定表)。既定は通常のアセット。
+    let map_path = flag_value(args, "--map-file").unwrap_or_else(|| "assets/data/hex_atlas_map.json".to_string());
+    let buildings_path = flag_value(args, "--buildings-file").unwrap_or_else(|| "assets/data/buildings.ron".to_string());
+    let facilities_path = flag_value(args, "--facilities-file")
+        .unwrap_or_else(|| "assets/data/world/preview/province_facilities.ron".to_string());
+    let map = load_from_path(&map_path).map_err(|e| e.to_string())?;
     let world = load_world_preview(
         "assets/data/world/preview/provinces.ron",
         "assets/data/world/preview/states.ron",
         &map,
     )?;
     let defs: Vec<BuildingDefinition> = ron::from_str(
-        &std::fs::read_to_string("assets/data/buildings.ron").map_err(|e| e.to_string())?,
+        &std::fs::read_to_string(&buildings_path).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
     let buildings = BuildingRegistry { definitions: defs.into_iter().map(|d| (d.building_type, d)).collect() };
+    let facilities = strategy_game::world::LocationFacilityRegistry::build(
+        &strategy_game::world::load_location_facilities(&facilities_path)?,
+        &world.model,
+    )
+    .map_err(|i| format!("{i:?}"))?;
+    let inputs = StaticInputs { map: &map, world: &world.model, buildings: &buildings, facilities: Some(&facilities) };
     let days_of = |flag: &str| -> Result<u32, String> {
         flag_value(args, flag)
             .ok_or_else(|| format!("{flag} needs a day count"))?
@@ -863,7 +875,7 @@ fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
             sim.advance_day(&buildings);
         }
         println!("{days} 日進めた(最後に処理を完了した日 {}/{:02}/{:02})。日と日の間で保存する。", sim.date.year, sim.date.month, sim.date.day);
-        match save(&sim, &world.model, &buildings, &loc, &name) {
+        match save(&sim, &inputs, &loc, &name) {
             Ok(r) => println!(
                 "保存成功: {} ({} バイト、日付 {}/{:02}/{:02}、既存ファイルの置換 {})",
                 r.path.display(),
@@ -879,15 +891,39 @@ fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
         let days = days_of("--economy-resume")?;
         let (loc, name) = location()?;
         println!("同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。");
-        match load(&mut sim, &world.model, &buildings, &loc, &name) {
-            Ok(r) => println!(
-                "復元成功: {} (復元した日付 = 最後に処理を完了した日 {}/{:02}/{:02}。再開後の最初の処理日はその翌日)",
-                r.path.display(),
-                r.date.year,
-                r.date.month,
-                r.date.day
-            ),
-            Err(e) => return Err(format!("復元失敗(現在の状態は変更されていない): {e}")),
+        match load(&mut sim, &inputs, &loc, &name) {
+            Ok(r) => {
+                println!(
+                    "復元成功: {} (復元した日付 = 最後に処理を完了した日 {}/{:02}/{:02}。再開後の最初の処理日はその翌日)",
+                    r.path.display(),
+                    r.date.year,
+                    r.date.month,
+                    r.date.day
+                );
+                println!(
+                    "静的入力の判定: 一致 {} 項目 / 警告つき許可 {} 項目 / 拒否 0 項目 (既定はStrict。判定表にない不一致は拒否)",
+                    r.verdict.matched.len(),
+                    r.verdict.warnings.len()
+                );
+                for w in &r.verdict.warnings {
+                    println!("警告(許可): {} — {} / 影響: {}", w.key, w.rationale, w.impact);
+                }
+            }
+            Err(e) => {
+                if let strategy_game::economy::map_economy_file::FileError::Incompatible(v) = &e {
+                    println!("静的入力の判定: 一致 {} 項目 / 警告 {} 項目 / 拒否 {} 項目 / 識別情報の問題 {} 件", v.matched.len(), v.warnings.len(), v.rejections.len(), v.structural.len());
+                    for s in &v.structural {
+                        println!("拒否(識別情報): {s}");
+                    }
+                    for r in &v.rejections {
+                        println!("拒否: {} — {} / 影響: {}", r.key, r.rationale, r.impact);
+                    }
+                    for w in &v.warnings {
+                        println!("警告(拒否項目が併存するため許可されない): {} — {}", w.key, w.rationale);
+                    }
+                }
+                return Err(format!("復元失敗(現在の状態は変更されていない): {e}"));
+            }
         }
         for _ in 0..days {
             let (_, report) = sim.advance_day(&buildings);

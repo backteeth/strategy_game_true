@@ -5194,6 +5194,7 @@ name = "strategy_game"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "blake3",
  "crossbeam-channel",
  "icu_provider",
  "image",

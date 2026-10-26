@@ -1,0 +1,29 @@
+## save 100 days
+100 日進めた(最後に処理を完了した日 1800/04/11)。日と日の間で保存する。
+保存成功: C:/Users/hirom/AppData/Local/Temp/tmp.WDroV6XUJ2\map_economy\cli.mapeco.ron (18401 バイト、日付 1800/04/11、既存ファイルの置換 false)
+exit=0
+## resume 60 days (same inputs)
+exit=0
+同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+復元成功: C:/Users/hirom/AppData/Local/Temp/tmp.WDroV6XUJ2\map_economy\cli.mapeco.ron (復元した日付 = 最後に処理を完了した日 1800/04/11。再開後の最初の処理日はその翌日)
+静的入力の判定: 一致 21 項目 / 警告つき許可 0 項目 / 拒否 0 項目 (既定はStrict。判定表にない不一致は拒否)
+## continuous 160 (days after 100)
+exit=0
+resumed day lines: 60  continuous day lines: 60
+day 1800/04/12 digest=0efefcfcfc398595 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+day 1800/06/10 digest=7f6f2d0ddbd2cc19 treasuries=[1:4693.96 2:6398.48 3:6954.90] completed=0 ordered=0 monthly=false
+day 1800/04/12 digest=0efefcfcfc398595 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+day 1800/06/10 digest=7f6f2d0ddbd2cc19 treasuries=[1:4693.96 2:6398.48 3:6954.90] completed=0 ordered=0 monthly=false
+RESULT: 60/60 lines identical
+## resume with building NAME changed (warn)
+同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+復元成功: C:/Users/hirom/AppData/Local/Temp/tmp.WDroV6XUJ2\map_economy\cli.mapeco.ron (復元した日付 = 最後に処理を完了した日 1800/04/11。再開後の最初の処理日はその翌日)
+静的入力の判定: 一致 20 項目 / 警告つき許可 1 項目 / 拒否 0 項目 (既定はStrict。判定表にない不一致は拒否)
+警告(許可): building_presentation — 表示用メタデータ。経済・AI・建設の計算経路に `name` の参照がないことを確認した / 影響: 表示だけが変わる
+exit=0
+## resume with building COST changed (reject)
+同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+静的入力の判定: 一致 20 項目 / 警告 0 項目 / 拒否 1 項目 / 識別情報の問題 0 件
+拒否: building_computation — 建物定義の計算に関係する変更(基本方針で拒否) / 影響: 建設・生産・経済の結果が変わる
+world_economy_check failed: 復元失敗(現在の状態は変更されていない): static data is incompatible with this save: `building_computation` differs: 建物定義の計算に関係する変更(基本方針で拒否)
+exit=1

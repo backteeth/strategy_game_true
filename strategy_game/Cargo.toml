@@ -21,6 +21,8 @@ bevy = { version = "0.19.0", features = ["dynamic_linking"] }
 ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# P32-017: 静的入力の項目別ダイジェスト(内容識別用。電子署名ではない)。bevy経由で既にCargo.lockにある標準実装を使う。
+blake3 = "1.8"
 # bevy_text(Parley)が内部で使うicu_providerは、"logging"機能が無効かつdebug buildだと
 # `log`クレートを経由せず直接eprintln!へフォールバックする実装のため、通常のログフィルタ
 # (main.rsのLogPlugin)で抑制できない。"logging"を明示的に有効化し、通常のtracing経由の

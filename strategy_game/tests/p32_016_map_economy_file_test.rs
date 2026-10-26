@@ -15,6 +15,7 @@ use strategy_game::economy::map_economy_file::{
     save_with_io,
 };
 use strategy_game::economy::map_state::snapshot::{MapEconomySimulation, RestoreIssue};
+use strategy_game::economy::map_state::static_identity::{StaticIdentity, StaticInputs};
 use strategy_game::economy::map_state::{
     DayReport, MapStateEconomyRegistry, SimDate, parse_multi_month_scenario,
 };
@@ -45,6 +46,21 @@ fn make(name: &str, w: &WorldModel, b: &BuildingRegistry) -> MapEconomySimulatio
     let d = derive_state_resources(w, &f).unwrap();
     reg.attach_province_resources(&d, w, &f).unwrap();
     MapEconomySimulation::new(START, reg, cs)
+}
+
+fn map() -> &'static strategy_game::hexmap::data::HexMap {
+    static MAP: std::sync::OnceLock<strategy_game::hexmap::data::HexMap> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| strategy_game::hexmap::data::load_from_path("assets/data/hex_atlas_map.json").unwrap())
+}
+
+fn inp<'a>(w: &'a WorldModel, b: &'a BuildingRegistry) -> StaticInputs<'a> {
+    StaticInputs { map: map(), world: w, buildings: b, facilities: None }
+}
+
+/// シミュレーションの現在の状態を、識別情報つきで封筒に入れた文字列にする。
+fn enc(sim: &MapEconomySimulation, w: &WorldModel, b: &BuildingRegistry) -> Result<String, FileError> {
+    let id = StaticIdentity::compute(sim, &inp(w, b)).unwrap().to_saved();
+    encode(&sim.snapshot(w, b), &id)
 }
 
 fn m4d(w: &WorldModel, b: &BuildingRegistry) -> MapEconomySimulation {
@@ -109,18 +125,18 @@ fn a_saved_file_round_trips_into_an_independent_simulation() {
     let (w, b) = (world(), buildings());
     let t = Tmp::new("roundtrip");
     let sim = advanced(&w, &b, 100);
-    let r = save(&sim, &w, &b, &t.loc(), "slot-1").unwrap();
+    let r = save(&sim, &inp(&w, &b), &t.loc(), "slot-1").unwrap();
     assert_eq!(r.path, t.file("slot-1"));
     assert!(!r.replaced_existing);
     assert_eq!((r.date.year, r.date.month, r.date.day), (1800, 4, 11));
     let mut target = m4d(&w, &b);
-    let l = load(&mut target, &w, &b, &t.loc(), "slot-1").unwrap();
+    let l = load(&mut target, &inp(&w, &b), &t.loc(), "slot-1").unwrap();
     assert_eq!(l.date, r.date);
     assert_eq!(target, sim);
     assert_eq!(t.names(), vec!["slot-1.mapeco.ron".to_string()], "no temporary file remains");
     // 保存したテキストは決定的で、再保存しても同一。
     let first = fs::read(t.file("slot-1")).unwrap();
-    save(&sim, &w, &b, &t.loc(), "slot-1").unwrap();
+    save(&sim, &inp(&w, &b), &t.loc(), "slot-1").unwrap();
     assert_eq!(first, fs::read(t.file("slot-1")).unwrap());
 }
 
@@ -153,7 +169,7 @@ fn assert_load_rejected(content: &[u8], check: impl Fn(&FileError) -> bool) {
     t.write_raw("bad", content);
     let mut target = advanced(&w, &b, 40);
     let before = target.clone();
-    let e = load(&mut target, &w, &b, &t.loc(), "bad").expect_err("must be rejected");
+    let e = load(&mut target, &inp(&w, &b), &t.loc(), "bad").expect_err("must be rejected");
     assert!(check(&e), "unexpected error: {e}");
     assert_eq!(target, before, "a failed load must not change the current state");
 }
@@ -161,16 +177,16 @@ fn assert_load_rejected(content: &[u8], check: impl Fn(&FileError) -> bool) {
 #[test]
 fn other_kinds_unsupported_versions_and_broken_files_are_rejected_without_changing_the_state() {
     let (w, b) = (world(), buildings());
-    let good = encode(&advanced(&w, &b, 100).snapshot(&w, &b)).unwrap();
+    let good = enc(&advanced(&w, &b, 100), &w, &b).unwrap();
     decode(&good).unwrap();
 
     assert_load_rejected(tamper(&good, "kind: \"map_economy_state\"", "kind: \"other_kind\"").as_bytes(), |e| {
         matches!(e, FileError::NotThisKind(DetectedKind::Other(k)) if k == "other_kind")
     });
-    assert_load_rejected(tamper(&good, "format_version: 1", "format_version: 2").as_bytes(), |e| {
-        matches!(e, FileError::UnsupportedVersion { found: 2 })
+    assert_load_rejected(tamper(&good, "format_version: 2", "format_version: 3").as_bytes(), |e| {
+        matches!(e, FileError::UnsupportedVersion { found: 3 })
     });
-    assert_load_rejected(tamper(&good, "format_version: 1", "format_version: 0").as_bytes(), |e| {
+    assert_load_rejected(tamper(&good, "format_version: 2", "format_version: 0").as_bytes(), |e| {
         matches!(e, FileError::UnsupportedVersion { found: 0 })
     });
     assert_load_rejected(remove_line_containing(&good, "format_version").as_bytes(), |e| matches!(e, FileError::Malformed(_)));
@@ -198,16 +214,16 @@ fn a_missing_required_field_is_rejected_but_an_explicitly_empty_one_is_accepted(
     let (w, b) = (world(), buildings());
     // 日0: 履歴は明示的に空(`[]`)、注文一覧も空。これは正当で読み込める。
     let fresh = m4d(&w, &b);
-    let text0 = encode(&fresh.snapshot(&w, &b)).unwrap();
+    let text0 = enc(&fresh, &w, &b).unwrap();
     assert!(text0.contains("supply: []") && text0.contains("construction_queue: []") && text0.contains("order_log: []"));
     let t = Tmp::new("empty");
     t.write_raw("empty", text0.as_bytes());
     let mut target = advanced(&w, &b, 10);
-    load(&mut target, &w, &b, &t.loc(), "empty").unwrap();
+    load(&mut target, &inp(&w, &b), &t.loc(), "empty").unwrap();
     assert_eq!(target, fresh);
     // 同じ欄が欠落したファイルは、既定値(空)で補完せず拒否する。
     for needle in ["supply: []", "iron: []", "factory: []", "construction_queue: []", "order_log: []", "next_order_seq", "dirty:", "ai: Some", "context:", "date:", "states:", "countries:", "stockpile:", "treasury:", "paid_cost"] {
-        let text = if needle == "paid_cost" { encode(&advanced(&w, &b, 100).snapshot(&w, &b)).unwrap() } else { text0.clone() };
+        let text = if needle == "paid_cost" { enc(&advanced(&w, &b, 100), &w, &b).unwrap() } else { text0.clone() };
         if !text.contains(needle) {
             continue; // 日0に注文が無いなど、この欄が存在しない場合は別の確認(下)で扱う
         }
@@ -223,7 +239,7 @@ fn a_missing_required_field_is_rejected_but_an_explicitly_empty_one_is_accepted(
             break;
         }
     }
-    let text = encode(&busy.snapshot(&w, &b)).unwrap();
+    let text = enc(&busy, &w, &b).unwrap();
     for needle in ["units:", "unmet_milli:", "signature:", "mine_levels:", "last_monthly_evaluation_day"] {
         let bad = remove_line_containing(&text, needle);
         assert_load_rejected(bad.as_bytes(), |e| matches!(e, FileError::Malformed(_)));
@@ -241,19 +257,24 @@ fn the_context_in_the_file_is_checked_against_the_target_not_adopted() {
     let (w, b) = (world(), buildings());
     let t = Tmp::new("context");
     let sim = advanced(&w, &b, 60);
-    save(&sim, &w, &b, &t.loc(), "m4d").unwrap();
+    save(&sim, &inp(&w, &b), &t.loc(), "m4d").unwrap();
     // 別のシナリオ(同じMapStateIdを含む)の集約へは復元できない。
     let mut other = make("economy_scenario_m4e.ron", &w, &b);
     let before = other.clone();
-    let e = load(&mut other, &w, &b, &t.loc(), "m4d").unwrap_err();
-    assert!(matches!(&e, FileError::Restore(r) if r.issues.contains(&RestoreIssue::ContextMismatch)), "{e}");
+    let e = load(&mut other, &inp(&w, &b), &t.loc(), "m4d").unwrap_err();
+    // P32-017: 項目別の判定(Incompatible)で拒否される。判定を通る差でも、内部コンテキスト照合が拒否する。
+    assert!(
+        matches!(&e, FileError::Incompatible(_))
+            || matches!(&e, FileError::Restore(r) if r.issues.contains(&RestoreIssue::ContextMismatch)),
+        "{e}"
+    );
     assert_eq!(other, before);
     // ファイルの `context` を書き換えても(別の値を「正しい」とは採用せず)、復元先の値と一致しなければ拒否。
     let text = fs::read_to_string(t.file("m4d")).unwrap();
     let line = text.lines().find(|l| l.trim_start().starts_with("context:")).unwrap();
     t.write_raw("m4d", text.replacen(line, "        context: 1,", 1).as_bytes());
     let mut target = m4d(&w, &b);
-    let e = load(&mut target, &w, &b, &t.loc(), "m4d").unwrap_err();
+    let e = load(&mut target, &inp(&w, &b), &t.loc(), "m4d").unwrap_err();
     assert!(matches!(&e, FileError::Restore(r) if r.issues.contains(&RestoreIssue::ContextMismatch)), "{e}");
 }
 
@@ -274,16 +295,16 @@ fn the_legacy_v1_save_is_neither_loaded_nor_overwritten_and_stays_byte_identical
     // V1を新形式として復元しない。
     let mut target = advanced(&w, &b, 20);
     let before = target.clone();
-    let e = load(&mut target, &w, &b, &t.loc(), "v1").unwrap_err();
+    let e = load(&mut target, &inp(&w, &b), &t.loc(), "v1").unwrap_err();
     assert!(matches!(e, FileError::NotThisKind(DetectedKind::LegacyV1 { version: 1 })), "{e}");
     assert!(e.to_string().contains("legacy V1"));
     assert_eq!(target, before);
     // V1を自動で上書きしない。
-    let e = save(&target, &w, &b, &t.loc(), "v1").unwrap_err();
+    let e = save(&target, &inp(&w, &b), &t.loc(), "v1").unwrap_err();
     assert!(matches!(e, FileError::OverwriteRefused { .. }), "{e}");
     assert_eq!(fs::read(t.file("v1")).unwrap(), in_dir_before);
     // 名前 `savegame_v1` でも、保存先は `savegame_v1.mapeco.ron`(V1のスロットとは別のファイル)。
-    save(&target, &w, &b, &t.loc(), "savegame_v1").unwrap();
+    save(&target, &inp(&w, &b), &t.loc(), "savegame_v1").unwrap();
     assert_eq!(fs::read(t.0.join("savegame_v1.ron")).unwrap(), copy_before);
     // 新形式のファイルを、V1として読めない(旧V1のDTOとして解析できない)。
     let text = fs::read_to_string(t.file("savegame_v1")).unwrap();
@@ -304,10 +325,10 @@ fn names_and_locations_cannot_escape_the_allowed_directory() {
         "", "..", "../x", "a/b", "a\\b", "C:\\x", "C:x", "/abs", "\\\\server\\share", "x.y", "x.mapeco.ron", ".hidden", "con", "NUL", "com1",
         "LPT9", "a b", "é", "a\0b", "../savegame_v1", "..\\saves\\savegame_v1", long.as_str(),
     ] {
-        let e = save(&sim, &w, &b, &t.loc(), name).unwrap_err();
+        let e = save(&sim, &inp(&w, &b), &t.loc(), name).unwrap_err();
         assert!(matches!(e, FileError::InvalidName(_)), "{name:?}: {e}");
         let mut target = sim.clone();
-        assert!(matches!(load(&mut target, &w, &b, &t.loc(), name).unwrap_err(), FileError::InvalidName(_)), "{name:?}");
+        assert!(matches!(load(&mut target, &inp(&w, &b), &t.loc(), name).unwrap_err(), FileError::InvalidName(_)), "{name:?}");
     }
     assert!(!t.0.join("map_economy").exists(), "nothing is created for refused names");
     assert_eq!(fs::read_dir(&t.0).unwrap().count(), 0);
@@ -352,11 +373,11 @@ fn a_directory_link_that_points_elsewhere_is_refused() {
         eprintln!("SKIPPED: directory links cannot be created in this environment");
         return;
     }
-    let e = save(&sim, &w, &b, &t.loc(), "x").unwrap_err();
+    let e = save(&sim, &inp(&w, &b), &t.loc(), "x").unwrap_err();
     assert!(matches!(e, FileError::Symlink(_) | FileError::LocationRefused(_)), "{e}");
     assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0, "nothing is written through the link");
     let mut target = sim.clone();
-    assert!(load(&mut target, &w, &b, &t.loc(), "x").is_err());
+    assert!(load(&mut target, &inp(&w, &b), &t.loc(), "x").is_err());
     // ジャンクションの削除(リンク先は消さない)。
     let _ = fs::remove_dir(t.0.join("map_economy"));
 }
@@ -373,10 +394,10 @@ fn a_file_symlink_pointing_at_the_legacy_save_is_refused_and_the_target_is_untou
         return;
     }
     let sim = advanced(&w, &b, 5);
-    let e = save(&sim, &w, &b, &t.loc(), "slot").unwrap_err();
+    let e = save(&sim, &inp(&w, &b), &t.loc(), "slot").unwrap_err();
     assert!(matches!(e, FileError::Symlink(_)), "{e}");
     let mut target = sim.clone();
-    assert!(matches!(load(&mut target, &w, &b, &t.loc(), "slot").unwrap_err(), FileError::Symlink(_)));
+    assert!(matches!(load(&mut target, &inp(&w, &b), &t.loc(), "slot").unwrap_err(), FileError::Symlink(_)));
     assert_eq!(fs::read(t.0.join("savegame_v1.ron")).unwrap(), v1_before);
 }
 
@@ -388,18 +409,18 @@ fn only_a_valid_map_economy_file_is_overwritten() {
     let t = Tmp::new("overwrite");
     let old = advanced(&w, &b, 40);
     let new = advanced(&w, &b, 90);
-    save(&old, &w, &b, &t.loc(), "slot").unwrap();
-    let r = save(&new, &w, &b, &t.loc(), "slot").unwrap();
+    save(&old, &inp(&w, &b), &t.loc(), "slot").unwrap();
+    let r = save(&new, &inp(&w, &b), &t.loc(), "slot").unwrap();
     assert!(r.replaced_existing);
     let mut target = m4d(&w, &b);
-    load(&mut target, &w, &b, &t.loc(), "slot").unwrap();
+    load(&mut target, &inp(&w, &b), &t.loc(), "slot").unwrap();
     assert_eq!(target, new, "the file now holds the new state completely");
     assert_eq!(t.names(), vec!["slot.mapeco.ron".to_string()]);
 
-    let good = encode(&old.snapshot(&w, &b)).unwrap();
+    let good = enc(&old, &w, &b).unwrap();
     let refused: Vec<(&str, Vec<u8>)> = vec![
         ("other kind", tamper(&good, "map_economy_state", "something_else").into_bytes()),
-        ("unsupported version", tamper(&good, "format_version: 1", "format_version: 9").into_bytes()),
+        ("unsupported version", tamper(&good, "format_version: 2", "format_version: 9").into_bytes()),
         ("garbage", b"hello".to_vec()),
         ("empty", Vec::new()),
         ("truncated own file", good.as_bytes()[..good.len() / 2].to_vec()),
@@ -407,7 +428,7 @@ fn only_a_valid_map_economy_file_is_overwritten() {
     ];
     for (what, content) in refused {
         t.write_raw("slot", &content);
-        let e = save(&new, &w, &b, &t.loc(), "slot").unwrap_err();
+        let e = save(&new, &inp(&w, &b), &t.loc(), "slot").unwrap_err();
         assert!(matches!(e, FileError::OverwriteRefused { .. }), "{what}: {e}");
         assert_eq!(fs::read(t.file("slot")).unwrap(), content, "{what}: the existing file is untouched");
         assert_eq!(t.names(), vec!["slot.mapeco.ron".to_string()], "{what}: no stray file");
@@ -415,7 +436,7 @@ fn only_a_valid_map_economy_file_is_overwritten() {
     // 通常ファイルでないもの(ディレクトリ)。
     fs::remove_file(t.file("slot")).unwrap();
     fs::create_dir(t.file("slot")).unwrap();
-    assert!(save(&new, &w, &b, &t.loc(), "slot").is_err());
+    assert!(save(&new, &inp(&w, &b), &t.loc(), "slot").is_err());
     assert!(t.file("slot").is_dir());
 }
 
@@ -493,7 +514,7 @@ fn a_failure_while_creating_writing_flushing_syncing_or_replacing_keeps_the_exis
     let new = advanced(&w, &b, 90);
     for fail in [Fail::Create, Fail::PartialWrite, Fail::Flush, Fail::Sync, Fail::Replace] {
         let t = Tmp::new("fail");
-        save(&old, &w, &b, &t.loc(), "slot").unwrap();
+        save(&old, &inp(&w, &b), &t.loc(), "slot").unwrap();
         // 無関係なファイル(古い一時ファイル風の名前を含む)は、失敗時の後始末で触られない。
         t.write_raw("other", b"unrelated");
         fs::write(t.0.join("map_economy").join("keep.txt"), b"keep").unwrap();
@@ -501,7 +522,7 @@ fn a_failure_while_creating_writing_flushing_syncing_or_replacing_keeps_the_exis
         let bytes_before = fs::read(t.file("slot")).unwrap();
         let names_before = t.names();
         let live_before = new.clone();
-        let e = save_with_io(&new, &w, &b, &t.loc(), "slot", &FakeIo(fail)).unwrap_err();
+        let e = save_with_io(&new, &inp(&w, &b), &t.loc(), "slot", &FakeIo(fail)).unwrap_err();
         assert!(matches!(e, FileError::Io { .. }), "{fail:?}: {e}");
         assert!(e.to_string().contains("injected"), "{fail:?}: {e}");
         assert_eq!(fs::read(t.file("slot")).unwrap(), bytes_before, "{fail:?}: the existing file is byte-identical");
@@ -509,7 +530,7 @@ fn a_failure_while_creating_writing_flushing_syncing_or_replacing_keeps_the_exis
         assert_eq!(fs::read(t.0.join("map_economy").join("keep.txt")).unwrap(), b"keep");
         assert_eq!(live_before, new, "the running simulation is untouched");
         let mut target = m4d(&w, &b);
-        load(&mut target, &w, &b, &t.loc(), "slot").unwrap();
+        load(&mut target, &inp(&w, &b), &t.loc(), "slot").unwrap();
         assert_eq!(target, old, "{fail:?}: the old state is still completely loadable");
     }
 }
@@ -520,22 +541,22 @@ fn a_failed_first_save_leaves_no_save_file_and_a_failed_cleanup_is_reported() {
     let sim = advanced(&w, &b, 40);
     for fail in [Fail::Create, Fail::PartialWrite, Fail::Flush, Fail::Sync, Fail::Replace] {
         let t = Tmp::new("firstfail");
-        assert!(save_with_io(&sim, &w, &b, &t.loc(), "slot", &FakeIo(fail)).is_err());
+        assert!(save_with_io(&sim, &inp(&w, &b), &t.loc(), "slot", &FakeIo(fail)).is_err());
         assert!(!t.file("slot").exists(), "{fail:?}: no final file is created by a failed save");
         assert!(t.names().is_empty(), "{fail:?}: {:?}", t.names());
     }
     // 置換の失敗後に一時ファイルの削除も失敗した場合: 保存は失敗として報告され、その旨が添えられる。
     let t = Tmp::new("cleanupfail");
-    let e = save_with_io(&sim, &w, &b, &t.loc(), "slot", &FakeIo(Fail::ReplaceAndCleanup)).unwrap_err();
+    let e = save_with_io(&sim, &inp(&w, &b), &t.loc(), "slot", &FakeIo(Fail::ReplaceAndCleanup)).unwrap_err();
     assert!(e.to_string().contains("could not be removed"), "{e}");
     assert!(!t.file("slot").exists());
     assert_eq!(t.names().len(), 1, "only our own leftover temporary file remains");
     assert!(t.names()[0].ends_with(".tmp"));
     // 通常のIOを通した保存(`Fail::None`)は成功し、完全な新しいファイルになる。
-    let r = save_with_io(&sim, &w, &b, &t.loc(), "slot", &FakeIo(Fail::None)).unwrap();
+    let r = save_with_io(&sim, &inp(&w, &b), &t.loc(), "slot", &FakeIo(Fail::None)).unwrap();
     assert!(r.path.exists());
     let mut target = m4d(&w, &b);
-    load(&mut target, &w, &b, &t.loc(), "slot").unwrap();
+    load(&mut target, &inp(&w, &b), &t.loc(), "slot").unwrap();
     assert_eq!(target, sim);
 }
 
@@ -562,9 +583,9 @@ fn resuming_from_a_file_matches_the_continuous_run_at_key_boundaries() {
     for k in points {
         let sim = advanced(&w, &b, k);
         assert_eq!(sim.snapshot(&w, &b), snaps[k], "setup at day {k}");
-        save(&sim, &w, &b, &t.loc(), "resume").unwrap();
+        save(&sim, &inp(&w, &b), &t.loc(), "resume").unwrap();
         let mut r = m4d(&w, &b);
-        load(&mut r, &w, &b, &t.loc(), "resume").unwrap();
+        load(&mut r, &inp(&w, &b), &t.loc(), "resume").unwrap();
         assert_eq!(r.snapshot(&w, &b), snaps[k]);
         for d in k + 1..=300 {
             let rep = r.advance_day(&b);
@@ -591,9 +612,9 @@ fn loading_does_not_charge_re_add_or_re_refund_and_new_order_ids_do_not_collide(
         sim.advance_day(&b); // Farmは30日で完成
     }
     let t = Tmp::new("ids");
-    save(&sim, &w, &b, &t.loc(), "ids").unwrap();
+    save(&sim, &inp(&w, &b), &t.loc(), "ids").unwrap();
     let mut r = make("economy_scenario_m4e.ron", &w, &b);
-    load(&mut r, &w, &b, &t.loc(), "ids").unwrap();
+    load(&mut r, &inp(&w, &b), &t.loc(), "ids").unwrap();
     assert_eq!(r.countries[0].treasury, sim.countries[0].treasury, "no cost is charged again");
     assert_eq!(r.registry.get(strategy_game::world::MapStateId(20)).unwrap().buildings[&Farm], sim.registry.get(strategy_game::world::MapStateId(20)).unwrap().buildings[&Farm]);
     for x in [&mut sim, &mut r] {
@@ -657,7 +678,7 @@ fn read_snapshot_reads_without_restoring() {
     let (w, b) = (world(), buildings());
     let t = Tmp::new("readonly");
     let sim = advanced(&w, &b, 33);
-    save(&sim, &w, &b, &t.loc(), "r").unwrap();
+    save(&sim, &inp(&w, &b), &t.loc(), "r").unwrap();
     assert_eq!(read_snapshot(&t.loc(), "r").unwrap(), sim.snapshot(&w, &b));
     assert!(matches!(read_snapshot(&t.loc(), "nope").unwrap_err(), FileError::NotFound(_)));
 }

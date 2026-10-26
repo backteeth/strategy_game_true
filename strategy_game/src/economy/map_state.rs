@@ -52,6 +52,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub mod snapshot;
+pub mod static_identity;
 
 pub const ECONOMY_SCENARIO_FORMAT_VERSION: u32 = 1;
 pub const MULTI_MONTH_SCENARIO_FORMAT_VERSION: u32 = 1;
