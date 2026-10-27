@@ -125,7 +125,7 @@ pub fn catalog_names(data: &WorldPreviewData) -> HashMap<MapStateId, String> {
         .collect()
 }
 
-fn enter_world(
+pub(super) fn enter_world(
     mut commands: Commands,
     map: Option<Res<LoadedHexMap>>,
     paths: Res<WorldPreviewPaths>,

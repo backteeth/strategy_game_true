@@ -50,9 +50,19 @@ pub struct SelectionRing;
 #[derive(Component)]
 struct LegendRoot;
 #[derive(Component)]
-struct InfoText;
+pub(super) struct InfoText;
 #[derive(Component)]
-struct StatusText;
+pub(super) struct StatusText;
+/// 右パネル(経済セッションの表示を挿入する位置の目印。`LeftPanel`と同じ作法)。
+#[derive(Component)]
+pub(super) struct RightPanel;
+
+/// 確認画面の毎フレームの更新(入力→カメラ→表示の同期)全体の集合。追加の表示(経済セッション等)は
+/// この集合の後(`.after(HexPreviewSet::Main)`)に置き、選択・モード・カメラの更新結果を同じフレームで読む。
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum HexPreviewSet {
+    Main,
+}
 #[derive(Component)]
 pub(super) struct ModeButton(pub(super) HexViewMode);
 /// 左パネル(ワールド設定のUIを挿入する位置の目印)。
@@ -179,6 +189,7 @@ impl Plugin for HexPreviewPlugin {
                     update_texts,
                 )
                     .chain()
+                    .in_set(HexPreviewSet::Main)
                     .run_if(in_state(HexPreviewState::Open)),
             )
             .add_systems(
@@ -519,7 +530,7 @@ fn spawn_ui(commands: &mut Commands) {
             ));
         });
     commands
-        .spawn((panel_node(false), Button, bg, HexPreviewEntity))
+        .spawn((panel_node(false), Button, bg, HexPreviewEntity, RightPanel))
         .with_children(|p| {
             p.spawn((InfoText, label("", 14.0)));
             p.spawn((StatusText, label("", 12.0)));

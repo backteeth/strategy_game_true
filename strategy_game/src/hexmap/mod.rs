@@ -2,6 +2,7 @@
 //! 既存の州/国家/軍事システムには接続しない(後続Phase)。
 
 pub mod data;
+pub mod economy_view;
 pub mod geometry;
 pub mod render;
 pub mod view;
