@@ -1,1 +1,4 @@
 /target
+
+# P32-019: 新マップ経済セッションの保存先(利用者が画面・CLIで作る .mapeco.ron)。旧V1(saves/savegame_v1.ron)や saves/ 全体は無視しない。
+/saves/map_economy/

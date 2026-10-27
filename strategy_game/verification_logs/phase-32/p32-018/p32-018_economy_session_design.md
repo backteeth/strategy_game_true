@@ -336,3 +336,30 @@ Update (HexPreviewState::Open のみ、既存の chain の後ろ):
 - `hex_map_preview` の `--shots` 自動スクリプトは新バイナリでは使わない。スクリーンショット検証が必要なら S1 で別途定義する。
 - Tab 往復で `LoadedHexMap` を読み直すコスト(約8MBのJSON)は既存の挙動。
 - 自動進行(実時間)は含めていない。追加するときは累積器と1フレーム上限を設け、日次の入口を変えない。
+
+---
+
+## 15. 追記(P32-019 / 2026-10): 採用された接続方針
+
+P32-019 の指示で、次の方針が採用された(本書 §3・§4.2・§11・§6.4 を、承認された範囲で更新する)。画面・独立Appそのものは P32-019 では実装しない(S1 以降)。
+
+| # | 採用された方針 | 本書の該当 |
+|---|---|---|
+| U1 | 新画面は独立バイナリ `map_economy_session`。旧ゲームの更新プラグインを登録しない | §3 案A を採用 |
+| U2 | 操作主体は `--actor <label>` または画面の国家選択で**明示**。未選択では状態変更操作を受け付けない。列挙順の先頭を自動選択しない(旧本書の `--operator` は `--actor` に読み替える) | §4.2 |
+| U3 | 新画面の既定シナリオは **m4e**(対応する資源設定は m4d の `province_resources_m4d.ron`)。既存CLIの既定は従来どおり m4d のまま | §4.2・§11 U3 |
+| U6 | `/saves/map_economy/` を `.gitignore` へ追加する。旧V1(`saves/savegame_v1.ron`)や `saves/` 全体は無視しない。追跡済みファイルは `git rm` しない | §6.4 |
+
+### 15.1 S0 で実装されたもの(P32-019)と、本書の記述との対応
+
+| 本書の想定 | 実装 |
+|---|---|
+| `economy::map_session`(lib。CLIと画面が共有) | 実装: `SessionScenario`/`SCENARIOS`(m4d・m4e)、`SessionPaths`、`GeographyData`、`build_simulation[_from_text]`、`EconomySession`(`MapEconomySimulation`の唯一の所有者+建物定義+位置施設) |
+| `m4d_simulation` の lib 化 | CLI(`world_economy_check`)が `map_session` 経由に(P32-015 の `run_snapshot_resume` の組み立ても共有) |
+| 建物定義の検証付き読込の共有化 | `BuildingRegistry::from_ron`(旧 `app::loader` の検証をそのまま切り出し、旧ローダーもこれを呼ぶ) |
+| 受付可否だけの確認(§5.4 案1) | `MapStateEconomyRegistry::check_order`/`check_build`。`place_order`/`request_build` が同じ中核検証を呼ぶ(判定の複製なし) |
+| `inspect`(§6.2) | `map_economy_file::inspect`(`load` と解析・判定を共有。復元しない) |
+| `list_saves`(§6.2) | `map_economy_file::list_saves` |
+| 操作主体の検証 | `EconomySession::resolve_actor`/`resolve_actor_for_state`/`manual_actors`、`request_build`/`cancel_order`/`check_build` が選択を検証 |
+
+§5.3 の `SessionCommand`/`apply`、Bevy 側の `EconomySessionPlugin`、`HexPreviewSet` は S1 で実装する(S0 では作っていない)。

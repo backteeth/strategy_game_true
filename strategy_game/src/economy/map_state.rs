@@ -998,6 +998,21 @@ pub enum OrderError {
     Precondition(OrderBlock),
 }
 
+/// 建設注文の受付可否の確認結果(`MapStateEconomyRegistry::check_order`が受理可能と判断したときの内容)。
+/// 確認した**時点**の情報で、注文の予約ではない(実際の注文では現在の状態に対して再検証する)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OrderCheck {
+    pub state: MapStateId,
+    pub building: BuildingType,
+    /// 現在の施設レベル。
+    pub current_level: u32,
+    /// 注文が完成したときのレベル(`current_level + 1`)。
+    pub target_level: u32,
+    /// 注文時に支払う費用(現在の建物定義の建設費)。
+    pub cost: f64,
+    pub required_progress: f64,
+}
+
 /// 1日の処理で起きた出来事(検証・表示用)。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DayReport {
@@ -1238,18 +1253,20 @@ impl MapStateEconomyRegistry {
         }
     }
 
-    /// 手動の建設注文を受け付ける(AIの候補選択を経由しない。注文主体は`country`)。旧`ui::state_panel`の
-    /// 受付と**同じ判定**(`building::construction::check_manual_build_order`)を、対象の存在・注文主体との
-    /// 対応・ステート単位の経済施設であることの確認の後に通し、さらに完成後の月次経済に必要な前提
-    /// (Mineの資源設定)も確認する。**支払いとキューへの追加は、全部通った後に1回だけ**。エラー時は何も変更しない。
-    /// 戻り値は発行した注文の識別子。
-    pub fn place_order(
+    /// 手動の建設注文の**受付可否だけ**を確認する(P32-019。状態を一切変更しない)。`place_order`・
+    /// `request_build`と**同じ中核検証**(この関数)を通るので、判定条件と順序は常に一致する:
+    /// 対象ステートの存在 → 注文主体との対応 → ステート単位の経済施設か →
+    /// `building::construction::check_manual_build_order`(旧UIと同じ判定: 定義・クリスタル条件・上限・重複・費用)→
+    /// 完成後の月次経済に必要な前提(Mineの資源設定)。
+    /// 戻り値はその**時点**の確認結果で、国庫・キュー・資源設定が後で変われば結果も変わる。注文する側
+    /// (`place_order`)は必ず現在の状態で再検証し、古い確認結果は使わない。
+    pub fn check_order(
         &self,
-        country: &mut ScenarioCountry,
+        country: &ScenarioCountry,
         state: MapStateId,
         building: BuildingType,
         building_registry: &BuildingRegistry,
-    ) -> Result<ConstructionOrderId, OrderError> {
+    ) -> Result<OrderCheck, OrderError> {
         use crate::building::construction::{ManualBuildRejection, check_manual_build_order};
         let Some(s) = self.states.get(&state) else {
             return Err(OrderError::UnknownState(state));
@@ -1282,13 +1299,49 @@ impl MapStateEconomyRegistry {
         if let Err(b) = self.ai_regions().order_precondition(state, building) {
             return Err(OrderError::Precondition(b));
         }
-        country.treasury -= def.construction_cost;
+        Ok(OrderCheck {
+            state,
+            building,
+            current_level: level,
+            target_level: level + 1,
+            cost: def.construction_cost,
+            required_progress: def.required_progress,
+        })
+    }
+
+    /// 注文主体のラベルで指定する受付可否の確認(`request_build`と同じ要求。状態は変更しない)。
+    pub fn check_build(
+        &self,
+        countries: &[ScenarioCountry],
+        issuer: u32,
+        state: MapStateId,
+        building: BuildingType,
+        building_registry: &BuildingRegistry,
+    ) -> Result<OrderCheck, OrderError> {
+        let Some(country) = countries.iter().find(|c| c.label == issuer) else {
+            return Err(OrderError::UnknownCountry(issuer));
+        };
+        self.check_order(country, state, building, building_registry)
+    }
+
+    /// 手動の建設注文を受け付ける(AIの候補選択を経由しない。注文主体は`country`)。旧`ui::state_panel`の
+    /// 受付と**同じ判定**を、`check_order`で**この時点の状態に対して**行い、全部通った後に**支払いと
+    /// キューへの追加を1回だけ**行う。エラー時は何も変更しない。戻り値は発行した注文の識別子。
+    pub fn place_order(
+        &self,
+        country: &mut ScenarioCountry,
+        state: MapStateId,
+        building: BuildingType,
+        building_registry: &BuildingRegistry,
+    ) -> Result<ConstructionOrderId, OrderError> {
+        let check = self.check_order(country, state, building, building_registry)?;
+        country.treasury -= check.cost;
         country.push_order(
             state,
             building,
-            level + 1,
-            def.required_progress,
-            def.construction_cost,
+            check.target_level,
+            check.required_progress,
+            check.cost,
         );
         Ok(country
             .construction_queue

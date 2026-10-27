@@ -524,6 +524,186 @@ pub fn read_snapshot(location: &SaveLocation, name: &str) -> Result<MapEconomySn
     Ok(read_file(location, name)?.snapshot)
 }
 
+/// 読み込み → 封筒の検証 → 復元先からの識別情報の生成 → 項目別の判定まで(`inspect`と`load`の共通の前半)。
+/// 復元はしない。ファイルも `sim` も変更しない。
+struct Examined {
+    path: PathBuf,
+    bytes: usize,
+    file: DecodedFile,
+    verdict: Verdict,
+}
+
+fn examine(
+    sim: &MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+) -> Result<Examined, FileError> {
+    let path = location.target(name, false)?;
+    let text = read_limited(&path)?;
+    let file = decode(&text)?;
+    let current = StaticIdentity::compute(sim, inputs).map_err(FileError::Identity)?;
+    let verdict = judge(&file.identity, &current);
+    Ok(Examined { path, bytes: text.len(), file, verdict })
+}
+
+/// 保存ファイルの概要(画面表示用)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaveSummary {
+    pub states: usize,
+    pub countries: usize,
+    /// 全国家の建設キューの合計件数。
+    pub queued_orders: usize,
+}
+
+fn summarize(snapshot: &MapEconomySnapshot) -> SaveSummary {
+    SaveSummary {
+        states: snapshot.states.len(),
+        countries: snapshot.countries.len(),
+        queued_orders: snapshot.countries.iter().map(|c| c.construction_queue.len()).sum(),
+    }
+}
+
+/// [`inspect`] の結果。`verdict.is_compatible()` が偽でも、確認そのものは成功(拒否の理由を返す)。
+#[derive(Debug, Clone, PartialEq)]
+pub struct InspectReport {
+    pub path: PathBuf,
+    /// 常に [`MAP_ECONOMY_FILE_KIND`](別の `kind` はエラーになる)。
+    pub kind: &'static str,
+    pub format_version: u32,
+    pub bytes: usize,
+    /// 保存日付(最後に処理を完了した日)。
+    pub date: SnapshotDate,
+    pub summary: SaveSummary,
+    /// 静的入力の項目別の判定(一致・警告・拒否・識別情報の問題)。
+    pub verdict: Verdict,
+    /// 判定が通った場合だけ: 候補の検証・再構築(`restore_candidate`)まで行った結果。`Ok` でも**復元はしていない**。
+    pub restorable: Option<Result<(), RestoreError>>,
+}
+
+/// 保存ファイルを**復元せずに**確認する(画面の事前確認用)。`load` と同じ解析(`decode`: `kind`・版・厳密な本体)と
+/// 同じ判定(`judge`)を共有し、緩い別のパーサーは持たない。`sim`・ファイル・保存先を変更しない(ディレクトリも作らない)。
+///
+/// 戻り値はその**時点**の確認結果で、復元の許可ではない。`load` は常に最初から(ファイルを読み直して)全検証をやり直し、
+/// 確認後にファイルや静的入力が変わっていれば、その時点の内容で判定・拒否する。確認と復元の間に別のプロセスが
+/// ファイルを書き換える競合(TOCTOU)を防ぐものではない(P32-016 と同じ保証範囲)。
+pub fn inspect(
+    sim: &MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+) -> Result<InspectReport, FileError> {
+    let ex = examine(sim, inputs, location, name)?;
+    let restorable = ex.verdict.is_compatible().then(|| {
+        sim.restore_candidate(&ex.file.snapshot, inputs.world, inputs.buildings).map(|_| ())
+    });
+    Ok(InspectReport {
+        path: ex.path,
+        kind: MAP_ECONOMY_FILE_KIND,
+        format_version: MAP_ECONOMY_FILE_FORMAT_VERSION,
+        bytes: ex.bytes,
+        date: ex.file.snapshot.date,
+        summary: summarize(&ex.file.snapshot),
+        verdict: ex.verdict,
+        restorable,
+    })
+}
+
+// ---------------------------------------------------------------- 保存の一覧
+
+/// 保存先ディレクトリそのものの状態。
+#[derive(Debug, Clone, PartialEq)]
+pub enum DirectoryStatus {
+    /// まだ存在しない(「保存なし」。作成しない)。
+    Missing,
+    Readable,
+    /// 保存先として使えない(リンク・保存先の外を指す・ディレクトリでない・読み取り不能)。一覧は空または部分的。
+    Refused(FileError),
+}
+
+/// 一覧の1件の状態。`Valid` は「自形式として完全に解析できた」ことだけを表し、現在の静的入力との互換性は
+/// 判定していない(それは [`inspect`])。
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntryStatus {
+    Valid { date: SnapshotDate, bytes: usize },
+    /// 壊れている・非対応の形式・別の `kind`・旧V1・リンク・通常ファイルでない・名前が規則に合わない・大きすぎる。
+    Unusable(FileError),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveEntry {
+    /// 保存名(`<名前>.mapeco.ron` の `<名前>`)。表示順は注文や国家の識別に使わない。
+    pub name: String,
+    pub path: PathBuf,
+    pub status: EntryStatus,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveList {
+    pub dir: PathBuf,
+    pub directory: DirectoryStatus,
+    /// 名前の昇順(安定)。
+    pub entries: Vec<SaveEntry>,
+}
+
+/// `<base>/map_economy/` の保存を安全に一覧する。
+/// - 対象は `*.mapeco.ron` だけ(他の拡張子・一時ファイル・無関係なファイルは含めず、触れない)。
+/// - 保存先が無ければ `Missing`(作成しない)。保存先の異常は `directory` に、個々のファイルの異常は各 `entries` に分けて返す。
+/// - 読むのは保存先ディレクトリ直下の候補だけ。修復・変換・削除・書き込みはしない。リンクは辿らない。
+pub fn list_saves(location: &SaveLocation) -> SaveList {
+    let dir = location.dir();
+    let mut list = SaveList { dir: dir.clone(), directory: DirectoryStatus::Readable, entries: Vec::new() };
+    let verified = match location.verified_dir(false) {
+        Ok(d) => d,
+        Err(FileError::NotFound(_)) => {
+            list.directory = DirectoryStatus::Missing;
+            return list;
+        }
+        Err(e) => {
+            list.directory = DirectoryStatus::Refused(e);
+            return list;
+        }
+    };
+    let rd = match fs::read_dir(&verified) {
+        Ok(rd) => rd,
+        Err(e) => {
+            list.directory = DirectoryStatus::Refused(io_err("read directory", &verified, &e));
+            return list;
+        }
+    };
+    for entry in rd {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                list.directory = DirectoryStatus::Refused(io_err("read directory entry", &verified, &e));
+                continue;
+            }
+        };
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else { continue };
+        let Some(stem) = file_name.strip_suffix(MAP_ECONOMY_EXTENSION) else { continue };
+        let path = verified.join(file_name);
+        let status = match entry.file_type() {
+            Err(e) => EntryStatus::Unusable(io_err("inspect file", &path, &e)),
+            Ok(t) if t.is_symlink() => EntryStatus::Unusable(FileError::Symlink(path.clone())),
+            Ok(t) if !t.is_file() => EntryStatus::Unusable(FileError::LocationRefused(format!(
+                "{} is not a regular file",
+                path.display()
+            ))),
+            Ok(_) => match check_name(stem) {
+                Err(e) => EntryStatus::Unusable(e),
+                Ok(()) => match read_limited(&path).and_then(|text| decode(&text).map(|f| (text.len(), f))) {
+                    Ok((bytes, f)) => EntryStatus::Valid { date: f.snapshot.date, bytes },
+                    Err(e) => EntryStatus::Unusable(e),
+                },
+            },
+        };
+        list.entries.push(SaveEntry { name: stem.to_string(), path, status });
+    }
+    list.entries.sort_by(|a, b| a.name.cmp(&b.name));
+    list
+}
+
 /// 復元に成功したときの結果。警告で許可した項目は `verdict.warnings` に入る(呼び出し側が利用者へ見せる)。
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadReceipt {
@@ -544,20 +724,17 @@ pub struct LoadReceipt {
 ///
 /// どこで失敗しても `sim` は変更されない。ファイル内の識別情報・`context` は採用せず、復元先の値と比べるだけ。
 /// 警告で許可した差分があっても、人口・国庫・履歴・注文などの動的状態は保存された値のまま復元する
-/// (初期化・再計算しない)。
+/// (初期化・再計算しない)。1〜4は [`inspect`] と共通の処理で、`inspect` の結果には依存せず毎回やり直す。
 pub fn load(
     sim: &mut MapEconomySimulation,
     inputs: &StaticInputs<'_>,
     location: &SaveLocation,
     name: &str,
 ) -> Result<LoadReceipt, FileError> {
-    let path = location.target(name, false)?;
-    let file = decode(&read_limited(&path)?)?;
-    let current = StaticIdentity::compute(sim, inputs).map_err(FileError::Identity)?;
-    let verdict = judge(&file.identity, &current);
-    if !verdict.is_compatible() {
-        return Err(FileError::Incompatible(verdict));
+    let ex = examine(sim, inputs, location, name)?;
+    if !ex.verdict.is_compatible() {
+        return Err(FileError::Incompatible(ex.verdict));
     }
-    sim.restore(&file.snapshot, inputs.world, inputs.buildings).map_err(FileError::Restore)?;
-    Ok(LoadReceipt { path, date: file.snapshot.date, verdict })
+    sim.restore(&ex.file.snapshot, inputs.world, inputs.buildings).map_err(FileError::Restore)?;
+    Ok(LoadReceipt { path: ex.path, date: ex.file.snapshot.date, verdict: ex.verdict })
 }

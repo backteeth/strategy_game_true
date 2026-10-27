@@ -1,0 +1,38 @@
+## list (save dir does not exist yet)
+保存先: C:/Users/hirom/AppData/Local/Temp/tmp.1ngxLaF2qR\map_economy
+保存先はまだありません(保存なし)
+exit=0 dir_created=no
+## save 100 days (default scenario m4d)
+100 日進めた(最後に処理を完了した日 1800/04/11)。日と日の間で保存する。
+保存成功: C:/Users/hirom/AppData/Local/Temp/tmp.1ngxLaF2qR\map_economy\cli.mapeco.ron (18401 バイト、日付 1800/04/11、既存ファイルの置換 false)
+exit=0
+## list
+保存先: C:/Users/hirom/AppData/Local/Temp/tmp.1ngxLaF2qR\map_economy
+保存 1 件
+  cli : 解析できる保存(処理済み 1800/04/11、18401 バイト)
+exit=0
+## inspect
+確認: C:/Users/hirom/AppData/Local/Temp/tmp.1ngxLaF2qR\map_economy\cli.mapeco.ron (kind map_economy_state / 形式 2 / 保存日付 1800/04/11 / 18401 バイト / ステート 3 国家 3 建設キュー 3)
+静的入力の判定: 一致 21 項目 / 警告 0 項目 / 拒否 0 項目 / 識別情報の問題 0 件
+復元可否: 復元できる見込み(復元はしていません)
+exit=0 file_unchanged=yes
+## resume 60 days
+exit=0
+同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+復元成功: C:/Users/hirom/AppData/Local/Temp/tmp.1ngxLaF2qR\map_economy\cli.mapeco.ron (復元した日付 = 最後に処理を完了した日 1800/04/11。再開後の最初の処理日はその翌日)
+静的入力の判定: 一致 21 項目 / 警告つき許可 0 項目 / 拒否 0 項目 (既定はStrict。判定表にない不一致は拒否)
+continuous exit=0
+resumed lines: 60 continuous lines: 60
+day 1800/04/12 digest=0efefcfcfc398595 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+day 1800/06/10 digest=7f6f2d0ddbd2cc19 treasuries=[1:4693.96 2:6398.48 3:6954.90] completed=0 ordered=0 monthly=false
+RESULT: 60/60 lines identical
+## baseline recorded before the refactor (P32-017 cli_identity_output.txt):
+day 1800/04/12 digest=0efefcfcfc398595 treasuries=[1:6887.64 2:7466.92 3:6990.29] completed=0 ordered=0 monthly=false
+day 1800/06/10 digest=7f6f2d0ddbd2cc19 treasuries=[1:4693.96 2:6398.48 3:6954.90] completed=0 ordered=0 monthly=false
+## m4d file under --scenario m4e (must be rejected)
+world_economy_check failed: 復元失敗(現在の状態は変更されていない): static data is incompatible with this save: `scenario_structure` differs: 国家構造の意味的変更(基本方針で拒否)。国家の並びは処理順に関わるため正規化しない; `military_inputs` differs: 軍事AI入力の意味的変更(基本方針で拒否)
+同じ静的入力(m4e)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。
+静的入力の判定: 一致 19 項目 / 警告 0 項目 / 拒否 2 項目 / 識別情報の問題 0 件
+拒否: scenario_structure — 国家構造の意味的変更(基本方針で拒否)。国家の並びは処理順に関わるため正規化しない / 影響: 国家構造・経済上の対応・AIの有無が変わる
+拒否: military_inputs — 軍事AI入力の意味的変更(基本方針で拒否) / 影響: AIの建設判断が変わる
+exit=1

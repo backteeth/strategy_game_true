@@ -667,24 +667,12 @@ fn run_snapshot_resume(
     world: &strategy_game::world::WorldModel,
     buildings: &BuildingRegistry,
 ) -> Result<(), String> {
+    use strategy_game::economy::map_session::{build_simulation, scenario_by_id};
     use strategy_game::economy::map_state::snapshot::MapEconomySimulation;
-    use strategy_game::economy::map_state::{MapStateEconomyRegistry, SimDate, parse_multi_month_scenario};
-    use strategy_game::economy::province_resources::{derive_state_resources, load_province_resources};
-    let scenario = parse_multi_month_scenario(
-        &std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4d.ron")
-            .map_err(|e| e.to_string())?,
-    )?;
-    let resources = load_province_resources("assets/data/world/preview/province_resources_m4d.ron")?;
+    // P32-019: 組み立ては新セッションと共有するライブラリ(`map_session::build_simulation`)を使う(初期状態は従来と同じ)。
+    let scenario = scenario_by_id("m4d").ok_or("scenario m4d is not registered")?;
     let make = || -> Result<MapEconomySimulation, String> {
-        let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
-            e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n")
-        };
-        let (mut reg, cs) =
-            MapStateEconomyRegistry::from_multi_scenario(&scenario, world, buildings).map_err(fmt)?;
-        let d = derive_state_resources(world, &resources)
-            .map_err(|i| i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n"))?;
-        reg.attach_province_resources(&d, world, &resources).map_err(fmt)?;
-        Ok(MapEconomySimulation::new(SimDate { year: 1800, month: 1, day: 1 }, reg, cs))
+        build_simulation(scenario, world, buildings).map_err(|e| e.to_string())
     };
     println!();
     println!();
@@ -755,29 +743,6 @@ fn run_snapshot_resume(
 
 // ---------------------------------------------------------------- P32-016: 新経路用ファイルの保存・再開(明示的な操作のみ)
 
-fn m4d_simulation(
-    world: &strategy_game::world::WorldModel,
-    buildings: &BuildingRegistry,
-) -> Result<strategy_game::economy::map_state::snapshot::MapEconomySimulation, String> {
-    use strategy_game::economy::map_state::snapshot::MapEconomySimulation;
-    use strategy_game::economy::map_state::{MapStateEconomyRegistry, SimDate, parse_multi_month_scenario};
-    use strategy_game::economy::province_resources::{derive_state_resources, load_province_resources};
-    let scenario = parse_multi_month_scenario(
-        &std::fs::read_to_string("assets/data/world/preview/economy_scenario_m4d.ron")
-            .map_err(|e| e.to_string())?,
-    )?;
-    let resources = load_province_resources("assets/data/world/preview/province_resources_m4d.ron")?;
-    let fmt = |e: Vec<strategy_game::economy::map_state::EconomyDataIssue>| {
-        e.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n")
-    };
-    let (mut reg, cs) =
-        MapStateEconomyRegistry::from_multi_scenario(&scenario, world, buildings).map_err(fmt)?;
-    let d = derive_state_resources(world, &resources)
-        .map_err(|i| i.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n"))?;
-    reg.attach_province_resources(&d, world, &resources).map_err(fmt)?;
-    Ok(MapEconomySimulation::new(SimDate { year: 1800, month: 1, day: 1 }, reg, cs))
-}
-
 fn state_digest(
     sim: &strategy_game::economy::map_state::snapshot::MapEconomySimulation,
     world: &strategy_game::world::WorldModel,
@@ -822,60 +787,78 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
 /// `--economy-resume <日数> --save-base <dir> --name <名前>`(同じ静的入力を用意し、ファイルから復元して翌日から再開)。
 /// 通常起動(引数なし)ではファイルを作らない。保存先は明示した `--save-base` 配下の `map_economy/` だけ。
 fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
-    use strategy_game::economy::map_economy_file::{SaveLocation, load, save};
-    use strategy_game::economy::map_state::static_identity::StaticInputs;
+    use strategy_game::economy::map_economy_file::{DirectoryStatus, EntryStatus, FileError, SaveLocation};
+    use strategy_game::economy::map_session::{
+        CLI_DEFAULT_SCENARIO, EconomySession, GeographyData, SessionError, SessionPaths, scenario_by_id,
+    };
     // 入力ファイルの場所を選ぶだけのオプション(判定の無効化ではない。判定は常にStrict+判定表)。既定は通常のアセット。
-    let map_path = flag_value(args, "--map-file").unwrap_or_else(|| "assets/data/hex_atlas_map.json".to_string());
-    let buildings_path = flag_value(args, "--buildings-file").unwrap_or_else(|| "assets/data/buildings.ron".to_string());
-    let facilities_path = flag_value(args, "--facilities-file")
-        .unwrap_or_else(|| "assets/data/world/preview/province_facilities.ron".to_string());
-    let map = load_from_path(&map_path).map_err(|e| e.to_string())?;
-    let world = load_world_preview(
-        "assets/data/world/preview/provinces.ron",
-        "assets/data/world/preview/states.ron",
-        &map,
-    )?;
-    let defs: Vec<BuildingDefinition> = ron::from_str(
-        &std::fs::read_to_string(&buildings_path).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    let buildings = BuildingRegistry { definitions: defs.into_iter().map(|d| (d.building_type, d)).collect() };
-    let facilities = strategy_game::world::LocationFacilityRegistry::build(
-        &strategy_game::world::load_location_facilities(&facilities_path)?,
-        &world.model,
-    )
-    .map_err(|i| format!("{i:?}"))?;
-    let inputs = StaticInputs { map: &map, world: &world.model, buildings: &buildings, facilities: Some(&facilities) };
+    let defaults = SessionPaths::default();
+    let paths = SessionPaths {
+        map: flag_value(args, "--map-file").unwrap_or(defaults.map),
+        buildings: flag_value(args, "--buildings-file").unwrap_or(defaults.buildings),
+        facilities: flag_value(args, "--facilities-file").unwrap_or(defaults.facilities),
+        ..defaults
+    };
+    // 既存CLIの既定は従来どおりm4d(新しい画面の既定m4eとは別)。`--scenario <id>` で明示的に選ぶ。
+    let scenario_id = flag_value(args, "--scenario").unwrap_or_else(|| CLI_DEFAULT_SCENARIO.to_string());
+    let scenario = scenario_by_id(&scenario_id)
+        .ok_or_else(|| SessionError::UnknownScenario(scenario_id.clone()).to_string())?;
     let days_of = |flag: &str| -> Result<u32, String> {
         flag_value(args, flag)
             .ok_or_else(|| format!("{flag} needs a day count"))?
             .parse::<u32>()
             .map_err(|e| format!("{flag}: {e}"))
     };
-    let location = || -> Result<(SaveLocation, String), String> {
+    let base = || -> Result<SaveLocation, String> {
         let base = flag_value(args, "--save-base").ok_or("--save-base <dir> is required (no default save location)")?;
-        let name = flag_value(args, "--name").ok_or("--name <name> is required")?;
-        Ok((SaveLocation::new(base), name))
+        Ok(SaveLocation::new(base))
     };
-    let mut sim = m4d_simulation(&world.model, &buildings)?;
+    let location = || -> Result<(SaveLocation, String), String> {
+        let name = flag_value(args, "--name").ok_or("--name <name> is required")?;
+        Ok((base()?, name))
+    };
+    // 保存先の一覧は静的入力を使わない(組み立てより先に扱う。ファイルもディレクトリも作らない)。
+    if args.iter().any(|a| a == "--economy-list") {
+        let list = EconomySession::list_saves(&base()?);
+        println!("保存先: {}", list.dir.display());
+        match &list.directory {
+            DirectoryStatus::Missing => println!("保存先はまだありません(保存なし)"),
+            DirectoryStatus::Readable => println!("保存 {} 件", list.entries.len()),
+            DirectoryStatus::Refused(e) => println!("保存先を使えません: {e}"),
+        }
+        for e in &list.entries {
+            match &e.status {
+                EntryStatus::Valid { date, bytes } => println!(
+                    "  {} : 解析できる保存(処理済み {}/{:02}/{:02}、{} バイト)",
+                    e.name, date.year, date.month, date.day, bytes
+                ),
+                EntryStatus::Unusable(err) => println!("  {} : 使えません({err})", e.name),
+            }
+        }
+        return Ok(());
+    }
+    let geo = GeographyData::load(&paths).map_err(|e| e.to_string())?;
+    let world = geo.model();
+    let mut session = EconomySession::load_files(scenario, world, &paths).map_err(|e| e.to_string())?;
     if args.iter().any(|a| a == "--economy-run") {
         let days = days_of("--economy-run")?;
         let from = flag_value(args, "--digest-from").map(|s| s.parse::<u32>().map_err(|e| e.to_string())).transpose()?.unwrap_or(0);
         println!("連続実行: {days} 日(出力は {from} 日より後)");
         for n in 1..=days {
-            let (_, report) = sim.advance_day(&buildings);
+            let (_, report) = session.advance_day();
             if n > from {
-                print_day(&sim, &report, &world.model, &buildings);
+                print_day(&session.sim, &report, world, &session.buildings);
             }
         }
     } else if args.iter().any(|a| a == "--economy-save") {
         let days = days_of("--economy-save")?;
         let (loc, name) = location()?;
         for _ in 0..days {
-            sim.advance_day(&buildings);
+            session.advance_day();
         }
-        println!("{days} 日進めた(最後に処理を完了した日 {}/{:02}/{:02})。日と日の間で保存する。", sim.date.year, sim.date.month, sim.date.day);
-        match save(&sim, &inputs, &loc, &name) {
+        let d = session.sim.date;
+        println!("{days} 日進めた(最後に処理を完了した日 {}/{:02}/{:02})。日と日の間で保存する。", d.year, d.month, d.day);
+        match session.save(&geo.map, world, &loc, &name) {
             Ok(r) => println!(
                 "保存成功: {} ({} バイト、日付 {}/{:02}/{:02}、既存ファイルの置換 {})",
                 r.path.display(),
@@ -887,11 +870,52 @@ fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
             ),
             Err(e) => return Err(format!("保存失敗(成功ではない): {e}")),
         }
+    } else if args.iter().any(|a| a == "--economy-inspect") {
+        let (loc, name) = location()?;
+        match session.inspect(&geo.map, world, &loc, &name) {
+            Ok(r) => {
+                println!(
+                    "確認: {} (kind {} / 形式 {} / 保存日付 {}/{:02}/{:02} / {} バイト / ステート {} 国家 {} 建設キュー {})",
+                    r.path.display(),
+                    r.kind,
+                    r.format_version,
+                    r.date.year,
+                    r.date.month,
+                    r.date.day,
+                    r.bytes,
+                    r.summary.states,
+                    r.summary.countries,
+                    r.summary.queued_orders
+                );
+                println!(
+                    "静的入力の判定: 一致 {} 項目 / 警告 {} 項目 / 拒否 {} 項目 / 識別情報の問題 {} 件",
+                    r.verdict.matched.len(),
+                    r.verdict.warnings.len(),
+                    r.verdict.rejections.len(),
+                    r.verdict.structural.len()
+                );
+                for w in &r.verdict.warnings {
+                    println!("警告(許可): {} — {}", w.key, w.rationale);
+                }
+                for x in &r.verdict.rejections {
+                    println!("拒否: {} — {}", x.key, x.rationale);
+                }
+                for s in &r.verdict.structural {
+                    println!("拒否(識別情報): {s}");
+                }
+                match &r.restorable {
+                    Some(Ok(())) => println!("復元可否: 復元できる見込み(復元はしていません)"),
+                    Some(Err(e)) => println!("復元可否: 復元できません({e})"),
+                    None => println!("復元可否: 静的入力が合わないため復元できません"),
+                }
+            }
+            Err(e) => return Err(format!("確認失敗: {e}")),
+        }
     } else if args.iter().any(|a| a == "--economy-resume") {
         let days = days_of("--economy-resume")?;
         let (loc, name) = location()?;
-        println!("同じ静的入力(m4d)から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。");
-        match load(&mut sim, &inputs, &loc, &name) {
+        println!("同じ静的入力({})から初期状態を用意し、ファイルから復元する(初期注文や検証用操作の再適用はしない)。", scenario.id);
+        match session.load(&geo.map, world, &loc, &name) {
             Ok(r) => {
                 println!(
                     "復元成功: {} (復元した日付 = 最後に処理を完了した日 {}/{:02}/{:02}。再開後の最初の処理日はその翌日)",
@@ -910,8 +934,14 @@ fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
                 }
             }
             Err(e) => {
-                if let strategy_game::economy::map_economy_file::FileError::Incompatible(v) = &e {
-                    println!("静的入力の判定: 一致 {} 項目 / 警告 {} 項目 / 拒否 {} 項目 / 識別情報の問題 {} 件", v.matched.len(), v.warnings.len(), v.rejections.len(), v.structural.len());
+                if let FileError::Incompatible(v) = &e {
+                    println!(
+                        "静的入力の判定: 一致 {} 項目 / 警告 {} 項目 / 拒否 {} 項目 / 識別情報の問題 {} 件",
+                        v.matched.len(),
+                        v.warnings.len(),
+                        v.rejections.len(),
+                        v.structural.len()
+                    );
                     for s in &v.structural {
                         println!("拒否(識別情報): {s}");
                     }
@@ -926,8 +956,8 @@ fn run_economy_state_cli(args: &[String]) -> Result<(), String> {
             }
         }
         for _ in 0..days {
-            let (_, report) = sim.advance_day(&buildings);
-            print_day(&sim, &report, &world.model, &buildings);
+            let (_, report) = session.advance_day();
+            print_day(&session.sim, &report, world, &session.buildings);
         }
     } else {
         return Err("unknown --economy-* operation".to_string());

@@ -70,32 +70,10 @@ pub fn load_game_data(
         )
     });
 
-    let building_defs: Vec<BuildingDefinition> = ron::from_str(&buildings_ron)
-        .unwrap_or_else(|e| panic!("[DataLoader] Failed to parse assets/data/buildings.ron: {e}"));
-
-    let mut building_map = HashMap::new();
-    for b in building_defs {
-        if b.construction_cost < 0.0 {
-            panic!(
-                "[DataLoader] assets/data/buildings.ron: Building '{:?}' has negative construction cost: {}",
-                b.building_type, b.construction_cost
-            );
-        }
-        if b.required_progress <= 0.0 {
-            panic!(
-                "[DataLoader] assets/data/buildings.ron: Building '{:?}' has invalid required_progress (<= 0): {}",
-                b.building_type, b.required_progress
-            );
-        }
-        if b.max_level == 0 {
-            panic!(
-                "[DataLoader] assets/data/buildings.ron: Building '{:?}' has max_level of 0",
-                b.building_type
-            );
-        }
-        building_map.insert(b.building_type, b);
-    }
-    building_registry.definitions = building_map;
+    // 解析と定義ごとの検証は、新経路のセッションと共有する純粋関数(`BuildingRegistry::from_ron`)。
+    building_registry.definitions = BuildingRegistry::from_ron(&buildings_ron)
+        .unwrap_or_else(|e| panic!("[DataLoader] assets/data/buildings.ron: {e}"))
+        .definitions;
 
     // ── 技術データ読み込み ───────────────────────────────────────────────
     let tech_ron = std::fs::read_to_string("assets/data/technologies.ron").unwrap_or_else(|e| {
