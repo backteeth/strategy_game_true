@@ -518,7 +518,7 @@ fn the_screen_says_it_is_a_validation_session_and_exposes_no_internal_names() {
     }
     let hex16 = all.split(|c: char| !c.is_ascii_hexdigit()).any(|t| t.len() >= 16);
     assert!(!hex16, "no digest-like token is shown: {all}");
-    assert!(all.contains("建設・保存の操作は後続の段階(S2・S3)で追加します"));
+    assert!(all.contains("保存・復元の操作は後続の段階(S3)で追加します"));
     // 結果欄の文言: 進行の要約・拒否の理由。
     let mut s = session("m4e");
     let mut a = Some(1);

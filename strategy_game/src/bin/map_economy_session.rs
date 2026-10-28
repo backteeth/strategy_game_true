@@ -17,6 +17,8 @@
 use bevy::log::{DEFAULT_FILTER, LogPlugin};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use strategy_game::building::data::BuildingType;
+use strategy_game::economy::map_state::ConstructionOrderId;
 use strategy_game::economy::map_session::{SCREEN_DEFAULT_SCENARIO, SCENARIOS, SessionPaths, scenario_by_id};
 use strategy_game::hexmap::economy_view::{EconomySessionPlugin, SessionCommand, SessionConfig};
 use strategy_game::hexmap::render::HexViewMode;
@@ -169,7 +171,36 @@ fn shot_script(
             settings.mode = HexViewMode::State;
         }
         325 => shot(&mut commands, "12_state_mode_state22.png"),
-        345 => {
+        // ---- S2: 建設候補・発注・キュー・進捗・取消し(画面と同じコマンド経路。実マウス操作の代替ではない)
+        350 => selection.0 = state_cell(20),
+        370 => shot(&mut commands, "13_build_candidates.png"),
+        375 => {
+            for b in [BuildingType::Farm, BuildingType::Mine, BuildingType::Factory, BuildingType::LoggingCamp, BuildingType::MilitaryFactory, BuildingType::Railway] {
+                out.write(SessionCommand::Build { actor: 1, state: MapStateId(20), building: b });
+            }
+        }
+        400 => shot(&mut commands, "14_queue_6_orders.png"),
+        405 => {
+            out.write(SessionCommand::AdvanceDays(7));
+        }
+        425 => shot(&mut commands, "15_progress_7_days.png"),
+        430 => {
+            // 2番目に発注した Mine(注文識別子 国家1の2番)を、識別子を指定して取り消す。
+            out.write(SessionCommand::Cancel { actor: 1, order: ConstructionOrderId { country: 1, seq: 2 } });
+        }
+        450 => shot(&mut commands, "16_after_cancel.png"),
+        455 => selection.0 = state_cell(21),
+        475 => shot(&mut commands, "17_other_country_state_view_only.png"),
+        480 => selection.0 = pick(&|s| matches!(s, CellStatus::Water)),
+        500 => shot(&mut commands, "18_water_no_build.png"),
+        505 => {
+            out.write(SessionCommand::ToggleBuildPanel);
+        }
+        525 => shot(&mut commands, "19_build_panel_hidden.png"),
+        530 => {
+            out.write(SessionCommand::ToggleBuildPanel);
+        }
+        550 => {
             exit.write(AppExit::Success);
         }
         _ => {}

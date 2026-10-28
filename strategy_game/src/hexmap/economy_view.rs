@@ -39,11 +39,16 @@ use super::view::{
     HexPreviewEntity, HexPreviewSet, HexPreviewState, HexSelection, LEFT_PANEL_W, LoadedHexMap, RIGHT_PANEL_W,
     RightPanel, StatusText, button_bundle, enter_preview, label,
 };
+use super::build_view::{
+    BuildButton, CancelButton, ToggleBuildPanelButton, add_build_panel_systems, spawn_build_panel,
+};
 use super::world_view::{LoadedWorld, enter_world};
 use crate::building::data::BuildingType;
 use crate::economy::economic_state::EconomicState;
-use crate::economy::map_session::{ActorError, EconomySession, SessionPaths, scenario_by_id};
-use crate::economy::map_state::{DayReport, SimDate};
+use crate::economy::map_session::{
+    ActorError, BuildRequestError, CancelRequestError, EconomySession, SessionPaths, scenario_by_id,
+};
+use crate::economy::map_state::{CancelError, CancelReceipt, ConstructionOrderId, DayReport, OrderError, SimDate};
 use crate::economy::resources::ResourceType;
 use crate::localization::{Locale, TranslationCatalog, translate};
 use crate::world::{CellStatus, MapStateId, ProvinceId, WorldModel, cell_status};
@@ -66,6 +71,14 @@ pub enum SessionCommand {
     SetActor(Option<u32>),
     /// `n` 日進める(1コマンド)。
     AdvanceDays(u32),
+    /// 手動の建設注文(S2)。**ボタンを押した時点の操作主体・対象ステート・施設**をコマンドが保持し、適用時に
+    /// 選択セルや一覧の位置からは読み直さない。適用時の操作主体が `actor` と違えば実行しない(古い操作を
+    /// 別の国家の操作として実行しない)。受付判定は共通API(`EconomySession::request_build`)が現在の状態に対して行う。
+    Build { actor: u32, state: MapStateId, building: BuildingType },
+    /// 注文識別子を指定した建設注文のキャンセル(S2)。表示の行番号や位置ではなく**実際の注文識別子**で対象を指す。
+    Cancel { actor: u32, order: ConstructionOrderId },
+    /// 建設パネルの表示/非表示(画面だけの操作。経済状態には触れない)。
+    ToggleBuildPanel,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,11 +112,34 @@ pub enum CommandOutcome {
     ActorRejected(ActorError),
     Advanced(AdvanceSummary),
     AdvanceRejected(AdvanceRejection),
+    /// 注文を受理した(支払い済み。内容は受理された注文そのもの)。
+    Built {
+        id: ConstructionOrderId,
+        state: MapStateId,
+        building: BuildingType,
+        target_level: u32,
+        cost: f64,
+        required_progress: f64,
+    },
+    BuildRejected(BuildRequestError),
+    /// キャンセルを受理した(返金の内訳は共通APIの結果)。
+    Cancelled(CancelReceipt),
+    CancelRejected(CancelRequestError),
+    /// コマンドを出したときの操作主体と、適用時の操作主体が違う(国家の切替などで古くなった操作)。実行していない。
+    ActorMismatch { commanded: u32, current: Option<u32> },
+    BuildPanelToggled,
 }
 
 impl CommandOutcome {
     pub fn is_ok(&self) -> bool {
-        matches!(self, CommandOutcome::ActorChanged(_) | CommandOutcome::Advanced(_))
+        matches!(
+            self,
+            CommandOutcome::ActorChanged(_)
+                | CommandOutcome::Advanced(_)
+                | CommandOutcome::Built { .. }
+                | CommandOutcome::Cancelled(_)
+                | CommandOutcome::BuildPanelToggled
+        )
     }
 }
 
@@ -148,6 +184,40 @@ pub fn apply_command(session: &mut EconomySession, actor: &mut Option<u32>, cmd:
             }
             CommandOutcome::Advanced(summary)
         }
+        SessionCommand::Build { actor: commanded, state, building } => {
+            if *actor != Some(commanded) {
+                return CommandOutcome::ActorMismatch { commanded, current: *actor };
+            }
+            // 判定(費用・鉱床・上限・重複・国家対応・クリスタル専用・Mineの資源設定)は共通APIが現在の状態に対して行う。
+            match session.request_build(Some(commanded), state, building) {
+                Ok(id) => {
+                    let placed = session
+                        .country(commanded)
+                        .and_then(|c| c.construction_queue.iter().find(|o| o.id == id))
+                        .expect("an accepted order is in the issuer's queue");
+                    CommandOutcome::Built {
+                        id,
+                        state,
+                        building,
+                        target_level: placed.target_level,
+                        cost: placed.paid_cost,
+                        required_progress: placed.required_progress,
+                    }
+                }
+                Err(e) => CommandOutcome::BuildRejected(e),
+            }
+        }
+        SessionCommand::Cancel { actor: commanded, order } => {
+            if *actor != Some(commanded) {
+                return CommandOutcome::ActorMismatch { commanded, current: *actor };
+            }
+            // 返金・キューからの削除・二重取消しの拒否は共通APIが行う(UIでは何もしない)。
+            match session.cancel_order(Some(commanded), order) {
+                Ok(receipt) => CommandOutcome::Cancelled(receipt),
+                Err(e) => CommandOutcome::CancelRejected(e),
+            }
+        }
+        SessionCommand::ToggleBuildPanel => CommandOutcome::BuildPanelToggled,
     }
 }
 
@@ -168,12 +238,20 @@ pub struct SessionRes {
 }
 
 /// 画面の状態(経済値は持たない)。
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug)]
 pub struct SessionUi {
     /// 明示的に選んだ操作主体。**既定は未選択**(列挙順の先頭などを選ばない)。
     pub actor: Option<u32>,
+    /// 建設パネルを表示するか(画面だけの状態。既定は表示)。
+    pub show_build: bool,
     /// 直近の操作結果(新しい順ではなく発生順。成功か否かと文言)。
     pub log: VecDeque<(bool, String)>,
+}
+
+impl Default for SessionUi {
+    fn default() -> Self {
+        SessionUi { actor: None, show_build: true, log: VecDeque::new() }
+    }
 }
 
 impl SessionUi {
@@ -278,7 +356,7 @@ fn fmt_date(d: SimDate) -> String {
     format!("{:04}/{:02}/{:02}", d.year, d.month, d.day)
 }
 
-fn country_label(session: &EconomySession, label: u32) -> String {
+pub(super) fn country_label(session: &EconomySession, label: u32) -> String {
     match session.country(label) {
         Some(c) if c.ai.is_some() => format!("国家{label}(AI)"),
         Some(_) => format!("国家{label}(手動)"),
@@ -286,7 +364,7 @@ fn country_label(session: &EconomySession, label: u32) -> String {
     }
 }
 
-fn state_label(names: &HashMap<MapStateId, String>, id: MapStateId) -> String {
+pub(super) fn state_label(names: &HashMap<MapStateId, String>, id: MapStateId) -> String {
     match names.get(&id) {
         Some(n) => format!("{n}(ステート#{})", id.0),
         None => format!("ステート#{}", id.0),
@@ -450,11 +528,11 @@ pub fn economy_text(
             t.push_str(&state_economy_lines(session, *state));
         }
     }
-    t.push_str("\n\n建設・保存の操作は後続の段階(S2・S3)で追加します。");
+    t.push_str("\n\n保存・復元の操作は後続の段階(S3)で追加します。");
     t
 }
 
-fn actor_error_text(e: &ActorError) -> String {
+pub(super) fn actor_error_text(e: &ActorError) -> String {
     match e {
         ActorError::NotSelected => "操作国家が未選択です。国家を選択してください".to_string(),
         ActorError::UnknownCountry(l) => format!("国家{l}はこのシナリオにありません"),
@@ -462,6 +540,58 @@ fn actor_error_text(e: &ActorError) -> String {
         ActorError::StateNotMapped { actor, state } => {
             format!("ステート#{}は国家{actor}の経済に含まれません", state.0)
         }
+    }
+}
+
+pub(super) fn building_name(session: &EconomySession, b: BuildingType) -> String {
+    session.buildings.get(b).map(|d| d.name.clone()).unwrap_or_else(|| format!("{b:?}"))
+}
+
+/// 共通APIの拒否理由(`OrderError`)を、そのまま利用者向けの文言にする(別の理由へ置き換えない)。
+pub(super) fn order_error_text(e: &OrderError, names: &HashMap<MapStateId, String>) -> String {
+    match e {
+        OrderError::UnknownCountry(l) => format!("国家{l}はこのシナリオにありません"),
+        OrderError::UnknownState(s) => format!("{}はこの検証シナリオの経済にありません", state_label(names, *s)),
+        OrderError::NotMappedToCountry(s) => {
+            format!("{}は操作国家の経済計算に含まれていません(他国家のステート)", state_label(names, *s))
+        }
+        OrderError::UndefinedBuilding(_) => "この施設の定義がありません".to_string(),
+        OrderError::UnsupportedFacility(_) => "ステート単位の経済施設ではありません".to_string(),
+        OrderError::NoCrystalDeposit(_) => "発見済みのクリスタル鉱床がないため建設できません".to_string(),
+        OrderError::CrystalOnlyState(_) => "クリスタル専用のステートには通常の鉱山を建設できません".to_string(),
+        OrderError::MaxLevel { level, max } => format!("建設上限に達しています(Lv{level} / 上限 Lv{max})"),
+        OrderError::AlreadyQueued => "同じ施設の注文が建設キューにあります".to_string(),
+        OrderError::InsufficientFunds { cost, treasury } => {
+            format!("国庫が足りません(費用 {cost:.0} / 国庫 {treasury:.1})")
+        }
+        OrderError::Precondition(b) => match b {
+            crate::country::ai_core::OrderBlock::ResourcesNotConfigured => {
+                "完成後の月次経済に必要な資源設定が未完了のため、注文できません".to_string()
+            }
+            crate::country::ai_core::OrderBlock::Other(s) => format!("注文の前提を満たしていません({s})"),
+        },
+    }
+}
+
+pub(super) fn build_error_text(e: &BuildRequestError, names: &HashMap<MapStateId, String>) -> String {
+    match e {
+        BuildRequestError::Actor(a) => actor_error_text(a),
+        BuildRequestError::Order(o) => order_error_text(o, names),
+    }
+}
+
+/// キャンセルの拒否理由(`CancelError`)。
+pub(super) fn cancel_error_text(e: &CancelRequestError) -> String {
+    match e {
+        CancelRequestError::Actor(a) => actor_error_text(a),
+        CancelRequestError::Cancel(c) => match c {
+            CancelError::UnknownCountry(l) => format!("国家{l}はこのシナリオにありません"),
+            CancelError::EmptyQueue => "取り消せる注文がありません".to_string(),
+            CancelError::NotIssuersOrder(_) => "他国家の注文は取り消せません".to_string(),
+            CancelError::AlreadyCompleted(_) => "完成済みの注文のため取り消せません(返金しません)".to_string(),
+            CancelError::AlreadyCancelled(_) => "すでに取り消された注文です(二重に返金しません)".to_string(),
+            CancelError::NoSuchOrder(_) => "この注文は存在しません".to_string(),
+        },
     }
 }
 
@@ -506,6 +636,37 @@ pub fn outcome_text(
             }
             (true, t)
         }
+        CommandOutcome::Built { state, building, target_level, cost, required_progress, .. } => (
+            true,
+            format!(
+                "発注しました: {} に {}(Lv{target_level}、費用 {cost:.0} を支払い、期間 {required_progress:.0}日)",
+                state_label(names, *state),
+                building_name(session, *building)
+            ),
+        ),
+        CommandOutcome::BuildRejected(e) => (false, format!("発注できません: {}", build_error_text(e, names))),
+        CommandOutcome::Cancelled(r) => (
+            true,
+            format!(
+                "取り消しました: {} の {}(支払済み {:.0} のうち {:.0} を返金)",
+                state_label(names, r.state),
+                building_name(session, r.building_type),
+                r.paid_cost,
+                r.refund
+            ),
+        ),
+        CommandOutcome::CancelRejected(e) => (false, format!("取り消せません: {}", cancel_error_text(e))),
+        CommandOutcome::ActorMismatch { commanded, current } => (
+            false,
+            format!(
+                "操作を実行しませんでした: 操作国家が変わっています(操作時: 国家{commanded} / 現在: {})",
+                match current {
+                    Some(c) => format!("国家{c}"),
+                    None => "未選択".to_string(),
+                }
+            ),
+        ),
+        CommandOutcome::BuildPanelToggled => (true, "建設パネルの表示を切り替えました".to_string()),
     }
 }
 
@@ -572,6 +733,10 @@ pub fn apply_session_commands(
     let names = world.as_ref().map(|w| &w.names).unwrap_or(&empty);
     for cmd in commands {
         let out = apply_command(&mut session.session, &mut ui.actor, cmd);
+        if out == CommandOutcome::BuildPanelToggled {
+            ui.show_build = !ui.show_build; // 画面だけの状態(経済には触れない)
+            continue;
+        }
         let (ok, text) = outcome_text(&out, &session.session, names);
         ui.push(ok, text);
     }
@@ -639,6 +804,7 @@ impl Plugin for EconomySessionPlugin {
             )
             .add_systems(Update, session_buttons.in_set(SessionSet::Input))
             .add_systems(Update, (sync_session_text, sync_button_styles).in_set(SessionSet::Sync));
+        add_build_panel_systems(app);
     }
 }
 
@@ -763,12 +929,17 @@ fn spawn_session_ui(commands: &mut Commands, session: Option<&EconomySession>, r
                     }
                 }
                 r.spawn(button_bundle(ClearActorButton, "選択解除"));
+                r.spawn(button_bundle(ToggleBuildPanelButton, "建設パネル 表示/非表示"));
                 r.spawn(label("  日付を進める:", 13.0));
                 for d in ADVANCE_STEPS {
                     r.spawn(button_bundle(AdvanceButton(d), &format!("+{d}日")));
                 }
             });
         });
+    // 建設パネル(S2。候補・注文・キュー・取消し)。セッションが無い場合は出さない。
+    if session.is_some() {
+        spawn_build_panel(commands);
+    }
     // 下部帯(操作結果)。
     commands
         .spawn((strip_node(false), Button, bg, HexPreviewEntity))
@@ -791,6 +962,10 @@ pub fn session_buttons(
     actors: Query<(&Interaction, &ActorButton), Changed<Interaction>>,
     clear: Query<&Interaction, (Changed<Interaction>, With<ClearActorButton>)>,
     advance: Query<(&Interaction, &AdvanceButton), Changed<Interaction>>,
+
+    builds: Query<(&Interaction, &BuildButton), Changed<Interaction>>,
+    cancels: Query<(&Interaction, &CancelButton), Changed<Interaction>>,
+    toggle: Query<&Interaction, (Changed<Interaction>, With<ToggleBuildPanelButton>)>,
     mut out: MessageWriter<SessionCommand>,
 ) {
     for (i, b) in &actors {
@@ -806,6 +981,22 @@ pub fn session_buttons(
     for (i, b) in &advance {
         if *i == Interaction::Pressed {
             out.write(SessionCommand::AdvanceDays(b.0));
+        }
+    }
+    // 押した時点の操作国家・対象・注文識別子をそのままコマンドへ入れる(適用時に選択や位置から読み直さない)。
+    for (i, b) in &builds {
+        if *i == Interaction::Pressed {
+            out.write(SessionCommand::Build { actor: b.actor, state: b.state, building: b.building });
+        }
+    }
+    for (i, b) in &cancels {
+        if *i == Interaction::Pressed {
+            out.write(SessionCommand::Cancel { actor: b.actor, order: b.order });
+        }
+    }
+    for i in &toggle {
+        if *i == Interaction::Pressed {
+            out.write(SessionCommand::ToggleBuildPanel);
         }
     }
 }
