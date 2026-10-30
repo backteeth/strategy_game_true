@@ -45,6 +45,8 @@ fn ui_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_message::<SessionCommand>().init_resource::<SessionUi>().init_resource::<SelectedView>();
+    // S3以降 `apply_session_commands` は保存画面の状態と保存先も必要とする(この試験では使わない。ファイルは作らない)。
+    app.init_resource::<strategy_game::hexmap::save_view::SaveUi>().init_resource::<strategy_game::hexmap::save_view::SaveLocationRes>();
     app.insert_resource(SessionRes { session: session() });
     app.add_systems(
         Update,

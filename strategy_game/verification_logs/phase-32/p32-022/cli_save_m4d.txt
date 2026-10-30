@@ -1,0 +1,2 @@
+100 日進めた(最後に処理を完了した日 1800/04/11)。日と日の間で保存する。
+保存成功: C:/Users/hirom/AppData/Local/Temp/tmp.3A4KxMc6Zi\map_economy\x_m4d.mapeco.ron (18401 バイト、日付 1800/04/11、既存ファイルの置換 false)

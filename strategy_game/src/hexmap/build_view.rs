@@ -33,6 +33,7 @@ use super::economy_view::{
     SelectedView, SelectionTarget, SessionRes, SessionSet, SessionUi, build_error_text, building_name, country_label,
     state_label,
 };
+use super::save_view::SaveUi;
 use super::view::{HexPreviewEntity, LEFT_PANEL_W, label};
 use super::world_view::LoadedWorld;
 use crate::building::construction::{ConstructionStatus, cancel_refund};
@@ -210,12 +211,16 @@ pub struct BuildButton {
     pub actor: u32,
     pub state: MapStateId,
     pub building: BuildingType,
+    /// 行を作ったときの復元世代(`SaveUi::restore_epoch`)。復元を挟んだ古いボタンの操作は発行しない。
+    pub epoch: u64,
 }
 /// 取消しボタン。**操作国家と実際の注文識別子**を持つ(行番号ではない)。
 #[derive(Component)]
 pub struct CancelButton {
     pub actor: u32,
     pub order: ConstructionOrderId,
+    /// 行を作ったときの復元世代。復元で注文連番が戻っても、復元前の注文識別子の操作が別の注文へ作用しないための照合。
+    pub epoch: u64,
 }
 /// 建設パネルの表示切替ボタン(上部帯)。
 #[derive(Component)]
@@ -263,7 +268,7 @@ fn dim_label(text: String, size: f32) -> impl Bundle {
     )
 }
 
-fn spawn_rows(list: &mut ChildSpawnerCommands, model: &BuildPanelModel) {
+fn spawn_rows(list: &mut ChildSpawnerCommands, model: &BuildPanelModel, epoch: u64) {
     let normal = Color::srgb(0.22, 0.34, 0.27);
     let box_bg = Color::srgba(0.16, 0.17, 0.2, 0.9);
     if model.candidates.is_empty() {
@@ -275,7 +280,7 @@ fn spawn_rows(list: &mut ChildSpawnerCommands, model: &BuildPanelModel) {
         match (&c.order, model.state) {
             (Some((actor, _)), Some(state)) => {
                 list.spawn((
-                    BuildButton { actor: *actor, state, building: c.building },
+                    BuildButton { actor: *actor, state, building: c.building, epoch },
                     Button,
                     Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)), ..default() },
                     BackgroundColor(normal),
@@ -317,7 +322,7 @@ fn spawn_rows(list: &mut ChildSpawnerCommands, model: &BuildPanelModel) {
                 ));
                 if let Some(actor) = r.cancel_by {
                     row.spawn((
-                        CancelButton { actor, order: r.order },
+                        CancelButton { actor, order: r.order, epoch },
                         Button,
                         Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)), ..default() },
                         BackgroundColor(Color::srgb(0.4, 0.22, 0.22)),
@@ -340,9 +345,11 @@ pub fn sync_build_panel(
     ui: Res<SessionUi>,
     view: Res<SelectedView>,
     world: Option<Res<LoadedWorld>>,
+    save: Option<Res<SaveUi>>,
     roots: Query<Entity, With<BuildListRoot>>,
     mut header: Query<&mut Text, With<BuildHeaderText>>,
 ) {
+    let epoch = save.as_ref().map_or(0, |s| s.restore_epoch);
     let changed = session.as_ref().is_some_and(|s| s.is_changed()) || ui.is_changed() || view.is_changed();
     if !changed {
         return;
@@ -363,7 +370,7 @@ pub fn sync_build_panel(
     }
     for root in &roots {
         commands.entity(root).despawn_related::<Children>();
-        commands.entity(root).with_children(|list| spawn_rows(list, &model));
+        commands.entity(root).with_children(|list| spawn_rows(list, &model, epoch));
     }
 }
 

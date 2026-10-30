@@ -31,8 +31,12 @@
 //! ## 入力
 //! パネル・帯・ボタンはすべて `Button`(`Interaction` を発行)なので、既存の `camera_input` の抑止
 //! (`ui_is_hovered`・`DragState.started_on_ui`)がそのまま効き、UI上のクリック・ドラッグ・スクロールは地図へ渡らない。
-//! テキスト入力欄は無い(入力フォーカスを奪う部品は S1 に無く、既存ホットキーは変更しない)。`Tab`(画面を閉じる=セッション破棄)
-//! は無効にする(保存機能が無い間に状態を失わないため)。`Esc` は従来どおり終了で、未保存の状態は破棄される。
+//! S3 で保存名の入力欄が加わった(`save_view`: フォーカス中は文字・編集キーを入力欄だけが受け、地図のショートカットへ渡さない)。
+//! `Tab`(画面を閉じる=セッション破棄)は引き続き無効。`Esc` は(入力欄にフォーカスが無ければ)従来どおり終了で、保存していない状態は破棄される。
+//!
+//! ## S3(保存・復元)
+//! 保存・確認・復元・一覧のコマンドも同じ列で適用する(`save_view::apply_file_command`)。復元が成功したら、その時点で受け付けた
+//! 残りのコマンドは破棄する。
 
 use super::data::HexMap;
 use super::view::{
@@ -41,6 +45,10 @@ use super::view::{
 };
 use super::build_view::{
     BuildButton, CancelButton, ToggleBuildPanelButton, add_build_panel_systems, spawn_build_panel,
+};
+use super::save_view::{
+    FileCtx, SaveLocationRes, SaveUi, ToggleSavePanelButton, add_save_panel_systems, apply_file_command, is_file_command,
+    spawn_save_panel,
 };
 use super::world_view::{LoadedWorld, enter_world};
 use crate::building::data::BuildingType;
@@ -79,6 +87,18 @@ pub enum SessionCommand {
     Cancel { actor: u32, order: ConstructionOrderId },
     /// 建設パネルの表示/非表示(画面だけの操作。経済状態には触れない)。
     ToggleBuildPanel,
+    /// 保存(S3)。名前・操作主体・置換の明示は**ボタンを押した時点の値**。名前の検証・保存先の制限・原子的置換は共有API。
+    /// `replace` が偽で同名の保存があれば拒否する(黙って置換しない)。
+    SaveAs { actor: Option<u32>, name: String, replace: bool },
+    /// 保存の事前確認(共有 `inspect`。復元はしない)。対象は保存名。
+    InspectSave { name: String },
+    /// 事前確認した保存からの復元(共有 `load` が最初から全検証する)。
+    LoadSave { actor: Option<u32>, name: String },
+    /// 保存一覧の更新(共有 `list_saves`。読み取りのみ)。
+    RefreshSaves,
+    /// 保存・復元パネルの表示/非表示、事前確認の詳細の表示/非表示(画面だけの操作)。
+    ToggleSavePanel,
+    ToggleSaveDetail,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -128,6 +148,8 @@ pub enum CommandOutcome {
     /// コマンドを出したときの操作主体と、適用時の操作主体が違う(国家の切替などで古くなった操作)。実行していない。
     ActorMismatch { commanded: u32, current: Option<u32> },
     BuildPanelToggled,
+    /// 保存・復元系のコマンドは、地図・保存先の文脈を持つ `apply_session_commands`(`save_view::apply_file_command`)だけが適用する。
+    FileCommandNeedsContext,
 }
 
 impl CommandOutcome {
@@ -218,6 +240,12 @@ pub fn apply_command(session: &mut EconomySession, actor: &mut Option<u32>, cmd:
             }
         }
         SessionCommand::ToggleBuildPanel => CommandOutcome::BuildPanelToggled,
+        SessionCommand::SaveAs { .. }
+        | SessionCommand::InspectSave { .. }
+        | SessionCommand::LoadSave { .. }
+        | SessionCommand::RefreshSaves
+        | SessionCommand::ToggleSavePanel
+        | SessionCommand::ToggleSaveDetail => CommandOutcome::FileCommandNeedsContext,
     }
 }
 
@@ -352,7 +380,7 @@ pub fn classify_selection(
 
 // ---------------------------------------------------------------- 表示用テキスト(純粋関数)
 
-fn fmt_date(d: SimDate) -> String {
+pub(super) fn fmt_date(d: SimDate) -> String {
     format!("{:04}/{:02}/{:02}", d.year, d.month, d.day)
 }
 
@@ -528,7 +556,7 @@ pub fn economy_text(
             t.push_str(&state_economy_lines(session, *state));
         }
     }
-    t.push_str("\n\n保存・復元の操作は後続の段階(S3)で追加します。");
+    t.push_str("\n\n保存・復元は「保存・復元」パネルから(検証用セッションの mapeco 形式。旧ゲームのセーブとは別)。");
     t
 }
 
@@ -667,6 +695,7 @@ pub fn outcome_text(
             ),
         ),
         CommandOutcome::BuildPanelToggled => (true, "建設パネルの表示を切り替えました".to_string()),
+        CommandOutcome::FileCommandNeedsContext => (false, "保存・復元の文脈がありません".to_string()),
     }
 }
 
@@ -701,6 +730,8 @@ impl Plugin for EconomySessionCorePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SessionCommand>()
             .init_resource::<SessionUi>()
+            .init_resource::<SaveUi>()
+            .init_resource::<SaveLocationRes>()
             .init_resource::<SelectedView>()
             .init_resource::<SessionLabels>()
             .configure_sets(
@@ -713,11 +744,17 @@ impl Plugin for EconomySessionCorePlugin {
 }
 
 /// 到着順に1つずつ適用する(複数日進行は1コマンドとして途中に割り込ませない)。
+/// 保存・復元のコマンドも同じ列で適用する。**復元が成功したら、その時点で受け付けた残りのコマンドは破棄する**
+/// (復元前の古い発注・取消し・日付進行・保存が、復元後の状態へ適用されない)。
+#[allow(clippy::too_many_arguments)]
 pub fn apply_session_commands(
     mut reader: MessageReader<SessionCommand>,
     session: Option<ResMut<SessionRes>>,
     mut ui: ResMut<SessionUi>,
     world: Option<Res<LoadedWorld>>,
+    map: Option<Res<LoadedHexMap>>,
+    mut save: ResMut<SaveUi>,
+    location: Res<SaveLocationRes>,
 ) {
     let commands: Vec<SessionCommand> = reader.read().cloned().collect();
     if commands.is_empty() {
@@ -731,11 +768,38 @@ pub fn apply_session_commands(
     };
     let empty = HashMap::new();
     let names = world.as_ref().map(|w| &w.names).unwrap_or(&empty);
-    for cmd in commands {
+    let mut iter = commands.into_iter();
+    while let Some(cmd) = iter.next() {
+        if is_file_command(&cmd) {
+            let ctx = FileCtx {
+                map: map.as_ref().map(|m| &m.0),
+                world: world.as_ref().map(|w| &w.data.model),
+                location: &location.0,
+            };
+            let r = apply_file_command(&mut session.session, &mut ui.actor, &mut save, &ctx, cmd);
+            if r.restored {
+                // 操作結果欄を整理(古い結果を残さない)し、残りの古いコマンドを破棄する。
+                ui.log.clear();
+            }
+            if let Some((ok, text)) = r.text {
+                ui.push(ok, text);
+            }
+            if r.restored {
+                let dropped = iter.by_ref().count();
+                if dropped > 0 {
+                    ui.push(false, format!("復元前に受け付けた残りの操作 {dropped} 件は、復元後の状態へ適用せず破棄しました"));
+                }
+                break;
+            }
+            continue;
+        }
         let out = apply_command(&mut session.session, &mut ui.actor, cmd);
         if out == CommandOutcome::BuildPanelToggled {
             ui.show_build = !ui.show_build; // 画面だけの状態(経済には触れない)
             continue;
+        }
+        if matches!(out, CommandOutcome::Advanced(_) | CommandOutcome::Built { .. } | CommandOutcome::Cancelled(_)) {
+            save.state_changed(); // 経済状態が変わった: 事前確認は現在の結果ではなくなる
         }
         let (ok, text) = outcome_text(&out, &session.session, names);
         ui.push(ok, text);
@@ -805,6 +869,7 @@ impl Plugin for EconomySessionPlugin {
             .add_systems(Update, session_buttons.in_set(SessionSet::Input))
             .add_systems(Update, (sync_session_text, sync_button_styles).in_set(SessionSet::Sync));
         add_build_panel_systems(app);
+        add_save_panel_systems(app);
     }
 }
 
@@ -851,6 +916,7 @@ fn enter_session(
     status: Query<Entity, With<StatusText>>,
 ) {
     commands.insert_resource(SessionUi::default());
+    commands.insert_resource(SaveUi::default());
     commands.insert_resource(SelectedView::default());
     commands.insert_resource(SessionLabels::build());
     let result = start_session(&config, map.is_some(), world.as_ref().map(|w| &w.data.model));
@@ -879,6 +945,7 @@ fn exit_session(mut commands: Commands) {
     commands.remove_resource::<SessionRes>();
     commands.remove_resource::<SessionLoadError>();
     commands.insert_resource(SessionUi::default());
+    commands.insert_resource(SaveUi::default());
     commands.insert_resource(SelectedView::default());
 }
 
@@ -930,6 +997,7 @@ fn spawn_session_ui(commands: &mut Commands, session: Option<&EconomySession>, r
                 }
                 r.spawn(button_bundle(ClearActorButton, "選択解除"));
                 r.spawn(button_bundle(ToggleBuildPanelButton, "建設パネル 表示/非表示"));
+                r.spawn(button_bundle(ToggleSavePanelButton, "保存・復元 表示/非表示"));
                 r.spawn(label("  日付を進める:", 13.0));
                 for d in ADVANCE_STEPS {
                     r.spawn(button_bundle(AdvanceButton(d), &format!("+{d}日")));
@@ -939,6 +1007,7 @@ fn spawn_session_ui(commands: &mut Commands, session: Option<&EconomySession>, r
     // 建設パネル(S2。候補・注文・キュー・取消し)。セッションが無い場合は出さない。
     if session.is_some() {
         spawn_build_panel(commands);
+        spawn_save_panel(commands);
     }
     // 下部帯(操作結果)。
     commands
@@ -958,11 +1027,13 @@ fn spawn_session_ui(commands: &mut Commands, session: Option<&EconomySession>, r
 
 /// ボタンを押した瞬間(`Interaction` が `Pressed` へ変わったフレーム)に1回だけコマンドを発行する。
 /// 押し続けても `Changed` は発火しないので、同じ操作は重複しない。状態はここでは変えない。
+#[allow(clippy::too_many_arguments)]
 pub fn session_buttons(
     actors: Query<(&Interaction, &ActorButton), Changed<Interaction>>,
     clear: Query<&Interaction, (Changed<Interaction>, With<ClearActorButton>)>,
     advance: Query<(&Interaction, &AdvanceButton), Changed<Interaction>>,
 
+    save: Option<Res<SaveUi>>,
     builds: Query<(&Interaction, &BuildButton), Changed<Interaction>>,
     cancels: Query<(&Interaction, &CancelButton), Changed<Interaction>>,
     toggle: Query<&Interaction, (Changed<Interaction>, With<ToggleBuildPanelButton>)>,
@@ -984,13 +1055,15 @@ pub fn session_buttons(
         }
     }
     // 押した時点の操作国家・対象・注文識別子をそのままコマンドへ入れる(適用時に選択や位置から読み直さない)。
+    let epoch = save.as_ref().map_or(0, |s| s.restore_epoch);
     for (i, b) in &builds {
-        if *i == Interaction::Pressed {
+        // 復元を挟んだ古い行(復元前の状態から作られたボタン)の操作は発行しない。
+        if *i == Interaction::Pressed && b.epoch == epoch {
             out.write(SessionCommand::Build { actor: b.actor, state: b.state, building: b.building });
         }
     }
     for (i, b) in &cancels {
-        if *i == Interaction::Pressed {
+        if *i == Interaction::Pressed && b.epoch == epoch {
             out.write(SessionCommand::Cancel { actor: b.actor, order: b.order });
         }
     }

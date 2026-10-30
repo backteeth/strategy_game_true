@@ -6,5 +6,6 @@ pub mod data;
 pub mod economy_view;
 pub mod geometry;
 pub mod render;
+pub mod save_view;
 pub mod view;
 pub mod world_view;

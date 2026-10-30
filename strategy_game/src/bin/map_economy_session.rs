@@ -20,6 +20,8 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use strategy_game::building::data::BuildingType;
 use strategy_game::economy::map_state::ConstructionOrderId;
 use strategy_game::economy::map_session::{SCREEN_DEFAULT_SCENARIO, SCENARIOS, SessionPaths, scenario_by_id};
+use strategy_game::economy::map_economy_file::SaveLocation;
+use strategy_game::hexmap::save_view::{SaveLocationRes, SaveUi};
 use strategy_game::hexmap::economy_view::{EconomySessionPlugin, SessionCommand, SessionConfig};
 use strategy_game::hexmap::render::HexViewMode;
 use strategy_game::hexmap::view::{HexPreviewPlugin, HexSelection, HexViewSettings, LoadedHexMap};
@@ -28,22 +30,26 @@ use strategy_game::world::{CellStatus, MapStateId, cell_status};
 
 #[derive(Resource)]
 struct ShotDir(std::path::PathBuf);
+#[derive(Resource)]
+struct ShotSaveBase(std::path::PathBuf);
 
 struct Args {
     scenario: String,
     actor: Option<u32>,
     shots: Option<std::path::PathBuf>,
+    /// 保存先の基準フォルダ(実際の保存先は `<base>/map_economy/`)。既定は `saves`。検証用に一時フォルダを指定できる。
+    save_base: Option<std::path::PathBuf>,
 }
 
 fn usage_error(msg: &str) -> ! {
     eprintln!("map_economy_session: {msg}");
-    eprintln!("usage: map_economy_session [--scenario <id>] [--actor <国家ラベル>] [--shots <dir>]");
+    eprintln!("usage: map_economy_session [--scenario <id>] [--actor <国家ラベル>] [--shots <dir>] [--save-base <dir>]");
     std::process::exit(2);
 }
 
 /// 引数を解析する。未知の引数・不正な値は黙って無視せず、別の設定へフォールバックせずに終了する。
 fn parse_args() -> Args {
-    let mut args = Args { scenario: SCREEN_DEFAULT_SCENARIO.to_string(), actor: None, shots: None };
+    let mut args = Args { scenario: SCREEN_DEFAULT_SCENARIO.to_string(), actor: None, shots: None, save_base: None };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut value = |name: &str| it.next().unwrap_or_else(|| usage_error(&format!("{name} needs a value")));
@@ -53,6 +59,7 @@ fn parse_args() -> Args {
                 let v = value("--actor");
                 args.actor = Some(v.parse::<u32>().unwrap_or_else(|_| usage_error(&format!("--actor: \"{v}\" is not a country label"))));
             }
+            "--save-base" => args.save_base = Some(std::path::PathBuf::from(value("--save-base"))),
             "--shots" => args.shots = Some(std::path::PathBuf::from(value("--shots"))),
             other => usage_error(&format!("unknown argument \"{other}\"")),
         }
@@ -87,9 +94,14 @@ fn main() {
     .add_plugins(EconomySessionPlugin {
         config: SessionConfig { scenario_id: args.scenario.clone(), actor: args.actor, paths: SessionPaths::default() },
     });
+    if let Some(base) = &args.save_base {
+        app.insert_resource(SaveLocationRes(SaveLocation::new(base.clone())));
+    }
     if let Some(dir) = args.shots {
         std::fs::create_dir_all(&dir).expect("create shot dir");
-        app.insert_resource(ShotDir(dir)).add_systems(Update, shot_script);
+        // 自動スクリプトは保存先を明示した一時フォルダだけに書く(既定の saves/ へは書かない)。
+        let Some(base) = args.save_base.clone() else { usage_error("--shots requires --save-base <temp dir> (the script writes saves)") };
+        app.insert_resource(ShotDir(dir)).insert_resource(ShotSaveBase(base)).add_systems(Update, shot_script);
     }
     app.run();
 }
@@ -106,6 +118,8 @@ fn shot_script(
     world: Option<Res<LoadedWorld>>,
     mut out: MessageWriter<SessionCommand>,
     mut exit: MessageWriter<AppExit>,
+    save_ui: Option<ResMut<SaveUi>>,
+    save_base: Res<ShotSaveBase>,
 ) {
     *frame += 1;
     let f = *frame;
@@ -200,7 +214,57 @@ fn shot_script(
         530 => {
             out.write(SessionCommand::ToggleBuildPanel);
         }
+        // ---- S3: 保存・一覧・事前確認・復元(画面と同じコマンド経路。実マウス・実キーボード操作の代替ではない)。
+        //      保存先は --save-base の一時フォルダだけ。
         550 => {
+            if let Some(mut u) = save_ui {
+                u.name = "shot_a".to_string();
+                u.focus = true;
+            }
+            out.write(SessionCommand::SaveAs { actor: Some(1), name: "shot_a".to_string(), replace: false });
+        }
+        570 => shot(&mut commands, "20_saved_shot_a.png"),
+        575 => {
+            out.write(SessionCommand::AdvanceDays(7));
+            // 壊れたファイルと旧V1形式のファイル(一覧に「破損」「非対応」として出る)。保存先は一時フォルダ。
+            let dir = save_base.0.join("map_economy");
+            std::fs::write(dir.join("shot_broken.mapeco.ron"), "(kind: \"map_economy_state\", format_version: 2, trunc").expect("write broken");
+            std::fs::write(dir.join("shot_v1like.mapeco.ron"), "(version: 1, game_time: (year: 1800))").expect("write v1like");
+            for i in 1..=10 {
+                out.write(SessionCommand::SaveAs { actor: Some(1), name: format!("list_{i:02}"), replace: false });
+            }
+            out.write(SessionCommand::RefreshSaves);
+        }
+        600 => shot(&mut commands, "21_list_long_after_7_days.png"),
+        605 => {
+            out.write(SessionCommand::InspectSave { name: "shot_a".to_string() });
+        }
+        625 => shot(&mut commands, "22_preview_shot_a.png"),
+        630 => {
+            out.write(SessionCommand::LoadSave { actor: Some(1), name: "shot_a".to_string() });
+        }
+        650 => shot(&mut commands, "23_restored_shot_a.png"),
+        655 => {
+            out.write(SessionCommand::InspectSave { name: "shot_broken".to_string() });
+        }
+        675 => shot(&mut commands, "24_preview_broken.png"),
+        680 => {
+            if let Some(mut u) = save_ui {
+                u.name = "bad name/../x".to_string();
+            }
+        }
+        700 => shot(&mut commands, "25_invalid_name.png"),
+        705 => {
+            if let Some(mut u) = save_ui {
+                u.name = "shot_a".to_string();
+            }
+        }
+        725 => shot(&mut commands, "26_replace_target.png"),
+        730 => {
+            out.write(SessionCommand::SaveAs { actor: Some(1), name: "shot_a".to_string(), replace: false });
+        }
+        750 => shot(&mut commands, "27_replace_refused_without_explicit.png"),
+        760 => {
             exit.write(AppExit::Success);
         }
         _ => {}
