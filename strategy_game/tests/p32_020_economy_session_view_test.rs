@@ -1,10 +1,14 @@
 //! P32-020 (S1): 新マップ経済セッションの画面(`hexmap::economy_view`)のテスト。
 //! 純粋関数だけでなく、実際の Bevy `App`(`MinimalPlugins` + `EconomySessionCorePlugin`)で、コマンドの受付と適用・
 //! ボタン(`Interaction`)からコマンドへの接続・選択対象の導出を通す。描画(実ウィンドウ)は含まない(GUI確認は別記録)。
-//! ファイルは一切作らない。
+//! アプリ(画面・コマンド)はファイルを作らない。保存先は**テスト固有の一時ディレクトリ**を注入して確認する
+//! (実際の `saves/` は読まない。ユーザーの保存の有無でテストが変わらない)。
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bevy::prelude::*;
 use strategy_game::app::time::{DayChangedMessage, GameDate, GamePaused, GameSpeed, MonthChangedMessage};
@@ -12,6 +16,7 @@ use strategy_game::economy::map_session::{
     ActorError, CLI_DEFAULT_SCENARIO, EconomySession, GeographyData, SCREEN_DEFAULT_SCENARIO, SessionPaths,
     build_simulation, scenario_by_id,
 };
+use strategy_game::economy::map_economy_file::SaveLocation;
 use strategy_game::economy::map_state::SimDate;
 use strategy_game::hexmap::data::{HexMap, load_from_path};
 use strategy_game::hexmap::economy_view::{
@@ -20,11 +25,46 @@ use strategy_game::hexmap::economy_view::{
     SessionLabels, SessionRes, SessionSet, SessionUi, apply_command, block_close_key, classify_selection,
     date_text, economy_text, header_text, monthly_computed, outcome_text, session_buttons, start_session,
 };
+use strategy_game::hexmap::save_view::SaveLocationRes;
 use strategy_game::hexmap::view::{HexSelection, LoadedHexMap};
 use strategy_game::hexmap::world_view::{LoadedWorld, catalog_names};
 use strategy_game::world::{CellStatus, MapStateId, cell_status, load_world_preview};
 
 const START: SimDate = SimDate { year: 1800, month: 1, day: 1 };
+const PREFIX: &str = "p32_020";
+
+// ---------------------------------------------------------------- 保存先の隔離(テスト固有の一時ディレクトリ)
+
+/// このテスト固有の保存先の基準ディレクトリ(`<base>/map_economy/` が保存先)。実際の `saves/` は使わない。
+struct TmpBase(PathBuf);
+
+impl TmpBase {
+    fn new(tag: &str) -> Self {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let p = std::env::temp_dir().join(format!("{PREFIX}_{tag}_{}_{nanos}_{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir_all(&p).unwrap();
+        TmpBase(p)
+    }
+    fn location(&self) -> SaveLocation {
+        SaveLocation::new(&self.0)
+    }
+    fn dir(&self) -> PathBuf {
+        self.0.join("map_economy")
+    }
+}
+
+impl Drop for TmpBase {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// 保存先の内容(ファイル名 → バイト列)。保存先が存在しなければ `None`(空のディレクトリとは区別する)。
+fn snapshot_dir(dir: &Path) -> Option<BTreeMap<String, Vec<u8>>> {
+    let rd = fs::read_dir(dir).ok()?;
+    Some(rd.map(|e| e.unwrap()).map(|e| (e.file_name().to_string_lossy().to_string(), fs::read(e.path()).unwrap())).collect())
+}
 
 fn geo() -> &'static GeographyData {
     static G: OnceLock<GeographyData> = OnceLock::new();
@@ -41,8 +81,14 @@ fn config(scenario: &str, actor: Option<u32>) -> SessionConfig {
 
 /// コアプラグインだけのヘッドレスApp。`actor` は SessionUi へ直接入れる(未選択が既定)。
 fn app_with(session: EconomySession) -> App {
+    app_with_location(session, SaveLocationRes::default().0)
+}
+
+/// 保存先を差し替えたヘッドレスApp(最初の更新の前に注入する)。
+fn app_with_location(session: EconomySession, location: SaveLocation) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins).add_plugins(EconomySessionCorePlugin);
+    app.insert_resource(SaveLocationRes(location));
     app.insert_resource(SessionRes { session });
     app.add_systems(Update, session_buttons.in_set(SessionSet::Input));
     app.update(); // 初回のフレーム(コマンドなし)
@@ -148,20 +194,48 @@ fn no_legacy_game_plugin_is_registered_by_the_binary_or_the_core_plugin() {
     assert!(!w.contains_resource::<State<strategy_game::app::game_state::GameState>>());
 }
 
-#[test]
-fn the_session_view_never_writes_files() {
-    let src = fs::read_to_string("src/hexmap/economy_view.rs").unwrap();
-    for banned in ["fs::write", "File::create", "create_dir", ".save(", "map_economy_file::save", "OpenOptions", "remove_file"] {
-        assert!(!src.contains(banned), "S1 must not write files ({banned})");
-    }
-    let before: Vec<_> = fs::read_dir("saves").unwrap().map(|e| e.unwrap().file_name()).collect();
-    let mut app = app_with(session("m4e"));
+const BANNED_WRITES: [&str; 7] =
+    ["fs::write", "File::create", "create_dir", ".save(", "map_economy_file::save", "OpenOptions", "remove_file"];
+
+/// 通常の起動・更新・終了(操作主体の選択と日付進行を含む)を行い、動いたことを確認して終了する。
+fn run_normal_session(location: SaveLocation) {
+    let mut app = app_with_location(session("m4e"), location);
     send(&mut app, SessionCommand::SetActor(Some(1)));
     send(&mut app, SessionCommand::AdvanceDays(30));
     app.update();
-    let after: Vec<_> = fs::read_dir("saves").unwrap().map(|e| e.unwrap().file_name()).collect();
-    assert_eq!(before, after);
-    assert!(!std::path::Path::new("saves/map_economy").exists());
+    for _ in 0..3 {
+        app.update();
+    }
+    assert!(sim(&app).date > START, "the session really advanced");
+    drop(app); // 終了
+}
+
+#[test]
+fn the_session_view_never_writes_files() {
+    let src = fs::read_to_string("src/hexmap/economy_view.rs").unwrap();
+    for banned in BANNED_WRITES {
+        assert!(!src.contains(banned), "S1 must not write files ({banned})");
+    }
+    // A. 保存先が存在しない: 起動・更新・終了後も作られない(基準ディレクトリ自体にも何も増えない)。
+    let tmp = TmpBase::new("absent");
+    assert!(snapshot_dir(&tmp.dir()).is_none(), "precondition: no save directory");
+    run_normal_session(tmp.location());
+    assert!(snapshot_dir(&tmp.dir()).is_none(), "the save directory is not created");
+    assert_eq!(fs::read_dir(&tmp.0).unwrap().count(), 0, "nothing was added under the base");
+}
+
+#[test]
+fn the_session_view_leaves_existing_saves_untouched() {
+    // B. 既存保存がある: 一時ディレクトリ内の fixture(共有APIで作った本物の保存と、無関係なファイル)が、
+    //    起動・更新・終了の前後でファイル一覧も各ファイルの内容も変わらない。
+    let tmp = TmpBase::new("existing");
+    session("m4e").save(&geo().map, geo().model(), &tmp.location(), "fixture_a").unwrap();
+    fs::write(tmp.dir().join("unrelated.txt"), b"not a save file").unwrap();
+    let before = snapshot_dir(&tmp.dir()).expect("fixture directory");
+    assert_eq!(before.len(), 2);
+    assert!(before.values().all(|b| !b.is_empty()));
+    run_normal_session(tmp.location());
+    assert_eq!(snapshot_dir(&tmp.dir()), Some(before), "file list and every file's bytes are unchanged");
 }
 
 // ---------------------------------------------------------------- 操作主体と進行(実際のコマンド経路)

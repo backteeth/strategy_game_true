@@ -194,13 +194,25 @@ pub fn build_simulation_from_text(
     let scenario = parse_multi_month_scenario(scenario_text).map_err(SessionError::Scenario)?;
     let resources = parse_province_resources(resources_text)
         .map_err(|message| SessionError::Data { what: "province resources", message })?;
+    build_simulation_from_data(&scenario, &resources, start, world, buildings)
+}
+
+/// 解析済みのシナリオ・資源設定から `MapEconomySimulation` を生成する。[`build_simulation_from_text`] の後半と同じ組み立てで、
+/// 入力をテキストにせず直接渡したい呼び出し側(P32-024 の規模測定ハーネス)が使う。検証は同じものが走る。
+pub fn build_simulation_from_data(
+    scenario: &crate::economy::map_state::MultiMonthScenario,
+    resources: &crate::economy::province_resources::ProvinceResourcesFile,
+    start: SimDate,
+    world: &WorldModel,
+    buildings: &BuildingRegistry,
+) -> Result<MapEconomySimulation, SessionError> {
     let (mut registry, countries) =
-        MapStateEconomyRegistry::from_multi_scenario(&scenario, world, buildings).map_err(fmt_issues)?;
-    let derived = derive_state_resources(world, &resources).map_err(|issues| SessionError::Data {
+        MapStateEconomyRegistry::from_multi_scenario(scenario, world, buildings).map_err(fmt_issues)?;
+    let derived = derive_state_resources(world, resources).map_err(|issues| SessionError::Data {
         what: "province resources",
         message: issues.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("\n"),
     })?;
-    registry.attach_province_resources(&derived, world, &resources).map_err(fmt_issues)?;
+    registry.attach_province_resources(&derived, world, resources).map_err(fmt_issues)?;
     Ok(MapEconomySimulation::new(start, registry, countries))
 }
 

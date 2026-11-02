@@ -1,0 +1,4 @@
+test the_session_view_never_writes_files ... FAILED
+test result: FAILED. 18 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+test the_build_ui_never_writes_files ... FAILED
+test result: FAILED. 16 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s

@@ -9,6 +9,7 @@ pub mod map_economy_file;
 pub mod map_session;
 pub mod map_state;
 pub mod resources;
+pub mod scale_harness;
 pub mod state_access;
 pub mod supply_balance;
 
