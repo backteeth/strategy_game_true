@@ -1,0 +1,14 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+SHAPE shape=named_variants target_kb=125 bytes=125121 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=2.042 ignored_any_ms=2.014 parsed_ok=true
+SHAPE shape=named_variants target_kb=125 bytes=125121 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=2.078 ignored_any_ms=2.034 parsed_ok=true
+SHAPE shape=named_variants target_kb=125 bytes=125121 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=2.010 ignored_any_ms=2.051 parsed_ok=true
+SHAPE shape=named_variants target_kb=250 bytes=250122 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=4.159 ignored_any_ms=4.132 parsed_ok=true
+SHAPE shape=named_variants target_kb=250 bytes=250122 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=4.057 ignored_any_ms=4.186 parsed_ok=true
+SHAPE shape=named_variants target_kb=250 bytes=250122 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=4.105 ignored_any_ms=4.094 parsed_ok=true
+SHAPE shape=named_variants target_kb=500 bytes=500121 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=8.110 ignored_any_ms=8.083 parsed_ok=true
+SHAPE shape=named_variants target_kb=500 bytes=500121 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=7.924 ignored_any_ms=8.312 parsed_ok=true
+SHAPE shape=named_variants target_kb=500 bytes=500121 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=7.905 ignored_any_ms=8.268 parsed_ok=true
+SHAPE shape=named_variants target_kb=1000 bytes=1000122 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=16.153 ignored_any_ms=16.203 parsed_ok=true
+SHAPE shape=named_variants target_kb=1000 bytes=1000122 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=15.976 ignored_any_ms=16.744 parsed_ok=true
+SHAPE shape=named_variants target_kb=1000 bytes=1000122 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=16.393 ignored_any_ms=16.286 parsed_ok=true
+exit 0

@@ -28,6 +28,8 @@ struct Args {
     map: String,
     buildings: String,
     series: bool,
+    cases: Vec<(u32, u32)>,
+    modes: Vec<String>,
 }
 
 fn parse(args: &[String]) -> Result<Args, String> {
@@ -41,6 +43,8 @@ fn parse(args: &[String]) -> Result<Args, String> {
     let mut map = "assets/data/hex_atlas_map.json".to_string();
     let mut buildings = "assets/data/buildings.ron".to_string();
     let mut series = false;
+    let mut cases = vec![(100u32, 3u32), (300, 3), (1000, 3), (1000, 100)];
+    let mut modes: Vec<String> = ["off", "on", "on", "off"].iter().map(|x| x.to_string()).collect();
     let mut i = 0;
     let value = |i: usize, name: &str| args.get(i + 1).cloned().ok_or_else(|| format!("{name} needs a value"));
     let num = |s: String, name: &str| s.parse::<u64>().map_err(|_| format!("{name}: \"{s}\" is not a number"));
@@ -61,6 +65,16 @@ fn parse(args: &[String]) -> Result<Args, String> {
             }
             "--map" => map = value(i, "--map")?,
             "--buildings" => buildings = value(i, "--buildings")?,
+            "--cases" => {
+                cases = value(i, "--cases")?
+                    .split(',')
+                    .map(|c| {
+                        let (x, y) = c.split_once('x').ok_or_else(|| format!("--cases: {c} is not NxC"))?;
+                        Ok((x.parse::<u32>().map_err(|e| e.to_string())?, y.parse::<u32>().map_err(|e| e.to_string())?))
+                    })
+                    .collect::<Result<_, String>>()?;
+            }
+            "--modes" => modes = value(i, "--modes")?.split(',').map(|x| x.to_string()).collect(),
             "--series" => {
                 series = true;
                 i += 1;
@@ -79,7 +93,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
     if let Some(p) = pps {
         scale.provinces_per_state = p;
     }
-    Ok(Args { spec: BenchSpec { scale, timed, trials }, map, buildings, series })
+    Ok(Args { spec: BenchSpec { scale, timed, trials }, map, buildings, series, cases, modes })
 }
 
 fn print_environment() {
@@ -148,9 +162,9 @@ fn series(a: &Args) -> i32 {
             return 4;
         }
     };
-    let cases = [(100u32, 3u32), (300, 3), (1000, 3), (1000, 100)];
-    // 順序の影響を見るため、off → on → on → off の順(同じ入力・同じ状態・同じビルド)。
-    let modes = ["off", "on", "on", "off"];
+    let cases = a.cases.clone();
+    // 順序の影響を見るため、既定は off → on → on → off の順(同じ入力・同じ状態・同じビルド)。
+    let modes: Vec<&str> = a.modes.iter().map(|x| x.as_str()).collect();
     let hard = Duration::from_secs(a.spec.scale.time_limit.as_secs() + 30);
     let mut worst = 0;
     'outer: for (states, countries) in cases {

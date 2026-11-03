@@ -1,0 +1,14 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+SHAPE shape=ints_with_dotdot_strings target_kb=125 bytes=125133 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=3.538 ignored_any_ms=3.458 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=125 bytes=125133 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=3.517 ignored_any_ms=3.523 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=125 bytes=125133 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=3.831 ignored_any_ms=3.931 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=250 bytes=250128 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=7.228 ignored_any_ms=6.932 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=250 bytes=250128 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=7.631 ignored_any_ms=7.530 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=250 bytes=250128 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=7.054 ignored_any_ms=6.958 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=500 bytes=500131 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=14.951 ignored_any_ms=15.198 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=500 bytes=500131 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=13.216 ignored_any_ms=13.770 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=500 bytes=500131 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=13.267 ignored_any_ms=13.835 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=1000 bytes=1000124 parens=2 brackets=2 max_depth=3 fields=6 trial=1 header_ms=29.418 ignored_any_ms=28.776 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=1000 bytes=1000124 parens=2 brackets=2 max_depth=3 fields=6 trial=2 header_ms=27.720 ignored_any_ms=26.557 parsed_ok=true
+SHAPE shape=ints_with_dotdot_strings target_kb=1000 bytes=1000124 parens=2 brackets=2 max_depth=3 fields=6 trial=3 header_ms=28.175 ignored_any_ms=28.802 parsed_ok=true
+exit 0

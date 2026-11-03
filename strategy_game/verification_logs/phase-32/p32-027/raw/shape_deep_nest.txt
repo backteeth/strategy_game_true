@@ -1,0 +1,14 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+SHAPE shape=deep_nest target_kb=125 bytes=125211 parens=24410 brackets=2 max_depth=26 fields=24414 trial=1 header_ms=22.784 ignored_any_ms=23.101 parsed_ok=true
+SHAPE shape=deep_nest target_kb=125 bytes=125211 parens=24410 brackets=2 max_depth=26 fields=24414 trial=2 header_ms=22.809 ignored_any_ms=22.919 parsed_ok=true
+SHAPE shape=deep_nest target_kb=125 bytes=125211 parens=24410 brackets=2 max_depth=26 fields=24414 trial=3 header_ms=23.504 ignored_any_ms=22.701 parsed_ok=true
+SHAPE shape=deep_nest target_kb=250 bytes=250179 parens=48794 brackets=2 max_depth=26 fields=48798 trial=1 header_ms=78.838 ignored_any_ms=77.427 parsed_ok=true
+SHAPE shape=deep_nest target_kb=250 bytes=250179 parens=48794 brackets=2 max_depth=26 fields=48798 trial=2 header_ms=78.103 ignored_any_ms=77.812 parsed_ok=true
+SHAPE shape=deep_nest target_kb=250 bytes=250179 parens=48794 brackets=2 max_depth=26 fields=48798 trial=3 header_ms=78.359 ignored_any_ms=77.886 parsed_ok=true
+SHAPE shape=deep_nest target_kb=500 bytes=500238 parens=97586 brackets=2 max_depth=26 fields=97590 trial=1 header_ms=287.606 ignored_any_ms=281.915 parsed_ok=true
+SHAPE shape=deep_nest target_kb=500 bytes=500238 parens=97586 brackets=2 max_depth=26 fields=97590 trial=2 header_ms=282.134 ignored_any_ms=283.429 parsed_ok=true
+SHAPE shape=deep_nest target_kb=500 bytes=500238 parens=97586 brackets=2 max_depth=26 fields=97590 trial=3 header_ms=282.575 ignored_any_ms=281.477 parsed_ok=true
+SHAPE shape=deep_nest target_kb=1000 bytes=1000233 parens=195146 brackets=2 max_depth=26 fields=195150 trial=1 header_ms=1090.202 ignored_any_ms=1089.076 parsed_ok=true
+SHAPE shape=deep_nest target_kb=1000 bytes=1000233 parens=195146 brackets=2 max_depth=26 fields=195150 trial=2 header_ms=1067.059 ignored_any_ms=1082.565 parsed_ok=true
+SHAPE shape=deep_nest target_kb=1000 bytes=1000233 parens=195146 brackets=2 max_depth=26 fields=195150 trial=3 header_ms=1097.135 ignored_any_ms=1087.511 parsed_ok=true
+exit 0

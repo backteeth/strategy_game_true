@@ -288,6 +288,11 @@ impl BenchResult {
                     for s in tm.spans() {
                         let _ = writeln!(o, "SPAN case={case} mode={mode} trial={} op={op} name={} calls={} ms={:.3}", t.index, s.name, s.calls, dur_ms(s.total));
                     }
+                    // 同じ呼出の整合性(P32-027): 各工程は全体の区間の中にあり、互いに重ならないので、工程の合計 <= 全体 <= 外側から計った時間。
+                    let max_span = tm.spans().iter().map(|s| s.total).max().unwrap_or_default();
+                    let _ = writeln!(o, "CHECK case={case} mode={mode} trial={} op={op} wall_ms={:.3} total_ms={:.3} covered_ms={:.3} max_span_ms={:.3} covered_le_total={} total_le_wall={} max_span_le_total={}",
+                        t.index, rec.wall_ms, dur_ms(tm.total()), dur_ms(tm.covered()), dur_ms(max_span),
+                        tm.covered() <= tm.total(), dur_ms(tm.total()) <= rec.wall_ms + 1e-6, max_span <= tm.total());
                 }
             }
         }
@@ -309,4 +314,48 @@ impl BenchResult {
         }
         o
     }
+}
+
+/// 比較測定(P32-027)の入力: 製品の保存で作った保存文章(ファイル内容そのもの)と、その規模。
+#[derive(Debug, Clone)]
+pub struct SavedText {
+    pub text: String,
+    pub states: usize,
+    pub countries: usize,
+    pub queued_orders: usize,
+}
+
+/// 合成入力を作り、`scale.split_day` 日進めた状態を**製品の `save`**で一時ディレクトリへ保存し、その文章を読み戻して返す。
+/// 保存・読込は解析時間の測定に含めない(呼び出し側が文章を使い回す)。後始末は自分のファイルだけ。
+pub fn build_saved_text(map: &HexMap, buildings: &BuildingRegistry, scale: &ScaleSpec, base: &Path) -> Result<SavedText, String> {
+    scale.validate().map_err(|e| e.to_string())?;
+    if base.components().any(|c| c.as_os_str() == "saves") {
+        return Err(format!("measurement save base must not be inside a 'saves' directory: {}", base.display()));
+    }
+    let t0 = Instant::now();
+    let deadline = Deadline { start: t0, limit: scale.time_limit };
+    let abort = |a: Abort| match a {
+        Abort::Timeout(p) => format!("timeout in {p}"),
+        Abort::Unrunnable(m) => m,
+    };
+    let input = generate(scale, map).map_err(|e| e.to_string())?;
+    let world = build_world(map, &input).map_err(|e| e.to_string())?;
+    let mut sim = assemble(&input, &world, buildings).map_err(|e| e.to_string())?;
+    let script = Script::new(&input, scale.scripted_orders);
+    let mut stats = RunStats::default();
+    crate::economy::scale_harness::run_days(&mut sim, buildings, &script, 0, scale.split_day, &deadline, "advance", &mut stats, |_, _, _| Ok(())).map_err(abort)?;
+    let inputs = StaticInputs { map, world: &world, buildings, facilities: None };
+    std::fs::create_dir_all(base).map_err(|e| format!("cannot create {}: {e}", base.display()))?;
+    let location = SaveLocation::new(base);
+    let receipt = map_economy_file::save(&sim, &inputs, &location, SAVE_NAME).map_err(|e| format!("save failed: {e:?}"))?;
+    let text = std::fs::read_to_string(&receipt.path).map_err(|e| format!("cannot read back the save: {e}"));
+    let _ = std::fs::remove_file(&receipt.path);
+    let _ = std::fs::remove_dir(base.join("map_economy"));
+    let _ = std::fs::remove_dir(base);
+    Ok(SavedText {
+        text: text?,
+        states: sim.registry.len(),
+        countries: sim.countries.len(),
+        queued_orders: sim.countries.iter().map(|c| c.construction_queue.len()).sum(),
+    })
 }

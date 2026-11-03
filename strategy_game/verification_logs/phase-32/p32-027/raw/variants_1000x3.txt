@@ -1,0 +1,19 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE states=1000 countries=3 queued_orders=9 state_entries=1000 building_entries=3229 country_entries=3
+INPUT label=full bytes=766591 lines=21979 parens=7603 brackets=2018 max_depth=9 fields=11318
+VARIANT name=full trial=1 product_header_ms=2338.488 product_body_ms=5.738 replica_header_ms=2225.848 ok=true
+VARIANT name=full trial=2 product_header_ms=2237.904 product_body_ms=5.590 replica_header_ms=2133.364 ok=true
+VARIANT name=full trial=3 product_header_ms=2110.034 product_body_ms=5.481 replica_header_ms=2109.418 ok=true
+INPUT label=states_only bytes=751205 lines=21565 parens=7483 brackets=2003 max_depth=6 fields=11058
+VARIANT name=states_only trial=1 product_header_ms=2025.921 product_body_ms=5.309 replica_header_ms=2033.951 ok=true
+VARIANT name=states_only trial=2 product_header_ms=2018.146 product_body_ms=5.340 replica_header_ms=2015.502 ok=true
+VARIANT name=states_only trial=3 product_header_ms=2033.107 product_body_ms=5.432 replica_header_ms=2032.165 ok=true
+INPUT label=countries_only bytes=19271 lines=520 parens=145 brackets=18 max_depth=9 fields=318
+VARIANT name=countries_only trial=1 product_header_ms=0.753 product_body_ms=0.136 replica_header_ms=0.739 ok=true
+VARIANT name=countries_only trial=2 product_header_ms=0.728 product_body_ms=0.108 replica_header_ms=0.749 ok=true
+VARIANT name=countries_only trial=3 product_header_ms=0.720 product_body_ms=0.110 replica_header_ms=0.731 ok=true
+INPUT label=states_first_half bytes=393095 lines=11255 parens=3879 brackets=1018 max_depth=9 fields=5818
+VARIANT name=states_first_half trial=1 product_header_ms=556.487 product_body_ms=2.986 replica_header_ms=550.377 ok=true
+VARIANT name=states_first_half trial=2 product_header_ms=546.885 product_body_ms=2.864 replica_header_ms=545.043 ok=true
+VARIANT name=states_first_half trial=3 product_header_ms=541.897 product_body_ms=2.776 replica_header_ms=596.286 ok=true
+exit 0

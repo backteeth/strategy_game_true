@@ -1,0 +1,14 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+SHAPE shape=list_of_lists target_kb=125 bytes=125126 parens=2 brackets=4980 max_depth=3 fields=6 trial=1 header_ms=328.894 ignored_any_ms=329.980 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=125 bytes=125126 parens=2 brackets=4980 max_depth=3 fields=6 trial=2 header_ms=327.827 ignored_any_ms=327.322 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=125 bytes=125126 parens=2 brackets=4980 max_depth=3 fields=6 trial=3 header_ms=328.286 ignored_any_ms=328.192 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=250 bytes=250134 parens=2 brackets=9788 max_depth=3 fields=6 trial=1 header_ms=1270.131 ignored_any_ms=1273.675 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=250 bytes=250134 parens=2 brackets=9788 max_depth=3 fields=6 trial=2 header_ms=1321.161 ignored_any_ms=1279.569 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=250 bytes=250134 parens=2 brackets=9788 max_depth=3 fields=6 trial=3 header_ms=1323.380 ignored_any_ms=1319.956 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=500 bytes=500144 parens=2 brackets=18150 max_depth=3 fields=6 trial=1 header_ms=4862.865 ignored_any_ms=4873.910 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=500 bytes=500144 parens=2 brackets=18150 max_depth=3 fields=6 trial=2 header_ms=4864.283 ignored_any_ms=4916.629 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=500 bytes=500144 parens=2 brackets=18150 max_depth=3 fields=6 trial=3 header_ms=4972.359 ignored_any_ms=4855.997 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=1000 bytes=1000124 parens=2 brackets=34816 max_depth=3 fields=6 trial=1 header_ms=18445.237 ignored_any_ms=18462.236 parsed_ok=true
+SHAPE shape=list_of_lists target_kb=1000 bytes=1000124 parens=2 brackets=34816 max_depth=3 fields=6 trial=2 header_ms=18441.794 ignored_any_ms=18458.987 parsed_ok=true
+INCOMPLETE section=shapes time_limit_exceeded_before=list_of_lists 1000KB trial 3
+exit 3

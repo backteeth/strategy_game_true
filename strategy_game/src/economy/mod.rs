@@ -8,6 +8,7 @@ pub mod manual_script;
 pub mod map_economy_file;
 pub mod map_session;
 pub mod map_state;
+pub mod parse_probe;
 pub mod phase_timing;
 pub mod resources;
 pub mod save_timing_bench;

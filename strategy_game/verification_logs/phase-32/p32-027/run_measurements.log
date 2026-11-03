@@ -1,0 +1,16 @@
+== trials_1000x3_proc1.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section trials --states 1000 --countries 3 --trials 3
+== trials_1000x3_proc2.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section trials --states 1000 --countries 3 --trials 3
+== trials_1000x3_proc3.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section trials --states 1000 --countries 3 --trials 3
+== trials_100x3.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section trials --states 100 --countries 3 --trials 3
+== trials_300x3.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section trials --states 300 --countries 3 --trials 3
+== trials_1000x100.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section trials --states 1000 --countries 100 --trials 3
+== variants_300x3.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section variants --states 300 --countries 3 --trials 3
+== variants_1000x3.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section variants --states 1000 --countries 3 --trials 3
+== shape_flat_ints.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape flat_ints --sizes-kb 125,250,500,1000 --trials 3
+== shape_struct_list.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape struct_list --sizes-kb 125,250,500,1000 --trials 3
+== shape_tuple_list.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape tuple_list --sizes-kb 125,250,500,1000 --trials 3
+== shape_list_of_lists.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape list_of_lists --sizes-kb 125,250,500,1000 --trials 3
+== shape_deep_nest.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape deep_nest --sizes-kb 125,250,500,1000 --trials 3
+== shape_long_string.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape long_string --sizes-kb 125,250,500,1000 --trials 3
+== shape_named_variants.txt: cargo run -q -j 1 --release --bin economy_parse_compare -- --section shapes --shape named_variants --sizes-kb 125,250,500,1000 --trials 3
+all done
