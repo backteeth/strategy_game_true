@@ -149,12 +149,14 @@ fn the_cli_baseline_recorded_in_p32_017_is_reproduced_by_the_library_assembly() 
         s.advance_day();
     }
     assert_eq!(s.sim.date, SimDate { year: 1800, month: 4, day: 12 });
-    assert_eq!(fnv_digest(&s.sim, &s), 0x0efe_fcfc_fc39_8595);
+    // 地理JSONをschemaVersion 10へ更新した際に、陸セル集合の指紋(状態の`context`に入る)が変わったため再基準化した。
+    // `context`を除いた経済状態の内容は更新前と同一(m4d/m4e とも160日後で確認済み)。更新前の値: 0x0efe_fcfc_fc39_8595 / 0x7f6f_2d0d_dbd2_cc19。
+    assert_eq!(fnv_digest(&s.sim, &s), 0x2f1b_1910_201c_e473);
     for _ in 101..160 {
         s.advance_day();
     }
     assert_eq!(s.sim.date, SimDate { year: 1800, month: 6, day: 10 });
-    assert_eq!(fnv_digest(&s.sim, &s), 0x7f6f_2d0d_dbd2_cc19);
+    assert_eq!(fnv_digest(&s.sim, &s), 0x2fce_25ce_b982_483b);
 }
 
 #[test]
@@ -740,8 +742,8 @@ fn the_cli_keeps_its_behaviour_after_the_shared_assembly_and_exposes_list_and_in
     assert_eq!(a.len(), 60);
     assert_eq!(a, b);
     // 共通化前(P32-017 の記録)と同じ値。
-    assert!(a[0].starts_with("day 1800/04/12 digest=0efefcfcfc398595 "), "{}", a[0]);
-    assert!(a[59].starts_with("day 1800/06/10 digest=7f6f2d0ddbd2cc19 "), "{}", a[59]);
+    assert!(a[0].starts_with("day 1800/04/12 digest=2f1b1910201ce473 "), "{}", a[0]);
+    assert!(a[59].starts_with("day 1800/06/10 digest=2fce25ceb982483b "), "{}", a[59]);
     // 明示した `--scenario m4d` は既定と同じ。
     let (ok, explicit, err) = cli(&["--economy-run", "160", "--digest-from", "100", "--scenario", "m4d"]);
     assert!(ok, "{err}");

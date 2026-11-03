@@ -82,30 +82,93 @@ fn preview_world_fails_game_start_validation() {
     assert!(r.has(IssueCode::UnassignedProvince));
 }
 
+/// 検証用プロヴィンス表に**保存されている**ID(明示保存された安定値)。`(id, q, r)`。
+/// これらのIDは、検証用表を作った時点の地図の初回採番で発行された値で、地図更新(P32-025:
+/// `hex-atlas-map_2.json`、海が陸に変わった718セルを含む)の後も**据え置く**(振り直さない)。
+/// 値は`provinces.ron`の写しではなく、「存続する区画のIDを維持する」ことの固定された期待値。
+const STORED_PREVIEW_IDS: [(u32, i32, i32); 29] = [
+    (17266, 83, 78), (17267, 84, 78), (17268, 85, 78), (17269, 86, 78),
+    (17484, 83, 79), (17485, 84, 79), (17486, 85, 79), (17487, 86, 79),
+    (17693, 83, 80), (17694, 84, 80), (17695, 85, 80), (17696, 86, 80),
+    (17903, 83, 81), (17904, 84, 81), (17905, 85, 81), (17906, 86, 81),
+    (18109, 82, 82), (18110, 83, 82), (18111, 84, 82), (18112, 85, 82),
+    (18308, 80, 83), (18309, 81, 83), (18310, 82, 83), (18311, 83, 83), (18312, 84, 83),
+    (18499, 80, 84), (18500, 81, 84), (18501, 82, 84), (18502, 83, 84),
+];
+
+/// 保存されているステート所属(ステートID → プロヴィンスID)。所属関係の正本は`states.ron`。
+const STORED_STATE_MEMBERS: [(u32, &[u32]); 3] = [
+    (20, &[18109, 18308, 18309, 18310, 18311, 18499, 18500]),
+    (21, &[17269, 17486, 17487, 17694, 17695, 17696, 17904, 17905, 17906, 18111, 18112, 18312, 18502]),
+    (22, &[17266, 17267, 17268, 17484, 17485, 17693]),
+];
+
+/// B. 保存済みの区画定義: 地図を更新しても、存続する区画のIDとセル参照・所属が維持される。
+/// (以前の確認「全世界の初回採番と一致する」は、保存IDが**作成時の地図の**初回採番だったことの
+/// 副産物で、地図の陸セル集合が変わった時点で成り立たなくなる。それはIDを振り直す理由にならない。
+/// 初回採番アルゴリズム自体の保証はAのテストが固定入力で確認する。)
 #[test]
-fn ids_are_stored_in_the_file_and_stay_stable_across_reloads() {
+fn stored_ids_and_membership_are_kept_across_map_updates_and_reloads() {
     let map = real_map();
     let a = preview(&map);
     let b = preview(&map);
     assert_eq!(a.model, b.model);
     // ファイルに明示された値がそのまま使われる(読み込み時に生成されない)
-    assert_eq!(a.model.province_at(83, 78).unwrap().id, ProvinceId(17266));
-    assert_eq!(a.model.state_of(ProvinceId(17266)), Some(MapStateId(22)));
-    // 全世界を網羅した場合の初回採番と一致する(将来の本番表と衝突しない)
-    let full = generate_initial_province_table(&map, Coverage::World);
-    for p in a.model.provinces() {
-        let f = full
-            .provinces
-            .iter()
-            .find(|x| x.q == p.cell.q && x.r == p.cell.r)
-            .unwrap();
-        assert_eq!(f.id, p.id.0);
+    assert_eq!(a.model.provinces().len(), STORED_PREVIEW_IDS.len());
+    for (id, q, r) in STORED_PREVIEW_IDS {
+        let p = a.model.province_at(q, r).unwrap_or_else(|| panic!("province at ({q},{r}) must survive"));
+        assert_eq!(p.id, ProvinceId(id), "the id at ({q},{r}) must be kept");
+        assert!(!map.cell(q, r).unwrap().terrain.is_water(), "({q},{r}) is still land");
     }
-    assert_eq!(a.model.next_province_id() as usize, full.provinces.len());
+    // IDの重複なし(セルの重複なし)
+    let ids: BTreeSet<u32> = a.model.provinces().iter().map(|p| p.id.0).collect();
+    assert_eq!(ids.len(), a.model.provinces().len());
+    let cells: BTreeSet<(i32, i32)> = a.model.provinces().iter().map(|p| (p.cell.q, p.cell.r)).collect();
+    assert_eq!(cells.len(), a.model.provinces().len());
+    // 所属が維持される
+    assert_eq!(a.model.states().len(), STORED_STATE_MEMBERS.len());
+    for (sid, members) in STORED_STATE_MEMBERS {
+        for m in members {
+            assert_eq!(a.model.state_of(ProvinceId(*m)), Some(MapStateId(sid)), "province {m} stays in state {sid}");
+        }
+    }
+    assert_eq!(a.model.state_of(ProvinceId(17266)), Some(MapStateId(22)));
+    // 未使用IDの払い出し元は、保存IDより大きい位置に据え置かれる(既存IDを再利用しない)。
+    let max = *ids.iter().next_back().unwrap();
+    assert!(a.model.next_province_id() > max);
+    assert_eq!(a.model.next_province_id(), 34503, "更新前の陸セル数。地図更新で増えた陸セルには、必要になった時に34503以降を払い出す");
+    // 表の対象外の陸セル(地図更新で増えた陸を含む)にはIDを発行していない
+    let full_land = map.cells().iter().filter(|c| !c.terrain.is_water()).count();
+    assert!(full_land > a.model.provinces().len());
+    assert!(a.model.province_at(0, 0).is_none());
     // 水域にはプロヴィンスもステートも無い
     for p in a.model.provinces() {
         assert!(!map.cell(p.cell.q, p.cell.r).unwrap().terrain.is_water());
     }
+}
+
+/// A. 初回採番アルゴリズム: 同じ入力から、決定的で妥当な(重複なし・連番・`(r,q)`順)IDを生成する。
+/// 固定の入力(実地図の陸セル集合そのもの)に対して検証し、結果は地図の更新後も成り立つ性質だけを見る。
+/// (固定フィクスチャでの具体的なID値と、JSONの並び順に依存しないことは`p32_004`が確認している。)
+#[test]
+fn initial_numbering_is_deterministic_sequential_and_ordered() {
+    let map = real_map();
+    let full = generate_initial_province_table(&map, Coverage::World);
+    assert_eq!(full.provinces, generate_initial_province_table(&map, Coverage::World).provinces);
+    let land = map.cells().iter().filter(|c| !c.terrain.is_water()).count();
+    assert_eq!(full.provinces.len(), land);
+    assert_eq!(full.next_province_id as usize, land);
+    for (i, p) in full.provinces.iter().enumerate() {
+        assert_eq!(p.id as usize, i, "ids are 0..n sequential");
+        assert!(!map.cell(p.q, p.r).unwrap().terrain.is_water());
+        if i > 0 {
+            let prev = &full.provinces[i - 1];
+            assert!((prev.r, prev.q) < (p.r, p.q), "sorted by (r, q), no duplicate cells");
+        }
+    }
+    // 生成した表は、そのまま全世界の表として地理と整合する
+    let model = WorldModel::build(full, layout(vec![])).unwrap();
+    assert!(validate_against_geography(&model, &map, ValidationMode::Authoring).is_ok());
 }
 
 // ---------------------------------------------------------------- 所属・選択表示データ

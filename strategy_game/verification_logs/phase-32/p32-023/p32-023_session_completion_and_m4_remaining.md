@@ -182,3 +182,9 @@ P32-003 の M4 の**本文**(ステート一覧を受け取る形・旧州でも
 - 上記の設計書・報告書の読み取り、実コードの存在確認(`grow_populations`・`recover_country_manpower`・`compute_country_finance`・`update_welfare_and_unrest`・`advance_construction_queue`・`compute_economic_metrics`・`check_manual_build_order`・`process_construction_ai_with_contexts`・`update_monthly_workforce_and_logistics`・`process_country_production`・`apportion_mobilized_manpower_by`・`compute_logistics`・`compute_employment`・`LocationFacilityRegistry`・`MapEconomySimulation`・`restore_candidate`・`cell_status`。`main.rs`・`app/` に新経路の参照が無いこと、`country/power.rs` が旧州の型(`StateRegistry`/`StateData`)を使い `MapState*` への参照が無いこと)。
 
 省略した確認(記録のみの変更のため。過去の結果を再実行したようには書かない): 全体テスト、clippy、GUI 再確認、スクリーンショット、人工セーブ生成、保存・再開実験。
+
+---
+
+## 10. 追記(P32-025): M4 の閉鎖判断
+
+本書の「M4 は完了と宣言しない」は当時の記録として残す。その後 P32-025 で、ユーザー判断により「経済処理の新ステート経路への移行」の範囲で M4 を閉じた(根拠・適用範囲・後続への引き継ぎは `verification_logs/phase-32/p32-025/p32-025_map_update_and_m4_closure.md` §7)。Phase 32 全体は継続。

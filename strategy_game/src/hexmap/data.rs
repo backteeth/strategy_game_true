@@ -1,4 +1,4 @@
-//! P32-001: ヘックスマップJSON(`hex-atlas-game-map` schemaVersion 9)の読み込みと検証。
+//! P32-001: ヘックスマップJSON(`hex-atlas-game-map` schemaVersion 9/10)の読み込みと検証。
 //!
 //! 構成は「DTO(JSONそのまま) → 検証 → `HexMap`(検証済み不変データ)」の一方向。
 //! 件数や属性集計はローダーへ固定しない(実データに対する期待値はテスト側が持つ)。
@@ -8,7 +8,10 @@ use serde::Deserialize;
 use std::fmt;
 
 pub const EXPECTED_KIND: &str = "hex-atlas-game-map";
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 9;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 10;
+/// 受け付けるスキーマ版。10はセルの`countryId`・`countries`・`labels`が加わった版で、
+/// それらはここでは読まない(DTOに無い項目は無視される。国家・地域データは別の対象)。
+pub const ACCEPTED_SCHEMA_VERSIONS: [u32; 2] = [9, 10];
 pub const SUPPORTED_ORIENTATION: &str = "pointy";
 /// 実行時に読み込むJSONの既存アセット規約上の位置(`assets/data/*.ron`と同じくcwd相対)。
 pub const DEFAULT_MAP_PATH: &str = "assets/data/hex_atlas_map.json";
@@ -437,7 +440,7 @@ impl fmt::Display for HexMapError {
             }
             Self::UnsupportedSchema(v) => write!(
                 f,
-                "unsupported schemaVersion {v} (supported: {SUPPORTED_SCHEMA_VERSION})"
+                "unsupported schemaVersion {v} (supported: {ACCEPTED_SCHEMA_VERSIONS:?})"
             ),
             Self::UnsupportedOrientation(o) => write!(
                 f,
@@ -480,7 +483,7 @@ fn validate(dto: MapDto) -> Result<HexMap, HexMapError> {
     if dto.kind != EXPECTED_KIND {
         return Err(HexMapError::WrongKind(dto.kind));
     }
-    if dto.schema_version != SUPPORTED_SCHEMA_VERSION {
+    if !ACCEPTED_SCHEMA_VERSIONS.contains(&dto.schema_version) {
         return Err(HexMapError::UnsupportedSchema(dto.schema_version));
     }
     let g = &dto.grid;

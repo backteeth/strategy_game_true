@@ -1,0 +1,38 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 8.54s
+     Running `target\debug\map_economy_session.exe --shots verification_logs/phase-32/p32-025/screenshots/economy_session --save-base 'C:/Users/hirom/AppData/Local/Temp/tmp.XR0t3YiEdu'`
+[2m2026-11-03T05:36:15.137945Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "617.42", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-11-03T05:36:15.426456Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-11-03T05:36:15.426520Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-11-03T05:36:15.427228Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Creating new window 新マップ 経済検証セッション(検証用) (65v0)
+[2m2026-11-03T05:36:15.658496Z[0m [32m INFO[0m [2mstrategy_game::hexmap::view[0m[2m:[0m [HexPreview] loaded 96760 cells / 3493 rivers in 66.7 ms; built 98 chunks (200 meshes, 200 map entities) in 29.5 ms
+[2m2026-11-03T05:36:15.672674Z[0m [32m INFO[0m [2mstrategy_game::hexmap::world_view[0m[2m:[0m [WorldPreview] loaded 29 provinces / 3 states (3 unassigned), 62 boundary edges
+[2m2026-11-03T05:36:15.676497Z[0m [32m INFO[0m [2mstrategy_game::hexmap::economy_view[0m[2m:[0m [EconomySession] scenario m4e ready (manual actors: [1, 2], actor: None)
+[2m2026-11-03T05:36:16.643595Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\01_initial_no_actor.png
+[2m2026-11-03T05:36:16.809705Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\02_state20_selected_no_actor.png
+[2m2026-11-03T05:36:16.972188Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\03_advance_rejected_no_actor.png
+[2m2026-11-03T05:36:17.141375Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\04_ai_actor_rejected.png
+[2m2026-11-03T05:36:17.335921Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\05_actor1_state20.png
+[2m2026-11-03T05:36:17.523080Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\06_after_1_day.png
+[2m2026-11-03T05:36:17.726299Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\07_after_31_days_monthly.png
+[2m2026-11-03T05:36:17.930886Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\08_other_country_state.png
+[2m2026-11-03T05:36:18.113415Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\09_water.png
+[2m2026-11-03T05:36:18.312863Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\10_unassigned.png
+[2m2026-11-03T05:36:18.509964Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\11_out_of_scope.png
+[2m2026-11-03T05:36:18.755159Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\12_state_mode_state22.png
+[2m2026-11-03T05:36:19.093174Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\13_build_candidates.png
+[2m2026-11-03T05:36:19.321243Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\14_queue_6_orders.png
+[2m2026-11-03T05:36:19.501772Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\15_progress_7_days.png
+[2m2026-11-03T05:36:19.682314Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\16_after_cancel.png
+[2m2026-11-03T05:36:19.854768Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\17_other_country_state_view_only.png
+[2m2026-11-03T05:36:20.028481Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\18_water_no_build.png
+[2m2026-11-03T05:36:20.214880Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\19_build_panel_hidden.png
+[2m2026-11-03T05:36:20.532783Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\20_saved_shot_a.png
+[2m2026-11-03T05:36:21.228574Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\21_list_long_after_7_days.png
+[2m2026-11-03T05:36:21.428263Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\22_preview_shot_a.png
+[2m2026-11-03T05:36:21.642466Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\23_restored_shot_a.png
+[2m2026-11-03T05:36:21.832798Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\24_preview_broken.png
+[2m2026-11-03T05:36:22.009117Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\25_invalid_name.png
+[2m2026-11-03T05:36:22.170797Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\26_replace_target.png
+[2m2026-11-03T05:36:22.344939Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/economy_session\27_replace_refused_without_explicit.png
+exit 0

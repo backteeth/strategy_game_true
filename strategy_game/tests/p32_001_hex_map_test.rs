@@ -340,7 +340,7 @@ fn missing_file_reports_path() {
 
 #[test]
 fn asset_copy_matches_original_if_present() {
-    let orig = std::path::Path::new("../hex_atlas/hex-atlas-map.json");
+    let orig = std::path::Path::new("../hex_atlas/hex-atlas-map_2.json");
     if let Ok(o) = std::fs::read(orig) {
         assert_eq!(o, std::fs::read(DEFAULT_MAP_PATH).unwrap());
     }

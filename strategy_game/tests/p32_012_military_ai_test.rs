@@ -938,7 +938,7 @@ fn lakes_exist_in_the_full_geography_but_not_around_the_preview_region() {
     use strategy_game::hexmap::data::{Terrain, hex_neighbors, load_from_path};
     let map = load_from_path("assets/data/hex_atlas_map.json").unwrap();
     let lakes = map.cells().iter().filter(|c| c.terrain == Terrain::Lake).count();
-    assert_eq!(lakes, 202, "whole map");
+    assert_eq!(lakes, 201, "whole map"); // 地理JSON更新(schemaVersion 10)で 202 から変わった
     let w = world();
     let mut lake_near_preview = 0;
     let mut sea_near_preview = 0;

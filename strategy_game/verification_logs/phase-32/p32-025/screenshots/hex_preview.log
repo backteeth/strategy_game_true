@@ -1,0 +1,29 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 13m 01s
+     Running `target\debug\hex_map_preview.exe --world-preview --shots verification_logs/phase-32/p32-025/screenshots/hex_preview`
+[2m2026-11-03T05:36:00.886889Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "617.42", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-11-03T05:36:01.374944Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-11-03T05:36:01.375034Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-11-03T05:36:01.376538Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Creating new window Hex Map Preview (P32-001) (65v0)
+[2m2026-11-03T05:36:01.632423Z[0m [32m INFO[0m [2mstrategy_game::hexmap::view[0m[2m:[0m [HexPreview] loaded 96760 cells / 3493 rivers in 62.4 ms; built 98 chunks (200 meshes, 200 map entities) in 35.5 ms
+[2m2026-11-03T05:36:01.648572Z[0m [32m INFO[0m [2mstrategy_game::hexmap::world_view[0m[2m:[0m [WorldPreview] loaded 29 provinces / 3 states (3 unassigned), 62 boundary edges
+[2m2026-11-03T05:36:02.525785Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\01_world_focus_terrain.png
+[2m2026-11-03T05:36:02.777709Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\02_world_state_mode.png
+[2m2026-11-03T05:36:02.981326Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\03_selected_assigned.png
+[2m2026-11-03T05:36:03.157060Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\04_selected_unassigned.png
+[2m2026-11-03T05:36:03.350016Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\05_selected_out_of_scope.png
+[2m2026-11-03T05:36:03.521035Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\06_selected_water.png
+[2m2026-11-03T05:36:03.704443Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\07_borders_over_climate.png
+[2m2026-11-03T05:36:03.916245Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\08_border_closeup_with_river_and_selection.png
+[2m2026-11-03T05:36:04.078114Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\09_after_full_map_return.png
+[2m2026-11-03T05:36:04.114731Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [WorldShots] entities before close: 206
+[2m2026-11-03T05:36:04.155732Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [WorldShots] entities while closed: 0
+[2m2026-11-03T05:36:04.264749Z[0m [32m INFO[0m [2mstrategy_game::hexmap::view[0m[2m:[0m [HexPreview] loaded 96760 cells / 3493 rivers in 62.1 ms; built 98 chunks (200 meshes, 200 map entities) in 37.6 ms
+[2m2026-11-03T05:36:04.279473Z[0m [32m INFO[0m [2mstrategy_game::hexmap::world_view[0m[2m:[0m [WorldPreview] loaded 29 provinces / 3 states (3 unassigned), 62 boundary edges
+[2m2026-11-03T05:36:04.473630Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [WorldShots] entities after reopen: 206
+[2m2026-11-03T05:36:04.551406Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\10_after_reopen.png
+[2m2026-11-03T05:36:04.788851Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\11_state_summary_beta.png
+[2m2026-11-03T05:36:04.984335Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\12_state_summary_alpha.png
+[2m2026-11-03T05:36:05.161169Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\13_state_summary_gamma.png
+[2m2026-11-03T05:36:05.356615Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-025/screenshots/hex_preview\14_unassigned_no_stale_summary.png
+exit 0

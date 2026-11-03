@@ -1,0 +1,26 @@
+grid equal: True {'orientation': 'pointy', 'size': 2.5, 'origin': {'x': 2.1650635094610964, 'y': 2.5}, 'imageWidth': 1774, 'imageHeight': 887, 'extent': {'minQ': -118, 'maxQ': 409, 'minR': 0, 'maxR': 235}}
+cells old/new: 96760 96760 same coordinate set: True
+land old/new: 34503 35221 gained: 718 lost: 0
+  terrain highland 2996 -> 2996
+  terrain hills 7546 -> 7820
+  terrain lake 202 -> 201
+  terrain mountain 1892 -> 1877
+  terrain plains 17276 -> 17744
+  terrain plateau 4793 -> 4784
+  terrain sea 62055 -> 61338
+land/water flips by terrain pair: {('sea', 'plains'): 520, ('sea', 'hills'): 197, ('lake', 'hills'): 1}
+changed terrain 881
+changed climate 1151
+changed vegetation 2633
+countryId non-null cells: 457
+rivers old/new: 3398 3493 added: 95 removed: 0
+preview provinces: 29
+land within dist 3 of (83,81): old 29 new 29 same: True
+preview cells == old region: True  == new region: True
+preview cells still land in new: True  attributes changed in preview cells: []
+cells within dist<=5 with any change: []
+rivers near region old/new, added, removed: 35 35 [] []
+stored preview ids == OLD map initial numbering: True mismatch 0
+stored id vs NEW-map initial numbering (delta histogram): {718: 29}
+max stored id: 18502 next_province_id in file: 34503; new land count: 35221
+new land cells with initial index < 34503 in NEW numbering (would collide with stored IDs): 34503
