@@ -74,12 +74,11 @@ fn parts<'a>(buildings: &'a BuildingRegistry, facilities: &'a Option<LocationFac
     StaticInputs { map: &geo().map, world: geo().model(), buildings, facilities: facilities.as_ref() }
 }
 
-const SAVE_SPANS: [&str; 12] = [
+const SAVE_SPANS: [&str; 11] = [
     "save.snapshot",
     "save.identity",
     "save.encode",
-    "save.verify_decode_header",
-    "save.verify_decode_body",
+    "save.verify_decode_fast",
     "save.verify_compare",
     "save.target",
     "save.existing_check",
@@ -89,11 +88,10 @@ const SAVE_SPANS: [&str; 12] = [
     "save.replace",
 ];
 
-const LOAD_SPANS: [&str; 11] = [
+const LOAD_SPANS: [&str; 10] = [
     "load.target",
     "load.read",
-    "load.decode_header",
-    "load.decode_body",
+    "load.decode_fast",
     "load.identity",
     "load.judge",
     "restore.validate",
@@ -356,8 +354,8 @@ fn the_bench_gives_identical_results_with_and_without_timing() {
     for t in &on.trials {
         let (s, r) = (t.save.timing.as_ref().unwrap(), t.restore.timing.as_ref().unwrap());
         assert_eq!((s.outcome(), r.outcome()), (Outcome::Success, Outcome::Success));
-        assert!(s.span("save.encode").is_some() && s.span("save.verify_decode_body").is_some());
-        assert!(r.span("load.decode_body").is_some() && r.span("restore.build_candidate").is_some());
+        assert!(s.span("save.encode").is_some() && s.span("save.verify_decode_fast").is_some());
+        assert!(r.span("load.decode_fast").is_some() && r.span("restore.build_candidate").is_some());
     }
     // 記録の出力に、すべての工程と結果が出る
     let text = on.render();

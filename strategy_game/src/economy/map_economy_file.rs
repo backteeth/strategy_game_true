@@ -181,13 +181,52 @@ pub fn encode(snapshot: &MapEconomySnapshot, identity: &SavedIdentity) -> Result
 }
 
 /// テキストを封筒として解析する(ファイルは触らない)。`kind`・版を先に判定し、本体は厳密に解析する。
+///
+/// P32-028: 正常な保存は**高速経路**で読む: 本体の型つきの完全解析(`FileOwned`)を先に1回だけ試し、成功し、かつ `kind` と
+/// 版が現行のものであれば、その解析結果をそのまま返す(同じ本体を再解析しない)。それ以外(型つきの解析の失敗、別の `kind`、
+/// 別の版)は、型つきの解析のエラーを返さずに捨てて、**従来の経路**(`decode_legacy`: ヘッダー解析 → `kind`・版の判定 → 本体の解析)で
+/// 最初からやり直し、その結果をそのまま返す。したがって、判定・拒否の順序・エラーの種類と内容は、従来経路が決める。
+/// 高速経路は何も書き込まず、状態を変えない。`kind`・版の取得に、文字列検索・先頭だけの解析・位置の固定は使わない。
 pub fn decode(text: &str) -> Result<DecodedFile, FileError> {
-    decode_timed(text, &mut Timing::off(), ("", ""))
+    decode_timed(text, &mut Timing::off(), DecodePhases::NONE)
 }
 
-/// [`decode`] と同じ処理(共通の本体)。`phases` = (ヘッダー解析・`kind`/版の判定, 本体の解析) の工程名で計る(P32-026)。
-/// 計時が無効なら、結果も動作も [`decode`] と同じ。
-pub fn decode_timed(text: &str, timing: &mut Timing, phases: (&'static str, &'static str)) -> Result<DecodedFile, FileError> {
+/// [`decode`] の計時用の工程名。`fast` = 高速経路の型つきの完全解析、`header` / `body` = 従来経路(フォールバック)の
+/// ヘッダー解析と本体解析(P32-026・027 の「ヘッダー解析」「本体解析」の名前を、従来経路の工程として引き継ぐ)。
+#[derive(Debug, Clone, Copy)]
+pub struct DecodePhases {
+    pub fast: &'static str,
+    pub header: &'static str,
+    pub body: &'static str,
+}
+
+impl DecodePhases {
+    /// 計時しない(名前は使われない)。
+    pub const NONE: DecodePhases = DecodePhases { fast: "", header: "", body: "" };
+}
+
+/// [`decode`] と同じ処理(共通の本体)を工程別に計る(P32-026・028)。計時が無効なら、結果も動作も [`decode`] と同じ。
+/// 正常な保存は `fast` の1工程だけ、フォールバックしたときは `fast`(失敗した試行)+ `header` + `body` が記録される。
+pub fn decode_timed(text: &str, timing: &mut Timing, phases: DecodePhases) -> Result<DecodedFile, FileError> {
+    // 高速経路: 型つきの完全解析を先に試す。エラーは利用者へ返さない(従来経路が決める)。
+    let fast: Option<FileOwned> = timing.run(phases.fast, || ron::from_str::<FileOwned>(text).ok());
+    if let Some(file) = fast
+        && file.kind == MAP_ECONOMY_FILE_KIND
+        && file.format_version == MAP_ECONOMY_FILE_FORMAT_VERSION
+    {
+        return Ok(DecodedFile { identity: file.identity, snapshot: file.snapshot });
+    }
+    decode_legacy_timed(text, timing, (phases.header, phases.body))
+}
+
+/// **従来の** `decode`(P32-028 より前と同じ処理): ヘッダーだけを先に解析して `kind`・版を判定し、その後に本体を厳密に解析する。
+/// 高速経路のフォールバックであり、新旧比較の基準でもある。
+pub fn decode_legacy(text: &str) -> Result<DecodedFile, FileError> {
+    decode_legacy_timed(text, &mut Timing::off(), ("", ""))
+}
+
+/// [`decode_legacy`] を工程別に計る。`phases` = (ヘッダー解析・`kind`/版の判定, 本体の解析)。
+pub fn decode_legacy_timed(text: &str, timing: &mut Timing, phases: (&'static str, &'static str)) -> Result<DecodedFile, FileError> {
     // ヘッダーだけは、値をそのまま(`kind: "..."`)読めるよう `implicit_some` で解析する(本体の `Option` は明示のまま)。
     let header = timing.run(phases.0, || -> Result<Header, FileError> {
         ron::Options::default()
@@ -494,7 +533,11 @@ fn save_body(
         .map_err(FileError::Identity)?;
     let text = timing.run("save.encode", || encode(&snapshot, &identity))?;
     // 検証: 直列化した結果が、そのまま同じスナップショットとして読めること(書いたものが読めない保存を作らない)。
-    let back = decode_timed(&text, timing, ("save.verify_decode_header", "save.verify_decode_body"))?;
+    let back = decode_timed(
+        &text,
+        timing,
+        DecodePhases { fast: "save.verify_decode_fast", header: "save.verify_decode_header", body: "save.verify_decode_body" },
+    )?;
     let same = timing.run("save.verify_compare", || back.snapshot == snapshot && back.identity == identity);
     if !same {
         return Err(FileError::Serialize("the encoded text does not decode to the same snapshot".to_string()));
@@ -603,7 +646,11 @@ fn examine(
 ) -> Result<Examined, FileError> {
     let path = timing.run("load.target", || location.target(name, false))?;
     let text = timing.run("load.read", || read_limited(&path))?;
-    let file = decode_timed(&text, timing, ("load.decode_header", "load.decode_body"))?;
+    let file = decode_timed(
+        &text,
+        timing,
+        DecodePhases { fast: "load.decode_fast", header: "load.decode_header", body: "load.decode_body" },
+    )?;
     let current = timing.run("load.identity", || StaticIdentity::compute(sim, inputs)).map_err(FileError::Identity)?;
     let verdict = timing.run("load.judge", || judge(&file.identity, &current));
     Ok(Examined { path, bytes: text.len(), file, verdict })
@@ -655,20 +702,39 @@ pub fn inspect(
     location: &SaveLocation,
     name: &str,
 ) -> Result<InspectReport, FileError> {
-    let ex = examine(sim, inputs, location, name, &mut Timing::off())?;
-    let restorable = ex.verdict.is_compatible().then(|| {
-        sim.restore_candidate(&ex.file.snapshot, inputs.world, inputs.buildings).map(|_| ())
-    });
-    Ok(InspectReport {
-        path: ex.path,
-        kind: MAP_ECONOMY_FILE_KIND,
-        format_version: MAP_ECONOMY_FILE_FORMAT_VERSION,
-        bytes: ex.bytes,
-        date: ex.file.snapshot.date,
-        summary: summarize(&ex.file.snapshot),
-        verdict: ex.verdict,
-        restorable,
-    })
+    inspect_timed(sim, inputs, location, name, &mut Timing::off())
+}
+
+/// [`inspect`] と同じ処理(共通の本体)を工程別に計る(P32-028)。読み込み・解析・識別・判定は `load` と共通の `examine` の工程名(`load.*`)で、
+/// 判定を通った場合の復元可能性の確認(候補の検証・再構築)は `restore.*` の工程で記録される。計時が無効なら動作は [`inspect`] と同じ。
+pub fn inspect_timed(
+    sim: &MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+    timing: &mut Timing,
+) -> Result<InspectReport, FileError> {
+    timing.begin_total();
+    let r = (|| {
+        let ex = examine(sim, inputs, location, name, timing)?;
+        let restorable = if ex.verdict.is_compatible() {
+            Some(sim.restore_candidate_timed(&ex.file.snapshot, inputs.world, inputs.buildings, timing).map(|_| ()))
+        } else {
+            None
+        };
+        Ok(InspectReport {
+            path: ex.path,
+            kind: MAP_ECONOMY_FILE_KIND,
+            format_version: MAP_ECONOMY_FILE_FORMAT_VERSION,
+            bytes: ex.bytes,
+            date: ex.file.snapshot.date,
+            summary: summarize(&ex.file.snapshot),
+            verdict: ex.verdict,
+            restorable,
+        })
+    })();
+    timing.end_total(outcome_of(&r));
+    r
 }
 
 // ---------------------------------------------------------------- 保存の一覧

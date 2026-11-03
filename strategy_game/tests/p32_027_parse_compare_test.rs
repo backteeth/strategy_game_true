@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use strategy_game::building::data::BuildingRegistry;
-use strategy_game::economy::map_economy_file::{decode, decode_timed};
+use strategy_game::economy::map_economy_file::{DecodePhases, decode, decode_legacy_timed, decode_timed};
 use strategy_game::economy::map_session::load_buildings;
 use strategy_game::economy::parse_probe::{
     DEEP_LEVELS, Shape, fixture, parse_header_replica, parse_ignored_any, process_memory, text_stats,
@@ -106,11 +106,17 @@ fn the_header_replica_reads_the_same_kind_and_version_as_the_product_on_a_real_s
     assert_eq!(parse_header_replica(&saved.text), Ok((Some("map_economy_state".to_string()), Some(2))));
     // 計時つきの decode は、同じ結果を返し、ヘッダー・本体の2工程を1回ずつ記録する
     let mut tm = Timing::on();
-    let timed = decode_timed(&saved.text, &mut tm, ("header", "body")).unwrap();
+    let phases = DecodePhases { fast: "fast", header: "header", body: "body" };
+    let timed = decode_timed(&saved.text, &mut tm, phases).unwrap();
     assert!(timed == product);
-    assert_eq!(tm.spans().iter().map(|s| (s.name, s.calls)).collect::<Vec<_>>(), [("header", 1), ("body", 1)]);
+    // P32-028: 正常な保存は高速経路(型つきの完全解析の1工程)だけを通る。従来経路(ヘッダー・本体の2工程)は同じ結果を返す。
+    assert_eq!(tm.spans().iter().map(|s| (s.name, s.calls)).collect::<Vec<_>>(), [("fast", 1)]);
+    let mut legacy = Timing::on();
+    let l = decode_legacy_timed(&saved.text, &mut legacy, ("header", "body")).unwrap();
+    assert!(l == product);
+    assert_eq!(legacy.spans().iter().map(|s| (s.name, s.calls)).collect::<Vec<_>>(), [("header", 1), ("body", 1)]);
     // 無効な計時でも同じ結果
-    let off = decode_timed(&saved.text, &mut Timing::off(), ("header", "body")).unwrap();
+    let off = decode_timed(&saved.text, &mut Timing::off(), phases).unwrap();
     assert!(off == product);
     // 作業用のファイルは残っていない
     assert!(!base.exists() || std::fs::read_dir(&base).map(|d| d.count()).unwrap_or(0) == 0);

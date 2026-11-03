@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-use strategy_game::economy::map_economy_file::{decode, decode_timed, encode};
+use strategy_game::economy::map_economy_file::{DecodePhases, decode, decode_legacy, decode_legacy_timed, decode_timed, encode};
 use strategy_game::economy::map_session::load_buildings;
 use strategy_game::economy::parse_probe::{Shape, fixture, parse_header_replica, parse_ignored_any, process_memory, text_stats};
 use strategy_game::economy::phase_timing::Timing;
@@ -120,7 +120,7 @@ fn run(a: &Args) -> i32 {
     };
     match a.section.as_str() {
         "shapes" => shapes(a, &over),
-        "trials" | "variants" => from_product_save(a, &over),
+        "trials" | "variants" | "fallback" => from_product_save(a, &over),
         other => {
             println!("INCOMPLETE unrunnable=unknown section {other}");
             64
@@ -225,14 +225,22 @@ fn from_product_save(a: &Args, over: &dyn Fn(&str) -> bool) -> i32 {
             }
             mem_line("before_trial", trial);
             // 区間: メモリ上の同じ文章(使い回し)の解析だけ。ファイル読込・結果の破棄・出力は含まない。
+            // 新: 製品の decode(高速経路。正常な保存は fast の1工程)。従来: decode_legacy(ヘッダー解析 + 本体解析)。同じ文章・同じ試行。
             let mut tm = Timing::on();
             let t = Instant::now();
-            let res = decode_timed(&text, &mut tm, ("header", "body"));
+            let res = decode_timed(&text, &mut tm, DecodePhases { fast: "fast", header: "header", body: "body" });
             let wall = ms(t.elapsed());
             let ok = res.is_ok();
             drop(res); // 解析結果の破棄(計時の外)
-            let hdr = tm.span("header").map_or(f64::NAN, |s| ms(s.total));
-            let body = tm.span("body").map_or(f64::NAN, |s| ms(s.total));
+            let fast = tm.span("fast").map_or(f64::NAN, |s| ms(s.total));
+            let mut lg = Timing::on();
+            let t = Instant::now();
+            let lres = decode_legacy_timed(&text, &mut lg, ("header", "body"));
+            let legacy_wall = ms(t.elapsed());
+            let legacy_ok = lres.is_ok();
+            drop(lres);
+            let hdr = lg.span("header").map_or(f64::NAN, |s| ms(s.total));
+            let body = lg.span("body").map_or(f64::NAN, |s| ms(s.total));
             let t = Instant::now();
             let _ = parse_header_replica(&text);
             let rep = ms(t.elapsed());
@@ -244,10 +252,51 @@ fn from_product_save(a: &Args, over: &dyn Fn(&str) -> bool) -> i32 {
             let st = text_stats(&text);
             let ctl = ms(t.elapsed());
             println!(
-                "PARSE trial={trial} product_decode_wall_ms={wall:.3} product_header_ms={hdr:.3} product_body_ms={body:.3} replica_header_ms={rep:.3} ignored_any_full_ms={ign:.3} control_text_scan_ms={ctl:.3} bytes={} ok={ok}",
+                "PARSE trial={trial} new_decode_wall_ms={wall:.3} new_fast_ms={fast:.3} new_spans={} legacy_decode_wall_ms={legacy_wall:.3} legacy_header_ms={hdr:.3} legacy_body_ms={body:.3} replica_header_ms={rep:.3} ignored_any_full_ms={ign:.3} control_text_scan_ms={ctl:.3} bytes={} ok={ok} legacy_ok={legacy_ok}",
+                tm.spans().iter().map(|s| s.name).collect::<Vec<_>>().join("+"),
                 st.bytes
             );
             mem_line("after_trial", trial);
+        }
+        return 0;
+    }
+    if a.section == "fallback" {
+        // 小さな不正入力(同じ保存の文章を壊したもの)で、新しい decode(高速経路を試して従来経路へ戻る)と従来 decode の時間を比べる。
+        // どちらも同じ結果(拒否)を返すことを確認する。検証は省略していない(拒否の判定は従来経路が行う)。
+        let cut = {
+            let mut i = text.len() * 3 / 4;
+            while !text.is_char_boundary(i) {
+                i -= 1;
+            }
+            i
+        };
+        let cases: Vec<(&str, String)> = vec![
+            ("valid", text.clone()),
+            ("truncated_75pct", text[..cut].to_string()),
+            ("bad_kind", text.replacen("map_economy_state", "other", 1)),
+            ("unsupported_version", text.replacen("format_version: 2", "format_version: 3", 1)),
+            ("legacy_v1_shape", "(version: 1, data: 5)".to_string()),
+            ("corrupt_second_half", text.replacen("states: [", "states: @[", 1)),
+            ("empty", String::new()),
+        ];
+        for (name, t) in &cases {
+            for trial in 1..=a.trials {
+                if over(&format!("fallback {name} trial {trial}")) {
+                    return 3;
+                }
+                let t0 = Instant::now();
+                let n = decode(t);
+                let new_ms = ms(t0.elapsed());
+                let t0 = Instant::now();
+                let l = decode_legacy(t);
+                let legacy_ms = ms(t0.elapsed());
+                let same = format!("{n:?}") == format!("{l:?}");
+                println!(
+                    "FALLBACK name={name} trial={trial} bytes={} new_decode_ms={new_ms:.3} legacy_decode_ms={legacy_ms:.3} same_result={same} outcome={}",
+                    t.len(),
+                    if n.is_ok() { "ok" } else { "rejected" }
+                );
+            }
         }
         return 0;
     }
@@ -278,7 +327,7 @@ fn from_product_save(a: &Args, over: &dyn Fn(&str) -> bool) -> i32 {
                 return 3;
             }
             let mut tm = Timing::on();
-            let res = decode_timed(&vt, &mut tm, ("header", "body"));
+            let res = decode_legacy_timed(&vt, &mut tm, ("header", "body"));
             let ok = res.is_ok();
             drop(res);
             let hdr = tm.span("header").map_or(f64::NAN, |s| ms(s.total));

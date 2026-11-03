@@ -1,0 +1,150 @@
+decode_1000x3_unpinned mask=0 exit=
+decode_1000x100_pinned mask=65535 exit=
+decode_300x3_pinned mask=65535 exit=
+decode_100x3_pinned mask=65535 exit=
+fallback_100x3_pinned mask=65535 exit=
+Start-Process : パラメーター 'ArgumentList の引数を確認できません。引数が null または空です。null または空でない引数を指定
+して、コマンドを再度実行してください。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:13 
+文字:53
++ ...    $p = Start-Process -FilePath $exe -ArgumentList $arguments -PassTh ...
++                                                        ~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Start-Process]、ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand
+ 
+このオブジェクトにプロパティ 'ProcessorAffinity' が見つかりません。プロパティが存在し、設定可能であることを確認してくださ
+い。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:14 
+文字:24
++     if ($mask -ne 0) { $p.ProcessorAffinity = [IntPtr]$mask }
++                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : PropertyNotFound
+ 
+null 値の式ではメソッドを呼び出せません。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:15 
+文字:5
++     $p.WaitForExit()
++     ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+e2e_pinned_old_a mask=65535 exit=
+Start-Process : パラメーター 'ArgumentList の引数を確認できません。引数が null または空です。null または空でない引数を指定
+して、コマンドを再度実行してください。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:13 
+文字:53
++ ...    $p = Start-Process -FilePath $exe -ArgumentList $arguments -PassTh ...
++                                                        ~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Start-Process]、ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand
+ 
+このオブジェクトにプロパティ 'ProcessorAffinity' が見つかりません。プロパティが存在し、設定可能であることを確認してくださ
+い。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:14 
+文字:24
++     if ($mask -ne 0) { $p.ProcessorAffinity = [IntPtr]$mask }
++                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : PropertyNotFound
+ 
+null 値の式ではメソッドを呼び出せません。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:15 
+文字:5
++     $p.WaitForExit()
++     ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+e2e_pinned_new_a mask=65535 exit=
+Start-Process : パラメーター 'ArgumentList の引数を確認できません。引数が null または空です。null または空でない引数を指定
+して、コマンドを再度実行してください。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:13 
+文字:53
++ ...    $p = Start-Process -FilePath $exe -ArgumentList $arguments -PassTh ...
++                                                        ~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Start-Process]、ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand
+ 
+このオブジェクトにプロパティ 'ProcessorAffinity' が見つかりません。プロパティが存在し、設定可能であることを確認してくださ
+い。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:14 
+文字:24
++     if ($mask -ne 0) { $p.ProcessorAffinity = [IntPtr]$mask }
++                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : PropertyNotFound
+ 
+null 値の式ではメソッドを呼び出せません。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:15 
+文字:5
++     $p.WaitForExit()
++     ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+e2e_pinned_new_b mask=65535 exit=
+Start-Process : パラメーター 'ArgumentList の引数を確認できません。引数が null または空です。null または空でない引数を指定
+して、コマンドを再度実行してください。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:13 
+文字:53
++ ...    $p = Start-Process -FilePath $exe -ArgumentList $arguments -PassTh ...
++                                                        ~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Start-Process]、ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand
+ 
+このオブジェクトにプロパティ 'ProcessorAffinity' が見つかりません。プロパティが存在し、設定可能であることを確認してくださ
+い。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:14 
+文字:24
++     if ($mask -ne 0) { $p.ProcessorAffinity = [IntPtr]$mask }
++                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : PropertyNotFound
+ 
+null 値の式ではメソッドを呼び出せません。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:15 
+文字:5
++     $p.WaitForExit()
++     ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+e2e_pinned_old_b mask=65535 exit=
+Start-Process : パラメーター 'ArgumentList の引数を確認できません。引数が null または空です。null または空でない引数を指定
+して、コマンドを再度実行してください。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:13 
+文字:53
++ ...    $p = Start-Process -FilePath $exe -ArgumentList $arguments -PassTh ...
++                                                        ~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Start-Process]、ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand
+ 
+null 値の式ではメソッドを呼び出せません。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:15 
+文字:5
++     $p.WaitForExit()
++     ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+e2e_unpinned_old mask=0 exit=
+Start-Process : パラメーター 'ArgumentList の引数を確認できません。引数が null または空です。null または空でない引数を指定
+して、コマンドを再度実行してください。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:13 
+文字:53
++ ...    $p = Start-Process -FilePath $exe -ArgumentList $arguments -PassTh ...
++                                                        ~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (:) [Start-Process]、ParameterBindingValidationException
+    + FullyQualifiedErrorId : ParameterArgumentValidationError,Microsoft.PowerShell.Commands.StartProcessCommand
+ 
+null 値の式ではメソッドを呼び出せません。
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:15 
+文字:5
++     $p.WaitForExit()
++     ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []、RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+e2e_unpinned_new mask=0 exit=
+all done

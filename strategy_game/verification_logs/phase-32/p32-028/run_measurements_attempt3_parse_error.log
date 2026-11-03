@@ -1,0 +1,8 @@
+発生場所 C:\Users\hirom\Desktop\strategy_game\strategy_game\verification_logs\phase-32\p32-028\run_measurements.ps1:18 
+文字:1
++ }
++ ~
+式またはステートメントのトークン '}' を使用できません。
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
+ 

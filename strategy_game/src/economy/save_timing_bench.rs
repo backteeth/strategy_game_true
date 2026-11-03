@@ -44,6 +44,10 @@ pub struct Trial {
     pub index: u32,
     pub save: OpRecord,
     pub restore: OpRecord,
+    /// 復元せずに確認する `inspect` の全体時間(外側から計った時間。通常のAPIを呼ぶ。復元はしない)。
+    pub inspect_wall_ms: f64,
+    pub inspect_exact: bool,
+    pub inspect_restorable: bool,
     pub file_bytes: u64,
     pub file_blake3: String,
     pub restored_equals_state_at_save: bool,
@@ -171,6 +175,13 @@ fn inner(
         }
         deadline.check("save")?;
 
+        // 復元せずに確認する(`inspect`。新しいセッションの状態は変わらない)。
+        let t = Instant::now();
+        let report = map_economy_file::inspect(&resumed, &inputs, &location, SAVE_NAME);
+        let inspect_wall = t.elapsed();
+        let report = report.map_err(|e| Abort::Unrunnable(format!("inspect failed: {e:?}")))?;
+        deadline.check("inspect")?;
+
         let mut load_timing = spec.timed.then(Timing::on);
         let t = Instant::now();
         let loaded = match &mut load_timing {
@@ -201,6 +212,9 @@ fn inner(
             index,
             save: OpRecord { wall_ms: ms(save_wall), timing: save_timing },
             restore: OpRecord { wall_ms: ms(load_wall), timing: load_timing },
+            inspect_wall_ms: ms(inspect_wall),
+            inspect_exact: report.verdict.is_exact(),
+            inspect_restorable: matches!(report.restorable, Some(Ok(()))),
             file_bytes: bytes.len() as u64,
             file_blake3,
             restored_equals_state_at_save: equal,
@@ -279,8 +293,8 @@ impl BenchResult {
         let _ = writeln!(o, "CASE case={case} mode={mode} status={} states={} countries={} save_date={} queued_orders_at_save={} setup_ms={:.3} total_ms={:.3}",
             self.status.label(), self.states, self.countries, self.save_date, self.queued_orders_at_save, self.setup_ms, self.total_ms);
         for t in &self.trials {
-            let _ = writeln!(o, "TRIAL case={case} mode={mode} trial={} save_wall_ms={:.3} restore_wall_ms={:.3} bytes={} file_blake3={} restored_equal={} verdict_exact={} warnings={} restored_date={}",
-                t.index, t.save.wall_ms, t.restore.wall_ms, t.file_bytes, t.file_blake3, t.restored_equals_state_at_save, t.verdict_exact, t.verdict_warnings, t.restored_date);
+            let _ = writeln!(o, "TRIAL case={case} mode={mode} trial={} save_wall_ms={:.3} restore_wall_ms={:.3} inspect_wall_ms={:.3} inspect_exact={} inspect_restorable={} bytes={} file_blake3={} restored_equal={} verdict_exact={} warnings={} restored_date={}",
+                t.index, t.save.wall_ms, t.restore.wall_ms, t.inspect_wall_ms, t.inspect_exact, t.inspect_restorable, t.file_bytes, t.file_blake3, t.restored_equals_state_at_save, t.verdict_exact, t.verdict_warnings, t.restored_date);
             for (op, rec) in [("save", &t.save), ("restore", &t.restore)] {
                 if let Some(tm) = &rec.timing {
                     let _ = writeln!(o, "TOTAL case={case} mode={mode} trial={} op={op} total_ms={:.3} covered_ms={:.3} uncovered_ms={:.3} outcome={:?}",

@@ -1,0 +1,13 @@
+done decode_1000x3_pinned_a exe=new_economy_parse_compare.exe mask=65535
+done decode_1000x3_unpinned exe=new_economy_parse_compare.exe mask=0
+done decode_1000x100_pinned exe=new_economy_parse_compare.exe mask=65535
+done decode_300x3_pinned exe=new_economy_parse_compare.exe mask=65535
+done decode_100x3_pinned exe=new_economy_parse_compare.exe mask=65535
+done fallback_100x3_pinned exe=new_economy_parse_compare.exe mask=65535
+done e2e_pinned_old_a exe=old_economy_save_timing.exe mask=65535
+done e2e_pinned_new_a exe=new_economy_save_timing.exe mask=65535
+done e2e_pinned_new_b exe=new_economy_save_timing.exe mask=65535
+done e2e_pinned_old_b exe=old_economy_save_timing.exe mask=65535
+done e2e_unpinned_old exe=old_economy_save_timing.exe mask=0
+done e2e_unpinned_new exe=new_economy_save_timing.exe mask=0
+all done

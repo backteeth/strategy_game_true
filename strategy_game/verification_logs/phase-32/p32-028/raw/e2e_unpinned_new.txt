@@ -1,0 +1,193 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+
+=== RUN states=1000 countries=3 mode=on pass=1 ===
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE case=1000x3 mode=on status=成功 states=1000 countries=3 save_date=SimDate { year: 1800, month: 6, day: 30 } queued_orders_at_save=9 setup_ms=34.007 total_ms=1287.937
+TRIAL case=1000x3 mode=on trial=1 save_wall_ms=31.416 restore_wall_ms=27.753 inspect_wall_ms=36.362 inspect_exact=true inspect_restorable=true bytes=766591 file_blake3=5cb94e817b03a217de999873ed0cc3f078b7ba04f62269b13dd02ff47263b493 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TOTAL case=1000x3 mode=on trial=1 op=save total_ms=31.413 covered_ms=31.142 uncovered_ms=0.270 outcome=Success
+SPAN case=1000x3 mode=on trial=1 op=save name=save.snapshot calls=1 ms=0.360
+SPAN case=1000x3 mode=on trial=1 op=save name=save.identity calls=1 ms=20.076
+SPAN case=1000x3 mode=on trial=1 op=save name=save.encode calls=1 ms=2.414
+SPAN case=1000x3 mode=on trial=1 op=save name=save.verify_decode_fast calls=1 ms=5.403
+SPAN case=1000x3 mode=on trial=1 op=save name=save.verify_compare calls=1 ms=0.021
+SPAN case=1000x3 mode=on trial=1 op=save name=save.target calls=1 ms=0.854
+SPAN case=1000x3 mode=on trial=1 op=save name=save.existing_check calls=1 ms=0.019
+SPAN case=1000x3 mode=on trial=1 op=save name=save.temp_create calls=1 ms=0.320
+SPAN case=1000x3 mode=on trial=1 op=save name=save.write calls=1 ms=0.484
+SPAN case=1000x3 mode=on trial=1 op=save name=save.sync calls=1 ms=0.829
+SPAN case=1000x3 mode=on trial=1 op=save name=save.replace calls=1 ms=0.362
+CHECK case=1000x3 mode=on trial=1 op=save wall_ms=31.416 total_ms=31.413 covered_ms=31.142 max_span_ms=20.076 covered_le_total=true total_le_wall=true max_span_le_total=true
+TOTAL case=1000x3 mode=on trial=1 op=restore total_ms=27.752 covered_ms=27.666 uncovered_ms=0.086 outcome=Success
+SPAN case=1000x3 mode=on trial=1 op=restore name=load.target calls=1 ms=0.299
+SPAN case=1000x3 mode=on trial=1 op=restore name=load.read calls=1 ms=0.659
+SPAN case=1000x3 mode=on trial=1 op=restore name=load.decode_fast calls=1 ms=5.676
+SPAN case=1000x3 mode=on trial=1 op=restore name=load.identity calls=1 ms=19.865
+SPAN case=1000x3 mode=on trial=1 op=restore name=load.judge calls=1 ms=0.008
+SPAN case=1000x3 mode=on trial=1 op=restore name=restore.validate calls=1 ms=0.359
+SPAN case=1000x3 mode=on trial=1 op=restore name=restore.build_candidate calls=1 ms=0.360
+SPAN case=1000x3 mode=on trial=1 op=restore name=restore.roundtrip_snapshot calls=1 ms=0.357
+SPAN case=1000x3 mode=on trial=1 op=restore name=restore.roundtrip_compare calls=1 ms=0.013
+SPAN case=1000x3 mode=on trial=1 op=restore name=restore.roundtrip_drop calls=1 ms=0.021
+SPAN case=1000x3 mode=on trial=1 op=restore name=restore.apply calls=1 ms=0.050
+CHECK case=1000x3 mode=on trial=1 op=restore wall_ms=27.753 total_ms=27.752 covered_ms=27.666 max_span_ms=19.865 covered_le_total=true total_le_wall=true max_span_le_total=true
+TRIAL case=1000x3 mode=on trial=2 save_wall_ms=32.054 restore_wall_ms=28.427 inspect_wall_ms=38.175 inspect_exact=true inspect_restorable=true bytes=766591 file_blake3=5cb94e817b03a217de999873ed0cc3f078b7ba04f62269b13dd02ff47263b493 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TOTAL case=1000x3 mode=on trial=2 op=save total_ms=32.054 covered_ms=31.835 uncovered_ms=0.219 outcome=Success
+SPAN case=1000x3 mode=on trial=2 op=save name=save.snapshot calls=1 ms=0.392
+SPAN case=1000x3 mode=on trial=2 op=save name=save.identity calls=1 ms=20.315
+SPAN case=1000x3 mode=on trial=2 op=save name=save.encode calls=1 ms=2.544
+SPAN case=1000x3 mode=on trial=2 op=save name=save.verify_decode_fast calls=1 ms=5.694
+SPAN case=1000x3 mode=on trial=2 op=save name=save.verify_compare calls=1 ms=0.024
+SPAN case=1000x3 mode=on trial=2 op=save name=save.target calls=1 ms=1.261
+SPAN case=1000x3 mode=on trial=2 op=save name=save.existing_check calls=1 ms=0.016
+SPAN case=1000x3 mode=on trial=2 op=save name=save.temp_create calls=1 ms=0.255
+SPAN case=1000x3 mode=on trial=2 op=save name=save.write calls=1 ms=0.313
+SPAN case=1000x3 mode=on trial=2 op=save name=save.sync calls=1 ms=0.652
+SPAN case=1000x3 mode=on trial=2 op=save name=save.replace calls=1 ms=0.371
+CHECK case=1000x3 mode=on trial=2 op=save wall_ms=32.054 total_ms=32.054 covered_ms=31.835 max_span_ms=20.315 covered_le_total=true total_le_wall=true max_span_le_total=true
+TOTAL case=1000x3 mode=on trial=2 op=restore total_ms=28.426 covered_ms=28.348 uncovered_ms=0.078 outcome=Success
+SPAN case=1000x3 mode=on trial=2 op=restore name=load.target calls=1 ms=0.405
+SPAN case=1000x3 mode=on trial=2 op=restore name=load.read calls=1 ms=0.324
+SPAN case=1000x3 mode=on trial=2 op=restore name=load.decode_fast calls=1 ms=6.242
+SPAN case=1000x3 mode=on trial=2 op=restore name=load.identity calls=1 ms=20.230
+SPAN case=1000x3 mode=on trial=2 op=restore name=load.judge calls=1 ms=0.007
+SPAN case=1000x3 mode=on trial=2 op=restore name=restore.validate calls=1 ms=0.345
+SPAN case=1000x3 mode=on trial=2 op=restore name=restore.build_candidate calls=1 ms=0.344
+SPAN case=1000x3 mode=on trial=2 op=restore name=restore.roundtrip_snapshot calls=1 ms=0.366
+SPAN case=1000x3 mode=on trial=2 op=restore name=restore.roundtrip_compare calls=1 ms=0.014
+SPAN case=1000x3 mode=on trial=2 op=restore name=restore.roundtrip_drop calls=1 ms=0.021
+SPAN case=1000x3 mode=on trial=2 op=restore name=restore.apply calls=1 ms=0.050
+CHECK case=1000x3 mode=on trial=2 op=restore wall_ms=28.427 total_ms=28.426 covered_ms=28.348 max_span_ms=20.230 covered_le_total=true total_le_wall=true max_span_le_total=true
+TRIAL case=1000x3 mode=on trial=3 save_wall_ms=31.171 restore_wall_ms=27.174 inspect_wall_ms=38.451 inspect_exact=true inspect_restorable=true bytes=766591 file_blake3=5cb94e817b03a217de999873ed0cc3f078b7ba04f62269b13dd02ff47263b493 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TOTAL case=1000x3 mode=on trial=3 op=save total_ms=31.171 covered_ms=30.983 uncovered_ms=0.188 outcome=Success
+SPAN case=1000x3 mode=on trial=3 op=save name=save.snapshot calls=1 ms=0.375
+SPAN case=1000x3 mode=on trial=3 op=save name=save.identity calls=1 ms=19.911
+SPAN case=1000x3 mode=on trial=3 op=save name=save.encode calls=1 ms=2.654
+SPAN case=1000x3 mode=on trial=3 op=save name=save.verify_decode_fast calls=1 ms=5.633
+SPAN case=1000x3 mode=on trial=3 op=save name=save.verify_compare calls=1 ms=0.025
+SPAN case=1000x3 mode=on trial=3 op=save name=save.target calls=1 ms=0.819
+SPAN case=1000x3 mode=on trial=3 op=save name=save.existing_check calls=1 ms=0.015
+SPAN case=1000x3 mode=on trial=3 op=save name=save.temp_create calls=1 ms=0.228
+SPAN case=1000x3 mode=on trial=3 op=save name=save.write calls=1 ms=0.278
+SPAN case=1000x3 mode=on trial=3 op=save name=save.sync calls=1 ms=0.687
+SPAN case=1000x3 mode=on trial=3 op=save name=save.replace calls=1 ms=0.357
+CHECK case=1000x3 mode=on trial=3 op=save wall_ms=31.171 total_ms=31.171 covered_ms=30.983 max_span_ms=19.911 covered_le_total=true total_le_wall=true max_span_le_total=true
+TOTAL case=1000x3 mode=on trial=3 op=restore total_ms=27.173 covered_ms=27.104 uncovered_ms=0.070 outcome=Success
+SPAN case=1000x3 mode=on trial=3 op=restore name=load.target calls=1 ms=0.351
+SPAN case=1000x3 mode=on trial=3 op=restore name=load.read calls=1 ms=0.362
+SPAN case=1000x3 mode=on trial=3 op=restore name=load.decode_fast calls=1 ms=5.433
+SPAN case=1000x3 mode=on trial=3 op=restore name=load.identity calls=1 ms=19.794
+SPAN case=1000x3 mode=on trial=3 op=restore name=load.judge calls=1 ms=0.007
+SPAN case=1000x3 mode=on trial=3 op=restore name=restore.validate calls=1 ms=0.343
+SPAN case=1000x3 mode=on trial=3 op=restore name=restore.build_candidate calls=1 ms=0.335
+SPAN case=1000x3 mode=on trial=3 op=restore name=restore.roundtrip_snapshot calls=1 ms=0.395
+SPAN case=1000x3 mode=on trial=3 op=restore name=restore.roundtrip_compare calls=1 ms=0.014
+SPAN case=1000x3 mode=on trial=3 op=restore name=restore.roundtrip_drop calls=1 ms=0.022
+SPAN case=1000x3 mode=on trial=3 op=restore name=restore.apply calls=1 ms=0.048
+CHECK case=1000x3 mode=on trial=3 op=restore wall_ms=27.174 total_ms=27.173 covered_ms=27.104 max_span_ms=19.794 covered_le_total=true total_le_wall=true max_span_le_total=true
+CONTINUITY case=1000x3 mode=on compared_days=180 mismatch_days=0 final_equal=true distinct_digests=180 digest_chain=040e84f07ab396f9db0a0a4ba6168362589bd4ff92687df3acf6256e84328e13 file_hashes_equal=true
+EXIT case=1000x3 mode=on pass=1 code=0 killed=false wall_s=1.4
+
+=== RUN states=1000 countries=3 mode=off pass=2 ===
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE case=1000x3 mode=off status=成功 states=1000 countries=3 save_date=SimDate { year: 1800, month: 6, day: 30 } queued_orders_at_save=9 setup_ms=35.939 total_ms=1277.503
+TRIAL case=1000x3 mode=off trial=1 save_wall_ms=32.766 restore_wall_ms=28.403 inspect_wall_ms=37.909 inspect_exact=true inspect_restorable=true bytes=766591 file_blake3=5cb94e817b03a217de999873ed0cc3f078b7ba04f62269b13dd02ff47263b493 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TRIAL case=1000x3 mode=off trial=2 save_wall_ms=31.779 restore_wall_ms=28.120 inspect_wall_ms=35.766 inspect_exact=true inspect_restorable=true bytes=766591 file_blake3=5cb94e817b03a217de999873ed0cc3f078b7ba04f62269b13dd02ff47263b493 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TRIAL case=1000x3 mode=off trial=3 save_wall_ms=31.900 restore_wall_ms=28.079 inspect_wall_ms=37.379 inspect_exact=true inspect_restorable=true bytes=766591 file_blake3=5cb94e817b03a217de999873ed0cc3f078b7ba04f62269b13dd02ff47263b493 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+CONTINUITY case=1000x3 mode=off compared_days=180 mismatch_days=0 final_equal=true distinct_digests=180 digest_chain=040e84f07ab396f9db0a0a4ba6168362589bd4ff92687df3acf6256e84328e13 file_hashes_equal=true
+EXIT case=1000x3 mode=off pass=2 code=0 killed=false wall_s=1.4
+
+=== RUN states=1000 countries=100 mode=on pass=1 ===
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE case=1000x100 mode=on status=成功 states=1000 countries=100 save_date=SimDate { year: 1800, month: 6, day: 30 } queued_orders_at_save=139 setup_ms=125.970 total_ms=1842.924
+TRIAL case=1000x100 mode=on trial=1 save_wall_ms=38.831 restore_wall_ms=30.161 inspect_wall_ms=40.226 inspect_exact=true inspect_restorable=true bytes=1251733 file_blake3=8c38ce86d8a4f0e15ac7507ff46608f9555ba209c2296e67f084a01391df6c60 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TOTAL case=1000x100 mode=on trial=1 op=save total_ms=38.822 covered_ms=38.395 uncovered_ms=0.427 outcome=Success
+SPAN case=1000x100 mode=on trial=1 op=save name=save.snapshot calls=1 ms=0.496
+SPAN case=1000x100 mode=on trial=1 op=save name=save.identity calls=1 ms=20.159
+SPAN case=1000x100 mode=on trial=1 op=save name=save.encode calls=1 ms=4.126
+SPAN case=1000x100 mode=on trial=1 op=save name=save.verify_decode_fast calls=1 ms=9.243
+SPAN case=1000x100 mode=on trial=1 op=save name=save.verify_compare calls=1 ms=0.039
+SPAN case=1000x100 mode=on trial=1 op=save name=save.target calls=1 ms=0.663
+SPAN case=1000x100 mode=on trial=1 op=save name=save.existing_check calls=1 ms=0.019
+SPAN case=1000x100 mode=on trial=1 op=save name=save.temp_create calls=1 ms=0.226
+SPAN case=1000x100 mode=on trial=1 op=save name=save.write calls=1 ms=0.387
+SPAN case=1000x100 mode=on trial=1 op=save name=save.sync calls=1 ms=2.620
+SPAN case=1000x100 mode=on trial=1 op=save name=save.replace calls=1 ms=0.418
+CHECK case=1000x100 mode=on trial=1 op=save wall_ms=38.831 total_ms=38.822 covered_ms=38.395 max_span_ms=20.159 covered_le_total=true total_le_wall=true max_span_le_total=true
+TOTAL case=1000x100 mode=on trial=1 op=restore total_ms=30.160 covered_ms=29.957 uncovered_ms=0.203 outcome=Success
+SPAN case=1000x100 mode=on trial=1 op=restore name=load.target calls=1 ms=0.282
+SPAN case=1000x100 mode=on trial=1 op=restore name=load.read calls=1 ms=0.479
+SPAN case=1000x100 mode=on trial=1 op=restore name=load.decode_fast calls=1 ms=7.999
+SPAN case=1000x100 mode=on trial=1 op=restore name=load.identity calls=1 ms=19.792
+SPAN case=1000x100 mode=on trial=1 op=restore name=load.judge calls=1 ms=0.008
+SPAN case=1000x100 mode=on trial=1 op=restore name=restore.validate calls=1 ms=0.381
+SPAN case=1000x100 mode=on trial=1 op=restore name=restore.build_candidate calls=1 ms=0.489
+SPAN case=1000x100 mode=on trial=1 op=restore name=restore.roundtrip_snapshot calls=1 ms=0.420
+SPAN case=1000x100 mode=on trial=1 op=restore name=restore.roundtrip_compare calls=1 ms=0.019
+SPAN case=1000x100 mode=on trial=1 op=restore name=restore.roundtrip_drop calls=1 ms=0.028
+SPAN case=1000x100 mode=on trial=1 op=restore name=restore.apply calls=1 ms=0.058
+CHECK case=1000x100 mode=on trial=1 op=restore wall_ms=30.161 total_ms=30.160 covered_ms=29.957 max_span_ms=19.792 covered_le_total=true total_le_wall=true max_span_le_total=true
+TRIAL case=1000x100 mode=on trial=2 save_wall_ms=36.163 restore_wall_ms=31.451 inspect_wall_ms=40.142 inspect_exact=true inspect_restorable=true bytes=1251733 file_blake3=8c38ce86d8a4f0e15ac7507ff46608f9555ba209c2296e67f084a01391df6c60 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TOTAL case=1000x100 mode=on trial=2 op=save total_ms=36.163 covered_ms=35.786 uncovered_ms=0.377 outcome=Success
+SPAN case=1000x100 mode=on trial=2 op=save name=save.snapshot calls=1 ms=0.429
+SPAN case=1000x100 mode=on trial=2 op=save name=save.identity calls=1 ms=19.940
+SPAN case=1000x100 mode=on trial=2 op=save name=save.encode calls=1 ms=4.334
+SPAN case=1000x100 mode=on trial=2 op=save name=save.verify_decode_fast calls=1 ms=8.538
+SPAN case=1000x100 mode=on trial=2 op=save name=save.verify_compare calls=1 ms=0.035
+SPAN case=1000x100 mode=on trial=2 op=save name=save.target calls=1 ms=0.583
+SPAN case=1000x100 mode=on trial=2 op=save name=save.existing_check calls=1 ms=0.015
+SPAN case=1000x100 mode=on trial=2 op=save name=save.temp_create calls=1 ms=0.191
+SPAN case=1000x100 mode=on trial=2 op=save name=save.write calls=1 ms=0.503
+SPAN case=1000x100 mode=on trial=2 op=save name=save.sync calls=1 ms=0.819
+SPAN case=1000x100 mode=on trial=2 op=save name=save.replace calls=1 ms=0.399
+CHECK case=1000x100 mode=on trial=2 op=save wall_ms=36.163 total_ms=36.163 covered_ms=35.786 max_span_ms=19.940 covered_le_total=true total_le_wall=true max_span_le_total=true
+TOTAL case=1000x100 mode=on trial=2 op=restore total_ms=31.450 covered_ms=31.299 uncovered_ms=0.151 outcome=Success
+SPAN case=1000x100 mode=on trial=2 op=restore name=load.target calls=1 ms=0.281
+SPAN case=1000x100 mode=on trial=2 op=restore name=load.read calls=1 ms=0.507
+SPAN case=1000x100 mode=on trial=2 op=restore name=load.decode_fast calls=1 ms=8.310
+SPAN case=1000x100 mode=on trial=2 op=restore name=load.identity calls=1 ms=20.547
+SPAN case=1000x100 mode=on trial=2 op=restore name=load.judge calls=1 ms=0.007
+SPAN case=1000x100 mode=on trial=2 op=restore name=restore.validate calls=1 ms=0.463
+SPAN case=1000x100 mode=on trial=2 op=restore name=restore.build_candidate calls=1 ms=0.501
+SPAN case=1000x100 mode=on trial=2 op=restore name=restore.roundtrip_snapshot calls=1 ms=0.550
+SPAN case=1000x100 mode=on trial=2 op=restore name=restore.roundtrip_compare calls=1 ms=0.033
+SPAN case=1000x100 mode=on trial=2 op=restore name=restore.roundtrip_drop calls=1 ms=0.028
+SPAN case=1000x100 mode=on trial=2 op=restore name=restore.apply calls=1 ms=0.072
+CHECK case=1000x100 mode=on trial=2 op=restore wall_ms=31.451 total_ms=31.450 covered_ms=31.299 max_span_ms=20.547 covered_le_total=true total_le_wall=true max_span_le_total=true
+TRIAL case=1000x100 mode=on trial=3 save_wall_ms=36.985 restore_wall_ms=31.422 inspect_wall_ms=39.207 inspect_exact=true inspect_restorable=true bytes=1251733 file_blake3=8c38ce86d8a4f0e15ac7507ff46608f9555ba209c2296e67f084a01391df6c60 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TOTAL case=1000x100 mode=on trial=3 op=save total_ms=36.985 covered_ms=36.513 uncovered_ms=0.472 outcome=Success
+SPAN case=1000x100 mode=on trial=3 op=save name=save.snapshot calls=1 ms=0.619
+SPAN case=1000x100 mode=on trial=3 op=save name=save.identity calls=1 ms=20.400
+SPAN case=1000x100 mode=on trial=3 op=save name=save.encode calls=1 ms=4.214
+SPAN case=1000x100 mode=on trial=3 op=save name=save.verify_decode_fast calls=1 ms=8.537
+SPAN case=1000x100 mode=on trial=3 op=save name=save.verify_compare calls=1 ms=0.043
+SPAN case=1000x100 mode=on trial=3 op=save name=save.target calls=1 ms=0.620
+SPAN case=1000x100 mode=on trial=3 op=save name=save.existing_check calls=1 ms=0.015
+SPAN case=1000x100 mode=on trial=3 op=save name=save.temp_create calls=1 ms=0.204
+SPAN case=1000x100 mode=on trial=3 op=save name=save.write calls=1 ms=0.445
+SPAN case=1000x100 mode=on trial=3 op=save name=save.sync calls=1 ms=0.864
+SPAN case=1000x100 mode=on trial=3 op=save name=save.replace calls=1 ms=0.553
+CHECK case=1000x100 mode=on trial=3 op=save wall_ms=36.985 total_ms=36.985 covered_ms=36.513 max_span_ms=20.400 covered_le_total=true total_le_wall=true max_span_le_total=true
+TOTAL case=1000x100 mode=on trial=3 op=restore total_ms=31.421 covered_ms=31.275 uncovered_ms=0.146 outcome=Success
+SPAN case=1000x100 mode=on trial=3 op=restore name=load.target calls=1 ms=0.281
+SPAN case=1000x100 mode=on trial=3 op=restore name=load.read calls=1 ms=0.484
+SPAN case=1000x100 mode=on trial=3 op=restore name=load.decode_fast calls=1 ms=8.747
+SPAN case=1000x100 mode=on trial=3 op=restore name=load.identity calls=1 ms=20.412
+SPAN case=1000x100 mode=on trial=3 op=restore name=load.judge calls=1 ms=0.008
+SPAN case=1000x100 mode=on trial=3 op=restore name=restore.validate calls=1 ms=0.397
+SPAN case=1000x100 mode=on trial=3 op=restore name=restore.build_candidate calls=1 ms=0.415
+SPAN case=1000x100 mode=on trial=3 op=restore name=restore.roundtrip_snapshot calls=1 ms=0.417
+SPAN case=1000x100 mode=on trial=3 op=restore name=restore.roundtrip_compare calls=1 ms=0.017
+SPAN case=1000x100 mode=on trial=3 op=restore name=restore.roundtrip_drop calls=1 ms=0.027
+SPAN case=1000x100 mode=on trial=3 op=restore name=restore.apply calls=1 ms=0.070
+CHECK case=1000x100 mode=on trial=3 op=restore wall_ms=31.422 total_ms=31.421 covered_ms=31.275 max_span_ms=20.412 covered_le_total=true total_le_wall=true max_span_le_total=true
+CONTINUITY case=1000x100 mode=on compared_days=180 mismatch_days=0 final_equal=true distinct_digests=180 digest_chain=73983edac72dc2ab31ab6c24447f0152b38e05aedaf160d4bac1c7b3515a64e1 file_hashes_equal=true
+EXIT case=1000x100 mode=on pass=1 code=0 killed=false wall_s=1.9
+
+=== RUN states=1000 countries=100 mode=off pass=2 ===
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE case=1000x100 mode=off status=成功 states=1000 countries=100 save_date=SimDate { year: 1800, month: 6, day: 30 } queued_orders_at_save=139 setup_ms=126.821 total_ms=1869.806
+TRIAL case=1000x100 mode=off trial=1 save_wall_ms=38.107 restore_wall_ms=30.881 inspect_wall_ms=40.368 inspect_exact=true inspect_restorable=true bytes=1251733 file_blake3=8c38ce86d8a4f0e15ac7507ff46608f9555ba209c2296e67f084a01391df6c60 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TRIAL case=1000x100 mode=off trial=2 save_wall_ms=36.782 restore_wall_ms=30.475 inspect_wall_ms=38.891 inspect_exact=true inspect_restorable=true bytes=1251733 file_blake3=8c38ce86d8a4f0e15ac7507ff46608f9555ba209c2296e67f084a01391df6c60 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+TRIAL case=1000x100 mode=off trial=3 save_wall_ms=36.337 restore_wall_ms=30.973 inspect_wall_ms=39.922 inspect_exact=true inspect_restorable=true bytes=1251733 file_blake3=8c38ce86d8a4f0e15ac7507ff46608f9555ba209c2296e67f084a01391df6c60 restored_equal=true verdict_exact=true warnings=0 restored_date=SnapshotDate { year: 1800, month: 6, day: 30 }
+CONTINUITY case=1000x100 mode=off compared_days=180 mismatch_days=0 final_equal=true distinct_digests=180 digest_chain=73983edac72dc2ab31ab6c24447f0152b38e05aedaf160d4bac1c7b3515a64e1 file_hashes_equal=true
+EXIT case=1000x100 mode=off pass=2 code=0 killed=false wall_s=2.0

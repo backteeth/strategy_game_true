@@ -1,0 +1,13 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE states=1000 countries=3 queued_orders=9 state_entries=1000 building_entries=3229 country_entries=3
+INPUT label=product_save_text bytes=766591 lines=21979 parens=7603 brackets=2018 max_depth=9 fields=11318
+MEM point=before_trial trial=1 working_set_bytes=17719296 private_bytes=5808128 peak_working_set_since_process_start_bytes=39628800
+PARSE trial=1 new_decode_wall_ms=5.839 new_fast_ms=5.833 new_spans=fast legacy_decode_wall_ms=2142.188 legacy_header_ms=2136.604 legacy_body_ms=5.582 replica_header_ms=3816.856 ignored_any_full_ms=4249.735 control_text_scan_ms=1.307 bytes=766591 ok=true legacy_ok=true
+MEM point=after_trial trial=1 working_set_bytes=18075648 private_bytes=5767168 peak_working_set_since_process_start_bytes=39628800
+MEM point=before_trial trial=2 working_set_bytes=18075648 private_bytes=5767168 peak_working_set_since_process_start_bytes=39628800
+PARSE trial=2 new_decode_wall_ms=11.582 new_fast_ms=11.579 new_spans=fast legacy_decode_wall_ms=4209.087 legacy_header_ms=4197.519 legacy_body_ms=11.563 replica_header_ms=4236.680 ignored_any_full_ms=4318.490 control_text_scan_ms=1.742 bytes=766591 ok=true legacy_ok=true
+MEM point=after_trial trial=2 working_set_bytes=18214912 private_bytes=6000640 peak_working_set_since_process_start_bytes=39628800
+MEM point=before_trial trial=3 working_set_bytes=18214912 private_bytes=6000640 peak_working_set_since_process_start_bytes=39628800
+PARSE trial=3 new_decode_wall_ms=14.483 new_fast_ms=14.480 new_spans=fast legacy_decode_wall_ms=4295.708 legacy_header_ms=4284.020 legacy_body_ms=11.685 replica_header_ms=4245.430 ignored_any_full_ms=4220.910 control_text_scan_ms=1.243 bytes=766591 ok=true legacy_ok=true
+MEM point=after_trial trial=3 working_set_bytes=18165760 private_bytes=5922816 peak_working_set_since_process_start_bytes=39628800
+exit 

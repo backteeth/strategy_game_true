@@ -1,0 +1,38 @@
+ENV os=windows arch=x86_64 build=release cpus=20
+CASE states=100 countries=3 queued_orders=7 state_entries=100 building_entries=332 country_entries=3
+FALLBACK name=valid trial=1 bytes=93575 new_decode_ms=0.669 legacy_decode_ms=30.627 same_result=true outcome=ok
+FALLBACK name=valid trial=2 bytes=93575 new_decode_ms=0.652 legacy_decode_ms=30.869 same_result=true outcome=ok
+FALLBACK name=valid trial=3 bytes=93575 new_decode_ms=0.647 legacy_decode_ms=31.033 same_result=true outcome=ok
+FALLBACK name=valid trial=4 bytes=93575 new_decode_ms=0.652 legacy_decode_ms=30.947 same_result=true outcome=ok
+FALLBACK name=valid trial=5 bytes=93575 new_decode_ms=0.714 legacy_decode_ms=31.118 same_result=true outcome=ok
+FALLBACK name=truncated_75pct trial=1 bytes=70181 new_decode_ms=18.686 legacy_decode_ms=17.714 same_result=true outcome=rejected
+FALLBACK name=truncated_75pct trial=2 bytes=70181 new_decode_ms=18.727 legacy_decode_ms=17.703 same_result=true outcome=rejected
+FALLBACK name=truncated_75pct trial=3 bytes=70181 new_decode_ms=18.645 legacy_decode_ms=17.757 same_result=true outcome=rejected
+FALLBACK name=truncated_75pct trial=4 bytes=70181 new_decode_ms=18.222 legacy_decode_ms=17.831 same_result=true outcome=rejected
+FALLBACK name=truncated_75pct trial=5 bytes=70181 new_decode_ms=18.282 legacy_decode_ms=17.711 same_result=true outcome=rejected
+FALLBACK name=bad_kind trial=1 bytes=93563 new_decode_ms=31.458 legacy_decode_ms=30.387 same_result=true outcome=rejected
+FALLBACK name=bad_kind trial=2 bytes=93563 new_decode_ms=30.908 legacy_decode_ms=30.281 same_result=true outcome=rejected
+FALLBACK name=bad_kind trial=3 bytes=93563 new_decode_ms=31.326 legacy_decode_ms=30.272 same_result=true outcome=rejected
+FALLBACK name=bad_kind trial=4 bytes=93563 new_decode_ms=30.684 legacy_decode_ms=30.944 same_result=true outcome=rejected
+FALLBACK name=bad_kind trial=5 bytes=93563 new_decode_ms=30.797 legacy_decode_ms=30.092 same_result=true outcome=rejected
+FALLBACK name=unsupported_version trial=1 bytes=93575 new_decode_ms=31.491 legacy_decode_ms=30.372 same_result=true outcome=rejected
+FALLBACK name=unsupported_version trial=2 bytes=93575 new_decode_ms=30.680 legacy_decode_ms=30.108 same_result=true outcome=rejected
+FALLBACK name=unsupported_version trial=3 bytes=93575 new_decode_ms=30.815 legacy_decode_ms=30.669 same_result=true outcome=rejected
+FALLBACK name=unsupported_version trial=4 bytes=93575 new_decode_ms=31.009 legacy_decode_ms=30.892 same_result=true outcome=rejected
+FALLBACK name=unsupported_version trial=5 bytes=93575 new_decode_ms=31.520 legacy_decode_ms=29.868 same_result=true outcome=rejected
+FALLBACK name=legacy_v1_shape trial=1 bytes=21 new_decode_ms=0.156 legacy_decode_ms=0.001 same_result=true outcome=rejected
+FALLBACK name=legacy_v1_shape trial=2 bytes=21 new_decode_ms=0.003 legacy_decode_ms=0.001 same_result=true outcome=rejected
+FALLBACK name=legacy_v1_shape trial=3 bytes=21 new_decode_ms=0.002 legacy_decode_ms=0.001 same_result=true outcome=rejected
+FALLBACK name=legacy_v1_shape trial=4 bytes=21 new_decode_ms=0.002 legacy_decode_ms=0.001 same_result=true outcome=rejected
+FALLBACK name=legacy_v1_shape trial=5 bytes=21 new_decode_ms=0.008 legacy_decode_ms=0.001 same_result=true outcome=rejected
+FALLBACK name=corrupt_second_half trial=1 bytes=93576 new_decode_ms=0.461 legacy_decode_ms=0.258 same_result=true outcome=rejected
+FALLBACK name=corrupt_second_half trial=2 bytes=93576 new_decode_ms=0.289 legacy_decode_ms=0.244 same_result=true outcome=rejected
+FALLBACK name=corrupt_second_half trial=3 bytes=93576 new_decode_ms=0.311 legacy_decode_ms=0.246 same_result=true outcome=rejected
+FALLBACK name=corrupt_second_half trial=4 bytes=93576 new_decode_ms=0.275 legacy_decode_ms=0.244 same_result=true outcome=rejected
+FALLBACK name=corrupt_second_half trial=5 bytes=93576 new_decode_ms=0.279 legacy_decode_ms=0.240 same_result=true outcome=rejected
+FALLBACK name=empty trial=1 bytes=0 new_decode_ms=0.158 legacy_decode_ms=0.003 same_result=true outcome=rejected
+FALLBACK name=empty trial=2 bytes=0 new_decode_ms=0.002 legacy_decode_ms=0.000 same_result=true outcome=rejected
+FALLBACK name=empty trial=3 bytes=0 new_decode_ms=0.002 legacy_decode_ms=0.001 same_result=true outcome=rejected
+FALLBACK name=empty trial=4 bytes=0 new_decode_ms=0.001 legacy_decode_ms=0.000 same_result=true outcome=rejected
+FALLBACK name=empty trial=5 bytes=0 new_decode_ms=0.001 legacy_decode_ms=0.000 same_result=true outcome=rejected
+exit 

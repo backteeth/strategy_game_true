@@ -1,0 +1,19 @@
+== build new
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `release` profile [optimized] target(s) in 7m 24s
+== old worktree (551eaa2)
+Preparing worktree (detached HEAD 551eaa2)
+Updating files:  86% (1046/1212)Updating files:  87% (1055/1212)Updating files:  88% (1067/1212)Updating files:  89% (1079/1212)Updating files:  90% (1091/1212)Updating files:  91% (1103/1212)Updating files:  92% (1116/1212)Updating files:  93% (1128/1212)Updating files:  94% (1140/1212)Updating files:  95% (1152/1212)Updating files:  96% (1164/1212)Updating files:  97% (1176/1212)Updating files:  98% (1188/1212)Updating files:  99% (1200/1212)Updating files: 100% (1212/1212)Updating files: 100% (1212/1212), done.
+HEAD is now at 551eaa2 P32-027: 計時の整合性確認とヘッダー解析の比較測定
+== build old
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\p28_exes\base551\strategy_game)
+    Finished `release` profile [optimized] target(s) in 7m 07s
+== done
+total 4088
+drwxr-xr-x 1 hirom 197609       0 Nov  3 20:43 .
+drwxr-xr-x 1 hirom 197609       0 Nov  3 20:29 ..
+drwxr-xr-x 1 hirom 197609       0 Nov  3 20:36 base551
+-rwxr-xr-x 1 hirom 197609 1326592 Nov  3 20:36 new_economy_parse_compare.exe
+-rwxr-xr-x 1 hirom 197609 1407488 Nov  3 20:36 new_economy_save_timing.exe
+-rwxr-xr-x 1 hirom 197609 1423360 Nov  3 20:43 old_economy_save_timing.exe
+exit 0
