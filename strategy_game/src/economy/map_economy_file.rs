@@ -34,6 +34,7 @@
 //! 復元先の値として採用しない。判定を通った後の P32-015 の内部コンテキスト照合(FNV-1a 64bit)は、拒否項目だけを
 //! 対象にした最後の砦で、警告項目を含まない(警告で許可した差分を再び拒否しない・無効化もしない)。
 
+use crate::economy::phase_timing::{Outcome, Timing};
 use crate::economy::map_state::snapshot::{
     MapEconomySimulation, MapEconomySnapshot, RestoreError, SnapshotDate,
 };
@@ -181,11 +182,19 @@ pub fn encode(snapshot: &MapEconomySnapshot, identity: &SavedIdentity) -> Result
 
 /// テキストを封筒として解析する(ファイルは触らない)。`kind`・版を先に判定し、本体は厳密に解析する。
 pub fn decode(text: &str) -> Result<DecodedFile, FileError> {
+    decode_timed(text, &mut Timing::off(), ("", ""))
+}
+
+/// [`decode`] と同じ処理(共通の本体)。`phases` = (ヘッダー解析・`kind`/版の判定, 本体の解析) の工程名で計る(P32-026)。
+/// 計時が無効なら、結果も動作も [`decode`] と同じ。
+pub fn decode_timed(text: &str, timing: &mut Timing, phases: (&'static str, &'static str)) -> Result<DecodedFile, FileError> {
     // ヘッダーだけは、値をそのまま(`kind: "..."`)読めるよう `implicit_some` で解析する(本体の `Option` は明示のまま)。
-    let header: Header = ron::Options::default()
-        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-        .from_str(text)
-        .map_err(|e| FileError::Malformed(e.to_string()))?;
+    let header = timing.run(phases.0, || -> Result<Header, FileError> {
+        ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(text)
+            .map_err(|e| FileError::Malformed(e.to_string()))
+    })?;
     match header.kind {
         Some(k) if k == MAP_ECONOMY_FILE_KIND => {}
         Some(k) => return Err(FileError::NotThisKind(DetectedKind::Other(k))),
@@ -201,7 +210,8 @@ pub fn decode(text: &str) -> Result<DecodedFile, FileError> {
         Some(found) => return Err(FileError::UnsupportedVersion { found }),
         None => return Err(FileError::Malformed("missing `format_version`".to_string())),
     }
-    let file: FileOwned = ron::from_str(text).map_err(|e| FileError::Malformed(e.to_string()))?;
+    let file: FileOwned =
+        timing.run(phases.1, || ron::from_str(text).map_err(|e| FileError::Malformed(e.to_string())))?;
     Ok(DecodedFile { identity: file.identity, snapshot: file.snapshot })
 }
 
@@ -432,46 +442,95 @@ pub fn save_with_io(
     name: &str,
     io: &dyn SaveIo,
 ) -> Result<SaveReceipt, FileError> {
+    save_with_io_timed(sim, inputs, location, name, io, &mut Timing::off())
+}
+
+/// [`save`] と同じ処理(共通の本体)を、工程別に計る(P32-026)。計時の結果は `timing` にだけ入り、保存内容・結果には影響しない。
+pub fn save_timed(
+    sim: &MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+    timing: &mut Timing,
+) -> Result<SaveReceipt, FileError> {
+    save_with_io_timed(sim, inputs, location, name, &RealIo, timing)
+}
+
+fn outcome_of<T>(r: &Result<T, FileError>) -> Outcome {
+    match r {
+        Ok(_) => Outcome::Success,
+        Err(FileError::Incompatible(_)) => Outcome::Rejected,
+        Err(_) => Outcome::Error,
+    }
+}
+
+/// [`save_with_io`] の共通の本体。`timing` が無効なら時計を読まない。
+pub fn save_with_io_timed(
+    sim: &MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+    io: &dyn SaveIo,
+    timing: &mut Timing,
+) -> Result<SaveReceipt, FileError> {
+    timing.begin_total();
+    let r = save_body(sim, inputs, location, name, io, timing);
+    timing.end_total(outcome_of(&r));
+    r
+}
+
+fn save_body(
+    sim: &MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+    io: &dyn SaveIo,
+    timing: &mut Timing,
+) -> Result<SaveReceipt, FileError> {
     // 1. 取得 2. 直列化(ここまでファイルは触らない)
-    let snapshot = sim.snapshot(inputs.world, inputs.buildings);
-    let identity = StaticIdentity::compute(sim, inputs).map_err(FileError::Identity)?.to_saved();
-    let text = encode(&snapshot, &identity)?;
+    let snapshot = timing.run("save.snapshot", || sim.snapshot(inputs.world, inputs.buildings));
+    let identity = timing
+        .run("save.identity", || StaticIdentity::compute(sim, inputs).map(|i| i.to_saved()))
+        .map_err(FileError::Identity)?;
+    let text = timing.run("save.encode", || encode(&snapshot, &identity))?;
     // 検証: 直列化した結果が、そのまま同じスナップショットとして読めること(書いたものが読めない保存を作らない)。
-    let back = decode(&text)?;
-    if back.snapshot != snapshot || back.identity != identity {
+    let back = decode_timed(&text, timing, ("save.verify_decode_header", "save.verify_decode_body"))?;
+    let same = timing.run("save.verify_compare", || back.snapshot == snapshot && back.identity == identity);
+    if !same {
         return Err(FileError::Serialize("the encoded text does not decode to the same snapshot".to_string()));
     }
 
     // 3. 保存先の検証と、既存ファイルの識別
-    let path = location.target(name, true)?;
-    let replaced_existing = match fs::symlink_metadata(&path) {
-        Ok(_) => {
-            let existing = read_limited(&path).map_err(|e| FileError::OverwriteRefused {
-                path: path.clone(),
-                reason: e.to_string(),
-            })?;
-            decode(&existing).map_err(|e| FileError::OverwriteRefused {
-                path: path.clone(),
-                reason: e.to_string(),
-            })?;
-            true
+    let path = timing.run("save.target", || location.target(name, true))?;
+    let replaced_existing = timing.run("save.existing_check", || -> Result<bool, FileError> {
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                let existing = read_limited(&path).map_err(|e| FileError::OverwriteRefused {
+                    path: path.clone(),
+                    reason: e.to_string(),
+                })?;
+                decode(&existing).map_err(|e| FileError::OverwriteRefused {
+                    path: path.clone(),
+                    reason: e.to_string(),
+                })?;
+                Ok(true)
+            }
+            Err(_) => Ok(false),
         }
-        Err(_) => false,
-    };
+    })?;
 
     // 4. 一時ファイル(同じディレクトリ。自分が create_new で作ったものだけ)
-    let mut created = None;
-    for _ in 0..8 {
-        let tmp = temp_path(&path);
-        match io.create_temp(&tmp) {
-            Ok(f) => {
-                created = Some((tmp, f));
-                break;
+    let created = timing.run("save.temp_create", || {
+        for _ in 0..8 {
+            let tmp = temp_path(&path);
+            match io.create_temp(&tmp) {
+                Ok(f) => return Ok(Some((tmp, f))),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(io_err("create temporary file", &tmp, &e)),
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(io_err("create temporary file", &tmp, &e)),
         }
-    }
+        Ok(None)
+    })?;
     let Some((tmp, mut file)) = created else {
         return Err(FileError::Io {
             op: "create temporary file",
@@ -482,9 +541,11 @@ pub fn save_with_io(
 
     // 5. 全内容を書き、flush・同期。失敗したら自分の一時ファイルだけを消して終わる(最終ファイルには触れない)。
     let written = (|| -> io::Result<()> {
-        file.write_all(text.as_bytes())?;
-        file.flush()?;
-        file.sync()
+        timing.run("save.write", || -> io::Result<()> {
+            file.write_all(text.as_bytes())?;
+            file.flush()
+        })?;
+        timing.run("save.sync", || file.sync())
     })();
     drop(file);
     if let Err(e) = written {
@@ -492,7 +553,7 @@ pub fn save_with_io(
     }
 
     // 6. 成功した場合だけ最終保存先へ置換
-    if let Err(e) = io.replace(&tmp, &path) {
+    if let Err(e) = timing.run("save.replace", || io.replace(&tmp, &path)) {
         return Err(cleanup_after(io, &tmp, io_err("replace the save file", &path, &e)));
     }
     Ok(SaveReceipt { path, bytes: text.len(), date: snapshot.date, replaced_existing })
@@ -538,12 +599,13 @@ fn examine(
     inputs: &StaticInputs<'_>,
     location: &SaveLocation,
     name: &str,
+    timing: &mut Timing,
 ) -> Result<Examined, FileError> {
-    let path = location.target(name, false)?;
-    let text = read_limited(&path)?;
-    let file = decode(&text)?;
-    let current = StaticIdentity::compute(sim, inputs).map_err(FileError::Identity)?;
-    let verdict = judge(&file.identity, &current);
+    let path = timing.run("load.target", || location.target(name, false))?;
+    let text = timing.run("load.read", || read_limited(&path))?;
+    let file = decode_timed(&text, timing, ("load.decode_header", "load.decode_body"))?;
+    let current = timing.run("load.identity", || StaticIdentity::compute(sim, inputs)).map_err(FileError::Identity)?;
+    let verdict = timing.run("load.judge", || judge(&file.identity, &current));
     Ok(Examined { path, bytes: text.len(), file, verdict })
 }
 
@@ -593,7 +655,7 @@ pub fn inspect(
     location: &SaveLocation,
     name: &str,
 ) -> Result<InspectReport, FileError> {
-    let ex = examine(sim, inputs, location, name)?;
+    let ex = examine(sim, inputs, location, name, &mut Timing::off())?;
     let restorable = ex.verdict.is_compatible().then(|| {
         sim.restore_candidate(&ex.file.snapshot, inputs.world, inputs.buildings).map(|_| ())
     });
@@ -731,10 +793,27 @@ pub fn load(
     location: &SaveLocation,
     name: &str,
 ) -> Result<LoadReceipt, FileError> {
-    let ex = examine(sim, inputs, location, name)?;
-    if !ex.verdict.is_compatible() {
-        return Err(FileError::Incompatible(ex.verdict));
-    }
-    sim.restore(&ex.file.snapshot, inputs.world, inputs.buildings).map_err(FileError::Restore)?;
-    Ok(LoadReceipt { path: ex.path, date: ex.file.snapshot.date, verdict: ex.verdict })
+    load_timed(sim, inputs, location, name, &mut Timing::off())
+}
+
+/// [`load`] と同じ処理(共通の本体)を、工程別に計る(P32-026)。計時の結果は `timing` にだけ入り、復元結果・判定には影響しない。
+/// 拒否(`Incompatible`)もエラーも、成功として記録しない(`Timing::outcome`)。
+pub fn load_timed(
+    sim: &mut MapEconomySimulation,
+    inputs: &StaticInputs<'_>,
+    location: &SaveLocation,
+    name: &str,
+    timing: &mut Timing,
+) -> Result<LoadReceipt, FileError> {
+    timing.begin_total();
+    let r = (|| {
+        let ex = examine(sim, inputs, location, name, timing)?;
+        if !ex.verdict.is_compatible() {
+            return Err(FileError::Incompatible(ex.verdict));
+        }
+        sim.restore_timed(&ex.file.snapshot, inputs.world, inputs.buildings, timing).map_err(FileError::Restore)?;
+        Ok(LoadReceipt { path: ex.path, date: ex.file.snapshot.date, verdict: ex.verdict })
+    })();
+    timing.end_total(outcome_of(&r));
+    r
 }

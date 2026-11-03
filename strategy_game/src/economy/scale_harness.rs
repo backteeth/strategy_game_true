@@ -683,18 +683,18 @@ pub struct CaseResult {
 
 // ---------------------------------------------------------------- 実行
 
-struct Deadline {
-    start: Instant,
-    limit: Duration,
+pub(crate) struct Deadline {
+    pub(crate) start: Instant,
+    pub(crate) limit: Duration,
 }
 
-enum Abort {
+pub(crate) enum Abort {
     Timeout(String),
     Unrunnable(String),
 }
 
 impl Deadline {
-    fn check(&self, phase: &str) -> Result<(), Abort> {
+    pub(crate) fn check(&self, phase: &str) -> Result<(), Abort> {
         if self.start.elapsed() > self.limit {
             Err(Abort::Timeout(phase.to_string()))
         } else {
@@ -724,7 +724,7 @@ fn hex8(d: &[u8; 32]) -> String {
 /// `from..to` 日目を処理する。進行時間は `advance_day` の呼び出しだけを計る。`after_day(処理済みの日数, 状態, その日の出来事)` は
 /// 計時の外で呼ぶ。
 #[allow(clippy::too_many_arguments)]
-fn run_days<F>(
+pub(crate) fn run_days<F>(
     sim: &mut MapEconomySimulation,
     buildings: &BuildingRegistry,
     script: &Script,

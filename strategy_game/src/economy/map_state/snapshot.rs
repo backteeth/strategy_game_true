@@ -36,6 +36,7 @@ use crate::country::country_ai::CountryAiDecisionReason;
 use crate::economy::economic_state::EconomicState;
 use crate::economy::factory_starvation::{FactoryStarvationHistory, FactoryStarvationSample};
 use crate::economy::iron_shortage::{IronShortageHistory, IronShortageSample};
+use crate::economy::phase_timing::Timing;
 use crate::economy::resources::{CountryStockpile, ResourceType};
 use crate::military::supply_production_history::{MonthlyProductionSample, SupplyProductionHistory};
 use crate::world::{MapStateId, WorldModel};
@@ -509,17 +510,31 @@ impl MapEconomySimulation {
         world: &WorldModel,
         buildings: &BuildingRegistry,
     ) -> Result<MapEconomySimulation, RestoreError> {
+        self.restore_candidate_timed(snap, world, buildings, &mut Timing::off())
+    }
+
+    /// [`Self::restore_candidate`] と同じ処理(共通の本体)を工程別に計る(P32-026)。計時が無効なら動作・結果は同じ。
+    pub fn restore_candidate_timed(
+        &self,
+        snap: &MapEconomySnapshot,
+        world: &WorldModel,
+        buildings: &BuildingRegistry,
+        timing: &mut Timing,
+    ) -> Result<MapEconomySimulation, RestoreError> {
         let mut issues = Vec::new();
-        self.validate_snapshot(snap, world, buildings, &mut issues);
+        timing.run("restore.validate", || self.validate_snapshot(snap, world, buildings, &mut issues));
         if !issues.is_empty() {
             return Err(RestoreError { issues });
         }
-        let candidate = self.build_candidate(snap, &mut issues);
+        let candidate = timing.run("restore.build_candidate", || self.build_candidate(snap, &mut issues));
         let Some(candidate) = candidate else {
             return Err(RestoreError { issues });
         };
         // 全体の整合性: 候補から取り直した結果が入力と一致する(入力に無い値で状態が決まっていない)。
-        if candidate.snapshot(world, buildings) != *snap {
+        let back = timing.run("restore.roundtrip_snapshot", || candidate.snapshot(world, buildings));
+        let same = timing.run("restore.roundtrip_compare", || back == *snap);
+        timing.run("restore.roundtrip_drop", || drop(back));
+        if !same {
             return Err(RestoreError {
                 issues: vec![RestoreIssue::RoundTripMismatch],
             });
@@ -535,8 +550,19 @@ impl MapEconomySimulation {
         world: &WorldModel,
         buildings: &BuildingRegistry,
     ) -> Result<(), RestoreError> {
-        let candidate = self.restore_candidate(snap, world, buildings)?;
-        *self = candidate;
+        self.restore_timed(snap, world, buildings, &mut Timing::off())
+    }
+
+    /// [`Self::restore`] と同じ処理(共通の本体)を工程別に計る(P32-026)。`restore.apply` は、置き換えと、置き換えられた旧状態の破棄を含む。
+    pub fn restore_timed(
+        &mut self,
+        snap: &MapEconomySnapshot,
+        world: &WorldModel,
+        buildings: &BuildingRegistry,
+        timing: &mut Timing,
+    ) -> Result<(), RestoreError> {
+        let candidate = self.restore_candidate_timed(snap, world, buildings, timing)?;
+        timing.run("restore.apply", || *self = candidate);
         Ok(())
     }
 
