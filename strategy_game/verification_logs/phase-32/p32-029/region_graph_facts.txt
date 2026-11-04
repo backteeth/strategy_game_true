@@ -1,0 +1,15 @@
+provinces: 29 assigned: 26 unassigned: [17903, 18110, 18501]
+province-province land edges (undirected): 65  of which with a river on the shared edge: 24
+edges crossing state/unassigned boundaries: 21 | between two different assigned states: 8
+provinces touching water (sea/lake/unmapped cell): [17266, 17484, 17693, 17903, 18109, 18308, 18309]
+provinces adjacent to out-of-scope land: [17266, 17267, 17268, 17269, 17487, 17696, 17906, 18112, 18308, 18312, 18499, 18500, 18501, 18502]
+components of the whole 29-province graph: 1
+state 20: 7 provinces, internal components 1
+state 21: 13 provinces, internal components 1
+state 22: 6 provinces, internal components 1
+components when unassigned provinces are not traversable: [26]
+without state 20: components of the remaining assigned provinces: [19]
+without state 21: components of the remaining assigned provinces: [6, 7]
+without state 22: components of the remaining assigned provinces: [20]
+facilities by province: {17266: ['Port'], 17694: ['RailwayStation'], 17695: ['Fortress'], 17903: ['Port'], 18309: ['Port'], 18310: ['Fortress']}
+facility provinces touching water: [17266, 17903, 18309]
