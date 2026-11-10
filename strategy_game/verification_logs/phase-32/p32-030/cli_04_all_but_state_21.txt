@@ -1,0 +1,25 @@
+$ world_reach_check --passable all --blocked-states 21 --source 18309 --target 17266 --target 17694
+=== グラフ (province land-adjacency graph) ===
+map: assets/data/hex_atlas_map.json
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+nodes: 29
+undirected edges (deduplicated): 65
+  of which cross-state (both ends assigned to different states): 8
+  of which with a river on a shared side (recorded only; rivers do not block): 24
+connected components: 1 (sizes: 29)
+scope: coverage=Partial unassigned_nodes=3 out_of_scope_land_cells=35192 complete=false
+(out-of-scope land has no ProvinceId and is never used as a bridge; it only makes some results `unknown`)
+
+=== 通行条件 (explicit; nothing else is passable) ===
+passable provinces: 16
+components of the passable part: 1 (sizes: 16)
+
+=== 到達判定 (pure reachability; not a supply amount, not a capacity) ===
+sources: 18309
+reached: 16
+unknown (reachable only through out-of-scope land): 0
+reached set touches out-of-scope land: true
+reached provinces: 17266 17267 17268 17484 17485 17693 17903 18109 18110 18308 18309 18310 18311 18499 18500 18501
+target Province#17266: 到達可能 (reachable)
+target Province#17694: 到達不能・確定 (unreachable: the target is not passable under the given condition)
+[exit 0]

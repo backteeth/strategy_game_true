@@ -1,0 +1,17 @@
+$ world_reach_check --source 17694 --passable-states 20,22
+=== グラフ (province land-adjacency graph) ===
+map: assets/data/hex_atlas_map.json
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+nodes: 29
+undirected edges (deduplicated): 65
+  of which cross-state (both ends assigned to different states): 8
+  of which with a river on a shared side (recorded only; rivers do not block): 24
+connected components: 1 (sizes: 29)
+scope: coverage=Partial unassigned_nodes=3 out_of_scope_land_cells=35192 complete=false
+(out-of-scope land has no ProvinceId and is never used as a bridge; it only makes some results `unknown`)
+
+=== 通行条件 (explicit; nothing else is passable) ===
+passable provinces: 13
+components of the passable part: 2 (sizes: 6 7)
+INPUT ERROR: invalid source: Province#17694 is not passable under the given condition
+[exit 65]

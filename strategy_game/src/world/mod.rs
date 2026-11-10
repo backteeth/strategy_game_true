@@ -13,6 +13,7 @@
 //! プロヴィンス→ステートの逆引きは読み込み時に導出する索引で、保存しない。
 
 pub mod aggregate;
+pub mod connectivity;
 pub mod facilities;
 pub mod files;
 pub mod fingerprint;
@@ -25,6 +26,11 @@ pub mod validate;
 pub use aggregate::{
     AdjacencyLookup, Completeness, DeriveError, StateAdjacency, StateGeoSummary, WorldGeoDerived,
     derive_world_geo,
+};
+pub use connectivity::{
+    CellClass, EdgeInfo, ExplicitPassable, GraphError, GraphScope, GraphSignature, NotApplicableReason, Passability,
+    ProvinceCells, ProvinceGraph, Reach, ReachError, Reachability, SourceProblem, UnknownPassableProvinces,
+    UnreachableReason, reach,
 };
 pub use facilities::{
     FacilityIssue, FacilityScope, LOCATION_FACILITIES_FORMAT_VERSION, LocationFacilitiesFile,

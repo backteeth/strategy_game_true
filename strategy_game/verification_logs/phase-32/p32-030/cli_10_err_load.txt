@@ -1,0 +1,4 @@
+$ world_reach_check --world-provinces no_such_file.ron
+LOAD ERROR: the world definition could not be loaded or validated:
+cannot read 'no_such_file.ron': 指定されたファイルが見つかりません。 (os error 2)
+[exit 66]

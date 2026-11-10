@@ -1,0 +1,4 @@
+$ world_reach_check --frobnicate
+USAGE ERROR: unknown argument --frobnicate
+usage: world_reach_check [--map P] [--world-provinces P] [--world-states P] [--source ID]... [--passable all] [--passable-provinces A,B] [--passable-states A,B] [--blocked-provinces A,B] [--blocked-states A,B] [--target ID]... [--target-cell Q,R]... [--no-list]
+[exit 64]

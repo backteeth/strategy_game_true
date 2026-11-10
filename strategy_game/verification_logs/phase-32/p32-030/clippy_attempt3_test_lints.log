@@ -1,0 +1,34 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> tests\p32_030_connectivity_test.rs:227:12
+    |
+227 | fn defs(v: &[(u32, Option<u32>, &[(i32, i32)])]) -> Vec<ProvinceCells> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: this `if` statement can be collapsed
+   --> tests\p32_030_connectivity_test.rs:600:13
+    |
+600 | /             if let Some(&other) = cell_of.get(&(d.cell.q + dq, d.cell.r + dr)) {
+601 | |                 if other != d.id.0 {
+602 | |                     out.insert((d.id.0.min(other), d.id.0.max(other)));
+603 | |                 }
+604 | |             }
+    | |_____________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+600 ~             if let Some(&other) = cell_of.get(&(d.cell.q + dq, d.cell.r + dr))
+601 ~                 && other != d.id.0 {
+602 |                     out.insert((d.id.0.min(other), d.id.0.max(other)));
+603 ~                 }
+    |
+
+error: could not compile `strategy_game` (test "p32_030_connectivity_test") due to 2 previous errors
+exit 101

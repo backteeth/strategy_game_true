@@ -1,0 +1,9 @@
+P32-030 clippy attempt 1 (transcribed from the console output; the original log file was overwritten by attempt 2 because it used the same file name)
+command: cargo clippy -j 1 --all-targets --all-features -- -D warnings
+result: exit 101
+errors (2, both the same lint `clippy::collapsible_if`):
+  src\world\connectivity.rs:396  `if let (Some(x), Some(y)) = (...) { if x != y { n += 1; } }` can be collapsed
+  error: could not compile `strategy_game` (lib) due to 2 previous errors
+fix: `ProvinceGraph::cross_state_edge_count` was rewritten without the nested `if` (src/world/connectivity.rs, `matches!` with a guard); no behaviour change (the 31 tests had passed before and are re-run below).
+attempt 2 (after the fix): the command was stopped by Claude Code because the system was critically low on memory; it is NOT counted as a success (clippy_attempt2_killed_low_memory.log has no `exit` line).
+attempt 3 (memory was fine: about 16 GB free, no leftover cargo/rustc processes; default profile, -j 1): clippy completed (it was NOT stopped) and failed with 2 lints in the NEW TEST FILE tests/p32_030_connectivity_test.rs (the library and the CLI passed): `clippy::type_complexity` on the helper `defs(&[(u32, Option<u32>, &[(i32, i32)])])` and `clippy::collapsible_if` in `brute_force_edges`. Log: clippy_attempt3_test_lints.log. These are lint errors, not OOM. Fix: a `type DefSpec` alias and a collapsed `if let ... && ...`; test logic and expectations unchanged. attempt 4 below.
