@@ -1,0 +1,2 @@
+condition A: scenario agent 1 == individual options (8 compared lines)
+condition B: scenario agent 2 == individual options (7 compared lines)

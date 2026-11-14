@@ -323,3 +323,13 @@ M6 で師団を P に載せる際に、`Reach` を日次補給の新マップ版
 - 区分は `Full`/`Partial`/`Unreachable` に、`Unknown`(到達可能0で不明あり。到達不能へ丸めない)・`NotApplicable`・`Empty`(所属が空。全域にしない)を加えた6区分。全域到達は「所属の全件が到達可能」のときだけ。ステート未所属のプロヴィンスはどのステートの件数にも入れず、別に数える。
 - 規則の表と、実データ・旧小規模ケースとの比較、規模測定(35,221ノード、主体 3/30/100)の結果、D10 への材料は `verification_logs/phase-32/p32-031/p32-031_m5b_state_reach_and_scale_report.md`。
 - 未実施のまま: シナリオファイルからの読込(M5-c)、経済・保存・軍への接続、補給量・輸送能力。
+
+---
+
+## 12. 追記(P32-032 / M5-c で採用した検証用シナリオの形式)
+
+**M5-c の実装範囲の方針であり、後続仕様の恒久的な決定ではない。D10・D6 は確定していない。**
+
+- 検証用シナリオ(`assets/data/world/preview/supply_connectivity_scenario.ron`、`format_version: 1`)は、主体ごとに `label`・`sources`(補給源の `ProvinceId`、複数可)と、`passable_provinces` / `passable_states`(少なくとも一方)を持つ。**経済シナリオの `countries[].states` や配列順から通行範囲を推定しない。通行範囲は検証入力で、正式な国境・所有・実効支配のデータではない。**
+- `passable_states` は `WorldModel` の所属(正本)から `ExplicitPassable::from_states` で展開する名前つきの変換。併用時は和集合で、**展開後の重複(同じ主体の `passable_states` の所属でもある ID を `passable_provinces` に書く)はエラー**。ステート未所属の既知の `ProvinceId` は明示すれば通行できる。すべての補給源が通行範囲に含まれることを要求する。
+- 検証規則・CLI(`world_reach_check --scenario`)・結果は `verification_logs/phase-32/p32-032/p32-032_m5c_supply_scenario_report.md`。経済・AI・軍・保存・補給量・輸送能力へは接続していない。

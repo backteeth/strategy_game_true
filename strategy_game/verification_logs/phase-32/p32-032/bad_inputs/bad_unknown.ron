@@ -1,0 +1,4 @@
+(
+ format_version: 1,
+ agents: [ ( label: 1, sources: [18309], passable_states: [20, 99], passable_provinces: [12345, 18309, 18309] ) ],
+)

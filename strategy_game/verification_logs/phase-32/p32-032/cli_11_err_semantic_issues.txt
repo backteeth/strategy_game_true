@@ -1,0 +1,22 @@
+$ cargo run --release --bin world_reach_check -- --scenario verification_logs/phase-32/p32-032/bad_inputs/bad_semantic.ron
+=== グラフ (province land-adjacency graph) ===
+map: assets/data/hex_atlas_map.json
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+nodes: 29
+undirected edges (deduplicated): 65
+  of which cross-state (both ends assigned to different states): 8
+  of which with a river on a shared side (recorded only; rivers do not block): 24
+connected components: 1 (sizes: 29)
+scope: coverage=Partial unassigned_nodes=3 out_of_scope_land_cells=35192 complete=false
+(out-of-scope land has no ProvinceId and is never used as a bridge; it only makes some results `unknown`)
+SCENARIO INPUT ERROR: verification_logs/phase-32/p32-032/bad_inputs/bad_semantic.ron: 9 issue(s)
+  [duplicate-label] label 7 is used by more than one agent
+  [missing-field] agent at position 0 (no label): required field `label` is missing
+  [missing-field] agent 2: required field `sources` is missing
+  [missing-field] agent 3: required field `passable_provinces or passable_states` is missing
+  [no-sources] agent 4: `sources` is empty (at least one supply source is required)
+  [source-not-passable] agent 5: source Province#17266 is not in the agent's passable range
+  [overlap-province-in-state] agent 6: `passable_provinces` lists Province#18309, which already belongs to MapState#20 named in `passable_states` (duplicate after expansion)
+  [empty-passable] agent 7: the passable range is empty after expansion
+  [duplicate-passable-state] agent 7: MapState#20 is listed more than once in `passable_states`
+exit=65

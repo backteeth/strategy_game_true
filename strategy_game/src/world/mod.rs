@@ -23,6 +23,7 @@ pub mod measure;
 pub mod model;
 pub mod overlay;
 pub mod state_reach;
+pub mod supply_scenario;
 pub mod validate;
 
 pub use aggregate::{
@@ -56,5 +57,10 @@ pub use overlay::{
 pub use state_reach::{
     ReachCounts, StateReach, StateReachKind, StateReachSummary, SummaryError, kind_label, summarize_by_state, summarize_membership,
     summarize_model,
+};
+pub use supply_scenario::{
+    AgentOutcome, AgentRef, EvaluateError, SUPPLY_SCENARIO_FORMAT_VERSION, SupplyAgent, SupplyScenario, SupplyScenarioError,
+    SupplyScenarioFile, SupplyScenarioIssue, evaluate_supply_scenario, load_supply_scenario, parse_supply_scenario,
+    resolve_supply_scenario,
 };
 pub use validate::{ValidationMode, ValidationReport, validate_against_geography};

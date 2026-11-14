@@ -1,0 +1,4 @@
+$ cargo run --release --bin world_reach_check -- --scenario-agent 1
+USAGE ERROR: --scenario-agent needs --scenario
+usage: world_reach_check [--map P] [--world-provinces P] [--world-states P] [--source ID]... [--passable all] [--passable-provinces A,B] [--passable-states A,B] [--blocked-provinces A,B] [--blocked-states A,B] [--target ID]... [--target-cell Q,R]... [--no-list] [--state-summary] [--scenario PATH [--scenario-agent LABEL]...]
+exit=64

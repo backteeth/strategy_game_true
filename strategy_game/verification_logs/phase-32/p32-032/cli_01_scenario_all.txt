@@ -1,0 +1,64 @@
+$ cargo run --release --bin world_reach_check -- --scenario assets/data/world/preview/supply_connectivity_scenario.ron
+=== グラフ (province land-adjacency graph) ===
+map: assets/data/hex_atlas_map.json
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+nodes: 29
+undirected edges (deduplicated): 65
+  of which cross-state (both ends assigned to different states): 8
+  of which with a river on a shared side (recorded only; rivers do not block): 24
+connected components: 1 (sizes: 29)
+scope: coverage=Partial unassigned_nodes=3 out_of_scope_land_cells=35192 complete=false
+(out-of-scope land has no ProvinceId and is never used as a bridge; it only makes some results `unknown`)
+
+=== 補給連結性シナリオ (verification input: the passable ranges are NOT official borders or control) ===
+scenario: assets/data/world/preview/supply_connectivity_scenario.ron
+description: P32-032 supply connectivity validation scenario (verification input, not official borders or control)
+agents: 3 (printed in label order)
+
+--- agent 1 ---
+sources: 18309
+passable: 13 provinces (explicit provinces: 0; states: 20 22)
+reached: 7
+unknown (reachable only through out-of-scope land): 6
+reached set touches out-of-scope land: true
+reached provinces: 18109 18308 18309 18310 18311 18499 18500
+unknown provinces: 17266 17267 17268 17484 17485 17693
+state summary (derived from this agent's province result):
+state    total reachable unreachable (blocked)  unknown   n/a  kind
+20           7         7           0         0        0     0  全域到達 (full)
+21          13         0          13        13        0     0  到達不能 (unreachable)
+22           6         0           0         0        6     0  不明 (unknown)
+unassigned     3         0           3         3        0     0  (not counted in any state)
+grand total: 29 provinces (graph nodes: 29)
+
+--- agent 2 ---
+sources: 18309
+passable: 16 provinces (explicit provinces: 3; states: 20 22)
+explicit provinces: 17903 18110 18501
+reached: 16
+unknown (reachable only through out-of-scope land): 0
+reached set touches out-of-scope land: true
+reached provinces: 17266 17267 17268 17484 17485 17693 17903 18109 18110 18308 18309 18310 18311 18499 18500 18501
+state summary (derived from this agent's province result):
+state    total reachable unreachable (blocked)  unknown   n/a  kind
+20           7         7           0         0        0     0  全域到達 (full)
+21          13         0          13        13        0     0  到達不能 (unreachable)
+22           6         6           0         0        0     0  全域到達 (full)
+unassigned     3         3           0         0        0     0  (not counted in any state)
+grand total: 29 provinces (graph nodes: 29)
+
+--- agent 3 ---
+sources: 17266 18309
+passable: 13 provinces (explicit provinces: 0; states: 20 22)
+reached: 13
+unknown (reachable only through out-of-scope land): 0
+reached set touches out-of-scope land: true
+reached provinces: 17266 17267 17268 17484 17485 17693 18109 18308 18309 18310 18311 18499 18500
+state summary (derived from this agent's province result):
+state    total reachable unreachable (blocked)  unknown   n/a  kind
+20           7         7           0         0        0     0  全域到達 (full)
+21          13         0          13        13        0     0  到達不能 (unreachable)
+22           6         6           0         0        0     0  全域到達 (full)
+unassigned     3         0           3         3        0     0  (not counted in any state)
+grand total: 29 provinces (graph nodes: 29)
+exit=0

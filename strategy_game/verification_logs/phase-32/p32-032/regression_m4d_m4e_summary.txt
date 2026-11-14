@@ -1,0 +1,8 @@
+m4d save exit=0
+m4d resume exit=0
+m4d cont exit=0
+m4d: resume lines=60, cont lines=60; resume==cont: yes; equals P32-022 recorded resume: NO; equals P32-022 recorded cont: NO; first=digest=2f1b1910201ce473 last=digest=2fce25ceb982483b
+m4e save exit=0
+m4e resume exit=0
+m4e cont exit=0
+m4e: resume lines=60, cont lines=60; resume==cont: yes; equals P32-022 recorded resume: NO; equals P32-022 recorded cont: NO; first=digest=59759ddc267451ff last=digest=3688f1125fce9d23

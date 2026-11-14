@@ -1,0 +1,17 @@
+$ cargo run --release --bin world_reach_check -- --scenario verification_logs/phase-32/p32-032/bad_inputs/bad_unknown.ron
+=== グラフ (province land-adjacency graph) ===
+map: assets/data/hex_atlas_map.json
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+nodes: 29
+undirected edges (deduplicated): 65
+  of which cross-state (both ends assigned to different states): 8
+  of which with a river on a shared side (recorded only; rivers do not block): 24
+connected components: 1 (sizes: 29)
+scope: coverage=Partial unassigned_nodes=3 out_of_scope_land_cells=35192 complete=false
+(out-of-scope land has no ProvinceId and is never used as a bridge; it only makes some results `unknown`)
+SCENARIO INPUT ERROR: verification_logs/phase-32/p32-032/bad_inputs/bad_unknown.ron: 4 issue(s)
+  [unknown-province] agent 1: `passable_provinces` names Province#12345, which is not a province of the world
+  [duplicate-passable-province] agent 1: Province#18309 is listed more than once in `passable_provinces`
+  [unknown-state] agent 1: `passable_states` names MapState#99, which is not a state of the world
+  [overlap-province-in-state] agent 1: `passable_provinces` lists Province#18309, which already belongs to MapState#20 named in `passable_states` (duplicate after expansion)
+exit=65

@@ -1,0 +1,4 @@
+(
+ format_version: 1,
+ agents: [ ( sources: [18309], passable_states: [20] ), ( label: 2, passable_states: [20] ), ( label: 3, sources: [18309] ), ( label: 4, sources: [], passable_states: [20] ), ( label: 5, sources: [17266], passable_states: [20] ), ( label: 6, sources: [18309], passable_states: [20], passable_provinces: [18309] ), ( label: 7, sources: [18309], passable_provinces: [], passable_states: [] ), ( label: 7, sources: [18309], passable_states: [20, 20] ) ],
+)

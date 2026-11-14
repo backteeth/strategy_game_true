@@ -1,0 +1,38 @@
+// P32-032 補給連結性の検証用シナリオ(M5-c)。**通行範囲は検証入力であり、正式な国境・所有・実効支配のデータではない。**
+// 経済シナリオ(economy_scenario_*.ron)の `countries[].states` とは無関係で、そこから通行範囲を推定しない。
+// 経済・AI・軍・保存には接続しない。到達可能は「十分な補給が届く」ではない(輸送能力・補給量は計算しない)。
+//
+// 形式(format_version 1)。各主体:
+//   label                必須。識別用ラベル(結果はラベル昇順で出る)。
+//   sources              必須。補給源の ProvinceId(1件以上。すべて通行可能範囲に含まれること)。
+//   passable_provinces   通行可能な ProvinceId。
+//   passable_states      通行可能な MapStateId(所属プロヴィンスへ展開)。
+//   ※ passable_provinces / passable_states は少なくとも一方が必須。併用は和集合だが、
+//      passable_provinces の ID が同じ主体の passable_states の所属でもある場合は重複としてエラー。
+//      ステート未所属の既知の ProvinceId は passable_provinces に明示すれば通行できる。
+// 検証地域(provinces.ron / states.ron)のID: ステート20=7件、21=13件、22=6件、未所属=17903・18110・18501。
+(
+    format_version: 1,
+    description: "P32-032 supply connectivity validation scenario (verification input, not official borders or control)",
+    agents: [
+        // A: ステート20・22の13件だけを許可。20は全域到達、21は到達不能、22は不明(範囲外の陸を通る経路があり得る)。
+        (
+            label: 1,
+            sources: [18309],
+            passable_states: [20, 22],
+        ),
+        // B: Aに、ステート未所属の3件を明示して追加。未所属が橋渡しとなり、20と22は全域到達、21は到達不能。
+        (
+            label: 2,
+            sources: [18309],
+            passable_states: [20, 22],
+            passable_provinces: [17903, 18110, 18501],
+        ),
+        // C: 複数の補給源(20側とステート22側)。ステート22の6件は2つ目の補給源から既知の辺で着くので、不明にならない。
+        (
+            label: 3,
+            sources: [18309, 17266],
+            passable_states: [20, 22],
+        ),
+    ],
+)

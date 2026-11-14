@@ -1,0 +1,7 @@
+save-base (temp): /tmp/tmp.QFDWobJGp8
+$ cargo run --release --bin world_economy_check -- --scenario m4d --economy-save 100 --save-base /tmp/tmp.QFDWobJGp8 --name x_m4d
+$ cargo run --release --bin world_economy_check -- --scenario m4d --economy-resume 60 --save-base /tmp/tmp.QFDWobJGp8 --name x_m4d
+$ cargo run --release --bin world_economy_check -- --scenario m4d --economy-run 160 --digest-from 100
+$ cargo run --release --bin world_economy_check -- --scenario m4e --economy-save 100 --save-base /tmp/tmp.QFDWobJGp8 --name x_m4e
+$ cargo run --release --bin world_economy_check -- --scenario m4e --economy-resume 60 --save-base /tmp/tmp.QFDWobJGp8 --name x_m4e
+$ cargo run --release --bin world_economy_check -- --scenario m4e --economy-run 160 --digest-from 100
