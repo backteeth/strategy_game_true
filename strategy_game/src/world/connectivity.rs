@@ -371,6 +371,11 @@ impl ProvinceGraph {
         self.index.get(&id).and_then(|&i| self.nodes[i].state)
     }
 
+    /// 全ノードの所属ステート(`ProvinceId` 昇順。未所属は `None`)。
+    pub fn node_states(&self) -> impl Iterator<Item = (ProvinceId, Option<MapStateId>)> + '_ {
+        self.nodes.iter().map(|n| (n.id, n.state))
+    }
+
     pub fn cells_of(&self, id: ProvinceId) -> Option<&[HexCoord]> {
         self.index.get(&id).map(|&i| self.nodes[i].cells.as_slice())
     }
@@ -640,6 +645,15 @@ pub enum NotApplicableReason {
     OutsideMap,
 }
 
+fn status_to_reachability(s: NodeStatus) -> Reachability {
+    match s {
+        NodeStatus::Reached => Reachability::Reachable,
+        NodeStatus::Possible => Reachability::Unknown,
+        NodeStatus::Unreached => Reachability::Unreachable(UnreachableReason::NoRoute),
+        NodeStatus::Blocked => Reachability::Unreachable(UnreachableReason::NotPassable),
+    }
+}
+
 /// 1つの対象についての判定(4区分)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reachability {
@@ -707,13 +721,13 @@ impl Reach {
     pub fn reachability(&self, target: ProvinceId) -> Reachability {
         match self.ids.binary_search(&target) {
             Err(_) => Reachability::NotApplicable(NotApplicableReason::UnknownProvince),
-            Ok(i) => match self.status[i] {
-                NodeStatus::Reached => Reachability::Reachable,
-                NodeStatus::Possible => Reachability::Unknown,
-                NodeStatus::Unreached => Reachability::Unreachable(UnreachableReason::NoRoute),
-                NodeStatus::Blocked => Reachability::Unreachable(UnreachableReason::NotPassable),
-            },
+            Ok(i) => status_to_reachability(self.status[i]),
         }
+    }
+
+    /// 全ノードの判定を `ProvinceId` 昇順で返す(P32-031: ステート単位の要約が、再探索せずにこの値だけから導出するための読み取り口)。
+    pub fn iter(&self) -> impl Iterator<Item = (ProvinceId, Reachability)> + '_ {
+        self.ids.iter().copied().zip(self.status.iter().map(|s| status_to_reachability(*s)))
     }
 
     /// セルを対象にした判定(水域・範囲外の陸・地図外は対象外)。

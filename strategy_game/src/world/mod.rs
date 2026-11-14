@@ -19,8 +19,10 @@ pub mod files;
 pub mod fingerprint;
 pub mod ids;
 pub mod issue;
+pub mod measure;
 pub mod model;
 pub mod overlay;
+pub mod state_reach;
 pub mod validate;
 
 pub use aggregate::{
@@ -50,5 +52,9 @@ pub use model::{MapStateDef, ProvinceDef, WorldModel};
 pub use overlay::{
     BoundaryEdge, BoundaryKind, CellStatus, WorldPreviewData, cell_status, compute_boundaries,
     load_world_preview, state_color,
+};
+pub use state_reach::{
+    ReachCounts, StateReach, StateReachKind, StateReachSummary, SummaryError, kind_label, summarize_by_state, summarize_membership,
+    summarize_model,
 };
 pub use validate::{ValidationMode, ValidationReport, validate_against_geography};

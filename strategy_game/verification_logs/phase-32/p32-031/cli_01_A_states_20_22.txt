@@ -1,0 +1,30 @@
+=== グラフ (province land-adjacency graph) ===
+map: assets/data/hex_atlas_map.json
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+nodes: 29
+undirected edges (deduplicated): 65
+  of which cross-state (both ends assigned to different states): 8
+  of which with a river on a shared side (recorded only; rivers do not block): 24
+connected components: 1 (sizes: 29)
+scope: coverage=Partial unassigned_nodes=3 out_of_scope_land_cells=35192 complete=false
+(out-of-scope land has no ProvinceId and is never used as a bridge; it only makes some results `unknown`)
+
+=== 通行条件 (explicit; nothing else is passable) ===
+passable provinces: 13
+components of the passable part: 2 (sizes: 6 7)
+
+=== 到達判定 (pure reachability; not a supply amount, not a capacity) ===
+sources: 18309
+reached: 7
+unknown (reachable only through out-of-scope land): 6
+reached set touches out-of-scope land: true
+reached provinces: 18109 18308 18309 18310 18311 18499 18500
+unknown provinces: 17266 17267 17268 17484 17485 17693
+
+=== ステート単位の要約 (derived from the province result; no search on a state graph) ===
+state    total reachable unreachable (blocked)  unknown   n/a  kind
+20           7         7           0         0        0     0  全域到達 (full)
+21          13         0          13        13        0     0  到達不能 (unreachable)
+22           6         0           0         0        6     0  不明 (unknown)
+unassigned     3         0           3         3        0     0  (not counted in any state)
+grand total: 29 provinces (graph nodes: 29); summary from graph labels identical to summary from the model: true

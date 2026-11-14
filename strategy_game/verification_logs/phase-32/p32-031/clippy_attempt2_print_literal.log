@@ -1,0 +1,21 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: literal with an empty format string
+   --> src\bin\world_reach_check.rs:302:153
+    |
+302 | ..., "reachable", "unreachable", "(blocked)", "unknown", "n/a", "kind");
+    |                                                                 ^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#print_literal
+    = note: `-D clippy::print-literal` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::print_literal)]`
+help: try
+    |
+302 -                 println!("{:<8} {:>5} {:>9} {:>11} {:>9} {:>8} {:>5}  {}", "state", "total", "reachable", "unreachable", "(blocked)", "unknown", "n/a", "kind");
+302 +                 println!("{:<8} {:>5} {:>9} {:>11} {:>9} {:>8} {:>5}  kind", "state", "total", "reachable", "unreachable", "(blocked)", "unknown", "n/a");
+    |
+
+error: could not compile `strategy_game` (bin "world_reach_check") due to 1 previous error
+
+real	0m13.661s
+user	0m0.000s
+sys	0m0.000s

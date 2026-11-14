@@ -1,0 +1,24 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: manual implementation of `.is_multiple_of()`
+  --> src\world\measure.rs:55:56
+   |
+55 |         let state = if rule.unassigned_modulus != 0 && id % rule.unassigned_modulus == 0 {
+   |                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `id.is_multiple_of(rule.unassigned_modulus)`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+   = note: `-D clippy::manual-is-multiple-of` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::manual_is_multiple_of)]`
+
+error: manual implementation of `.is_multiple_of()`
+   --> src\world\measure.rs:114:61
+    |
+114 |             LoadKind::Heavy => graph.node_ids().filter(|id| mix((id.0 as u64) << 20 ^ (k as u64 + 1)) % 20 != 0).collect(),
+    |                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `!mix((id.0 as u64) << 20 ^ (k as u64 + 1)).is_multiple_of(20)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+error: could not compile `strategy_game` (lib) due to 2 previous errors
+
+real	0m15.864s
+user	0m0.015s
+sys	0m0.000s

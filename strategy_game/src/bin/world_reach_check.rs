@@ -22,6 +22,7 @@
 //!   --target <ProvinceId>        判定する対象(繰り返し可)
 //!   --target-cell <q,r>          判定する対象のセル(繰り返し可。水域・範囲外の陸は「対象外」)
 //!   --no-list                    到達したプロヴィンスの一覧を出さない
+//!   --state-summary              MapStateId 単位の到達要約を出す(P32-031。Reach から導出。再探索しない)
 //! 通行可能の指定が1つもなく起点を指定した場合は入力不正(既定では何も通れない)。
 //! 終了コード: 0 = 判定できた(到達不能・不明も正常な判定)、64 = 引数の誤り、65 = 入力不正(未知のID・通行不可の起点など)、
 //! 66 = 読み込みまたは検証の失敗。
@@ -30,12 +31,13 @@ use std::collections::BTreeSet;
 
 use strategy_game::hexmap::data::load_from_path;
 use strategy_game::world::{
-    ExplicitPassable, HexCoord, MapStateId, ProvinceGraph, ProvinceId, Reachability, load_world_preview, reach,
+    ExplicitPassable, HexCoord, MapStateId, ProvinceGraph, ProvinceId, Reachability, kind_label, load_world_preview, reach,
+    summarize_by_state, summarize_model,
 };
 
 const USAGE: &str = "usage: world_reach_check [--map P] [--world-provinces P] [--world-states P] [--source ID]... \
 [--passable all] [--passable-provinces A,B] [--passable-states A,B] [--blocked-provinces A,B] [--blocked-states A,B] \
-[--target ID]... [--target-cell Q,R]... [--no-list]";
+[--target ID]... [--target-cell Q,R]... [--no-list] [--state-summary]";
 
 #[derive(Default)]
 struct Args {
@@ -51,6 +53,7 @@ struct Args {
     targets: Vec<u32>,
     target_cells: Vec<(i32, i32)>,
     no_list: bool,
+    state_summary: bool,
     any_pass_spec: bool,
 }
 
@@ -102,6 +105,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 a.target_cells.push((q, r));
             }
             "--no-list" => a.no_list = true,
+            "--state-summary" => a.state_summary = true,
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -286,6 +290,36 @@ fn run(a: &Args) -> i32 {
     }
     for (q, r) in &a.target_cells {
         println!("target cell (q={q}, r={r}): {}", verdict(result.reachability_of_cell(&graph, &map, HexCoord::new(*q, *r))));
+    }
+    if a.state_summary {
+        // 所属の正本(WorldModel)から導出した要約と、グラフのラベルから導出した要約は一致する(不一致なら異常として終了)。
+        let by_model = summarize_model(&world.model, &result);
+        let by_graph = summarize_by_state(&graph, &result);
+        match (by_model, by_graph) {
+            (Ok(m), Ok(g)) => {
+                println!("
+=== ステート単位の要約 (derived from the province result; no search on a state graph) ===");
+                println!("state    total reachable unreachable (blocked)  unknown   n/a  kind");
+                for s in m.states() {
+                    let c = &s.counts;
+                    println!(
+                        "{:<8} {:>5} {:>9} {:>11} {:>9} {:>8} {:>5}  {}",
+                        s.state.0, c.total, c.reachable, c.unreachable(), c.unreachable_not_passable, c.unknown, c.not_applicable, kind_label(s.kind)
+                    );
+                }
+                let u = m.unassigned();
+                println!(
+                    "{:<8} {:>5} {:>9} {:>11} {:>9} {:>8} {:>5}  (not counted in any state)",
+                    "unassigned", u.total, u.reachable, u.unreachable(), u.unreachable_not_passable, u.unknown, u.not_applicable
+                );
+                let g_tot = m.grand_totals();
+                println!("grand total: {} provinces (graph nodes: {}); summary from graph labels identical to summary from the model: {}", g_tot.total, graph.node_count(), g.states() == m.states() && g.unassigned() == m.unassigned());
+            }
+            (m, g) => {
+                println!("INTERNAL ERROR: state summary failed (model: {:?}, graph: {:?})", m.err(), g.err());
+                return 66;
+            }
+        }
     }
     0
 }

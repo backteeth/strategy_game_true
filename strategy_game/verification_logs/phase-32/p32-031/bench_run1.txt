@@ -1,0 +1,107 @@
+=== environment ===
+os=windows arch=x86_64 profile=release logical_cpus_visible=20 (the measurement is single-threaded; no affinity/priority was set)
+trials=3 limit_secs_per_condition=120
+file_load_ms (map json, not part of any search cost): 38.600
+definitions_ms (measurement-only input, in memory): 1.734
+MEASUREMENT-ONLY INPUT (not the official world definition): 1 land cell = 1 province; ProvinceId = rank of (r,q); states = 10x10-cell blocks (MapStateId from 1000); ProvinceId % 97 == 0 is unassigned
+input: land_cells=35221 provinces=35221 states=573 unassigned=364
+static_build_ms (once per world change, NOT a daily cost): min=28.227 median=28.553 max=29.250 (trials: 29.250 / 28.227 / 28.553)
+graph: nodes=35221 undirected_edges=99948 connected_components=109 (largest 18171) unassigned_nodes=364 out_of_scope_land_cells=0 cross_state_edges=12617 (components computed in 1.572 ms, not part of any condition)
+
+=== condition split:3 (agents=3) ===
+agent_setup_ms (not part of the daily cost): 7.650
+passable per agent: min=11740 median=11740 max=11741 total=35221; sources: 5115,11534,17894
+trial 1: day_total=4.806ms = prep 0.694 + search 2.830 + aggregate 1.147 + release 0.134 (+ other 0.000) | search per agent min/med/max = 0.883/0.972/0.975 ms | checksum fb24a4208a4970e8
+trial 2: day_total=5.228ms = prep 0.950 + search 2.996 + aggregate 1.165 + release 0.116 (+ other 0.001) | search per agent min/med/max = 0.935/0.984/1.075 ms | checksum fb24a4208a4970e8
+trial 3: day_total=5.376ms = prep 1.125 + search 2.983 + aggregate 1.147 + release 0.121 (+ other 0.000) | search per agent min/med/max = 0.957/0.981/1.043 ms | checksum fb24a4208a4970e8
+condition status: complete (3 trials, 0.0s total)
+summary over trials:
+  prep           min=0.694 median=0.950 max=1.125 (ms; trials: 0.694 / 0.950 / 1.125)
+  search_total   min=2.830 median=2.983 max=2.996 (ms; trials: 2.830 / 2.996 / 2.983)
+  aggregate      min=1.147 median=1.147 max=1.165 (ms; trials: 1.147 / 1.165 / 1.147)
+  release        min=0.116 median=0.121 max=0.134 (ms; trials: 0.134 / 0.116 / 0.121)
+  DAY_TOTAL      min=4.806 median=5.228 max=5.376 (ms; trials: 4.806 / 5.228 / 5.376)
+searched: reached per agent min=4315 median=6643 max=7212 sum=18170 | unknown sum=0 | state summaries per all agents: full=214 partial=47 unreachable=1458 unknown=0 not_applicable=0 empty=0
+results identical across trials: true
+
+=== condition split:30 (agents=30) ===
+agent_setup_ms (not part of the daily cost): 20.609
+passable per agent: min=1174 median=1174 max=1175 total=35221; sources: 27993,26706,26000,3508,31024,...
+trial 1: day_total=28.188ms = prep 0.888 + search 15.828 + aggregate 11.069 + release 0.403 (+ other 0.001) | search per agent min/med/max = 0.356/0.526/0.778 ms | checksum 7caaf7b5849548d6
+trial 2: day_total=27.654ms = prep 1.042 + search 15.314 + aggregate 10.872 + release 0.426 (+ other 0.001) | search per agent min/med/max = 0.322/0.509/0.586 ms | checksum 7caaf7b5849548d6
+trial 3: day_total=27.426ms = prep 1.049 + search 15.364 + aggregate 10.480 + release 0.533 (+ other 0.001) | search per agent min/med/max = 0.355/0.510/0.597 ms | checksum 7caaf7b5849548d6
+condition status: complete (3 trials, 0.1s total)
+summary over trials:
+  prep           min=0.888 median=1.042 max=1.049 (ms; trials: 0.888 / 1.042 / 1.049)
+  search_total   min=15.314 median=15.364 max=15.828 (ms; trials: 15.828 / 15.314 / 15.364)
+  aggregate      min=10.480 median=10.872 max=11.069 (ms; trials: 11.069 / 10.872 / 10.480)
+  release        min=0.403 median=0.426 max=0.533 (ms; trials: 0.403 / 0.426 / 0.533)
+  DAY_TOTAL      min=27.426 median=27.654 max=28.188 (ms; trials: 28.188 / 27.654 / 27.426)
+searched: reached per agent min=394 median=711 max=1139 sum=22496 | unknown sum=0 | state summaries per all agents: full=103 partial=389 unreachable=16698 unknown=0 not_applicable=0 empty=0
+results identical across trials: true
+
+=== condition split:100 (agents=100) ===
+agent_setup_ms (not part of the daily cost): 43.447
+passable per agent: min=352 median=352 max=353 total=35221; sources: 34309,28720,27990,27395,26875,...
+trial 1: day_total=80.215ms = prep 1.043 + search 40.490 + aggregate 37.312 + release 1.369 (+ other 0.002) | search per agent min/med/max = 0.246/0.406/0.628 ms | checksum dd3706f3c389179b
+trial 2: day_total=97.257ms = prep 2.827 + search 50.612 + aggregate 42.347 + release 1.468 (+ other 0.003) | search per agent min/med/max = 0.335/0.443/1.760 ms | checksum dd3706f3c389179b
+trial 3: day_total=79.973ms = prep 1.140 + search 41.278 + aggregate 36.035 + release 1.518 (+ other 0.002) | search per agent min/med/max = 0.257/0.419/0.519 ms | checksum dd3706f3c389179b
+condition status: complete (3 trials, 0.3s total)
+summary over trials:
+  prep           min=1.043 median=1.140 max=2.827 (ms; trials: 1.043 / 2.827 / 1.140)
+  search_total   min=40.490 median=41.278 max=50.612 (ms; trials: 40.490 / 50.612 / 41.278)
+  aggregate      min=36.035 median=37.312 max=42.347 (ms; trials: 37.312 / 42.347 / 36.035)
+  release        min=1.369 median=1.468 max=1.518 (ms; trials: 1.369 / 1.468 / 1.518)
+  DAY_TOTAL      min=79.973 median=80.215 max=97.257 (ms; trials: 80.215 / 97.257 / 79.973)
+searched: reached per agent min=84 median=208 max=352 sum=21733 | unknown sum=0 | state summaries per all agents: full=22 partial=914 unreachable=56364 unknown=0 not_applicable=0 empty=0
+results identical across trials: true
+
+=== condition heavy:3 (agents=3) ===
+agent_setup_ms (not part of the daily cost): 18.392
+passable per agent: min=33422 median=33483 max=33492 total=100397; sources: 4316,11992,19070
+trial 1: day_total=9.243ms = prep 2.455 + search 5.356 + aggregate 1.152 + release 0.280 (+ other 0.001) | search per agent min/med/max = 1.631/1.765/1.959 ms | checksum 1ac5332dbd6f36b6
+trial 2: day_total=9.140ms = prep 2.242 + search 5.495 + aggregate 1.123 + release 0.279 (+ other 0.001) | search per agent min/med/max = 1.720/1.864/1.910 ms | checksum 1ac5332dbd6f36b6
+trial 3: day_total=9.554ms = prep 2.573 + search 5.510 + aggregate 1.183 + release 0.288 (+ other 0.001) | search per agent min/med/max = 1.724/1.856/1.928 ms | checksum 1ac5332dbd6f36b6
+condition status: complete (3 trials, 0.0s total)
+summary over trials:
+  prep           min=2.242 median=2.455 max=2.573 (ms; trials: 2.455 / 2.242 / 2.573)
+  search_total   min=5.356 median=5.495 max=5.510 (ms; trials: 5.356 / 5.495 / 5.510)
+  aggregate      min=1.123 median=1.152 max=1.183 (ms; trials: 1.152 / 1.123 / 1.183)
+  release        min=0.279 median=0.280 max=0.288 (ms; trials: 0.280 / 0.279 / 0.288)
+  DAY_TOTAL      min=9.140 median=9.243 max=9.554 (ms; trials: 9.243 / 9.140 / 9.554)
+searched: reached per agent min=17228 median=17268 max=17282 sum=51778 | unknown sum=0 | state summaries per all agents: full=67 partial=674 unreachable=978 unknown=0 not_applicable=0 empty=0
+results identical across trials: true
+
+=== condition heavy:30 (agents=30) ===
+agent_setup_ms (not part of the daily cost): 154.703
+passable per agent: min=33382 median=33462 max=33570 total=1003858; sources: 564,1482,2312,3114,3891,...
+trial 1: day_total=84.392ms = prep 18.159 + search 51.746 + aggregate 11.308 + release 3.178 (+ other 0.001) | search per agent min/med/max = 1.587/1.716/2.138 ms | checksum 47f2fd07477d055d
+trial 2: day_total=97.480ms = prep 18.732 + search 63.388 + aggregate 11.780 + release 3.580 (+ other 0.001) | search per agent min/med/max = 1.723/2.007/3.201 ms | checksum 47f2fd07477d055d
+trial 3: day_total=90.578ms = prep 19.422 + search 56.081 + aggregate 11.687 + release 3.385 (+ other 0.002) | search per agent min/med/max = 1.634/1.822/2.398 ms | checksum 47f2fd07477d055d
+condition status: complete (3 trials, 0.3s total)
+summary over trials:
+  prep           min=18.159 median=18.732 max=19.422 (ms; trials: 18.159 / 18.732 / 19.422)
+  search_total   min=51.746 median=56.081 max=63.388 (ms; trials: 51.746 / 63.388 / 56.081)
+  aggregate      min=11.308 median=11.687 max=11.780 (ms; trials: 11.308 / 11.780 / 11.687)
+  release        min=3.178 median=3.385 max=3.580 (ms; trials: 3.178 / 3.580 / 3.385)
+  DAY_TOTAL      min=84.392 median=90.578 max=97.480 (ms; trials: 84.392 / 97.480 / 90.578)
+searched: reached per agent min=17191 median=17261 max=17344 sum=517751 | unknown sum=0 | state summaries per all agents: full=694 partial=6730 unreachable=9766 unknown=0 not_applicable=0 empty=0
+results identical across trials: true
+
+=== condition heavy:100 (agents=100) ===
+agent_setup_ms (not part of the daily cost): 563.854
+passable per agent: min=33360 median=33462 max=33570 total=3346157; sources: 219,536,841,1071,1379,...
+trial 1: day_total=283.213ms = prep 60.819 + search 172.465 + aggregate 38.812 + release 11.115 (+ other 0.002) | search per agent min/med/max = 1.548/1.678/2.719 ms | checksum b3415c465af9ead8
+trial 2: day_total=282.237ms = prep 60.731 + search 170.757 + aggregate 38.479 + release 12.267 (+ other 0.002) | search per agent min/med/max = 1.576/1.685/2.125 ms | checksum b3415c465af9ead8
+trial 3: day_total=277.466ms = prep 59.768 + search 168.359 + aggregate 38.196 + release 11.142 (+ other 0.002) | search per agent min/med/max = 1.531/1.641/2.085 ms | checksum b3415c465af9ead8
+condition status: complete (3 trials, 0.9s total)
+summary over trials:
+  prep           min=59.768 median=60.731 max=60.819 (ms; trials: 60.819 / 60.731 / 59.768)
+  search_total   min=168.359 median=170.757 max=172.465 (ms; trials: 172.465 / 170.757 / 168.359)
+  aggregate      min=38.196 median=38.479 max=38.812 (ms; trials: 38.812 / 38.479 / 38.196)
+  release        min=11.115 median=11.142 max=12.267 (ms; trials: 11.115 / 12.267 / 11.142)
+  DAY_TOTAL      min=277.466 median=282.237 max=283.213 (ms; trials: 283.213 / 282.237 / 277.466)
+searched: reached per agent min=17187 median=17263 max=17344 sum=1726058 | unknown sum=0 | state summaries per all agents: full=2286 partial=22469 unreachable=32545 unknown=0 not_applicable=0 empty=0
+results identical across trials: true
+
+output_ms (printing this report, accumulated up to the previous flush): 1.052
