@@ -23,8 +23,8 @@ use std::collections::HashMap;
 use strategy_game::common::CountryId;
 use strategy_game::hexmap::data::load_from_path;
 use strategy_game::world::{
-    BattleOutcome, ClaimReason, DivisionScenarioError, FinishReason, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent, OrderOutcome, ProvinceGraph,
-    ProvinceId, StopReason, load_division_scenario, load_world_preview,
+    BattleOutcome, ClaimReason, ClaimRejection, DivisionScenarioError, FinishReason, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent, OrderOutcome, ProvinceGraph,
+    ProvinceId, StopReason, countries_to_invalidate, load_division_scenario, load_world_preview,
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
@@ -256,7 +256,8 @@ fn run(a: &Args) -> i32 {
                 }
             }
         }
-        for e in military.advance_day(&graph) {
+        let day_events = military.advance_day(&graph);
+        for e in day_events.iter().cloned() {
             match e {
                 MoveEvent::HopCompleted { division, province } => println!("event: {division} reached {province}"),
                 MoveEvent::Arrived { division, province } => println!("event: {division} arrived at its destination {province}"),
@@ -297,7 +298,7 @@ fn run(a: &Args) -> i32 {
                     }
                 ),
                 MoveEvent::ControlClaim { province, claimant, previous_controller, reason, divisions } => println!(
-                    "event: CONTROL CLAIM for M6-c (control NOT changed here): {province} by country {} (previous controller {}; reason {}; divisions {})",
+                    "event: control claim: {province} by country {} (controller at the time {}; reason {}; divisions {})",
                     labels.get(&claimant).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
                     previous_controller.map(|c| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into())).unwrap_or_else(|| "none".into()),
                     match reason {
@@ -306,7 +307,42 @@ fn run(a: &Args) -> i32 {
                     },
                     divisions.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
                 ),
+                MoveEvent::ControlChanged { province, previous, new, reason, divisions } => println!(
+                    "event: CONTROL CHANGED {province}: country {} -> country {} ({}; divisions {}). Only this province changed; the state's legal owner is untouched",
+                    previous.map(|c| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into())).unwrap_or_else(|| "none".into()),
+                    labels.get(&new).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    match reason {
+                        ClaimReason::Undefended => "undefended".to_string(),
+                        ClaimReason::AttackerWonBattle(b) => format!("attacker won {b}"),
+                    },
+                    divisions.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
+                ),
+                MoveEvent::ClaimNotApplied { province, claimant, reason, rejection } => println!(
+                    "event: claim NOT applied at {province} by country {} ({}): {} (control unchanged; not retried automatically)",
+                    labels.get(&claimant).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    match reason {
+                        ClaimReason::Undefended => "undefended".to_string(),
+                        ClaimReason::AttackerWonBattle(b) => format!("attacker won {b}"),
+                    },
+                    match rejection {
+                        ClaimRejection::AlreadyApplied => "already applied".to_string(),
+                        ClaimRejection::Stale { .. } => "stale: the controller changed after the request".to_string(),
+                        ClaimRejection::NotAtWar { .. } => "the current controller is not at war with the claimant".to_string(),
+                        ClaimRejection::NoValidAttacker => "no valid attacking division is left at the province".to_string(),
+                        ClaimRejection::EnemyDivisionsRemain { divisions } => format!(
+                            "deferred: divisions of a country at war with the claimant remain there ({})",
+                            divisions.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
+                        ),
+                    }
+                ),
             }
+        }
+        let invalidated = countries_to_invalidate(&day_events);
+        if !invalidated.is_empty() {
+            println!(
+                "reach invalidation targets for M6-d (previous and new controllers; no duplicates): countries {}",
+                invalidated.iter().map(|c| labels.get(c).map(|l| l.to_string()).unwrap_or_else(|| "?".into())).collect::<Vec<_>>().join(", ")
+            );
         }
         print_state(day, &military, &labels, a.combat);
     }

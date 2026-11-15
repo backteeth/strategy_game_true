@@ -10,11 +10,13 @@
 //!   自国支配かつ戦闘中でない最小 `ProvinceId`。防御側は戦闘地点の隣接で自国支配かつ戦闘中でない最小 `ProvinceId`。退路がなければ撃破される。
 //! - 両陣営の人員損失が 0 の日は、防御側勝利として攻撃側全員を撤退させる(旧 P27-007)。
 //!
-//! **占領との分担(M6-c へ)**: 守備隊のいない進入と攻撃側の勝利では、**実効支配を更新せず**、`ControlClaim`(対象プロヴィンス・攻撃国・直前の支配国・理由・関わった師団)を1回だけ発行する。
-//! その時点の師団は、対象プロヴィンスにいて `Idle`、命令なし(経路・目的地は破棄)。支配が更新されるまで同じ要求は再発行されない(接触は移動中の師団が到着したときだけ起き、戦闘は終了した日に除去される)。
+//! **占領(M6-c。`occupation.rs`)**: 守備隊のいない進入と攻撃側の勝利では、`ControlClaim`(対象プロヴィンス・攻撃国・直前の支配国・理由・関わった師団)を1回だけ発行し、**その場で適用する**
+//! (守備隊なしは接触の処理の中、戦闘の勝利は終了処理の中。いずれも当日の組織率回復より前)。その時点の師団は、対象プロヴィンスにいて `Idle`、命令なし(経路・目的地は破棄)。
+//! 同じ要求は再発行されない(接触は移動中の師団が到着したときだけ起き、戦闘は終了した日に除去される)。
 
 use super::ids::ProvinceId;
 use super::legacy_combat::{self, ParticipantOutcome};
+use super::occupation::ClaimRequest;
 use super::movement::{BattleOutcome, ClaimReason, FinishReason, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent};
 use crate::common::CountryId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -93,14 +95,9 @@ impl MapMilitary {
         // 地点にいる交戦国の師団(`MapDivisionId` 昇順)
         let defenders: Vec<MapDivisionId> = self.divisions.values().filter(|d| d.province == province && d.id != id && self.at_war(owner, d.owner)).map(|d| d.id).collect();
         if defenders.is_empty() {
-            // 守備隊なし: 支配は更新せず、更新要求を1回だけ発行する(師団は Idle のまま対象プロヴィンスにいる)。
-            events.push(MoveEvent::ControlClaim {
-                province,
-                claimant: owner,
-                previous_controller: self.control.controller(province),
-                reason: ClaimReason::Undefended,
-                divisions: vec![id],
-            });
+            // 守備隊なし: 更新要求を1回だけ発行し、その場で適用する(旧の即時占領。師団は Idle のまま対象プロヴィンスにいる)。
+            let req = ClaimRequest { province, claimant: owner, previous_controller: self.control.controller(province), reason: ClaimReason::Undefended, divisions: vec![id] };
+            self.claim_and_report(req, events);
             return;
         }
         let defender_country = self.divisions[&defenders[0]].owner;
@@ -305,13 +302,15 @@ impl MapMilitary {
                         outcome: BattleOutcome::AttackerWon,
                         reason: FinishReason::DefenderGone,
                     });
-                    events.push(MoveEvent::ControlClaim {
+                    // 攻撃側の勝利: 終了処理の中で、その場で適用する(旧の即時占領。後続の戦闘の退路判定は更新後の支配国を参照する)。
+                    let req = ClaimRequest {
                         province,
                         claimant: battle.attacker_country,
                         previous_controller: self.control.controller(province),
                         reason: ClaimReason::AttackerWonBattle(bid),
                         divisions: remaining_attackers.clone(),
-                    });
+                    };
+                    self.claim_and_report(req, events);
                 }
                 (true, false) => {
                     finish(self, MapBattleStatus::DefenderWon);

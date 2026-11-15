@@ -1,6 +1,7 @@
 //! P32-034/035 (M6-a/b): 新経路の師団の初期配置と、陸上プロヴィンス間の日単位の移動・敵支配地への進入(純粋な Rust。Bevy・経済・保存・軍の旧型に依存しない)。
 //!
-//! 設計は `verification_logs/phase-32/p32-033/p32-033_m6_design.md`(§5・§6・§10)。**占領(実効支配の更新)・日次補給・前線/AI・UI・保存は含まない**(M6-c 以降)。
+//! 設計は `verification_logs/phase-32/p32-033/p32-033_m6_design.md`(§5・§6・§10)。**日次補給・前線/AI・UI・保存は含まない**(M6-d 以降)。
+//! 占領(守備隊のいない進入・戦闘の勝利による実効支配の更新。D8: 旧本番の**即時占領**)は M6-c(`occupation.rs`)。
 //! 戦闘の本体は `battle.rs`、旧経路の戦闘計算の再利用は `legacy_combat.rs`(隔離)。
 //!
 //! 旧経路(`military::movement`・`military::pathfinding`・`military::invasion`)の挙動のうち、次を引き継ぐ(旧コードを呼ばず、同じ規則を新しい型で実装する。比較は
@@ -14,7 +15,7 @@
 //! M6-b で加えたもの: 交戦関係(検証用シナリオが明示する国家の組。双方向)、敵支配のプロヴィンスへの進入と戦闘・退却(`battle.rs`)、戦闘中の師団への命令の拒否。
 //!
 //! **敵支配地に着いたときの扱い(M6-b 単体)**: 師団は到着したプロヴィンスに入り(現在地を更新)、**残りの経路と目的地を破棄**して止まる(占領が成立したものとして敵領の奥へ進まない)。
-//! 続きの移動は、M6-c で実効支配が更新された後に、改めて命令する。実行時状態であり、保存しない(M8 まで)。
+//! 占領が成立した(実効支配が更新された)あとは、新しい命令で移動できる。実行時状態であり、保存しない(M8 まで)。
 
 use super::battle::{MapBattle, MapBattleId};
 use super::connectivity::ProvinceGraph;
@@ -276,7 +277,7 @@ pub enum FinishReason {
     ZeroDamage,
 }
 
-/// 実効支配の更新要求の理由(M6-c が受け取る)。
+/// 実効支配の更新要求の理由。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaimReason {
     /// 守備隊のいない敵支配地に進入した。
@@ -285,7 +286,7 @@ pub enum ClaimReason {
     AttackerWonBattle(MapBattleId),
 }
 
-/// 日次処理で起きたこと(表示・テスト・M6-c への引き渡し用)。**支配は更新しない**(`ControlClaim` を M6-c が適用する)。
+/// 日次処理で起きたこと(表示・テスト・M6-d への通知用)。実効支配の更新は `ControlClaim` → `ControlChanged` / `ClaimNotApplied`(`occupation.rs`)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MoveEvent {
     /// 1ホップを終えて `province` に着いた(最終目的地ではない場合を含む)。
@@ -308,8 +309,12 @@ pub enum MoveEvent {
     Destroyed { division: MapDivisionId, battle: MapBattleId, at: ProvinceId },
     /// 戦闘が終わった。
     BattleFinished { battle: MapBattleId, province: ProvinceId, attacker: CountryId, defender: CountryId, outcome: BattleOutcome, reason: FinishReason },
-    /// 実効支配の更新要求(M6-c が適用する。**この処理は支配を変えない**)。守備隊のいない進入、または戦闘での攻撃側の勝利で、1回だけ発行される。
+    /// 実効支配の更新要求。守備隊のいない進入、または戦闘での攻撃側の勝利で、1回だけ発行され、**その場で適用される**(直後に `ControlChanged` または `ClaimNotApplied`)。
     ControlClaim { province: ProvinceId, claimant: CountryId, previous_controller: Option<CountryId>, reason: ClaimReason, divisions: Vec<MapDivisionId> },
+    /// 実効支配が実際に変わった(対象プロヴィンスだけ)。M6-d が `previous`・`new` の到達結果を無効化できる(`countries_to_invalidate`)。
+    ControlChanged { province: ProvinceId, previous: Option<CountryId>, new: CountryId, reason: ClaimReason, divisions: Vec<MapDivisionId> },
+    /// 更新要求を適用しなかった(支配は上書きしない。見送りは翌日に自動で再適用しない)。
+    ClaimNotApplied { province: ProvinceId, claimant: CountryId, reason: ClaimReason, rejection: super::occupation::ClaimRejection },
 }
 
 /// 新経路の師団・支配・交戦関係・戦闘の集合(実行時状態)。
@@ -486,7 +491,7 @@ impl MapMilitary {
     /// 3. 戦闘の進行(`MapBattleId` 昇順。旧 `process_daily_battles`)→ 4. 終了処理(`MapBattleId` 昇順。旧 `resolve_finished_battles`。旧は HashMap 順)→
     /// 5. 終了した戦闘の除去 → 6. 組織率の回復(`MapDivisionId` 昇順)。
     ///
-    /// 支配は更新しない(`ControlClaim` を返すだけ)。`graph` は退路の探索に使う。
+    /// 占領(`ControlClaim` の適用)は、守備隊のいない進入では接触の処理の中、戦闘の勝利では終了処理の中で、その場で行う(当日の組織率回復より前)。`graph` は退路の探索に使う。
     pub fn advance_day(&mut self, graph: &ProvinceGraph) -> Vec<MoveEvent> {
         let mut events = Vec::new();
         let ids: Vec<MapDivisionId> = self.divisions.keys().copied().collect();

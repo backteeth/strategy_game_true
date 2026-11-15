@@ -24,6 +24,7 @@ pub mod issue;
 pub mod legacy_combat;
 pub mod measure;
 pub mod model;
+pub mod occupation;
 pub mod movement;
 pub mod overlay;
 pub mod state_reach;
@@ -59,6 +60,7 @@ pub use ids::{HexCoord, MapStateId, ProvinceId};
 pub use issue::{IssueCode, Severity, WorldIssue};
 pub use model::{MapStateDef, ProvinceDef, WorldModel};
 pub use battle::{MapBattle, MapBattleId, MapBattleStatus};
+pub use occupation::{ClaimOutcome, ClaimRejection, ClaimRequest, countries_to_invalidate};
 pub use movement::{
     BattleOutcome, ClaimReason, CombatStats, DEFAULT_BASE_DAYS, FinishReason, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MapMilitaryError, MoveEvent,
     MovementParams, OrderOutcome, OrderRejection, ProvinceControl, StopReason, find_land_path, find_path_where,

@@ -1,0 +1,37 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 4.97s
+     Running tests\p32_036_map_occupation_test.rs (target\debug\deps\p32_036_map_occupation_test-3555cf1247c9711d.exe)
+
+running 12 tests
+test a_claim_is_applied_once_and_applied_stale_or_unjustified_claims_never_overwrite_control ... ok
+test a_non_participating_enemy_division_defers_the_conquest_after_a_won_battle_and_it_is_not_retried_the_next_day ... ok
+test an_attacker_victory_changes_control_on_the_finishing_day_and_the_organization_recovers_that_same_day ... ok
+test an_undefended_arrival_changes_control_on_the_arrival_day_and_the_organization_recovers_that_same_day ... ok
+test defender_victory_total_annihilation_and_zero_damage_never_occupy ... FAILED
+test enemy_divisions_that_remain_defer_the_claim_while_neutral_and_own_divisions_do_not_block_it_and_keep_their_state ... ok
+test later_orders_and_the_same_days_later_retreat_decisions_see_the_new_controller ... ok
+test occupation_results_do_not_depend_on_registration_or_order_issue_order ... ok
+test only_the_conquered_province_changes_and_the_state_ownership_and_other_provinces_are_untouched ... ok
+test reach_invalidation_targets_are_only_the_previous_and_new_controllers_without_duplicates ... ok
+test same_day_same_province_competition_is_decided_by_the_stable_processing_order ... ok
+test the_occupation_code_stays_separate_from_economy_saving_the_old_military_and_state_ownership ... ok
+
+failures:
+
+---- defender_victory_total_annihilation_and_zero_damage_never_occupy stdout ----
+
+thread 'defender_victory_total_annihilation_and_zero_damage_never_occupy' (2824) panicked at tests\p32_036_map_occupation_test.rs:245:5:
+[HopCompleted { division: MapDivisionId(1), province: ProvinceId(100) }, BattleStarted { battle: MapBattleId(0), province: ProvinceId(100), attacker: CountryId(1), defender: CountryId(2), attackers: [MapDivisionId(1)], defenders: [MapDivisionId(2)] }, Destroyed { division: MapDivisionId(1), battle: MapBattleId(0), at: ProvinceId(100) }, BattleFinished { battle: MapBattleId(0), province: ProvinceId(100), attacker: CountryId(1), defender: CountryId(2), outcome: DefenderWon, reason: AttackerGone }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    defender_victory_total_annihilation_and_zero_damage_never_occupy
+
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+error: test failed, to rerun pass `--test p32_036_map_occupation_test`
+
+real	0m5.545s
+user	0m0.000s
+sys	0m0.030s

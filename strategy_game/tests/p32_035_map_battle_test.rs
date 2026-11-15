@@ -2,8 +2,8 @@
 //!
 //! 旧経路との比較は、**旧の日次処理(`military::update::handle_daily_military`)を最小の Bevy App で実際に動かし**、同じ条件の新経路と各日の状態を比べる
 //! (新旧IDの対応表: 旧 `StateId i` ↔ 新 `ProvinceId 100+10i`、旧 `DivisionId n` ↔ 新 `MapDivisionId n`。隣接はテスト内で独立に六角形の規則から作る)。
-//! 実効支配の更新(占領)は M6-c の範囲なので、新経路は `ControlClaim` を返すだけ。比較ハーネスは、旧が占領した日と同じ日に、その要求を新側の支配へ適用して揃える
-//! (旧は戦闘の終了処理の中で支配を変えるため、その日の組織率回復が旧では +5 先に効く。比較は占領の日で止め、その日の差を明示的に補正する)。時間は合否条件にしない。保存・アセットは書かない。
+//! 実効支配の更新(占領)は M6-c で新経路にも入った(旧と同じく、到着処理・終了処理の中で、当日の組織率回復の前に更新する)。M6-b で入れていた比較ハーネスの補正は不要になり、
+//! 占領後も各日の全項目を比べる。時間は合否条件にしない。保存・アセットは書かない。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -235,7 +235,7 @@ fn the_shipped_battle_scenario_resolves_with_explicit_wars_and_combat() {
     let (_m, w, g) = real();
     let s = load_division_scenario(BATTLE, &g, &w.model).unwrap();
     assert_eq!(s.wars, vec![(C1, C2), (C3, C2)]);
-    assert_eq!(s.divisions.len(), 11);
+    assert_eq!(s.divisions.len(), 14);
     assert_eq!(s.control.controller(p(18312)), Some(C3), "an explicit override beats the state owner (state 21 = country 2)");
     for q in [17696u32, 17905, 18112] {
         assert_eq!(s.control.controller(p(q)), Some(C1));
@@ -312,8 +312,9 @@ fn an_undefended_enemy_province_stops_the_division_issues_one_claim_and_discards
         all.extend(ev);
     }
     assert_eq!(claims(&all).len(), 1, "the claim is issued once; the same result is never repeated on later days");
-    // 支配はまだ更新されていない。師団は対象プロヴィンスにいて Idle、残りの経路・目的地は破棄されている
-    assert_eq!(m.control().controller(p(11)), Some(C2));
+    // M6-c: 実効支配は到着日に更新される(対象プロヴィンスだけ。12 は国家2のまま)。師団は対象プロヴィンスにいて Idle、残りの経路・目的地は破棄されている
+    assert_eq!(m.control().controller(p(11)), Some(C1));
+    assert_eq!(m.control().controller(p(12)), Some(C2));
     let d = m.division(md(1)).unwrap();
     assert_eq!((d.province, d.status, d.destination, d.target, d.path.is_empty(), d.progress, d.battle), (p(11), MapDivisionStatus::Idle, None, None, true, 0.0, None));
     assert!(m.battles().next().is_none(), "no battle is created without defenders");
@@ -440,7 +441,7 @@ fn attacker_victory_issues_one_claim_with_the_full_result_and_leaves_control_unc
     // 支配が更新される前の状態: 師団は対象プロヴィンスにいて Idle、命令なし。支配は変わっていない。戦闘は除去済み
     let d = m.division(md(2)).unwrap();
     assert_eq!((d.province, d.status, d.destination, d.target, d.path.is_empty(), d.battle), (p(17694), MapDivisionStatus::Idle, None, None, true, None));
-    assert_eq!(m.control().controller(p(17694)), Some(C2));
+    assert_eq!(m.control().controller(p(17694)), Some(C1), "M6-c: the victory changes the control of that province on the finishing day");
     assert!(m.battles().next().is_none());
     let d5 = m.division(md(5)).unwrap();
     assert_eq!((d5.province, d5.status, d5.battle), (p(17486), MapDivisionStatus::Idle, None));
@@ -513,7 +514,7 @@ fn the_defender_retreats_to_the_lowest_province_id_it_controls() {
 }
 
 #[test]
-fn a_retreat_candidate_with_an_ongoing_battle_is_skipped_and_a_battle_resolved_earlier_in_id_order_still_counts_as_ongoing() {
+fn a_retreat_candidate_with_an_ongoing_battle_is_skipped_and_a_conquest_earlier_in_id_order_is_seen_by_later_retreat_decisions() {
     // 師団1(idx1)が中心 idx0 を、師団3(idx2)が idx3 を、同じ日に攻める(どちらも国家2の弱い守備)。先に始まった戦闘0(中心)の防御側は、
     // 最小の候補 idx3 が戦闘中(戦闘1)なので飛ばし、次の idx4 へ退却する。
     let g = star_graph();
@@ -525,8 +526,9 @@ fn a_retreat_candidate_with_an_ongoing_battle_is_skipped_and_a_battle_resolved_e
     let started: Vec<(MapBattleId, ProvinceId)> = ev.iter().filter_map(|e| if let MoveEvent::BattleStarted { battle, province, .. } = e { Some((*battle, *province)) } else { None }).collect();
     assert_eq!(started, vec![(MapBattleId(0), p(pid(0))), (MapBattleId(1), p(pid(3)))], "battle ids follow the division id order of arrival");
     let retreats: Vec<(MapDivisionId, ProvinceId)> = ev.iter().filter_map(|e| if let MoveEvent::Retreated { division, to, .. } = e { Some((*division, *to)) } else { None }).collect();
-    // 戦闘0(先): 候補 idx3 は戦闘1が進行中なので飛ばして idx4。戦闘1(後): 戦闘0は既に終了した状態なので、最小の候補は中心 idx0(支配は未更新で国家2のまま)。
-    assert_eq!(retreats, vec![(md(2), p(pid(4))), (md(4), p(pid(0)))]);
+    // 戦闘0(先): 候補 idx3 は戦闘1が進行中なので飛ばして idx4。戦闘1(後): 戦闘0は既に終了し、**M6-c で中心 idx0 の支配は国家1に変わっている**ので候補にならず、
+    // 最小の候補は idx4(M6-b では支配が未更新で、中心 idx0 へ退却した。占領後の支配国が同日の後続の退路判定から見える)。
+    assert_eq!(retreats, vec![(md(2), p(pid(4))), (md(4), p(pid(4)))]);
 }
 
 #[test]
@@ -862,27 +864,12 @@ fn compare(case: &Case) -> (Vec<String>, Vec<MoveEvent>) {
         old_day(&mut old, day as u8);
         let ev = new.advance_day(&g);
         check_invariants(&new);
-        // 実効支配の更新は M6-c。旧が占領した日に、その要求を新側へ適用して揃える(旧は戦闘の終了処理の中で占領するので、その日の組織率回復が旧では +5 先に効く)
-        let claim_divs: Vec<MapDivisionId> = ev
-            .iter()
-            .filter_map(|e| if let MoveEvent::ControlClaim { province, claimant, divisions, .. } = e { Some((province, claimant, divisions)) } else { None })
-            .flat_map(|(pr, c, ds)| {
-                new.set_controller(*pr, Some(*c));
-                ds.clone()
-            })
-            .collect();
+        // M6-c: 占領(実効支配の更新)は、新経路も旧と同じく、到着処理・終了処理の中でその場で行う(当日の組織率回復より前)。
+        // M6-b のハーネスにあった「要求を新側へ適用する」補正と「占領の日で比較を止める」処理は不要になった。
         events.extend(ev);
-        let (so, mut sn) = (old_snapshot(&old, n), new_snapshot(&new, n));
-        for id in &claim_divs {
-            let d = sn.divisions.iter_mut().find(|d| d.id == id.0).unwrap();
-            let org = (f32::from_bits(d.organization) + 5.0).min(100.0);
-            d.organization = org.to_bits();
-        }
+        let (so, sn) = (old_snapshot(&old, n), new_snapshot(&new, n));
         if so != sn {
             diffs.push(format!("day {day}:\n  old {so:?}\n  new {sn:?}"));
-        }
-        if !claim_divs.is_empty() {
-            break; // 以後は、旧だけが占領で支配を変えた状態の組織率回復が先行し、軌跡が(意図して)ずれる
         }
     }
     (diffs, events)
@@ -898,7 +885,7 @@ fn case(cells: Vec<(i32, i32)>, controllers: Vec<usize>, divisions: Vec<(u32, us
 
 #[test]
 fn old_comparison_attacker_wins_the_defender_retreats_and_the_claim_matches_the_old_occupation() {
-    let c = case(line(5), vec![1, 1, 2, 2, 2], vec![(1, 1, 1, CombatStats::standard()), (2, 2, 2, weak())], vec![(1, 1, 2)], 12);
+    let c = case(line(5), vec![1, 1, 2, 2, 2], vec![(1, 1, 1, CombatStats::standard()), (2, 2, 2, weak())], vec![(1, 1, 2)], 18);
     let (diffs, ev) = compare(&c);
     assert!(diffs.is_empty(), "{}", diffs.join("\n"));
     assert!(ev.contains(&MoveEvent::Retreated { division: md(2), battle: MapBattleId(0), from: p(pid(2)), to: p(pid(3)) }));
@@ -917,7 +904,7 @@ fn old_comparison_defender_wins_and_the_attacker_retreats_to_its_origin_and_reco
 #[test]
 fn old_comparison_a_defender_without_a_retreat_is_destroyed() {
     // 国家2の守備(idx2)は、隣接 idx1・idx3 がどちらも国家1の支配で、退路がない
-    let c = case(line(5), vec![1, 1, 2, 1, 1], vec![(1, 1, 1, CombatStats::standard()), (2, 2, 2, weak())], vec![(1, 1, 2)], 10);
+    let c = case(line(5), vec![1, 1, 2, 1, 1], vec![(1, 1, 1, CombatStats::standard()), (2, 2, 2, weak())], vec![(1, 1, 2)], 16);
     let (diffs, ev) = compare(&c);
     assert!(diffs.is_empty(), "{}", diffs.join("\n"));
     assert!(ev.contains(&MoveEvent::Destroyed { division: md(2), battle: MapBattleId(0), at: p(pid(2)) }));
@@ -946,7 +933,7 @@ fn old_comparison_the_attacker_origin_is_lost_and_the_lowest_controlled_neighbou
 #[test]
 fn old_comparison_a_reinforcement_joins_the_ongoing_battle_as_an_attacker() {
     // 国家1: 師団1(idx2)が idx3 を攻め、師団3(idx1)が2ホップで後から合流。守備: 師団2(国家2、idx3)
-    let c = case(line(5), vec![1, 1, 1, 2, 2], vec![(1, 1, 2, CombatStats::standard()), (2, 2, 3, CombatStats::standard()), (3, 1, 1, CombatStats::standard())], vec![(1, 1, 3), (1, 3, 3)], 14);
+    let c = case(line(5), vec![1, 1, 1, 2, 2], vec![(1, 1, 2, CombatStats::standard()), (2, 2, 3, CombatStats::standard()), (3, 1, 1, CombatStats::standard())], vec![(1, 1, 3), (1, 3, 3)], 20);
     let (diffs, ev) = compare(&c);
     assert!(diffs.is_empty(), "{}", diffs.join("\n"));
     assert!(ev.iter().any(|e| matches!(e, MoveEvent::BattleJoined { division, .. } if *division == md(3))));
@@ -985,7 +972,7 @@ fn old_comparison_ordinary_movement_and_a_moving_division_ordered_to_its_current
 
 #[test]
 fn old_comparison_known_differences_undefended_entry_and_a_third_country() {
-    // 守備隊なし(意図した差): 旧は即座に占領(支配国が変わる)し、師団は翌日まで Moving のまま。新は支配を変えず、到着日に Idle にして ControlClaim を出す。
+    // 守備隊なし: 旧も新も到着日(5日目)に支配国が変わる(M6-c)。残る差: 旧は師団を翌日まで Moving のままにし、新は到着日に Idle にする。
     let c = case(line(3), vec![1, 2, 2], vec![(1, 1, 0, CombatStats::standard())], vec![(1, 1, 1)], 5);
     let adj = adjacency(&c.cells);
     let mut old = old_app(&c, &adj);
@@ -1015,8 +1002,8 @@ fn old_comparison_known_differences_undefended_entry_and_a_third_country() {
         ev.extend(m.advance_day(&g));
     }
     assert_eq!(claims(&ev).len(), 1);
-    assert_eq!(m.control().controller(p(pid(1))), Some(C2), "new: control is not changed here (M6-c)");
-    assert_eq!(m.division(md(1)).unwrap().status, MapDivisionStatus::Idle);
+    assert_eq!(m.control().controller(p(pid(1))), Some(C1), "new (M6-c): the control also changes on the arrival day (day 5), the same day as the old model");
+    assert_eq!(m.division(md(1)).unwrap().status, MapDivisionStatus::Idle, "new: Idle on the arrival day (the old model keeps it Moving for one more day)");
 }
 
 // ---------------------------------------------------------------- 分離の確認

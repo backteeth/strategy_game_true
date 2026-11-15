@@ -1,0 +1,94 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 11m 12s
+     Running tests\p32_034_map_movement_test.rs (target\debug\deps\p32_034_map_movement_test-5e522a353fdcacc9.exe)
+
+running 19 tests
+test a_later_province_becoming_impassable_cuts_the_path_and_the_current_hop_still_finishes ... ok
+test an_order_is_applied_at_once_without_moving_the_division_and_arrival_follows_the_old_formula ... ok
+test division_registration_order_and_order_issue_order_do_not_change_the_result ... ok
+test equal_cost_candidates_are_taken_in_province_id_order_regardless_of_input_order ... ok
+test equal_cost_path_choice_matches_the_old_find_path_when_the_id_correspondence_preserves_order ... ok
+test every_kind_of_invalid_scenario_input_is_reported_with_its_own_code ... ok
+test format_failures_are_distinguished_from_content_issues ... ok
+test ids_are_resolved_through_membership_never_by_numeric_equality ... ok
+test one_hop_and_multi_hop_arrival_days_match_the_old_path_for_the_same_adjacency_cost_and_speed ... ok
+test real_18309_to_17266_crosses_the_state_boundary_in_five_hops_only_when_17903_is_explicitly_controlled ... ok
+test real_18309_to_18308_stays_on_day_one_and_arrives_on_day_five_even_with_a_reissued_order ... ok
+test real_control_change_after_the_order_stops_the_division_before_entering ... ok
+test real_rejections_other_controller_unknown_id_and_no_route ... ok
+test reissuing_the_same_destination_and_ordering_the_current_province_are_no_ops_that_change_nothing ... ok
+test rejections_are_distinguished_and_leave_every_division_untouched ... ok
+test rivers_and_the_state_layout_do_not_change_movement_cost_or_permission ... ok
+test the_division_stops_before_entering_a_province_that_is_no_longer_passable ... ok
+test the_movement_code_stays_separate_from_economy_saving_war_and_the_old_military ... ok
+test the_shipped_scenarios_resolve_the_initial_control_from_membership_and_explicit_overrides_only ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running tests\p32_035_map_battle_test.rs (target\debug\deps\p32_035_map_battle_test-83e3e8fb84c94c2a.exe)
+
+running 26 tests
+test a_battle_includes_only_the_divisions_in_the_same_province_even_inside_one_state ... ok
+test a_day_with_no_damage_on_either_side_is_a_defender_win_and_the_attacker_goes_back ... ok
+test a_defender_with_no_retreat_is_destroyed_and_the_attacker_wins ... ok
+test a_province_that_stops_being_enterable_stops_the_division_before_arriving ... ok
+test a_retreat_candidate_with_an_ongoing_battle_is_skipped_and_a_conquest_earlier_in_id_order_is_seen_by_later_retreat_decisions ... ok
+test an_undefended_enemy_province_stops_the_division_issues_one_claim_and_discards_the_rest_of_the_path ... ok
+test attacker_victory_issues_one_claim_with_the_full_result_and_leaves_control_unchanged ... ok
+test belligerents_may_try_to_enter_enemy_provinces_and_other_countries_are_distinguished ... ok
+test defender_victory_sends_the_attacker_back_to_its_origin_and_issues_no_claim ... ok
+test fighting_divisions_take_no_orders_and_ordinary_idempotency_and_rejection_safety_hold_with_wars ... ok
+test old_comparison_a_defender_without_a_retreat_is_destroyed ... ok
+test old_comparison_a_reinforcement_joins_the_ongoing_battle_as_an_attacker ... ok
+test old_comparison_attacker_wins_the_defender_retreats_and_the_claim_matches_the_old_occupation ... ok
+test old_comparison_defender_wins_and_the_attacker_retreats_to_its_origin_and_recovers ... ok
+test old_comparison_known_differences_undefended_entry_and_a_third_country ... ok
+test old_comparison_ordinary_movement_and_a_moving_division_ordered_to_its_current_province ... ok
+test old_comparison_the_attacker_origin_is_lost_and_the_lowest_controlled_neighbour_is_used ... ok
+test old_comparison_the_attacker_origin_is_lost_and_there_is_no_other_retreat_so_it_is_destroyed ... ok
+test old_comparison_zero_damage_on_both_sides_sends_the_attacker_back ... ok
+test registration_order_and_order_issue_order_do_not_change_events_or_final_state ... ok
+test reinforcements_join_the_ongoing_battle_in_id_order_other_countries_stop_before_entering_and_nobody_is_registered_twice ... ok
+test the_attacker_retreats_to_its_origin_then_to_the_lowest_controlled_neighbour_then_is_destroyed ... ok
+test the_battle_code_depends_on_the_old_model_only_through_the_isolated_adapter ... ok
+test the_defender_retreats_to_the_lowest_province_id_it_controls ... ok
+test the_shipped_battle_scenario_resolves_with_explicit_wars_and_combat ... ok
+test war_pairs_are_validated_bidirectionally_and_scenarios_without_wars_still_run ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+
+     Running tests\p32_036_map_occupation_test.rs (target\debug\deps\p32_036_map_occupation_test-3555cf1247c9711d.exe)
+
+running 12 tests
+test a_claim_is_applied_once_and_applied_stale_or_unjustified_claims_never_overwrite_control ... ok
+test a_non_participating_enemy_division_defers_the_conquest_after_a_won_battle_and_it_is_not_retried_the_next_day ... ok
+test an_attacker_victory_changes_control_on_the_finishing_day_and_the_organization_recovers_that_same_day ... ok
+test an_undefended_arrival_changes_control_on_the_arrival_day_and_the_organization_recovers_that_same_day ... ok
+test defender_victory_total_annihilation_and_zero_damage_never_occupy ... FAILED
+test enemy_divisions_that_remain_defer_the_claim_while_neutral_and_own_divisions_do_not_block_it_and_keep_their_state ... ok
+test later_orders_and_the_same_days_later_retreat_decisions_see_the_new_controller ... ok
+test occupation_results_do_not_depend_on_registration_or_order_issue_order ... ok
+test only_the_conquered_province_changes_and_the_state_ownership_and_other_provinces_are_untouched ... ok
+test reach_invalidation_targets_are_only_the_previous_and_new_controllers_without_duplicates ... ok
+test same_day_same_province_competition_is_decided_by_the_stable_processing_order ... ok
+test the_occupation_code_stays_separate_from_economy_saving_the_old_military_and_state_ownership ... ok
+
+failures:
+
+---- defender_victory_total_annihilation_and_zero_damage_never_occupy stdout ----
+
+thread 'defender_victory_total_annihilation_and_zero_damage_never_occupy' (3112) panicked at tests\p32_036_map_occupation_test.rs:244:5:
+[HopCompleted { division: MapDivisionId(1), province: ProvinceId(100) }, BattleStarted { battle: MapBattleId(0), province: ProvinceId(100), attacker: CountryId(1), defender: CountryId(2), attackers: [MapDivisionId(1)], defenders: [MapDivisionId(2)] }, Destroyed { division: MapDivisionId(1), battle: MapBattleId(0), at: ProvinceId(100) }, BattleFinished { battle: MapBattleId(0), province: ProvinceId(100), attacker: CountryId(1), defender: CountryId(2), outcome: DefenderWon, reason: AttackerGone }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    defender_victory_total_annihilation_and_zero_damage_never_occupy
+
+test result: FAILED. 11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+error: test failed, to rerun pass `--test p32_036_map_occupation_test`
+
+real	11m14.737s
+user	0m0.000s
+sys	0m0.000s

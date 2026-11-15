@@ -1,0 +1,56 @@
+7c7
+< divisions: 14
+---
+> divisions: 11
+22,24d21
+< day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+39,41d35
+< day 1 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 1 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 1 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+55,57d48
+< day 2 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 2 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 2 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+71,73d61
+< day 3 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 3 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 3 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+87,89d74
+< day 4 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 4 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 4 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+107,109d91
+< day 5 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 5 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 5 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+123,125d104
+< day 6 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 6 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 6 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+139,141d117
+< day 7 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 7 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 7 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+155,157d130
+< day 8 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 8 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 8 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+171,173d143
+< day 9 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 9 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 9 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+187,189d156
+< day 10 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 10 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 10 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+203,205d169
+< day 11 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 11 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 11 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+219,221d182
+< day 12 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 12 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
+< day 12 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - manpower 10000 organization 100.0 equipment 100.00
