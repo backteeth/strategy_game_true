@@ -333,3 +333,9 @@ M6 で師団を P に載せる際に、`Reach` を日次補給の新マップ版
 - 検証用シナリオ(`assets/data/world/preview/supply_connectivity_scenario.ron`、`format_version: 1`)は、主体ごとに `label`・`sources`(補給源の `ProvinceId`、複数可)と、`passable_provinces` / `passable_states`(少なくとも一方)を持つ。**経済シナリオの `countries[].states` や配列順から通行範囲を推定しない。通行範囲は検証入力で、正式な国境・所有・実効支配のデータではない。**
 - `passable_states` は `WorldModel` の所属(正本)から `ExplicitPassable::from_states` で展開する名前つきの変換。併用時は和集合で、**展開後の重複(同じ主体の `passable_states` の所属でもある ID を `passable_provinces` に書く)はエラー**。ステート未所属の既知の `ProvinceId` は明示すれば通行できる。すべての補給源が通行範囲に含まれることを要求する。
 - 検証規則・CLI(`world_reach_check --scenario`)・結果は `verification_logs/phase-32/p32-032/p32-032_m5c_supply_scenario_report.md`。経済・AI・軍・保存・補給量・輸送能力へは接続していない。
+
+---
+
+## 13. 追記(P32-033: D10 の決定と M5 の閉鎖)
+
+**D10 は、プロヴィンスグラフ上で到達判定し、区画の所属に基づいて `MapStateId` 単位の要約を導出する方式に決定した(ユーザー指示)。** 根拠・M5 の完了条件との照合・M5 の閉鎖は `verification_logs/phase-32/p32-033/p32-033_d10_decision_and_m5_closure.md`。再計算の第一候補は「入力(補給源・通行条件・所属)が変化した主体だけを再計算する」方式で、日次の時間予算・キャッシュの実装・再計算の実行順は M6 で検討する。到達判定を日次補給や軍へ適用する作業は M6 以降(`p32-033_m6_design.md`)。§6 の U7(D10)は本節で解決した。D5・D6・D7・D8 は未決のまま。

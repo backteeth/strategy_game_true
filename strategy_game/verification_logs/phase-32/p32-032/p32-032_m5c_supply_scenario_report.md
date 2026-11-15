@@ -96,3 +96,10 @@
 
 ## 10. M5 の残りと次
 本体(経済・AI・軍)への接続は後続(M6 以降)。今回の接続先は検証用CLIだけで、`MapEconomySimulation`・保存形式は不変。
+
+## 11. 訂正(P32-033 で追記。本文は書き換えていない)
+§7 の「今回の変更は `src/economy`・`assets/data` を1行も変えていない(`git diff` 0行)」は、**補給検証用 RON と README の差分があることを書き落としていた**。P32-032 の変更で `assets/` 配下に生じた差分は次の2つである(`git diff aaa7884 2ab33b1 -- assets src/economy` で確認)。
+- 追加: `assets/data/world/preview/supply_connectivity_scenario.ron`(補給検証用の新規ファイル。§2 の変更範囲の表には記載済み)
+- 変更: `assets/data/world/preview/README.md`(新ファイルの説明を1行追加。§2 に記載済み)
+
+**既存の経済アセット(`economy_scenario_*.ron`・`province_resources*.ron`・`province_facilities.ron`・`manual_orders_m4e.ron`・`provinces.ron`・`states.ron`・地図)と `src/economy` には差分がない。** §7 の「0行」は、上記2ファイルを追加・変更する前の `git diff HEAD`(新規ファイルは未追跡のため差分に出ない)で確認した値であり、最終コミットの差分を表していなかった。
