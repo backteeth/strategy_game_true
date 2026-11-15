@@ -1,0 +1,30 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 2m 33s
+     Running `target\debug\hex_map_preview.exe --division-scenario assets/data/world/preview/division_movement_scenario.ron --shots verification_logs/phase-32/p32-039/shots_move`
+[2m2026-11-15T12:14:48.294745Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "617.42", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-11-15T12:14:48.458533Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-11-15T12:14:48.458591Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-11-15T12:14:48.459023Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Creating new window Hex Map Preview (P32-001) (65v0)
+[2m2026-11-15T12:14:48.585663Z[0m [32m INFO[0m [2mstrategy_game::hexmap::view[0m[2m:[0m [HexPreview] loaded 96760 cells / 3493 rivers in 40.9 ms; built 98 chunks (200 meshes, 200 map entities) in 22.9 ms
+[2m2026-11-15T12:14:48.597908Z[0m [32m INFO[0m [2mstrategy_game::hexmap::world_view[0m[2m:[0m [WorldPreview] loaded 29 provinces / 3 states (3 unassigned), 62 boundary edges
+[2m2026-11-15T12:14:48.624043Z[0m [32m INFO[0m [2mstrategy_game::hexmap::division_view[0m[2m:[0m [DivisionView] scenario assets/data/world/preview/division_movement_scenario.ron ready (3 divisions)
+[2m2026-11-15T12:14:49.122352Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] initial: day 0 selected None divisions 1@18309:idle 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.159972Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d1_initial.png
+[2m2026-11-15T12:14:49.233219Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] selected division 1, destination cell 18308 selected: day 0 selected Some(1) divisions 1@18309:idle 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.270443Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d2_selected.png
+[2m2026-11-15T12:14:49.344228Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] order accepted: day 0 selected Some(1) divisions 1@18309:moving->18308 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.381137Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d3_ordered.png
+[2m2026-11-15T12:14:49.510905Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] after 4 days (division 1 must still be at 18309): day 4 selected Some(1) divisions 1@18309:moving->18308 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.547854Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d4_day4.png
+[2m2026-11-15T12:14:49.621987Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] after 5 days (division 1 must be at 18308): day 5 selected Some(1) divisions 1@18308:idle 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.659213Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d5_day5.png
+[2m2026-11-15T12:14:49.782963Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] after mode switch and zoom: day 5 selected Some(1) divisions 1@18308:idle 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.820507Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d6_zoom_state_mode.png
+[2m2026-11-15T12:14:49.943926Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] division 2 selected after pan: day 5 selected Some(2) divisions 1@18308:idle 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:49.983813Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d7_pan_division2.png
+[2m2026-11-15T12:14:50.701471Z[0m [32m INFO[0m [2mstrategy_game::hexmap::view[0m[2m:[0m [HexPreview] loaded 96760 cells / 3493 rivers in 41.0 ms; built 98 chunks (200 meshes, 200 map entities) in 22.0 ms
+[2m2026-11-15T12:14:50.712891Z[0m [32m INFO[0m [2mstrategy_game::hexmap::world_view[0m[2m:[0m [WorldPreview] loaded 29 provinces / 3 states (3 unassigned), 62 boundary edges
+[2m2026-11-15T12:14:50.737654Z[0m [32m INFO[0m [2mstrategy_game::hexmap::division_view[0m[2m:[0m [DivisionView] scenario assets/data/world/preview/division_movement_scenario.ron ready (3 divisions)
+[2m2026-11-15T12:14:50.910616Z[0m [32m INFO[0m [2mhex_map_preview[0m[2m:[0m [DivisionShots] after reopen (must be the initial placement, no selection): day 0 selected None divisions 1@18309:idle 2@17266:idle 3@17269:idle
+[2m2026-11-15T12:14:50.944888Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_move\d_after_reopen.png
+exit=0

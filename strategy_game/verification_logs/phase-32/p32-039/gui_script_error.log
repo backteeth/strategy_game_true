@@ -1,0 +1,11 @@
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.46s
+     Running `target\debug\hex_map_preview.exe --division-scenario assets/data/world/preview/does_not_exist.ron --shots verification_logs/phase-32/p32-039/shots_battle`
+[2m2026-11-15T12:14:55.842742Z[0m [32m INFO[0m [2mbevy_render::renderer[0m[2m:[0m AdapterInfo { name: "NVIDIA GeForce RTX 5070 Ti", vendor: 4318, device: 11269, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "617.42", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: false }
+[2m2026-11-15T12:14:56.002700Z[0m [32m INFO[0m [2mbevy_pbr::cluster[0m[2m:[0m GPU clustering is supported on this device.
+[2m2026-11-15T12:14:56.002750Z[0m [32m INFO[0m [2mbevy_render::batching::gpu_preprocessing[0m[2m:[0m GPU preprocessing is fully supported on this device.
+[2m2026-11-15T12:14:56.003173Z[0m [32m INFO[0m [2mbevy_winit::system[0m[2m:[0m Creating new window Hex Map Preview (P32-001) (65v0)
+[2m2026-11-15T12:14:56.131387Z[0m [32m INFO[0m [2mstrategy_game::hexmap::view[0m[2m:[0m [HexPreview] loaded 96760 cells / 3493 rivers in 41.0 ms; built 98 chunks (200 meshes, 200 map entities) in 22.4 ms
+[2m2026-11-15T12:14:56.143568Z[0m [32m INFO[0m [2mstrategy_game::hexmap::world_view[0m[2m:[0m [WorldPreview] loaded 29 provinces / 3 states (3 unassigned), 62 boundary edges
+[2m2026-11-15T12:14:56.170108Z[0m [31mERROR[0m [2mstrategy_game::hexmap::division_view[0m[2m:[0m [DivisionView] failed to start: cannot read 'assets/data/world/preview/does_not_exist.ron': 指定されたファイルが見つかりません。 (os error 2)
+[2m2026-11-15T12:14:56.697402Z[0m [32m INFO[0m [2mbevy_render::view::window::screenshot[0m[2m:[0m Screenshot saved to verification_logs/phase-32/p32-039/shots_battle\d_error.png
+exit=0

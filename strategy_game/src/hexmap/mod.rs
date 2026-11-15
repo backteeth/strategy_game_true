@@ -3,6 +3,7 @@
 
 pub mod build_view;
 pub mod data;
+pub mod division_view;
 pub mod economy_view;
 pub mod geometry;
 pub mod render;

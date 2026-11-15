@@ -11,6 +11,7 @@
 use bevy::log::{DEFAULT_FILTER, LogPlugin};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use strategy_game::hexmap::division_view::{DivisionCommand, DivisionSessionRes, DivisionViewConfig, DivisionViewPlugin};
 use strategy_game::hexmap::render::HexViewMode;
 use strategy_game::hexmap::view::{
     HexCamera, HexPreviewEntity, HexPreviewPlugin, HexPreviewState, HexSelection, HexViewSettings,
@@ -48,6 +49,17 @@ fn main() {
         }
         p
     });
+    // P32-039: --division-scenario <RON>。検証用の師団シナリオを開く(--world-preview を含意する)。値が無い場合は起動しない。
+    let division_scenario = args.iter().position(|a| a == "--division-scenario").map(|i| {
+        args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().unwrap_or_else(|| {
+            eprintln!("hex_map_preview: --division-scenario needs a path to a division scenario RON");
+            std::process::exit(2)
+        })
+    });
+    let world_preview = match (world_preview, division_scenario.is_some()) {
+        (None, true) => Some(WorldPreviewPaths::default_preview()),
+        (w, _) => w,
+    };
     let with_world = world_preview.is_some();
 
     let mut app = App::new();
@@ -74,10 +86,15 @@ fn main() {
         open_at_start: true,
         world_preview,
     });
+    if let Some(path) = division_scenario.clone() {
+        app.add_plugins(DivisionViewPlugin { config: DivisionViewConfig { scenario: path } });
+    }
     if let Some(dir) = shots {
         std::fs::create_dir_all(&dir).expect("create shot dir");
         app.insert_resource(ShotDir(dir));
-        if with_world {
+        if division_scenario.is_some() {
+            app.add_systems(Update, division_shot_script);
+        } else if with_world {
             app.add_systems(Update, world_shot_script);
         } else {
             app.add_systems(Update, shot_script);
@@ -375,5 +392,224 @@ fn world_shot_script(
             exit.write(AppExit::Success);
         }
         _ => {}
+    }
+}
+
+/// `--division-scenario --shots`用の自動スクリプト(実マウス操作の代替ではない。同じ `DivisionCommand` の経路を使う)。
+/// 移動シナリオ(ファイル名に "battle" を含まない): 師団1を選び、18309→18308 へ命令して 5 日進める(4日目まで 18309、5日目に 18308)。
+/// 戦闘シナリオ("battle" を含む): 同じ 18311 にいる師団1・4 の選択、師団2 の 17694 への攻撃(戦闘→占領)、表示モード切替とズーム後の確認。
+/// どちらも最後に Tab で閉じて開き直し、初期配置へ戻ることを確認する。各段階の師団の位置は `[DivisionShots]` のログに出す。
+#[allow(clippy::too_many_arguments)]
+fn division_shot_script(
+    mut commands: Commands,
+    dir: Res<ShotDir>,
+    config: Res<DivisionViewConfig>,
+    mut frame: Local<u32>,
+    settings: Option<ResMut<HexViewSettings>>,
+    selection: Option<ResMut<HexSelection>>,
+    session: Option<Res<DivisionSessionRes>>,
+    world: Option<Res<LoadedWorld>>,
+    map: Option<Res<LoadedHexMap>>,
+    mut cam: Query<&mut Transform, With<HexCamera>>,
+    mut out: MessageWriter<DivisionCommand>,
+    mut next: ResMut<NextState<HexPreviewState>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    *frame += 1;
+    let f = *frame;
+    let shot = |commands: &mut Commands, name: &str| {
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(dir.0.join(name)));
+    };
+    let battle = config.scenario.contains("battle");
+    let log_state = |tag: &str| {
+        if let Some(s) = &session {
+            let m = s.0.military();
+            let parts: Vec<String> = m
+                .divisions()
+                .map(|d| format!("{}@{}:{}{}", d.id.0, d.province.0, division_status(d.status), d.destination.map(|p| format!("->{}", p.0)).unwrap_or_default()))
+                .collect();
+            info!("[DivisionShots] {tag}: day {} selected {:?} divisions {}", s.0.day(), s.0.selected().map(|i| i.0), parts.join(" "));
+        } else {
+            info!("[DivisionShots] {tag}: no session");
+        }
+    };
+    if f == 300 {
+        next.set(HexPreviewState::Closed);
+        return;
+    }
+    if f == 310 {
+        next.set(HexPreviewState::Open);
+        return;
+    }
+    if f == 340 {
+        log_state("after reopen (must be the initial placement, no selection)");
+        shot(&mut commands, "d_after_reopen.png");
+    }
+    if f == 360 {
+        exit.write(AppExit::Success);
+        return;
+    }
+    let (Some(mut settings), Some(mut selection), Some(world), Some(map)) = (settings, selection, world, map) else {
+        if f == 40 {
+            shot(&mut commands, "d_error.png");
+        }
+        if f == 60 {
+            exit.write(AppExit::Success);
+        }
+        return;
+    };
+    if session.is_none() {
+        // 起動失敗(エラー表示の確認)
+        if f == 40 {
+            shot(&mut commands, "d_error.png");
+        }
+        if f == 60 {
+            exit.write(AppExit::Success);
+        }
+        return;
+    }
+    let cell_of = |p: u32| world.data.model.province(strategy_game::world::ProvinceId(p)).map(|d| (d.cell.q, d.cell.r));
+    let select_cell = |sel: &mut HexSelection, p: u32| {
+        if let Some((q, r)) = cell_of(p) {
+            sel.0 = map.0.cell_index(q, r);
+        }
+    };
+    let focus = |tf: &mut Transform, p: u32, scale: f32| {
+        if let Some((q, r)) = cell_of(p) {
+            let (x, y) = map.0.grid.center_world(q, r);
+            tf.translation.x = x as f32;
+            tf.translation.y = y as f32;
+            tf.scale = Vec3::splat(scale);
+        }
+    };
+    use strategy_game::world::MapDivisionId as D;
+    if !battle {
+        match f {
+            40 => {
+                log_state("initial");
+                shot(&mut commands, "d1_initial.png");
+            }
+            45 => {
+                out.write(DivisionCommand::Select(D(1)));
+                select_cell(&mut selection, 18308);
+            }
+            60 => {
+                log_state("selected division 1, destination cell 18308 selected");
+                shot(&mut commands, "d2_selected.png");
+            }
+            65 => {
+                out.write(DivisionCommand::OrderToSelectedCell);
+            }
+            80 => {
+                log_state("order accepted");
+                shot(&mut commands, "d3_ordered.png");
+            }
+            85 | 90 | 95 | 100 => {
+                out.write(DivisionCommand::AdvanceDay);
+            }
+            110 => {
+                log_state("after 4 days (division 1 must still be at 18309)");
+                shot(&mut commands, "d4_day4.png");
+            }
+            115 => {
+                out.write(DivisionCommand::AdvanceDay);
+            }
+            130 => {
+                log_state("after 5 days (division 1 must be at 18308)");
+                shot(&mut commands, "d5_day5.png");
+            }
+            135 => {
+                // 表示モード切替・ズーム・パンの後も、マーカーと選択が同じセルに乗る
+                settings.mode = HexViewMode::State;
+                if let Ok(mut tf) = cam.single_mut() {
+                    focus(&mut tf, 18308, 0.05);
+                }
+            }
+            155 => {
+                log_state("after mode switch and zoom");
+                shot(&mut commands, "d6_zoom_state_mode.png");
+            }
+            160 => {
+                settings.mode = HexViewMode::Terrain;
+                if let Ok(mut tf) = cam.single_mut() {
+                    focus(&mut tf, 17266, 0.12);
+                }
+                out.write(DivisionCommand::Select(D(2)));
+            }
+            180 => {
+                log_state("division 2 selected after pan");
+                shot(&mut commands, "d7_pan_division2.png");
+            }
+            _ => {}
+        }
+    } else {
+        match f {
+            40 => {
+                log_state("initial");
+                shot(&mut commands, "b1_initial.png");
+            }
+            45 => {
+                // 同じプロヴィンス(18311)に師団1と4がいる: 件数表示と、選択欄からの選択
+                select_cell(&mut selection, 18311);
+                if let Ok(mut tf) = cam.single_mut() {
+                    focus(&mut tf, 18311, 0.06);
+                }
+            }
+            60 => {
+                log_state("two divisions at 18311");
+                shot(&mut commands, "b2_two_divisions_one_province.png");
+            }
+            65 => {
+                out.write(DivisionCommand::Select(D(4)));
+            }
+            80 => {
+                log_state("division 4 picked");
+                shot(&mut commands, "b3_division4_selected.png");
+            }
+            85 => {
+                out.write(DivisionCommand::Select(D(2)));
+                select_cell(&mut selection, 17694);
+                if let Ok(mut tf) = cam.single_mut() {
+                    focus(&mut tf, 17694, 0.08);
+                }
+            }
+            95 => {
+                out.write(DivisionCommand::OrderToSelectedCell);
+            }
+            105 => {
+                log_state("division 2 ordered to 17694");
+                shot(&mut commands, "b4_ordered.png");
+            }
+            110 | 112 | 114 | 116 | 118 => {
+                out.write(DivisionCommand::AdvanceDay);
+            }
+            125 => {
+                log_state("after 5 days (battle expected)");
+                shot(&mut commands, "b5_day5_battle.png");
+            }
+            130 | 132 | 134 | 136 | 138 => {
+                out.write(DivisionCommand::AdvanceDay);
+            }
+            150 => {
+                log_state("after 10 days (occupation expected)");
+                shot(&mut commands, "b6_day10_occupied.png");
+            }
+            155 => {
+                settings.mode = HexViewMode::State;
+            }
+            175 => {
+                log_state("state mode after occupation");
+                shot(&mut commands, "b7_state_mode_after_occupation.png");
+            }
+            _ => {}
+        }
+    }
+}
+
+fn division_status(s: strategy_game::world::MapDivisionStatus) -> &'static str {
+    match s {
+        strategy_game::world::MapDivisionStatus::Idle => "idle",
+        strategy_game::world::MapDivisionStatus::Moving => "moving",
+        strategy_game::world::MapDivisionStatus::Fighting => "fighting",
     }
 }
