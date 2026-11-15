@@ -1,0 +1,3 @@
+$ cargo run --release --bin world_move_check -- --days 1 --control 1:17903:9
+INPUT ERROR: --control: country label 9 is not defined in the scenario
+exit=65

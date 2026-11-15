@@ -1,0 +1,16 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> tests\p32_034_map_movement_test.rs:314:55
+    |
+314 | fn old_timeline(n: usize, speed: f32, days: usize) -> (Vec<(usize, DivisionStatus, f32)>, Result<Vec<usize>, ()>) {
+    |                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: could not compile `strategy_game` (test "p32_034_map_movement_test") due to 1 previous error
+
+real	1m25.242s
+user	0m0.000s
+sys	0m0.016s

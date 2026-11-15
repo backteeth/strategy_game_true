@@ -1,0 +1,155 @@
+$ cargo run --release --bin world_move_check -- --days 26 --order 1:1:17266
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_movement_scenario.ron
+description: P32-034 division placement and movement validation scenario (verification input, not official ownership or control)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 3
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18309 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 1 ---
+order MapDivision#1 -> Province#17266: accepted (5 hop(s))
+day 1 MapDivision#1 (country 1) at 18309 Moving progress 0.20 destination 17266 next 18109 remaining 17903>17693>17484>17266
+day 1 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 2 ---
+day 2 MapDivision#1 (country 1) at 18309 Moving progress 0.40 destination 17266 next 18109 remaining 17903>17693>17484>17266
+day 2 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 3 ---
+day 3 MapDivision#1 (country 1) at 18309 Moving progress 0.60 destination 17266 next 18109 remaining 17903>17693>17484>17266
+day 3 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 4 ---
+day 4 MapDivision#1 (country 1) at 18309 Moving progress 0.80 destination 17266 next 18109 remaining 17903>17693>17484>17266
+day 4 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 5 ---
+event: MapDivision#1 reached Province#18109
+day 5 MapDivision#1 (country 1) at 18109 Moving progress 0.00 destination 17266 next 17903 remaining 17693>17484>17266
+day 5 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 6 ---
+day 6 MapDivision#1 (country 1) at 18109 Moving progress 0.20 destination 17266 next 17903 remaining 17693>17484>17266
+day 6 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 7 ---
+day 7 MapDivision#1 (country 1) at 18109 Moving progress 0.40 destination 17266 next 17903 remaining 17693>17484>17266
+day 7 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 8 ---
+day 8 MapDivision#1 (country 1) at 18109 Moving progress 0.60 destination 17266 next 17903 remaining 17693>17484>17266
+day 8 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 9 ---
+day 9 MapDivision#1 (country 1) at 18109 Moving progress 0.80 destination 17266 next 17903 remaining 17693>17484>17266
+day 9 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 10 ---
+event: MapDivision#1 reached Province#17903
+day 10 MapDivision#1 (country 1) at 17903 Moving progress 0.00 destination 17266 next 17693 remaining 17484>17266
+day 10 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 11 ---
+day 11 MapDivision#1 (country 1) at 17903 Moving progress 0.20 destination 17266 next 17693 remaining 17484>17266
+day 11 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 12 ---
+day 12 MapDivision#1 (country 1) at 17903 Moving progress 0.40 destination 17266 next 17693 remaining 17484>17266
+day 12 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 13 ---
+day 13 MapDivision#1 (country 1) at 17903 Moving progress 0.60 destination 17266 next 17693 remaining 17484>17266
+day 13 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 14 ---
+day 14 MapDivision#1 (country 1) at 17903 Moving progress 0.80 destination 17266 next 17693 remaining 17484>17266
+day 14 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 15 ---
+event: MapDivision#1 reached Province#17693
+day 15 MapDivision#1 (country 1) at 17693 Moving progress 0.00 destination 17266 next 17484 remaining 17266
+day 15 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 16 ---
+day 16 MapDivision#1 (country 1) at 17693 Moving progress 0.20 destination 17266 next 17484 remaining 17266
+day 16 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 16 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 17 ---
+day 17 MapDivision#1 (country 1) at 17693 Moving progress 0.40 destination 17266 next 17484 remaining 17266
+day 17 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 17 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 18 ---
+day 18 MapDivision#1 (country 1) at 17693 Moving progress 0.60 destination 17266 next 17484 remaining 17266
+day 18 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 18 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 19 ---
+day 19 MapDivision#1 (country 1) at 17693 Moving progress 0.80 destination 17266 next 17484 remaining 17266
+day 19 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 19 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 20 ---
+event: MapDivision#1 reached Province#17484
+day 20 MapDivision#1 (country 1) at 17484 Moving progress 0.00 destination 17266 next 17266 remaining -
+day 20 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 20 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 21 ---
+day 21 MapDivision#1 (country 1) at 17484 Moving progress 0.20 destination 17266 next 17266 remaining -
+day 21 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 21 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 22 ---
+day 22 MapDivision#1 (country 1) at 17484 Moving progress 0.40 destination 17266 next 17266 remaining -
+day 22 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 22 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 23 ---
+day 23 MapDivision#1 (country 1) at 17484 Moving progress 0.60 destination 17266 next 17266 remaining -
+day 23 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 23 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 24 ---
+day 24 MapDivision#1 (country 1) at 17484 Moving progress 0.80 destination 17266 next 17266 remaining -
+day 24 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 24 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 25 ---
+event: MapDivision#1 reached Province#17266
+event: MapDivision#1 arrived at its destination Province#17266
+day 25 MapDivision#1 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 25 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 25 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 26 ---
+day 26 MapDivision#1 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 26 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 26 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+orders rejected: 0 (a rejection is a normal result)
+exit=0

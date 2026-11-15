@@ -1,0 +1,5 @@
+(
+ format_version: 1,
+ base_days: 5.0,
+ countries: [], state_owners: [], divisions: [], owner: 3,
+)

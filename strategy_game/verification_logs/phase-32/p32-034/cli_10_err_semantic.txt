@@ -1,0 +1,11 @@
+$ cargo run --release --bin world_move_check -- --scenario verification_logs/phase-32/p32-034/bad_inputs/bad_semantic.ron --days 1
+SCENARIO INPUT ERROR: verification_logs/phase-32/p32-034/bad_inputs/bad_semantic.ron: 8 issue(s)
+  [invalid-base-days] base_days must be finite and positive
+  [duplicate-country-id] country_id 1 is used by more than one label
+  [unresolved-country] state_owners (state 99): country label 7 is not defined in `countries`
+  [unknown-state] state_owners names MapState#99, which is not a state of the world
+  [unknown-province] controller_overrides (province 99999): Province#99999 is not a province of the world
+  [invalid-speed] division 1: speed must be finite and positive
+  [initial-position-not-controlled] division 1 starts at Province#17269, which has no controller (its country is 1)
+  [duplicate-division] division id 1 is defined more than once
+exit=65

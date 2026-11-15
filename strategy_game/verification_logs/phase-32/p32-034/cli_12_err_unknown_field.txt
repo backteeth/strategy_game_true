@@ -1,0 +1,3 @@
+$ cargo run --release --bin world_move_check -- --scenario verification_logs/phase-32/p32-034/bad_inputs/bad_field.ron
+SCENARIO LOAD ERROR: the division scenario is malformed: 4:50-4:55: Unexpected field named `owner` in `DivisionScenarioFile`, expected one of `format_version`, `description`, `base_days`, `countries`, `state_owners`, `controller_overrides`, or `divisions` instead
+exit=66

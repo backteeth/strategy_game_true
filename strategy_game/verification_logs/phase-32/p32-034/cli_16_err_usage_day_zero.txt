@@ -1,0 +1,4 @@
+$ cargo run --release --bin world_move_check -- --order 0:1:18308
+USAGE ERROR: --order: the day starts at 1
+usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] [--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]...
+exit=64

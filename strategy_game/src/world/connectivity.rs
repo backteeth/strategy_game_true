@@ -386,6 +386,11 @@ impl ProvinceGraph {
         Some(self.adj[i].iter().map(|(j, e)| (self.nodes[*j].id, *e)).collect())
     }
 
+    /// `id` の隣接ノード(`ProvinceId` 昇順)を、割り当てなしで列挙する(未知の ID は空)。P32-034: 移動の経路探索が使う。
+    pub fn neighbor_ids(&self, id: ProvinceId) -> impl Iterator<Item = ProvinceId> + '_ {
+        self.index.get(&id).into_iter().flat_map(move |&i| self.adj[i].iter().map(move |(j, _)| self.nodes[*j].id))
+    }
+
     /// 2ノードが隣接するか(辺の事実を返す)。
     pub fn edge_between(&self, a: ProvinceId, b: ProvinceId) -> Option<EdgeInfo> {
         let (&i, &j) = (self.index.get(&a)?, self.index.get(&b)?);

@@ -1,0 +1,8 @@
+(
+ format_version: 1,
+ base_days: 0.0,
+ countries: [ (label: 1, country_id: 1), (label: 2, country_id: 1) ],
+ state_owners: [ (state: 20, country: 1), (state: 99, country: 7) ],
+ controller_overrides: [ (province: 99999, country: 1) ],
+ divisions: [ (id: 1, country: 1, province: 17269, speed: -1.0), (id: 1, country: 1, province: 18309, speed: 1.0) ],
+)

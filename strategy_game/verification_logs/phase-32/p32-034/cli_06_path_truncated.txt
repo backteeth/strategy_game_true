@@ -1,0 +1,68 @@
+$ cargo run --release --bin world_move_check -- --days 9 --order 1:1:17266 --control 3:17693:2
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_movement_scenario.ron
+description: P32-034 division placement and movement validation scenario (verification input, not official ownership or control)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 3
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18309 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 1 ---
+order MapDivision#1 -> Province#17266: accepted (5 hop(s))
+day 1 MapDivision#1 (country 1) at 18309 Moving progress 0.20 destination 17266 next 18109 remaining 17903>17693>17484>17266
+day 1 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 2 ---
+day 2 MapDivision#1 (country 1) at 18309 Moving progress 0.40 destination 17266 next 18109 remaining 17903>17693>17484>17266
+day 2 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 3 ---
+control change: Province#17693 -> country 2
+event: MapDivision#1 path truncated (a later province is no longer passable)
+day 3 MapDivision#1 (country 1) at 18309 Moving progress 0.60 destination - next 18109 remaining -
+day 3 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 4 ---
+day 4 MapDivision#1 (country 1) at 18309 Moving progress 0.80 destination - next 18109 remaining -
+day 4 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 5 ---
+event: MapDivision#1 reached Province#18109
+event: MapDivision#1 arrived at its destination Province#18109
+day 5 MapDivision#1 (country 1) at 18109 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 6 ---
+day 6 MapDivision#1 (country 1) at 18109 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 7 ---
+day 7 MapDivision#1 (country 1) at 18109 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 8 ---
+day 8 MapDivision#1 (country 1) at 18109 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 9 ---
+day 9 MapDivision#1 (country 1) at 18109 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+orders rejected: 0 (a rejection is a normal result)
+exit=0

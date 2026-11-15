@@ -1,0 +1,29 @@
+$ cargo run --release --bin world_move_check -- --scenario assets/data/world/preview/division_movement_scenario_no_bridge.ron --days 2 --order 1:1:17266
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_movement_scenario_no_bridge.ron
+description: P32-034 division placement and movement validation scenario (verification input, not official ownership or control)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2
+initial controlled provinces: 26
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 3
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18309 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 1 ---
+order MapDivision#1 -> Province#17266: rejected: no-path: no route through provinces controlled by the division's country
+day 1 MapDivision#1 (country 1) at 18309 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+--- day 2 ---
+day 2 MapDivision#1 (country 1) at 18309 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#2 (country 1) at 17266 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#3 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+
+orders rejected: 1 (a rejection is a normal result)
+exit=0

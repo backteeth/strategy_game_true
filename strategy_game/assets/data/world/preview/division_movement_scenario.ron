@@ -1,0 +1,34 @@
+// P32-034 師団の初期配置と移動の検証用シナリオ(M6-a)。**所有・支配は検証入力であり、正式な全世界の所有・実効支配データではない。**
+// 経済シナリオ(economy_scenario_*.ron)の `countries[].states` や、補給検証用シナリオ(supply_connectivity_scenario.ron)の通行範囲から、所有・支配を推定していない(別のデータ)。
+// 戦争関係・戦闘・占領・日次補給・前線/AI・UI・保存には接続しない。
+//
+// 形式(format_version 1):
+//   base_days             1ホップの基準日数(有限・正。旧経路は 5.0)。補給係数は 1.0 固定。
+//   countries             国家ラベル ↔ CountryId(旧経路と同じ型)の対応表。以降の country は国家ラベル。
+//   state_owners          ステートごとの所有国。所属するステートがあれば、その所有国が各プロヴィンスの初期支配国になる。
+//   controller_overrides  プロヴィンスごとの初期支配国の上書き(優先)。ステート未所属のプロヴィンスは、ここに明示がなければ支配国なし(通れない)。
+//   divisions             師団(id・所属国・初期位置の ProvinceId・速度)。初期位置は所属国の支配下であること。
+// 検証地域のID: ステート20=7件、21=13件、22=6件、未所属=17903・18110・18501。
+(
+    format_version: 1,
+    description: "P32-034 division placement and movement validation scenario (verification input, not official ownership or control)",
+    base_days: 5.0,
+    countries: [
+        (label: 1, country_id: 1),
+        (label: 2, country_id: 2),
+    ],
+    state_owners: [
+        (state: 20, country: 1),
+        (state: 22, country: 1),
+        (state: 21, country: 2),
+    ],
+    controller_overrides: [
+        // ステート未所属の 17903 を国家1の支配と明示する。これでステート20→22の境界を越える経路(5ホップ)が成立する。
+        (province: 17903, country: 1),
+    ],
+    divisions: [
+        (id: 1, country: 1, province: 18309, speed: 1.0),
+        (id: 2, country: 1, province: 17266, speed: 1.0),
+        (id: 3, country: 2, province: 17269, speed: 1.0),
+    ],
+)

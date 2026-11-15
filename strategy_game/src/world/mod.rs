@@ -14,6 +14,7 @@
 
 pub mod aggregate;
 pub mod connectivity;
+pub mod division_scenario;
 pub mod facilities;
 pub mod files;
 pub mod fingerprint;
@@ -21,6 +22,7 @@ pub mod ids;
 pub mod issue;
 pub mod measure;
 pub mod model;
+pub mod movement;
 pub mod overlay;
 pub mod state_reach;
 pub mod supply_scenario;
@@ -34,6 +36,10 @@ pub use connectivity::{
     CellClass, EdgeInfo, ExplicitPassable, GraphError, GraphScope, GraphSignature, NotApplicableReason, Passability,
     ProvinceCells, ProvinceGraph, Reach, ReachError, Reachability, SourceProblem, UnknownPassableProvinces,
     UnreachableReason, reach,
+};
+pub use division_scenario::{
+    DIVISION_SCENARIO_FORMAT_VERSION, DivisionScenario, DivisionScenarioError, DivisionScenarioFile, DivisionScenarioIssue,
+    load_division_scenario, parse_division_scenario, resolve_division_scenario,
 };
 pub use facilities::{
     FacilityIssue, FacilityScope, LOCATION_FACILITIES_FORMAT_VERSION, LocationFacilitiesFile,
@@ -50,6 +56,10 @@ pub use fingerprint::{GeographyChange, GeographyFingerprint, compute_fingerprint
 pub use ids::{HexCoord, MapStateId, ProvinceId};
 pub use issue::{IssueCode, Severity, WorldIssue};
 pub use model::{MapStateDef, ProvinceDef, WorldModel};
+pub use movement::{
+    DEFAULT_BASE_DAYS, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MapMilitaryError, MoveEvent, MovementParams, OrderOutcome,
+    OrderRejection, ProvinceControl, find_land_path,
+};
 pub use overlay::{
     BoundaryEdge, BoundaryKind, CellStatus, WorldPreviewData, cell_status, compute_boundaries,
     load_world_preview, state_color,

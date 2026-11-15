@@ -7,6 +7,7 @@
 | `provinces.ron` | プロヴィンス表。`coverage: Partial`(地図全体の陸セルを網羅していない)。IDは明示保存された安定値で、読み込み時に生成・変更されません。 |
 | `states.ron` | ステート配置(3ステート)。**所属関係の正本**。 |
 | `supply_connectivity_scenario.ron` | 補給連結性の検証用シナリオ(P32-032)。主体ごとの補給源と通行可能範囲(`passable_provinces` / `passable_states`)。**検証入力であり、正式な国境・所有・実効支配ではない**。経済シナリオとは無関係。`world_reach_check --scenario` で確認する。 |
+| `division_movement_scenario.ron` / `division_movement_scenario_no_bridge.ron` | 師団の初期配置と移動の検証用シナリオ(P32-034 / M6-a)。国家ラベルと `CountryId` の対応、ステートごとの所有国、プロヴィンスごとの初期支配国の上書き、師団(ID・所属国・初期位置・速度)、基準日数。**所有・支配は検証入力であり、正式な全世界の所有・実効支配データではない**。経済シナリオ・補給検証用シナリオの通行範囲とは無関係。`no_bridge` は 17903 の上書きを外した版(差はそこだけ)。`world_move_check` で確認する。 |
 
 ## 対象地域
 中心 `(q=83, r=81)` から距離3以内の陸ヘックス 29 個(`q=80..86`, `r=78..84`)。海岸と河川を含む(河川は地理JSON側のデータで、ステート境界とは無関係)。

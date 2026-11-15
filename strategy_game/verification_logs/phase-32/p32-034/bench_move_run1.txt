@@ -1,0 +1,30 @@
+=== environment ===
+os=windows arch=x86_64 profile=release logical_cpus_visible=20 (single-threaded; no affinity/priority set) trials=5 limit_per_condition=120s
+file_load_ms (map json; not part of any order cost): 36.686
+
+=== (1) verification region (29 provinces; division_movement_scenario.ron) ===
+graph_build_ms (not part of an order): 19.5788 | nodes=29 edges=65
+scenario_load_ms (not part of an order): 0.2209
+  18309 -> 18308 (adjacent, same state): accepted, path length 1 hop(s) | order_ms median=0.0006 max=0.0023 min=0.0004 (trials: 0.0023 / 0.0011 / 0.0004 / 0.0006 / 0.0004)
+  18309 -> 17266 (5 hops across the state boundary via 17903): accepted, path length 5 hop(s) | order_ms median=0.0017 max=0.0047 min=0.0012 (trials: 0.0047 / 0.0020 / 0.0017 / 0.0015 / 0.0012)
+  18309 -> 17269 (state 21, controlled by country 2: rejected): rejected: destination-not-passable: Province#17269 is controlled by country 2 | order_ms median=0.0000 max=0.0001 min=0.0000 (trials: 0.0000 / 0.0000 / 0.0001 / 0.0000 / 0.0000)
+  18309 -> Province#99999 (unknown): rejected: unknown-province: Province#99999 is not a province of the graph | order_ms median=0.0000 max=0.0000 min=0.0000 (trials: 0.0000 / 0.0000 / 0.0000 / 0.0000 / 0.0000)
+  18309 -> 17266 without the 17903 override (NoPath; the whole reachable part is explored): rejected: no-path: no route through provinces controlled by the division's country | order_ms median=0.0008 max=0.0018 min=0.0007 (trials: 0.0018 / 0.0008 / 0.0008 / 0.0007 / 0.0008)
+
+=== (2) measurement-only graph (1 land cell = 1 province; NOT the official world definition) ===
+definitions_ms (in memory only): 1.633 | land_cells=35221 provinces=35221
+graph_build_ms (not part of an order): 27.976 | nodes=35221 edges=99948
+country 1 controlled part: 34857 provinces in 109 connected component(s); largest has 17989 provinces (measurement-only rule: ProvinceId % 97 == 0 belongs to country 2)
+source Province#11990 (middle of the largest component)
+  adjacent: -> 11696: accepted, path length 1 hop(s) | order_ms median=0.0009 max=0.0032 min=0.0006 (trials: 0.0032 / 0.0008 / 0.0009 / 0.0009 / 0.0006)
+  far (lowest id in the component): -> 14: accepted, path length 89 hop(s) | order_ms median=1.1280 max=1.5906 min=1.0077 (trials: 1.5906 / 1.2033 / 1.1280 / 1.0077 / 1.0913)
+  far (highest id in the component): -> 24935: accepted, path length 121 hop(s) | order_ms median=2.0085 max=2.0727 min=1.8826 (trials: 2.0085 / 2.0727 / 1.8978 / 2.0219 / 1.8826)
+  NoPath: -> 98 (country 1's, but in another component of 1 provinces; the whole source component is explored): rejected: no-path: no route through provinces controlled by the division's country | order_ms median=4.8645 max=5.2190 min=4.4013 (trials: 4.4424 / 4.4013 / 4.8645 / 5.2190 / 5.1695)
+  rejected (destination controlled by country 2): -> 0: rejected: destination-not-passable: Province#0 is controlled by country 2 | order_ms median=0.0002 max=0.0005 min=0.0001 (trials: 0.0005 / 0.0002 / 0.0001 / 0.0004 / 0.0002)
+  unknown province: -> 4294967295: rejected: unknown-province: Province#4294967295 is not a province of the graph | order_ms median=0.0002 max=0.0004 min=0.0001 (trials: 0.0004 / 0.0002 / 0.0003 / 0.0002 / 0.0001)
+
+note: order_ms covers `issue_move_order` only (validation, pathfinding, applying the order); the clone of the unordered state, graph build and file load are excluded.
+
+real	0m0.829s
+user	0m0.000s
+sys	0m0.000s

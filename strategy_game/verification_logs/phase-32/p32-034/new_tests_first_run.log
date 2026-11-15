@@ -1,0 +1,31 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 12m 31s
+     Running tests\p32_034_map_movement_test.rs (target\debug\deps\p32_034_map_movement_test-5e522a353fdcacc9.exe)
+
+running 19 tests
+test a_later_province_becoming_impassable_cuts_the_path_and_the_current_hop_still_finishes ... ok
+test an_order_is_applied_at_once_without_moving_the_division_and_arrival_follows_the_old_formula ... ok
+test division_registration_order_and_order_issue_order_do_not_change_the_result ... ok
+test equal_cost_candidates_are_taken_in_province_id_order_regardless_of_input_order ... ok
+test equal_cost_path_choice_matches_the_old_find_path_when_the_id_correspondence_preserves_order ... ok
+test every_kind_of_invalid_scenario_input_is_reported_with_its_own_code ... ok
+test format_failures_are_distinguished_from_content_issues ... ok
+test ids_are_resolved_through_membership_never_by_numeric_equality ... ok
+test one_hop_and_multi_hop_arrival_days_match_the_old_path_for_the_same_adjacency_cost_and_speed ... ok
+test real_18309_to_17266_crosses_the_state_boundary_in_five_hops_only_when_17903_is_explicitly_controlled ... ok
+test real_18309_to_18308_stays_on_day_one_and_arrives_on_day_five_even_with_a_reissued_order ... ok
+test real_control_change_after_the_order_stops_the_division_before_entering ... ok
+test real_rejections_other_controller_unknown_id_and_no_route ... ok
+test reissuing_the_same_destination_and_ordering_the_current_province_are_no_ops_that_change_nothing ... ok
+test rejections_are_distinguished_and_leave_every_division_untouched ... ok
+test rivers_and_the_state_layout_do_not_change_movement_cost_or_permission ... ok
+test the_division_stops_before_entering_a_province_that_is_no_longer_passable ... ok
+test the_movement_code_stays_separate_from_economy_saving_war_and_the_old_military ... ok
+test the_shipped_scenarios_resolve_the_initial_control_from_membership_and_explicit_overrides_only ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+
+real	12m32.288s
+user	0m0.000s
+sys	0m0.015s
