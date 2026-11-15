@@ -18,17 +18,17 @@
 //! 命令の拒否は**正常な結果**(終了コード 0。`rejected:` と理由を出す)。終了コード: 0 = 実行できた、64 = 引数の誤り、
 //! 65 = 入力不正(検証に失敗したシナリオ、`--control` の未知の ID・国家ラベル)、66 = 読み込みの失敗(地図・区画・シナリオが読めない、RON として不正、非対応の版)。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use strategy_game::common::CountryId;
 use strategy_game::hexmap::data::load_from_path;
 use strategy_game::world::{
     BattleOutcome, ClaimReason, ClaimRejection, DivisionScenarioError, FinishReason, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent, OrderOutcome, ProvinceGraph,
-    ProvinceId, StopReason, countries_to_invalidate, load_division_scenario, load_world_preview,
+    ProvinceId, StopReason, countries_to_invalidate, load_division_scenario, load_world_preview, MapStateId, StateControlKind, WorldModel, control_kind_label, summarize_control,
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat]";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control]";
 
 #[derive(Default)]
 struct Args {
@@ -41,6 +41,7 @@ struct Args {
     controls: Vec<(u32, u32, Option<u32>)>,
     capitals: Vec<(u32, u32, u32)>,
     combat: bool,
+    state_control: bool,
 }
 
 fn num(name: &str, s: &str) -> Result<u32, String> {
@@ -100,6 +101,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 a.capitals.push((day, num("--capital label", parts[1])?, num("--capital province", parts[2])?));
             }
             "--combat" => a.combat = true,
+            "--state-control" => a.state_control = true,
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -129,6 +131,39 @@ fn path_text(p: &[ProvinceId]) -> String {
 
 fn opt(p: Option<ProvinceId>) -> String {
     p.map(|x| x.0.to_string()).unwrap_or_else(|| "-".into())
+}
+
+/// M6-e: ステート単位の実効支配の集計(法的所有と実効支配は別々に出す。占領は交戦関係を明示して数え、第三国の支配は加算しない)。
+fn print_state_control(day: u32, model: &WorldModel, owners: &BTreeMap<MapStateId, CountryId>, m: &MapMilitary, labels: &HashMap<CountryId, u32>) {
+    let name = |c: CountryId| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into());
+    let summary = match summarize_control(model, owners, m.control()) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("state control (day {day}): summary FAILED: {e}");
+            return;
+        }
+    };
+    println!("state control (day {day}; derived from province control, nothing stored; consistent={}; unassigned provinces (in no state's denominator): {}):", summary.is_consistent(), summary.unassigned());
+    let at_war = |a: CountryId, b: CountryId| m.at_war(a, b);
+    for s in summary.states() {
+        let owner = s.legal_owner.map(name).unwrap_or_else(|| "none".into());
+        let kind = match s.kind() {
+            StateControlKind::Full(c) => format!("{} (country {})", control_kind_label(s.kind()), name(c)),
+            k => control_kind_label(k).to_string(),
+        };
+        let mut parts: Vec<String> = s.by_country.iter().map(|(c, n)| format!("country {} {n}/{}", name(*c), s.total)).collect();
+        parts.push(format!("no controller {}/{}", s.uncontrolled, s.total));
+        println!("  {} legal owner: country {owner} | provinces {} | {kind} | controllers: {}", s.state, s.total, parts.join(", "));
+        for (c, n) in &s.by_country {
+            if s.legal_owner == Some(*c) {
+                continue;
+            }
+            match s.occupation_by(*c, &at_war) {
+                Some(share) => println!("      occupation by country {} (at war with the owner, country {owner}): {}/{} = {:.3}", name(*c), share.numerator, share.denominator, share.as_f64()),
+                None => println!("      control by country {} {n}/{} is NOT counted as occupation (not at war with the owner)", name(*c), s.total),
+            }
+        }
+    }
 }
 
 fn print_state(day: u32, m: &MapMilitary, labels: &HashMap<CountryId, u32>, combat: bool) {
@@ -201,6 +236,7 @@ fn run(a: &Args) -> i32 {
     };
     let labels: HashMap<CountryId, u32> = scenario.countries.iter().map(|(l, c)| (*c, *l)).collect();
     let scenario_countries = scenario.countries.clone();
+    let state_owners = scenario.state_owners.clone();
     // --control の参照を事前に確認(未知のプロヴィンス・国家ラベルは入力不正)
     let mut controls: Vec<(u32, ProvinceId, Option<CountryId>)> = Vec::new();
     for (day, p, label) in &a.controls {
@@ -271,6 +307,9 @@ fn run(a: &Args) -> i32 {
     let mut military = scenario.into_military();
     println!("\n--- day 0 (initial placement) ---");
     print_state(0, &military, &labels, a.combat);
+    if a.state_control {
+        print_state_control(0, &world.model, &state_owners, &military, &labels);
+    }
     let mut rejected = 0usize;
     for day in 1..=a.days {
         println!("\n--- day {day} ---");
@@ -409,6 +448,9 @@ fn run(a: &Args) -> i32 {
             );
         }
         print_state(day, &military, &labels, a.combat);
+        if a.state_control {
+            print_state_control(day, &world.model, &state_owners, &military, &labels);
+        }
     }
     let unused: Vec<u32> = a.orders.iter().filter(|(d, _, _)| *d > a.days).map(|(d, _, _)| *d).collect();
     if !unused.is_empty() {

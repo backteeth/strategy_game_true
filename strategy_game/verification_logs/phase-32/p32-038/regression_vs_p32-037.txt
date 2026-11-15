@@ -1,0 +1,1 @@
+flag off: output of cli_05 / cli_08 (P32-037 commands) matches the P32-037 logs; the only difference is the trailing 'exit=0' line that the old log format appended (0 other diff lines)

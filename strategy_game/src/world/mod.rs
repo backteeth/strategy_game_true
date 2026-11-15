@@ -28,6 +28,7 @@ pub mod model;
 pub mod occupation;
 pub mod movement;
 pub mod overlay;
+pub mod state_control;
 pub mod state_reach;
 pub mod supply;
 pub mod supply_scenario;
@@ -71,6 +72,9 @@ pub use movement::{
 pub use overlay::{
     BoundaryEdge, BoundaryKind, CellStatus, WorldPreviewData, cell_status, compute_boundaries,
     load_world_preview, state_color,
+};
+pub use state_control::{
+    ControlSummaryError, ShareOf, StateControl, StateControlKind, StateControlSummary, control_kind_label, summarize_control, summarize_control_membership,
 };
 pub use state_reach::{
     ReachCounts, StateReach, StateReachKind, StateReachSummary, SummaryError, kind_label, summarize_by_state, summarize_membership,

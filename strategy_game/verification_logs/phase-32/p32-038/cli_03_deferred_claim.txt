@@ -1,0 +1,374 @@
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_battle_scenario.ron
+description: P32-035 war, entry, battle and retreat validation scenario (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3
+initial controlled provinces: 26
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 14
+wars (both directions): 1-2 3-2
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining -
+state control (day 0; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 1 ---
+order MapDivision#14 -> Province#17486: accepted (1 hop(s))
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#14 (country 1) at 17485 Moving progress 0.20 destination 17486 next 17486 remaining -
+day 1 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+day 1 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining -
+state control (day 1; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 2 ---
+day 2 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#14 (country 1) at 17485 Moving progress 0.40 destination 17486 next 17486 remaining -
+day 2 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+day 2 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining -
+state control (day 2; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 3 ---
+order MapDivision#16 -> Province#17486: accepted (1 hop(s))
+day 3 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#14 (country 1) at 17485 Moving progress 0.60 destination 17486 next 17486 remaining -
+day 3 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+day 3 MapDivision#16 (country 2) at 17487 Moving progress 0.20 destination 17486 next 17486 remaining -
+state control (day 3; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 4 ---
+day 4 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#14 (country 1) at 17485 Moving progress 0.80 destination 17486 next 17486 remaining -
+day 4 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+day 4 MapDivision#16 (country 2) at 17487 Moving progress 0.40 destination 17486 next 17486 remaining -
+state control (day 4; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 5 ---
+event: MapDivision#14 reached Province#17486
+event: MapBattle#0 started at Province#17486: country 1 attacks country 2 (attackers 14; defenders 15)
+day 5 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 5 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 5 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 5 MapDivision#16 (country 2) at 17487 Moving progress 0.60 destination 17486 next 17486 remaining -
+state control (day 5; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 6 ---
+day 6 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 6 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 6 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 6 MapDivision#16 (country 2) at 17487 Moving progress 0.80 destination 17486 next 17486 remaining -
+state control (day 6; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 7 ---
+event: MapDivision#16 reached Province#17486
+event: MapDivision#16 arrived at its destination Province#17486
+day 7 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 7 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 7 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 7 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 7; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 8 ---
+day 8 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 8 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 8 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 8 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 8; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 9 ---
+day 9 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 9 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 9 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0
+day 9 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 9; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 10 ---
+event: MapDivision#15 retreated from Province#17486 to Province#17269 (MapBattle#0)
+event: MapBattle#0 finished at Province#17486: attacker won (attacker country 1, defender country 2; reason defender gone)
+event: control claim: Province#17486 by country 1 (controller at the time 2; reason attacker won MapBattle#0; divisions 14)
+event: claim NOT applied at Province#17486 by country 1 (attacker won MapBattle#0): deferred: divisions of a country at war with the claimant remain there (16) (control unchanged; not retried automatically)
+day 10 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 10 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 10; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 11 ---
+day 11 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 11 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 11; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 12 ---
+day 12 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 12 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 12; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 13 ---
+day 13 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 13 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 13; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 14 ---
+day 14 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 14 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 14; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+--- day 15 ---
+day 15 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining -
+day 15 MapDivision#16 (country 2) at 17486 Idle progress 0.00 destination - next - remaining -
+state control (day 15; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 9/13, country 3 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 全域支配 (full) (country 1) | controllers: country 1 6/6, no controller 0/6
+
+orders rejected: 0 (a rejection is a normal result)

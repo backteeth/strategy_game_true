@@ -338,6 +338,8 @@ pub struct DivisionScenario {
     pub countries: BTreeMap<u32, CountryId>,
     /// 初期の実効支配(プロヴィンスごと)。
     pub control: ProvinceControl,
+    /// ステートごとの法的所有国(検証入力。M6-e のステート単位の集計に使う。`MapMilitary` には入らない)。
+    pub state_owners: BTreeMap<MapStateId, CountryId>,
     /// 交戦する国の組(双方向。`CountryId`)。
     pub wars: Vec<(CountryId, CountryId)>,
     /// 国家ごとの補給の設定(首都・初期の備蓄。空なら補給なし)。師団の補給消費量は各師団の `supply_usage`。
@@ -563,5 +565,5 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
         return Err(issues);
     }
     divisions.sort_by_key(|d| d.id);
-    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, wars, supply, divisions })
+    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, state_owners: owners, wars, supply, divisions })
 }

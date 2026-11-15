@@ -1,0 +1,3 @@
+strategy_game/src/bin/world_move_check.rs
+strategy_game/src/world/division_scenario.rs
+strategy_game/src/world/mod.rs
