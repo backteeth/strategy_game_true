@@ -163,14 +163,15 @@ impl MapMilitary {
             if attackers.is_empty() || defenders.is_empty() {
                 continue; // 終了処理に任せる
             }
-            let view = |ids: &[MapDivisionId], this: &MapMilitary| -> Vec<(MapDivisionId, CountryId, super::movement::CombatStats)> {
-                ids.iter().map(|i| (*i, this.divisions[i].owner, this.divisions[i].combat)).collect()
+            let view = |ids: &[MapDivisionId], this: &MapMilitary| -> Vec<(MapDivisionId, CountryId, super::movement::CombatStats, f64)> {
+                ids.iter().map(|i| (*i, this.divisions[i].owner, this.divisions[i].combat, this.divisions[i].fulfillment)).collect()
             };
             let a = view(&attackers, self);
             let d = view(&defenders, self);
-            let a_refs: Vec<(MapDivisionId, CountryId, &super::movement::CombatStats)> = a.iter().map(|(i, o, c)| (*i, *o, c)).collect();
-            let d_refs: Vec<(MapDivisionId, CountryId, &super::movement::CombatStats)> = d.iter().map(|(i, o, c)| (*i, *o, c)).collect();
-            let Some(damage) = legacy_combat::resolve_day(&a_refs, &d_refs) else {
+            let a_refs: Vec<(MapDivisionId, CountryId, &super::movement::CombatStats, f64)> = a.iter().map(|(i, o, c, f)| (*i, *o, c, *f)).collect();
+            let d_refs: Vec<(MapDivisionId, CountryId, &super::movement::CombatStats, f64)> = d.iter().map(|(i, o, c, f)| (*i, *o, c, *f)).collect();
+            // その日の補給充足率(日次補給が、その日の戦闘より前に確定した値)を戦闘計算へ渡す(旧の `supply_fulfillment_of` と同じ経路)。
+            let Some(damage) = legacy_combat::resolve_day_with_supply(&a_refs, &d_refs) else {
                 continue; // 参加者の準備率が不正: その日の解決を見送る(旧と同じ)
             };
             if damage.zero_damage {

@@ -26,6 +26,7 @@ use super::connectivity::ProvinceGraph;
 use super::ids::{MapStateId, ProvinceId};
 use super::model::WorldModel;
 use super::movement::{CombatStats, MapDivision, MapDivisionId, MapMilitary, MovementParams, ProvinceControl};
+use super::supply::SupplyCountryConfig;
 use crate::common::CountryId;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -113,6 +114,32 @@ pub struct DivisionEntry {
     pub combat: CombatEntry,
 }
 
+/// 国家ごとの補給の設定(M6-d)。首都の `ProvinceId` と、初期の軍需物資の備蓄。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupplyCountryEntry {
+    /// 国家ラベル。
+    pub country: u32,
+    pub capital: u32,
+    pub military_supplies: f64,
+}
+
+/// 師団の補給消費量(旧 `DivisionDefinition::supply_usage` に相当。既存の需要計算の入力)。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupplyUsageEntry {
+    pub division: u32,
+    pub supply_usage: f32,
+}
+
+/// 補給の設定(M6-d。省略または `countries` が空なら補給なしで、M6-a〜c と同じ挙動)。
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct SupplySetup {
+    pub countries: Vec<SupplyCountryEntry>,
+    pub divisions: Vec<SupplyUsageEntry>,
+}
+
 /// 交戦する国の組(国家ラベル。双方向。順序は意味を持たない)。M6-b。
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -136,6 +163,9 @@ pub struct DivisionScenarioFile {
     #[serde(default)]
     pub wars: Vec<WarEntry>,
     pub divisions: Vec<DivisionEntry>,
+    /// 国家ごとの首都・初期の備蓄と、師団の補給消費量(省略可。M6-d)。
+    #[serde(default)]
+    pub supply: SupplySetup,
 }
 
 /// どこに書かれた参照か(問題の報告用)。
@@ -145,6 +175,7 @@ pub enum RefSite {
     Override(u32),
     Division(u32),
     War(usize),
+    SupplyCountry(u32),
 }
 
 impl std::fmt::Display for RefSite {
@@ -154,6 +185,7 @@ impl std::fmt::Display for RefSite {
             RefSite::Override(p) => write!(f, "controller_overrides (province {p})"),
             RefSite::Division(d) => write!(f, "divisions (id {d})"),
             RefSite::War(i) => write!(f, "wars (entry {i})"),
+            RefSite::SupplyCountry(l) => write!(f, "supply.countries (country {l})"),
         }
     }
 }
@@ -178,6 +210,24 @@ pub enum DivisionScenarioIssue {
     DuplicateWar { index: usize },
     /// 戦闘能力の値が不正(有限でない・範囲外)。
     InvalidCombat { division: u32 },
+    /// 補給の設定で、同じ国家が複数ある。
+    SupplyDuplicateCountry(u32),
+    /// 補給の設定の首都が、世界に無い `ProvinceId`。
+    SupplyUnknownCapital { country: u32, province: ProvinceId },
+    /// 補給の設定の首都が、初期に所属国の支配下にない(`actual` は支配国なしなら `None`)。
+    SupplyCapitalNotControlled { country: u32, province: ProvinceId, actual: Option<CountryId> },
+    /// 補給の設定の備蓄が不正(有限でない・負・値域外)。
+    SupplyInvalidStockpile { country: u32 },
+    /// 補給消費量の設定が、存在しない師団を指している。
+    SupplyUnknownDivision(u32),
+    /// 同じ師団の補給消費量が複数ある。
+    SupplyDuplicateUsage(u32),
+    /// 補給消費量が不正(有限でない・負・値域外)。
+    SupplyInvalidUsage { division: u32 },
+    /// 補給の設定がある国家の師団に、補給消費量の設定がない(不足項目)。
+    SupplyMissingUsage { division: u32 },
+    /// 補給の設定がない国家の師団に、補給消費量が設定されている。
+    SupplyUsageWithoutCountry { division: u32 },
 }
 
 impl DivisionScenarioIssue {
@@ -197,6 +247,15 @@ impl DivisionScenarioIssue {
             Self::SelfWar { .. } => "self-war",
             Self::DuplicateWar { .. } => "duplicate-war",
             Self::InvalidCombat { .. } => "invalid-combat",
+            Self::SupplyDuplicateCountry(_) => "supply-duplicate-country",
+            Self::SupplyUnknownCapital { .. } => "supply-unknown-capital",
+            Self::SupplyCapitalNotControlled { .. } => "supply-capital-not-controlled",
+            Self::SupplyInvalidStockpile { .. } => "supply-invalid-stockpile",
+            Self::SupplyUnknownDivision(_) => "supply-unknown-division",
+            Self::SupplyDuplicateUsage(_) => "supply-duplicate-usage",
+            Self::SupplyInvalidUsage { .. } => "supply-invalid-usage",
+            Self::SupplyMissingUsage { .. } => "supply-missing-usage",
+            Self::SupplyUsageWithoutCountry { .. } => "supply-usage-without-country",
         }
     }
 }
@@ -224,6 +283,18 @@ impl std::fmt::Display for DivisionScenarioIssue {
             Self::SelfWar { index } => write!(f, "wars (entry {index}): a country cannot be at war with itself"),
             Self::DuplicateWar { index } => write!(f, "wars (entry {index}): the same pair (in either order) is listed more than once"),
             Self::InvalidCombat { division } => write!(f, "division {division}: combat stats must be finite and in range (manpower <= max_manpower, 0 <= equipment <= max_equipment, 0 <= organization <= max_organization, maxima positive)"),
+            Self::SupplyDuplicateCountry(l) => write!(f, "supply.countries: country label {l} is listed more than once"),
+            Self::SupplyUnknownCapital { country, province } => write!(f, "supply.countries (country {country}): the capital {province} is not a province of the world"),
+            Self::SupplyCapitalNotControlled { country, province, actual: Some(a) } => {
+                write!(f, "supply.countries (country {country}): the capital {province} is initially controlled by country {} (not by the country itself)", a.0)
+            }
+            Self::SupplyCapitalNotControlled { country, province, actual: None } => write!(f, "supply.countries (country {country}): the capital {province} initially has no controller"),
+            Self::SupplyInvalidStockpile { country } => write!(f, "supply.countries (country {country}): military_supplies must be finite, non-negative and within the supported range"),
+            Self::SupplyUnknownDivision(d) => write!(f, "supply.divisions names division {d}, which is not defined in `divisions`"),
+            Self::SupplyDuplicateUsage(d) => write!(f, "supply.divisions: division {d} is listed more than once"),
+            Self::SupplyInvalidUsage { division } => write!(f, "supply.divisions (division {division}): supply_usage must be finite, non-negative and within the supported range"),
+            Self::SupplyMissingUsage { division } => write!(f, "division {division} belongs to a country with a supply setup but has no entry in supply.divisions"),
+            Self::SupplyUsageWithoutCountry { division } => write!(f, "supply.divisions names division {division}, whose country has no entry in supply.countries"),
         }
     }
 }
@@ -269,6 +340,8 @@ pub struct DivisionScenario {
     pub control: ProvinceControl,
     /// 交戦する国の組(双方向。`CountryId`)。
     pub wars: Vec<(CountryId, CountryId)>,
+    /// 国家ごとの補給の設定(首都・初期の備蓄。空なら補給なし)。師団の補給消費量は各師団の `supply_usage`。
+    pub supply: Vec<SupplyCountryConfig>,
     /// 師団(`MapDivisionId` 昇順)。
     pub divisions: Vec<MapDivision>,
 }
@@ -276,7 +349,7 @@ pub struct DivisionScenario {
 impl DivisionScenario {
     /// 実行時状態を作る(検証済みの入力なので失敗しない)。
     pub fn into_military(self) -> MapMilitary {
-        MapMilitary::new(self.divisions, self.control, self.params).and_then(|m| m.with_wars(self.wars)).expect("a validated scenario builds")
+        MapMilitary::new(self.divisions, self.control, self.params).and_then(|m| m.with_wars(self.wars)).and_then(|m| m.with_supply(self.supply)).expect("a validated scenario builds")
     }
 
     /// 国家ラベル(`CountryId` から)。対応表に無ければ `None`。
@@ -423,9 +496,72 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
             }
         }
     }
+    // 補給の設定(M6-d。`countries` が空なら補給なし = 従来の挙動。設定があれば、未知ID・重複・無効な数値・不足項目を検証する)
+    let mut supply: Vec<SupplyCountryConfig> = Vec::new();
+    let mut supply_labels: BTreeMap<u32, CountryId> = BTreeMap::new();
+    let mut seen_supply: BTreeSet<u32> = BTreeSet::new();
+    for e in &file.supply.countries {
+        let c = resolve(RefSite::SupplyCountry(e.country), e.country, &mut issues);
+        if !seen_supply.insert(e.country) {
+            issues.push(DivisionScenarioIssue::SupplyDuplicateCountry(e.country));
+            continue;
+        }
+        let cap = ProvinceId(e.capital);
+        let mut ok = true;
+        if !graph.contains(cap) {
+            issues.push(DivisionScenarioIssue::SupplyUnknownCapital { country: e.country, province: cap });
+            ok = false;
+        } else if let Some(c) = c {
+            let actual = control.controller(cap);
+            if actual != Some(c) {
+                issues.push(DivisionScenarioIssue::SupplyCapitalNotControlled { country: e.country, province: cap, actual });
+                ok = false;
+            }
+        }
+        if super::legacy_supply::stockpile_units(e.military_supplies).is_none() {
+            issues.push(DivisionScenarioIssue::SupplyInvalidStockpile { country: e.country });
+            ok = false;
+        }
+        if let (Some(c), true) = (c, ok) {
+            supply.push(SupplyCountryConfig { country: c, capital: cap, stockpile: e.military_supplies });
+            supply_labels.insert(e.country, c);
+        }
+    }
+    let mut usage: BTreeMap<u32, f32> = BTreeMap::new();
+    let mut seen_usage: BTreeSet<u32> = BTreeSet::new();
+    let division_country: BTreeMap<u32, u32> = file.divisions.iter().map(|d| (d.id, d.country)).collect();
+    for e in &file.supply.divisions {
+        if !seen_usage.insert(e.division) {
+            issues.push(DivisionScenarioIssue::SupplyDuplicateUsage(e.division));
+            continue;
+        }
+        let Some(label) = division_country.get(&e.division) else {
+            issues.push(DivisionScenarioIssue::SupplyUnknownDivision(e.division));
+            continue;
+        };
+        if !super::legacy_supply::usage_is_valid(e.supply_usage) {
+            issues.push(DivisionScenarioIssue::SupplyInvalidUsage { division: e.division });
+            continue;
+        }
+        if !file.supply.countries.iter().any(|c| c.country == *label) {
+            issues.push(DivisionScenarioIssue::SupplyUsageWithoutCountry { division: e.division });
+            continue;
+        }
+        usage.insert(e.division, e.supply_usage);
+    }
+    for d in &file.divisions {
+        if file.supply.countries.iter().any(|c| c.country == d.country) && !usage.contains_key(&d.id) && !seen_usage.contains(&d.id) {
+            issues.push(DivisionScenarioIssue::SupplyMissingUsage { division: d.id });
+        }
+    }
+    for d in &mut divisions {
+        if let Some(u) = usage.get(&d.id.0) {
+            d.supply_usage = *u;
+        }
+    }
     if !issues.is_empty() {
         return Err(issues);
     }
     divisions.sort_by_key(|d| d.id);
-    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, wars, divisions })
+    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, wars, supply, divisions })
 }

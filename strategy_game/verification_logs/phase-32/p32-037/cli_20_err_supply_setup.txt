@@ -1,0 +1,11 @@
+$ cargo run --release --bin world_move_check -- --scenario verification_logs/phase-32/p32-037/bad_inputs/bad_supply.ron --days 1
+SCENARIO INPUT ERROR: verification_logs/phase-32/p32-037/bad_inputs/bad_supply.ron: 8 issue(s)
+  [supply-capital-not-controlled] supply.countries (country 1): the capital Province#17269 is initially controlled by country 2 (not by the country itself)
+  [supply-invalid-stockpile] supply.countries (country 1): military_supplies must be finite, non-negative and within the supported range
+  [supply-duplicate-country] supply.countries: country label 1 is listed more than once
+  [unresolved-country] supply.countries (country 9): country label 9 is not defined in `countries`
+  [supply-unknown-capital] supply.countries (country 2): the capital Province#99999 is not a province of the world
+  [supply-invalid-usage] supply.divisions (division 1): supply_usage must be finite, non-negative and within the supported range
+  [supply-unknown-division] supply.divisions names division 7, which is not defined in `divisions`
+  [supply-missing-usage] division 2 belongs to a country with a supply setup but has no entry in supply.divisions
+exit=65

@@ -1,0 +1,59 @@
+=== environment ===
+os=windows arch=x86_64 profile=release logical_cpus_visible=20 (single-threaded; no affinity/priority set) trials=3 limit_per_condition=120s
+file_load_ms (not part of any day): 35.830
+MEASUREMENT-ONLY INPUT (not the official world definition): 1 land cell = 1 province; land_cells=35221 nodes=35221 edges=99948
+static_build_ms (once per world change, NOT a daily cost): median=25.591 max=26.803 min=25.532 (trials: 26.803 / 25.591 / 25.532)
+
+=== layout split, countries 3 ===
+setup_ms (groups, capitals, divisions; not part of any day): 10.557 | countries=3 divisions=30
+  reach exploration only, all 3 countries (passable preparation + reach): median=3.793 max=4.092 min=3.685 (trials: 4.092 / 3.793 / 3.685) | provinces reached in total: 18170
+  warm-up day: reach recomputed for 3 countries
+  day [reuse]: recomputed countries=0/3 | day_with_supply_ms median=0.017 max=0.024 min=0.015 (trials: 0.024 / 0.017 / 0.015) | day_without_supply_ms median=0.004 max=0.004 min=0.004 (trials: 0.004 / 0.004 / 0.004) | supply_cost_ms (difference) median=0.013 max=0.020 min=0.011 (trials: 0.020 / 0.013 / 0.011)
+  day [partial]: recomputed countries=1/3 | day_with_supply_ms median=1.430 max=1.604 min=1.346 (trials: 1.604 / 1.430 / 1.346) | day_without_supply_ms median=0.006 max=0.006 min=0.004 (trials: 0.006 / 0.004 / 0.006) | supply_cost_ms (difference) median=1.426 max=1.598 min=1.340 (trials: 1.598 / 1.426 / 1.340)
+  day [all]: recomputed countries=3/3 | day_with_supply_ms median=4.440 max=5.300 min=4.258 (trials: 5.300 / 4.440 / 4.258) | day_without_supply_ms median=0.007 max=0.008 min=0.007 (trials: 0.007 / 0.008 / 0.007) | supply_cost_ms (difference) median=4.432 max=5.293 min=4.251 (trials: 5.293 / 4.432 / 4.251)
+
+=== layout split, countries 30 ===
+setup_ms (groups, capitals, divisions; not part of any day): 20.809 | countries=30 divisions=300
+  reach exploration only, all 30 countries (passable preparation + reach): median=14.984 max=15.408 min=14.809 (trials: 14.809 / 15.408 / 14.984) | provinces reached in total: 22496
+  warm-up day: reach recomputed for 30 countries
+  day [reuse]: recomputed countries=0/30 | day_with_supply_ms median=0.258 max=0.315 min=0.210 (trials: 0.258 / 0.210 / 0.315) | day_without_supply_ms median=0.057 max=0.084 min=0.055 (trials: 0.055 / 0.057 / 0.084) | supply_cost_ms (difference) median=0.203 max=0.231 min=0.152 (trials: 0.203 / 0.152 / 0.231)
+  day [partial]: recomputed countries=3/30 | day_with_supply_ms median=1.865 max=2.027 min=1.800 (trials: 2.027 / 1.865 / 1.800) | day_without_supply_ms median=0.065 max=0.071 min=0.062 (trials: 0.065 / 0.071 / 0.062) | supply_cost_ms (difference) median=1.794 max=1.962 min=1.737 (trials: 1.962 / 1.794 / 1.737)
+  day [all]: recomputed countries=30/30 | day_with_supply_ms median=20.151 max=22.426 min=19.627 (trials: 20.151 / 19.627 / 22.426) | day_without_supply_ms median=0.069 max=0.074 min=0.069 (trials: 0.074 / 0.069 / 0.069) | supply_cost_ms (difference) median=20.077 max=22.357 min=19.558 (trials: 20.077 / 19.558 / 22.357)
+
+=== layout split, countries 100 ===
+setup_ms (groups, capitals, divisions; not part of any day): 45.707 | countries=100 divisions=1000
+  reach exploration only, all 100 countries (passable preparation + reach): median=37.630 max=39.508 min=37.334 (trials: 37.334 / 39.508 / 37.630) | provinces reached in total: 21733
+  warm-up day: reach recomputed for 100 countries
+  day [reuse]: recomputed countries=0/100 | day_with_supply_ms median=0.898 max=0.915 min=0.896 (trials: 0.915 / 0.896 / 0.898) | day_without_supply_ms median=0.222 max=0.223 min=0.218 (trials: 0.218 / 0.222 / 0.223) | supply_cost_ms (difference) median=0.675 max=0.697 min=0.674 (trials: 0.697 / 0.674 / 0.675)
+  day [partial]: recomputed countries=10/100 | day_with_supply_ms median=5.059 max=5.128 min=4.963 (trials: 5.128 / 5.059 / 4.963) | day_without_supply_ms median=0.214 max=0.217 min=0.213 (trials: 0.217 / 0.214 / 0.213) | supply_cost_ms (difference) median=4.845 max=4.911 min=4.750 (trials: 4.911 / 4.845 / 4.750)
+  day [all]: recomputed countries=100/100 | day_with_supply_ms median=51.808 max=53.044 min=51.222 (trials: 51.222 / 51.808 / 53.044) | day_without_supply_ms median=0.222 max=0.227 min=0.208 (trials: 0.227 / 0.222 / 0.208) | supply_cost_ms (difference) median=51.586 max=52.836 min=50.996 (trials: 50.996 / 51.586 / 52.836)
+
+=== layout skewed, countries 3 ===
+setup_ms (groups, capitals, divisions; not part of any day): 10.325 | countries=3 divisions=30
+  reach exploration only, all 3 countries (passable preparation + reach): median=4.905 max=4.997 min=4.546 (trials: 4.997 / 4.905 / 4.546) | provinces reached in total: 19843
+  warm-up day: reach recomputed for 3 countries
+  day [reuse]: recomputed countries=0/3 | day_with_supply_ms median=0.017 max=0.020 min=0.017 (trials: 0.020 / 0.017 / 0.017) | day_without_supply_ms median=0.006 max=0.006 min=0.005 (trials: 0.006 / 0.005 / 0.006) | supply_cost_ms (difference) median=0.012 max=0.014 min=0.011 (trials: 0.014 / 0.012 / 0.011)
+  day [partial]: recomputed countries=1/3 | day_with_supply_ms median=3.729 max=3.730 min=3.028 (trials: 3.730 / 3.028 / 3.729) | day_without_supply_ms median=0.007 max=0.008 min=0.005 (trials: 0.008 / 0.005 / 0.007) | supply_cost_ms (difference) median=3.722 max=3.722 min=3.023 (trials: 3.722 / 3.023 / 3.722)
+  day [all]: recomputed countries=3/3 | day_with_supply_ms median=4.388 max=4.513 min=4.330 (trials: 4.513 / 4.330 / 4.388) | day_without_supply_ms median=0.007 max=0.008 min=0.007 (trials: 0.007 / 0.008 / 0.007) | supply_cost_ms (difference) median=4.381 max=4.506 min=4.322 (trials: 4.506 / 4.322 / 4.381)
+
+=== layout skewed, countries 30 ===
+setup_ms (groups, capitals, divisions; not part of any day): 18.476 | countries=30 divisions=300
+  reach exploration only, all 30 countries (passable preparation + reach): median=13.176 max=13.473 min=13.104 (trials: 13.176 / 13.104 / 13.473) | provinces reached in total: 19897
+  warm-up day: reach recomputed for 30 countries
+  day [reuse]: recomputed countries=0/30 | day_with_supply_ms median=0.184 max=0.185 min=0.160 (trials: 0.184 / 0.160 / 0.185) | day_without_supply_ms median=0.055 max=0.059 min=0.055 (trials: 0.055 / 0.055 / 0.059) | supply_cost_ms (difference) median=0.126 max=0.129 min=0.105 (trials: 0.129 / 0.105 / 0.126)
+  day [partial]: recomputed countries=3/30 | day_with_supply_ms median=4.863 max=5.196 min=4.354 (trials: 4.863 / 4.354 / 5.196) | day_without_supply_ms median=0.065 max=0.069 min=0.062 (trials: 0.065 / 0.062 / 0.069) | supply_cost_ms (difference) median=4.798 max=5.127 min=4.292 (trials: 4.798 / 4.292 / 5.127)
+  day [all]: recomputed countries=30/30 | day_with_supply_ms median=17.690 max=18.429 min=17.490 (trials: 17.490 / 17.690 / 18.429) | day_without_supply_ms median=0.064 max=0.087 min=0.060 (trials: 0.064 / 0.060 / 0.087) | supply_cost_ms (difference) median=17.630 max=18.341 min=17.426 (trials: 17.426 / 17.630 / 18.341)
+
+=== layout skewed, countries 100 ===
+setup_ms (groups, capitals, divisions; not part of any day): 34.384 | countries=100 divisions=1000
+  reach exploration only, all 100 countries (passable preparation + reach): median=28.441 max=29.728 min=28.273 (trials: 29.728 / 28.273 / 28.441) | provinces reached in total: 19630
+  warm-up day: reach recomputed for 100 countries
+  day [reuse]: recomputed countries=0/100 | day_with_supply_ms median=0.885 max=0.894 min=0.814 (trials: 0.885 / 0.814 / 0.894) | day_without_supply_ms median=0.195 max=0.204 min=0.191 (trials: 0.204 / 0.191 / 0.195) | supply_cost_ms (difference) median=0.681 max=0.700 min=0.623 (trials: 0.681 / 0.623 / 0.700)
+  day [partial]: recomputed countries=10/100 | day_with_supply_ms median=7.690 max=7.916 min=7.364 (trials: 7.916 / 7.690 / 7.364) | day_without_supply_ms median=0.191 max=0.197 min=0.185 (trials: 0.197 / 0.185 / 0.191) | supply_cost_ms (difference) median=7.505 max=7.719 min=7.173 (trials: 7.719 / 7.505 / 7.173)
+  day [all]: recomputed countries=100/100 | day_with_supply_ms median=42.569 max=43.658 min=41.745 (trials: 41.745 / 43.658 / 42.569) | day_without_supply_ms median=0.220 max=0.233 min=0.198 (trials: 0.220 / 0.198 / 0.233) | supply_cost_ms (difference) median=42.336 max=43.460 min=41.525 (trials: 41.525 / 43.460 / 42.336)
+
+note: day_with_supply covers `advance_day` (supply planning + the other daily steps); the clone of the warmed-up state, graph build and file load are excluded. Divisions have no orders, so the non-supply steps are small.
+
+real	0m2.125s
+user	0m0.015s
+sys	0m0.000s

@@ -1,0 +1,3 @@
+$ cargo run --release --bin world_move_check -- --scenario assets/data/world/preview/division_supply_scenario.ron --days 1 --capital 1:9:18309
+INPUT ERROR: --capital: country label 9 is not defined in the scenario
+exit=65

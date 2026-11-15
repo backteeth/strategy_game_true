@@ -28,7 +28,7 @@ pub struct DayDamage {
 }
 
 /// 計算の間だけの旧 `Division` の値(戦闘能力のみ。位置・命令は持たない)。
-fn stats_view(id: MapDivisionId, owner: CountryId, c: &CombatStats) -> Division {
+pub(super) fn stats_view(id: MapDivisionId, owner: CountryId, c: &CombatStats) -> Division {
     Division {
         id: DivisionId(id.0 as usize),
         owner,
@@ -60,18 +60,32 @@ fn stats_view(id: MapDivisionId, owner: CountryId, c: &CombatStats) -> Division 
 /// 日次の戦闘計算(旧 `resolve_combat_day_multi_with_supply`)。参加者の準備率が不正(旧の検証が `Err`)なら `None`(旧と同じく、その戦闘の当日の解決を見送る)。
 /// 引数の順序(`MapDivisionId` 昇順)が旧の「参加師団の ID 昇順」に対応する。
 pub fn resolve_day(attackers: &[(MapDivisionId, CountryId, &CombatStats)], defenders: &[(MapDivisionId, CountryId, &CombatStats)]) -> Option<DayDamage> {
-    let atk: Vec<Division> = attackers.iter().map(|(id, o, c)| stats_view(*id, *o, c)).collect();
-    let def: Vec<Division> = defenders.iter().map(|(id, o, c)| stats_view(*id, *o, c)).collect();
+    let with = |v: &[(MapDivisionId, CountryId, &CombatStats)]| -> Vec<(MapDivisionId, CountryId, CombatStats, f64)> { v.iter().map(|(i, o, c)| (*i, *o, **c, 1.0)).collect() };
+    let (a, d) = (with(attackers), with(defenders));
+    let a_refs: Vec<(MapDivisionId, CountryId, &CombatStats, f64)> = a.iter().map(|(i, o, c, f)| (*i, *o, c, *f)).collect();
+    let d_refs: Vec<(MapDivisionId, CountryId, &CombatStats, f64)> = d.iter().map(|(i, o, c, f)| (*i, *o, c, *f)).collect();
+    resolve_day_with_supply(&a_refs, &d_refs)
+}
+
+/// 師団ごとの補給充足率(`0.0..=1.0`。旧 `MilitaryRegistry::supply_fulfillment_of`)つきの日次の戦闘計算。旧の計算が充足率を参照する経路(`registry.supply_fulfillment_of`)へ、
+/// 一時的なレジストリでその日の値を渡す(旧の状態は渡さない)。充足率が不正(旧の検証が `Err`)なら `None`。
+pub fn resolve_day_with_supply(attackers: &[(MapDivisionId, CountryId, &CombatStats, f64)], defenders: &[(MapDivisionId, CountryId, &CombatStats, f64)]) -> Option<DayDamage> {
+    let atk: Vec<Division> = attackers.iter().map(|(id, o, c, _)| stats_view(*id, *o, c)).collect();
+    let def: Vec<Division> = defenders.iter().map(|(id, o, c, _)| stats_view(*id, *o, c)).collect();
+    let mut registry = MilitaryRegistry::default();
+    for (id, _, _, f) in attackers.iter().chain(defenders.iter()) {
+        registry.division_supply_fulfillment.insert(DivisionId(id.0 as usize), *f);
+    }
     let invalid = atk
         .iter()
         .chain(def.iter())
-        .any(|d| calculate_combat_readiness_with_supply(d.manpower, d.max_manpower, d.equipment, d.max_equipment, 1.0).is_err());
+        .any(|d| calculate_combat_readiness_with_supply(d.manpower, d.max_manpower, d.equipment, d.max_equipment, registry.supply_fulfillment_of(d.id)).is_err());
     if invalid {
         return None;
     }
     let atk_refs: Vec<&Division> = atk.iter().collect();
     let def_refs: Vec<&Division> = def.iter().collect();
-    let (a, d) = resolve_combat_day_multi_with_supply(&atk_refs, &def_refs, TERRAIN_BONUS_PLAIN, &MilitaryRegistry::default());
+    let (a, d) = resolve_combat_day_multi_with_supply(&atk_refs, &def_refs, TERRAIN_BONUS_PLAIN, &registry);
     let back = |m: std::collections::HashMap<DivisionId, (u64, f32)>| -> BTreeMap<MapDivisionId, (u64, f32)> { m.into_iter().map(|(k, v)| (MapDivisionId(k.0 as u32), v)).collect() };
     let attackers = back(a);
     let defenders = back(d);

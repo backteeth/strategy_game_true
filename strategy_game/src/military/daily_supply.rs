@@ -41,7 +41,7 @@ use crate::app::time::DayChangedMessage;
 use crate::common::{CountryId, DivisionDefinitionId, DivisionId, StateId};
 use crate::country::{CountryData, CountryRegistry};
 use crate::economy::resources::{
-    MilitarySuppliesUnitsError, ResourceType, military_supplies_units_to_value,
+    CountryStockpile, MilitarySuppliesUnitsError, ResourceType, military_supplies_units_to_value,
     military_supplies_value_to_units,
 };
 use crate::military::capital_connectivity::connected_states_from_capital;
@@ -241,15 +241,88 @@ pub fn plan_country_daily_supply_with_frontline(
          legitimate error state"
     );
 
-    // P26-006(spec §10): 連結/切断への分類。DivisionId昇順を維持したまま分割する。
-    let mut eligible: Vec<(DivisionId, u128)> = Vec::with_capacity(per_division.len());
-    let mut disconnected: Vec<(DivisionId, u128)> = Vec::new();
-    for &(id, demand) in &per_division {
-        let division = &divisions[&id];
-        if connected_states.contains(&division.current_state) || frontline_eligible.contains(&id) {
-            eligible.push((id, demand));
+    // P26-006(spec §10): 連結/切断への分類・備蓄の消費量・Hamilton配分は、共通の核(`plan_supply_core`)が行う(P32-037 / U8 B案)。
+    // 到達資格(旧は `StateId` の連結集合と前線補給の例外)は、この呼び出し側が判定してから渡す。核は ID の型を知らない。
+    let entries: Vec<SupplyDemandEntry> = per_division
+        .iter()
+        .map(|&(id, demand)| {
+            let division = &divisions[&id];
+            SupplyDemandEntry {
+                key: id.0,
+                demand_units: demand,
+                eligible: connected_states.contains(&division.current_state) || frontline_eligible.contains(&id),
+            }
+        })
+        .collect();
+    let core = plan_supply_core(current_stockpile_value, &entries)?;
+    let allocations = core
+        .allocations
+        .iter()
+        .map(|a| DivisionSupplyAllocation {
+            division_id: DivisionId(a.key),
+            demand_units: a.demand_units,
+            allocated_units: a.allocated_units,
+            fulfillment: a.fulfillment,
+        })
+        .collect();
+
+    Ok(CountrySupplyPlan {
+        country_id,
+        total_demand_units,
+        eligible_demand_units: core.eligible_demand_units,
+        consumed_units: core.consumed_units,
+        allocations,
+    })
+}
+
+// ─── 共通の核(P32-037 / U8 B案): 旧経路(StateId)と新経路(ProvinceId)が共有する ────────────────
+
+/// 呼び出し側が到達資格を判定済みの、1つの師団の日次需要(`key` は安定した順序のキー。師団IDの数値)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupplyDemandEntry {
+    pub key: usize,
+    pub demand_units: u128,
+    /// 首都と連結している(または前線補給の例外に当てはまる)。偽なら配分0・備蓄を消費しない(需要が正なら充足率0.0、需要0なら1.0)。
+    pub eligible: bool,
+}
+
+/// 1つの師団の配分結果(`key` 昇順)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SupplyCoreAllocation {
+    pub key: usize,
+    pub demand_units: u128,
+    pub allocated_units: u128,
+    /// `0.0..=1.0`。需要0なら常に `1.0`。
+    pub fulfillment: f64,
+}
+
+/// 共通の核の計画。備蓄・師団のいずれも変更しない純粋な計算結果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupplyCorePlan {
+    pub total_demand_units: u128,
+    pub eligible_demand_units: u128,
+    /// `min(eligible_demand, 現在備蓄)`。切断された師団の需要は含まない。
+    pub consumed_units: u128,
+    pub allocations: Vec<SupplyCoreAllocation>,
+}
+
+/// 到達資格を判定済みの需要から、消費量と最大剰余法(Hamilton方式)の配分を決める(旧 `plan_country_daily_supply_with_frontline` の後半をそのまま切り出したもの)。
+/// 同順位は `key` 昇順。`entries` の並びには依存しない(内部で `key` 昇順に整える)。
+pub fn plan_supply_core(current_stockpile_value: f64, entries: &[SupplyDemandEntry]) -> Result<SupplyCorePlan, DailySupplyPlanError> {
+    let mut sorted: Vec<SupplyDemandEntry> = entries.to_vec();
+    sorted.sort_by_key(|e| e.key);
+    let total_demand_units: u128 = sorted
+        .iter()
+        .try_fold(0u128, |acc, e| acc.checked_add(e.demand_units))
+        .ok_or(DailySupplyPlanError::Overflow)?;
+
+    let mut eligible: Vec<(usize, u128)> = Vec::with_capacity(sorted.len());
+    let mut disconnected: Vec<(usize, u128)> = Vec::new();
+    for e in &sorted {
+        if e.eligible {
+            eligible.push((e.key, e.demand_units));
         } else {
-            disconnected.push((id, demand));
+            disconnected.push((e.key, e.demand_units));
         }
     }
     let eligible_demand_units: u128 = eligible
@@ -257,49 +330,36 @@ pub fn plan_country_daily_supply_with_frontline(
         .try_fold(0u128, |acc, &(_, demand)| acc.checked_add(demand))
         .ok_or(DailySupplyPlanError::Overflow)?;
 
-    let current_units = military_supplies_value_to_units(current_stockpile_value)
-        .map_err(|_| DailySupplyPlanError::InvalidCurrentStockpile)?;
+    let current_units = military_supplies_value_to_units(current_stockpile_value).map_err(|_| DailySupplyPlanError::InvalidCurrentStockpile)?;
 
     let consumed_units = eligible_demand_units.min(current_units as u128);
 
     let mut allocations = if eligible_demand_units == 0 || consumed_units == eligible_demand_units {
-        // 連結Divisionの需要0、または備蓄が連結Divisionの総需要以上
-        // (spec §7/§10: 常に連結Divisionの需要全量を配分する)。
+        // 連結Divisionの需要0、または備蓄が連結Divisionの総需要以上(spec §7/§10: 常に連結Divisionの需要全量を配分する)。
         eligible
             .iter()
-            .map(|&(id, demand)| DivisionSupplyAllocation {
-                division_id: id,
-                demand_units: demand,
-                allocated_units: demand,
-                fulfillment: 1.0,
-            })
+            .map(|&(key, demand)| SupplyCoreAllocation { key, demand_units: demand, allocated_units: demand, fulfillment: 1.0 })
             .collect()
     } else {
         allocate_by_largest_remainder(consumed_units, eligible_demand_units, &eligible)?
     };
 
-    // P26-006(spec §11): 切断Divisionは配分0。需要が正なら補給率0.0、需要0なら
-    // 「要求がない状態は完全充足として扱う」という既存契約(spec §11・P26-004 §8)を
-    // 維持して補給率1.0とする。国家備蓄への影響は一切ない(このループは
-    // `consumed_units`計算より後にあり、`disconnected`の需要をどこにも加算しない)。
-    for &(id, demand) in &disconnected {
+    // P26-006(spec §11): 切断Divisionは配分0。需要が正なら補給率0.0、需要0なら1.0。国家備蓄への影響は一切ない。
+    for &(key, demand) in &disconnected {
         let fulfillment = if demand == 0 { 1.0 } else { 0.0 };
-        allocations.push(DivisionSupplyAllocation {
-            division_id: id,
-            demand_units: demand,
-            allocated_units: 0,
-            fulfillment,
-        });
+        allocations.push(SupplyCoreAllocation { key, demand_units: demand, allocated_units: 0, fulfillment });
     }
-    allocations.sort_by_key(|a| a.division_id.0);
+    allocations.sort_by_key(|a| a.key);
 
-    Ok(CountrySupplyPlan {
-        country_id,
-        total_demand_units,
-        eligible_demand_units,
-        consumed_units,
-        allocations,
-    })
+    Ok(SupplyCorePlan { total_demand_units, eligible_demand_units, consumed_units, allocations })
+}
+
+/// 計画した消費量を国家備蓄から1回だけ消費する(旧 `apply_country_daily_supply_plan` の消費の部分をそのまま切り出したもの。生の `consume` は使わず、
+/// `try_consume_military_supplies` を使う)。失敗したときは備蓄を完全に不変のまま `Err`。
+pub fn commit_supply_consumption(stockpile: &mut CountryStockpile, consumed_units: u128) -> Result<(), DailySupplyApplyError> {
+    let consumed_units_u64 = u64::try_from(consumed_units).map_err(|_| DailySupplyApplyError::ConsumedUnitsOutOfRange)?;
+    let consumed_value = military_supplies_units_to_value(consumed_units_u64);
+    stockpile.try_consume_military_supplies(consumed_value).map_err(DailySupplyApplyError::Consume)
 }
 
 /// Hamilton方式(最大剰余法)による決定的な比例配分(spec §7.1)。
@@ -310,17 +370,16 @@ pub fn plan_country_daily_supply_with_frontline(
 /// R = C_c - Σ base_i
 /// ```
 ///
-/// `R` unitsを、`remainder_i`降順→同値なら`DivisionId`昇順の順で1 unitずつ追加する
+/// `R` unitsを、`remainder_i`降順→同値なら`key`(師団ID)昇順の順で1 unitずつ追加する
 /// (spec §7.1、Bevy Entity番号・HashMap挿入順・query反復順には一切依存しない)。
-/// `C_c × D_i`は`checked_mul`、他の加減算もすべてchecked演算を用いる(spec §7.3、
-/// 到達不能に見える箇所でも省略しない)。
+/// `C_c × D_i`は`checked_mul`、他の加減算もすべてchecked演算を用いる(spec §7.3、到達不能に見える箇所でも省略しない)。
 fn allocate_by_largest_remainder(
     consumed_units: u128,
     total_demand_units: u128,
-    per_division: &[(DivisionId, u128)],
-) -> Result<Vec<DivisionSupplyAllocation>, DailySupplyPlanError> {
+    per_division: &[(usize, u128)],
+) -> Result<Vec<SupplyCoreAllocation>, DailySupplyPlanError> {
     struct Item {
-        id: DivisionId,
+        key: usize,
         demand: u128,
         base: u128,
         remainder: u128,
@@ -328,55 +387,38 @@ fn allocate_by_largest_remainder(
 
     let mut items: Vec<Item> = Vec::with_capacity(per_division.len());
     let mut base_sum: u128 = 0;
-    for &(id, demand) in per_division {
+    for &(key, demand) in per_division {
         if demand == 0 {
-            items.push(Item { id, demand, base: 0, remainder: 0 });
+            items.push(Item { key, demand, base: 0, remainder: 0 });
             continue;
         }
         let numerator = consumed_units.checked_mul(demand).ok_or(DailySupplyPlanError::Overflow)?;
         let base = numerator / total_demand_units;
         let remainder = numerator % total_demand_units;
         base_sum = base_sum.checked_add(base).ok_or(DailySupplyPlanError::Overflow)?;
-        items.push(Item { id, demand, base, remainder });
+        items.push(Item { key, demand, base, remainder });
     }
 
-    // R = C_c - Σbase_i。標準的なHamilton法の数学的性質により常に
-    // `0 <= R < (需要が正のDivision数)`が成り立つ(このモジュールのテスト
-    // `allocation_invariants_hold_under_random_scenarios`等で実測検証する)。
+    // R = C_c - Σbase_i。標準的なHamilton法の数学的性質により常に `0 <= R < (需要が正のDivision数)` が成り立つ。
     let leftover = consumed_units.checked_sub(base_sum).ok_or(DailySupplyPlanError::Overflow)?;
     let leftover_usize = usize::try_from(leftover).map_err(|_| DailySupplyPlanError::Overflow)?;
 
     let mut order: Vec<usize> = (0..items.len()).collect();
-    order.sort_by(|&a, &b| {
-        items[b].remainder.cmp(&items[a].remainder).then(items[a].id.0.cmp(&items[b].id.0))
-    });
+    order.sort_by(|&a, &b| items[b].remainder.cmp(&items[a].remainder).then(items[a].key.cmp(&items[b].key)));
 
     let mut gets_extra_unit = vec![false; items.len()];
     for &idx in order.iter().take(leftover_usize) {
         gets_extra_unit[idx] = true;
     }
 
-    let mut allocations: Vec<DivisionSupplyAllocation> = Vec::with_capacity(items.len());
+    let mut allocations: Vec<SupplyCoreAllocation> = Vec::with_capacity(items.len());
     for (idx, item) in items.iter().enumerate() {
-        let allocated = if gets_extra_unit[idx] {
-            item.base.checked_add(1).ok_or(DailySupplyPlanError::Overflow)?
-        } else {
-            item.base
-        };
-        let fulfillment = if item.demand == 0 {
-            1.0
-        } else {
-            (allocated as f64 / item.demand as f64).clamp(0.0, 1.0)
-        };
-        allocations.push(DivisionSupplyAllocation {
-            division_id: item.id,
-            demand_units: item.demand,
-            allocated_units: allocated,
-            fulfillment,
-        });
+        let allocated = if gets_extra_unit[idx] { item.base.checked_add(1).ok_or(DailySupplyPlanError::Overflow)? } else { item.base };
+        let fulfillment = if item.demand == 0 { 1.0 } else { (allocated as f64 / item.demand as f64).clamp(0.0, 1.0) };
+        allocations.push(SupplyCoreAllocation { key: item.key, demand_units: item.demand, allocated_units: allocated, fulfillment });
     }
 
-    allocations.sort_by_key(|a| a.division_id.0);
+    allocations.sort_by_key(|a| a.key);
     Ok(allocations)
 }
 
@@ -397,14 +439,8 @@ pub fn apply_country_daily_supply_plan(
     military_registry: &mut MilitaryRegistry,
     plan: &CountrySupplyPlan,
 ) -> Result<(), DailySupplyApplyError> {
-    let consumed_units_u64 = u64::try_from(plan.consumed_units)
-        .map_err(|_| DailySupplyApplyError::ConsumedUnitsOutOfRange)?;
-    let consumed_value = military_supplies_units_to_value(consumed_units_u64);
-
-    country
-        .stockpile
-        .try_consume_military_supplies(consumed_value)
-        .map_err(DailySupplyApplyError::Consume)?;
+    // 備蓄の消費は、新経路と共有する共通の処理(P32-037 / U8 B案)。
+    commit_supply_consumption(&mut country.stockpile, plan.consumed_units)?;
 
     for allocation in &plan.allocations {
         military_registry

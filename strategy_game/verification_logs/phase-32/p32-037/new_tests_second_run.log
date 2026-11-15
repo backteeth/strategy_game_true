@@ -1,0 +1,30 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 7.27s
+     Running tests\p32_037_map_supply_test.rs (target\debug\deps\p32_037_map_supply_test-743f542c0a0ee2a3.exe)
+
+running 18 tests
+test a_disconnected_division_gets_zero_and_does_not_consume_and_a_lost_capital_empties_the_reach ... ok
+test a_shortage_is_allocated_by_largest_remainder_with_the_division_id_tie_break_and_never_exceeds_the_stock ... ok
+test a_sufficient_stockpile_supplies_every_connected_division_and_is_consumed_exactly_once_per_day ... ok
+test an_occupation_does_not_change_todays_allocation_and_the_next_day_reflects_reconnection_or_a_lost_capital ... ok
+test old_comparison_capital_loss_reconnection_and_the_update_day_match ... ok
+test old_comparison_shortage_and_the_largest_remainder_tie_break_match ... ok
+test old_comparison_sufficient_stock_a_cut_division_and_a_zero_manpower_division_match ... ok
+test old_comparison_the_frontline_exception_matches_the_old_eligibility ... ok
+test only_the_previous_and_new_controllers_are_recomputed_and_unrelated_countries_reuse_their_reach ... ok
+test replacing_the_graph_discards_every_cached_reach ... ok
+test supply_results_do_not_depend_on_registration_order ... ok
+test supply_setup_is_validated_with_distinct_codes_and_scenarios_without_it_keep_the_old_behaviour ... ok
+test the_days_allocation_is_used_by_the_days_battle_calculation ... ok
+test the_frontline_exception_applies_to_an_attacker_in_battle_next_to_connected_own_territory_and_not_otherwise ... ok
+test the_fulfillment_changes_the_movement_days_with_the_old_floor_of_one_half_and_supply_off_keeps_the_old_speed ... ok
+test the_shipped_supply_scenario_resolves_and_runs_with_the_expected_allocations ... ok
+test the_supply_code_depends_on_the_old_model_only_through_the_isolated_adapter ... ok
+test unknown_reach_is_reported_separately_and_never_counted_as_confirmed_supply ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+
+real	0m7.703s
+user	0m0.000s
+sys	0m0.015s

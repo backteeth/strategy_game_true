@@ -1,0 +1,3 @@
+$ cargo run --release --bin world_move_check -- --scenario assets/data/world/preview/division_battle_scenario.ron --days 1 --capital 1:1:18309
+INPUT ERROR: --capital: country label 1 has no supply setup in the scenario
+exit=65

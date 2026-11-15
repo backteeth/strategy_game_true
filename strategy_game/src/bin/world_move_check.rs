@@ -28,7 +28,7 @@ use strategy_game::world::{
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--combat]";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat]";
 
 #[derive(Default)]
 struct Args {
@@ -39,6 +39,7 @@ struct Args {
     days: u32,
     orders: Vec<(u32, u32, u32)>,
     controls: Vec<(u32, u32, Option<u32>)>,
+    capitals: Vec<(u32, u32, u32)>,
     combat: bool,
 }
 
@@ -86,6 +87,18 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 let label = if parts[2] == "none" { None } else { Some(num("--control label", parts[2])?) };
                 a.controls.push((day, num("--control province", parts[1])?, label));
             }
+            "--capital" => {
+                let v = value()?;
+                let parts: Vec<&str> = v.split(':').collect();
+                if parts.len() != 3 {
+                    return Err(format!("--capital: \"{v}\" is not DAY:LABEL:PROVINCE"));
+                }
+                let day = num("--capital day", parts[0])?;
+                if day == 0 {
+                    return Err("--capital: the day starts at 1".into());
+                }
+                a.capitals.push((day, num("--capital label", parts[1])?, num("--capital province", parts[2])?));
+            }
             "--combat" => a.combat = true,
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
@@ -119,14 +132,15 @@ fn opt(p: Option<ProvinceId>) -> String {
 }
 
 fn print_state(day: u32, m: &MapMilitary, labels: &HashMap<CountryId, u32>, combat: bool) {
+    let supply = m.supply_enabled();
     for d in m.divisions() {
-        print_division(day, d, labels, combat);
+        print_division(day, d, labels, combat, supply);
     }
 }
 
-fn print_division(day: u32, d: &MapDivision, labels: &HashMap<CountryId, u32>, combat: bool) {
+fn print_division(day: u32, d: &MapDivision, labels: &HashMap<CountryId, u32>, combat: bool, supply: bool) {
     println!(
-        "day {day} {} (country {}) at {} {} progress {:.2} destination {} next {} remaining {}{}{}",
+        "day {day} {} (country {}) at {} {} progress {:.2} destination {} next {} remaining {}{}{}{}",
         d.id,
         labels.get(&d.owner).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
         d.province.0,
@@ -140,7 +154,8 @@ fn print_division(day: u32, d: &MapDivision, labels: &HashMap<CountryId, u32>, c
         opt(d.target),
         path_text(&d.path),
         d.battle.map(|b| format!(" battle {}", b.0)).unwrap_or_default(),
-        if combat { format!(" manpower {} organization {:.1} equipment {:.2}", d.combat.manpower, d.combat.organization, d.combat.equipment) } else { String::new() }
+        if combat { format!(" manpower {} organization {:.1} equipment {:.2}", d.combat.manpower, d.combat.organization, d.combat.equipment) } else { String::new() },
+        if supply { format!(" supply {:.4}", d.fulfillment) } else { String::new() }
     );
 }
 
@@ -185,6 +200,7 @@ fn run(a: &Args) -> i32 {
         }
     };
     let labels: HashMap<CountryId, u32> = scenario.countries.iter().map(|(l, c)| (*c, *l)).collect();
+    let scenario_countries = scenario.countries.clone();
     // --control の参照を事前に確認(未知のプロヴィンス・国家ラベルは入力不正)
     let mut controls: Vec<(u32, ProvinceId, Option<CountryId>)> = Vec::new();
     for (day, p, label) in &a.controls {
@@ -203,6 +219,20 @@ fn run(a: &Args) -> i32 {
             None => None,
         };
         controls.push((*day, ProvinceId(*p), c));
+    }
+    for (_, label, p) in &a.capitals {
+        if !scenario.countries.contains_key(label) {
+            println!("INPUT ERROR: --capital: country label {label} is not defined in the scenario");
+            return 65;
+        }
+        if !scenario.supply.iter().any(|s| scenario.countries.get(label) == Some(&s.country)) {
+            println!("INPUT ERROR: --capital: country label {label} has no supply setup in the scenario");
+            return 65;
+        }
+        if !graph.contains(ProvinceId(*p)) {
+            println!("INPUT ERROR: --capital: Province#{p} is not a province of the graph");
+            return 65;
+        }
     }
     println!("=== 師団の移動 (M6-a: verification input, not official ownership or control) ===");
     println!("world: {prov_path} / {state_path}");
@@ -227,6 +257,17 @@ fn run(a: &Args) -> i32 {
                 .join(" ")
         );
     }
+    if !scenario.supply.is_empty() {
+        println!(
+            "daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): {}",
+            scenario
+                .supply
+                .iter()
+                .map(|s| format!("country {} capital {} stockpile {}", labels.get(&s.country).map(|l| l.to_string()).unwrap_or_else(|| "?".into()), s.capital.0, s.stockpile))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
     let mut military = scenario.into_military();
     println!("\n--- day 0 (initial placement) ---");
     print_state(0, &military, &labels, a.combat);
@@ -243,6 +284,12 @@ fn run(a: &Args) -> i32 {
                     None => "no controller".into(),
                 }
             );
+        }
+        for (_, label, p) in a.capitals.iter().filter(|(d, _, _)| *d == day) {
+            if let Some(c) = scenario_countries.get(label) {
+                military.set_capital(*c, ProvinceId(*p));
+                println!("capital change: country {label} -> {}", ProvinceId(*p));
+            }
         }
         for (_, div, p) in a.orders.iter().filter(|(d, _, _)| *d == day) {
             let id = MapDivisionId(*div);
@@ -316,6 +363,23 @@ fn run(a: &Args) -> i32 {
                         ClaimReason::AttackerWonBattle(b) => format!("attacker won {b}"),
                     },
                     divisions.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
+                ),
+                MoveEvent::DailySupply(r) => println!(
+                    "supply: country {}: capital {}; connected {} province(s), unknown {} (not counted as connected); reach {}; demand {} (eligible {}) consumed {} units; stockpile {} units{}",
+                    labels.get(&r.country).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    if r.capital_controlled { "controlled" } else { "LOST (reach is empty)" },
+                    r.connected_provinces,
+                    r.unknown_provinces,
+                    if !r.capital_controlled { "not computed (the capital is not controlled: empty)" } else if r.reach_recomputed { "recomputed" } else { "reused from cache" },
+                    r.total_demand_units,
+                    r.eligible_demand_units,
+                    r.consumed_units,
+                    r.stockpile_units,
+                    if r.frontline_divisions.is_empty() { String::new() } else { format!("; frontline supply exception for divisions {}", r.frontline_divisions.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")) }
+                ),
+                MoveEvent::SupplyFailed { country, reason } => println!(
+                    "supply: country {}: planning/applying FAILED ({reason:?}); stockpile and fulfillment left unchanged",
+                    labels.get(&country).map(|l| l.to_string()).unwrap_or_else(|| "?".into())
                 ),
                 MoveEvent::ClaimNotApplied { province, claimant, reason, rejection } => println!(
                     "event: claim NOT applied at {province} by country {} ({}): {} (control unchanged; not retried automatically)",

@@ -1,0 +1,21 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: doc list item without indentation
+ --> src\bin\world_supply_bench.rs:8:5
+  |
+8 | //! 各国家に首都(その国家の支配地の最大の連結成分の中ほど)と、その成分の中に 10 個の師団(標準の戦闘能力。補給消費量 1.0。備蓄は十分)...
+  |     ^
+  |
+  = help: if this is supposed to be its own paragraph, add a blank line
+  = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_continuation
+  = note: `-D clippy::doc-lazy-continuation` implied by `-D warnings`
+  = help: to override `-D warnings` add `#[allow(clippy::doc_lazy_continuation)]`
+help: indent this line
+  |
+8 | //!   各国家に首都(その国家の支配地の最大の連結成分の中ほど)と、その成分の中に 10 個の師団(標準の戦闘能力。補給消費量 1.0。備蓄は十分)を置く(師団数 = 国家数 × 10)。
+  |     ++
+
+error: could not compile `strategy_game` (bin "world_supply_bench" test) due to 1 previous error
+
+real	0m36.263s
+user	0m0.015s
+sys	0m0.015s

@@ -597,6 +597,7 @@ fn template() -> DivisionScenarioFile {
         state_owners: vec![StateOwnerEntry { state: 20, country: 1 }, StateOwnerEntry { state: 21, country: 2 }],
         controller_overrides: vec![],
         wars: vec![],
+        supply: Default::default(),
         divisions: vec![DivisionEntry { id: 1, country: 1, province: 18309, speed: 1.0, combat: Default::default() }],
     }
 }
@@ -700,6 +701,7 @@ fn ids_are_resolved_through_membership_never_by_numeric_equality() {
         state_owners: vec![StateOwnerEntry { state: 5, country: 1 }, StateOwnerEntry { state: 6, country: 2 }],
         controller_overrides: vec![],
         wars: vec![],
+        supply: Default::default(),
         divisions: vec![DivisionEntry { id: 5, country: 1, province: 6, speed: 1.0, combat: Default::default() }],
     };
     let s = resolve_division_scenario(&f, &g, &w).unwrap();

@@ -1,0 +1,74 @@
+// P32-037 日次補給の検証用シナリオ(M6-d)。division_battle_scenario.ron(交戦・戦闘・占領の検証用)に、**国家ごとの首都と初期の軍需物資の備蓄(supply.countries)**と、
+// **師団の補給消費量(supply.divisions。旧 DivisionDefinition::supply_usage に相当する、既存の需要計算の入力)**を加えたもの。**検証入力であり、正式な世界データではない。**
+// 補給の設定(supply)がないシナリオ(M6-a〜c)は従来どおり動く。設定がある国家の師団は、すべて supply.divisions に補給消費量が必要。首都は初期に自国の支配下であること。
+//
+// 補給は毎日、その日の移動・戦闘・占領より前に1回だけ計算される(前日終値の状態)。到達判定は、その国の実効支配下の陸上プロヴィンスを、首都を起点に既存の reach でたどる。
+// 17903(ステート未所属)は国家1の支配と明示してあり、首都 18309 からステート22側へ連結する(M6-a の検証用シナリオと同じ橋渡し)。孤立した 17696・17905・18112(国家1の支配)の師団11 は、首都と連結しない。
+// 国家1: 首都 18309、備蓄 100(十分)。国家2: 首都 17695、備蓄 0.5(不足。全師団の需要より小さい)。国家3: 首都 18312、備蓄 10。
+// 場面の例(CLI): 十分な備蓄=国家1 / 備蓄不足=国家2 / 分断=--control 2:17903:none(国家1の 17903 の支配を外すと、ステート22側の師団2 が首都から切れる。到達は「不明」になり、確認済みの到達には含まれない)/
+//   首都喪失=--control 3:18309:2 / 前線補給=--order 1:4:18111(攻撃側の師団4 は、戦闘中も隣接する連結した自国支配のプロヴィンス 18311 から補給を受ける)。
+(
+    format_version: 1,
+    description: "P32-037 daily supply validation scenario (verification input, not official data)",
+    base_days: 5.0,
+    countries: [
+        (label: 1, country_id: 1),
+        (label: 2, country_id: 2),
+        (label: 3, country_id: 3),
+    ],
+    state_owners: [
+        (state: 20, country: 1),
+        (state: 22, country: 1),
+        (state: 21, country: 2),
+    ],
+    controller_overrides: [
+        (province: 18312, country: 3),
+        (province: 17696, country: 1),
+        (province: 17905, country: 1),
+        (province: 18112, country: 1),
+        (province: 17903, country: 1),
+    ],
+    wars: [
+        (a: 1, b: 2),
+        (a: 3, b: 2),
+    ],
+    divisions: [
+        (id: 1, country: 1, province: 18311, speed: 1.0),
+        (id: 2, country: 1, province: 17693, speed: 1.0),
+        (id: 3, country: 1, province: 17268, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 4, country: 1, province: 18311, speed: 1.0),
+        (id: 5, country: 2, province: 17694, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 6, country: 2, province: 17269, speed: 1.0),
+        (id: 7, country: 1, province: 18310, speed: 1.0),
+        (id: 8, country: 2, province: 18111, speed: 1.0),
+        (id: 10, country: 3, province: 18312, speed: 1.0),
+        (id: 11, country: 1, province: 17905, speed: 1.0),
+        (id: 12, country: 2, province: 17906, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 14, country: 1, province: 17485, speed: 1.0, combat: (attack_power: 12)),
+        (id: 15, country: 2, province: 17486, speed: 1.0),
+        (id: 16, country: 2, province: 17487, speed: 1.0),
+    ],
+    supply: (
+        countries: [
+            (country: 1, capital: 18309, military_supplies: 100.0),
+            (country: 2, capital: 17695, military_supplies: 0.5),
+            (country: 3, capital: 18312, military_supplies: 10.0),
+        ],
+        divisions: [
+            (division: 1, supply_usage: 1.0),
+            (division: 2, supply_usage: 1.0),
+            (division: 3, supply_usage: 1.0),
+            (division: 4, supply_usage: 1.0),
+            (division: 5, supply_usage: 1.0),
+            (division: 6, supply_usage: 1.0),
+            (division: 7, supply_usage: 1.0),
+            (division: 8, supply_usage: 1.0),
+            (division: 10, supply_usage: 1.0),
+            (division: 11, supply_usage: 1.0),
+            (division: 12, supply_usage: 1.0),
+            (division: 14, supply_usage: 1.0),
+            (division: 15, supply_usage: 1.0),
+            (division: 16, supply_usage: 1.0),
+        ],
+    ),
+)

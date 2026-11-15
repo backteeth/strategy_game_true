@@ -1,0 +1,11 @@
+(
+ format_version: 1,
+ base_days: 5.0,
+ countries: [ (label: 1, country_id: 1), (label: 2, country_id: 2) ],
+ state_owners: [ (state: 20, country: 1), (state: 21, country: 2) ],
+ divisions: [ (id: 1, country: 1, province: 18309, speed: 1.0), (id: 2, country: 2, province: 17269, speed: 1.0) ],
+ supply: (
+  countries: [ (country: 1, capital: 17269, military_supplies: -1.0), (country: 1, capital: 18309, military_supplies: 5.0), (country: 9, capital: 18309, military_supplies: 1.0), (country: 2, capital: 99999, military_supplies: 1.0) ],
+  divisions: [ (division: 1, supply_usage: -3.0), (division: 7, supply_usage: 1.0) ],
+ ),
+)

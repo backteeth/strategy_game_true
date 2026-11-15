@@ -1,6 +1,6 @@
 //! P32-034/035 (M6-a/b): 新経路の師団の初期配置と、陸上プロヴィンス間の日単位の移動・敵支配地への進入(純粋な Rust。Bevy・経済・保存・軍の旧型に依存しない)。
 //!
-//! 設計は `verification_logs/phase-32/p32-033/p32-033_m6_design.md`(§5・§6・§10)。**日次補給・前線/AI・UI・保存は含まない**(M6-d 以降)。
+//! 設計は `verification_logs/phase-32/p32-033/p32-033_m6_design.md`(§5・§6・§10)。日次補給は M6-d(`supply.rs`。その日の移動・戦闘・占領より前に1回計算する)。**前線/AI・UI・保存は含まない**。
 //! 占領(守備隊のいない進入・戦闘の勝利による実効支配の更新。D8: 旧本番の**即時占領**)は M6-c(`occupation.rs`)。
 //! 戦闘の本体は `battle.rs`、旧経路の戦闘計算の再利用は `legacy_combat.rs`(隔離)。
 //!
@@ -10,7 +10,7 @@
 //!   その時点では現在地を動かさない。拒否したときは何も変更しない。
 //! - 経路: 辺の費用は 1、同費用の候補は `ProvinceId` 昇順。通れるのは**所属国の支配地と、交戦国の支配地**(旧の `allowed`/`hostile`)。河川は費用にも可否にも加えない。
 //! - 日次: `MapDivisionId` 昇順。日の初めに経路を検証し(次の移動先が通れなければ進入前に停止、残りの経路に通れない所があれば経路を切って現在のホップだけ続ける)、その後に移動する。
-//!   1ホップの日数 = `max(1, 基準日数 × 費用 / (速度 × 補給係数))`(f32、旧と同じ式。補給係数は 1.0 固定)。
+//!   1ホップの日数 = `max(1, 基準日数 × 費用 / (速度 × 補給係数))`(f32、旧と同じ式)。補給係数 = `max(その日の補給充足率, 0.5)`(補給の設定がない師団は充足率 1.0 なので 1.0)。
 //!
 //! M6-b で加えたもの: 交戦関係(検証用シナリオが明示する国家の組。双方向)、敵支配のプロヴィンスへの進入と戦闘・退却(`battle.rs`)、戦闘中の師団への命令の拒否。
 //!
@@ -97,6 +97,11 @@ pub struct MapDivision {
     pub combat: CombatStats,
     /// 参加中の戦闘(`Fighting` のときだけ)。
     pub battle: Option<MapBattleId>,
+    /// その日の補給充足率(`0.0..=1.0`。M6-d の日次補給が毎日、その日の移動・戦闘・占領より前に確定する。補給の設定がない師団は常に 1.0)。
+    /// 戦闘計算(旧の `supply_fulfillment`)と、移動の補給係数(`max(充足率, 0.5)`)の両方が参照する。
+    pub fulfillment: f64,
+    /// 補給需要の計算に使う補給消費量(旧 `DivisionDefinition::supply_usage`)。補給の設定がある国家の師団は、検証用シナリオが明示する。
+    pub supply_usage: f32,
 }
 
 impl MapDivision {
@@ -114,11 +119,18 @@ impl MapDivision {
             speed,
             combat: CombatStats::standard(),
             battle: None,
+            fulfillment: 1.0,
+            supply_usage: 1.0,
         }
     }
 
     pub fn with_combat(mut self, combat: CombatStats) -> MapDivision {
         self.combat = combat;
+        self
+    }
+
+    pub fn with_supply_usage(mut self, supply_usage: f32) -> MapDivision {
+        self.supply_usage = supply_usage;
         self
     }
 }
@@ -172,8 +184,8 @@ pub struct MovementParams {
 /// 旧経路の既定の基準日数。
 pub const DEFAULT_BASE_DAYS: f32 = 5.0;
 
-/// 補給係数(1.0 固定。旧経路は `max(supply_ratio, 0.5)`。M6-d で補給計画に接続する)。
-pub const SUPPLY_MODIFIER: f32 = 1.0;
+/// 移動の補給係数の下限(旧経路の `max(supply_ratio, 0.5)` の 0.5)。補給係数 = `max(その日の補給充足率, この値)`。
+pub const MIN_SUPPLY_MODIFIER: f32 = 0.5;
 
 /// 辺の費用(旧経路の `calculate_step_cost` と同じく常に 1。河川・地形は加えない)。
 pub const STEP_COST: f32 = 1.0;
@@ -189,6 +201,12 @@ pub enum MapMilitaryError {
     SelfWar(CountryId),
     /// 同じ組(逆順を含む)が重複している。
     DuplicateWar(CountryId, CountryId),
+    /// 補給の設定で、同じ国家が複数回ある。
+    DuplicateSupplyCountry(CountryId),
+    /// 補給の設定の備蓄が不正(有限でない・負・値域外)。
+    InvalidSupplyStockpile(CountryId),
+    /// 補給の設定がある国家の師団の補給消費量が不正。
+    InvalidSupplyUsage(MapDivisionId),
 }
 
 impl std::fmt::Display for MapMilitaryError {
@@ -200,6 +218,9 @@ impl std::fmt::Display for MapMilitaryError {
             Self::InvalidBaseDays => write!(f, "base_days must be finite and positive"),
             Self::SelfWar(c) => write!(f, "country {} cannot be at war with itself", c.0),
             Self::DuplicateWar(a, b) => write!(f, "the war between countries {} and {} is listed more than once", a.0, b.0),
+            Self::DuplicateSupplyCountry(c) => write!(f, "country {} has more than one supply setup", c.0),
+            Self::InvalidSupplyStockpile(c) => write!(f, "country {}: the military supplies stockpile is invalid", c.0),
+            Self::InvalidSupplyUsage(d) => write!(f, "{d}: supply_usage is invalid"),
         }
     }
 }
@@ -315,6 +336,44 @@ pub enum MoveEvent {
     ControlChanged { province: ProvinceId, previous: Option<CountryId>, new: CountryId, reason: ClaimReason, divisions: Vec<MapDivisionId> },
     /// 更新要求を適用しなかった(支配は上書きしない。見送りは翌日に自動で再適用しない)。
     ClaimNotApplied { province: ProvinceId, claimant: CountryId, reason: ClaimReason, rejection: super::occupation::ClaimRejection },
+    /// 国家1か国分のその日の日次補給の結果(M6-d。その日の移動・戦闘・占領より前に確定した値)。
+    DailySupply(SupplyReport),
+    /// 日次補給の計画または適用に失敗した(備蓄と師団の充足率は変更しない。他国には影響しない)。
+    SupplyFailed { country: CountryId, reason: SupplyFailure },
+}
+
+/// 日次補給が失敗した理由(旧の `DailySupplyPlanError` / `DailySupplyApplyError` を、`Eq` を保てる形に分類したもの)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupplyFailure {
+    /// 師団の需要を求められない(不正な戦闘能力・補給消費量)。
+    Demand,
+    /// 国家の備蓄が不正で、正規の単位へ変換できない。
+    InvalidStockpile,
+    /// 単位の演算が溢れた。
+    Overflow,
+    /// 備蓄の消費の確定に失敗した。
+    ApplyFailed,
+}
+
+/// 国家1か国分のその日の日次補給の要約(整数だけ。備蓄は旧と同じ固定小数点の単位)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupplyReport {
+    pub country: CountryId,
+    /// 首都が自国の支配下にあるか(偽なら到達集合は空)。
+    pub capital_controlled: bool,
+    /// 首都から確認済みの到達(`Reachable`)の件数。「不明」は含まない。
+    pub connected_provinces: usize,
+    /// 「不明」(範囲外の陸を通る経路があり得る)の件数。確認済みの到達には含めない。
+    pub unknown_provinces: usize,
+    /// その日に到達結果を計算し直したか(偽なら、キャッシュした国家ごとの `Reach` を再利用した)。
+    pub reach_recomputed: bool,
+    pub total_demand_units: u128,
+    pub eligible_demand_units: u128,
+    pub consumed_units: u128,
+    /// 消費後の備蓄。
+    pub stockpile_units: u64,
+    /// 前線補給の例外で資格を得た師団(昇順)。
+    pub frontline_divisions: Vec<MapDivisionId>,
 }
 
 /// 新経路の師団・支配・交戦関係・戦闘の集合(実行時状態)。
@@ -327,6 +386,8 @@ pub struct MapMilitary {
     pub(super) wars: Vec<(usize, usize)>,
     pub(super) battles: BTreeMap<MapBattleId, MapBattle>,
     pub(super) next_battle: u32,
+    /// 日次補給(M6-d。設定がなければ `None`で、従来と同じ挙動)。
+    pub(super) supply: Option<super::supply::SupplyRuntime>,
 }
 
 /// 通れるプロヴィンスだけを通る最短経路(費用 1、同費用は `ProvinceId` 昇順)。終点は `start` を含まず `end` を含む。`start == end` は空の経路。
@@ -392,7 +453,7 @@ impl MapMilitary {
                 return Err(MapMilitaryError::DuplicateDivision(id));
             }
         }
-        Ok(MapMilitary { divisions: map, control, params, wars: Vec::new(), battles: BTreeMap::new(), next_battle: 0 })
+        Ok(MapMilitary { divisions: map, control, params, wars: Vec::new(), battles: BTreeMap::new(), next_battle: 0, supply: None })
     }
 
     /// 交戦関係を設定する(検証用シナリオが明示する組。双方向)。自国との組・重複(逆順を含む)は `Err`。
@@ -428,7 +489,11 @@ impl MapMilitary {
 
     /// 支配国を設定する(命令後の通行条件の変更の検証用。**占領の更新は M6-c**。ここから呼ばれて戦闘・進行中の経路が自動で直ることはない)。
     pub fn set_controller(&mut self, p: ProvinceId, c: Option<CountryId>) {
+        let previous = self.control.controller(p);
         self.control.set(p, c);
+        // 支配が変わると、変更前と変更後の支配国の到達結果(キャッシュした `Reach`)は古くなる(M6-d)。
+        let affected: Vec<CountryId> = previous.into_iter().chain(c).collect();
+        self.invalidate_reach(&affected);
     }
 
     pub fn division(&self, id: MapDivisionId) -> Option<&MapDivision> {
@@ -494,6 +559,8 @@ impl MapMilitary {
     /// 占領(`ControlClaim` の適用)は、守備隊のいない進入では接触の処理の中、戦闘の勝利では終了処理の中で、その場で行う(当日の組織率回復より前)。`graph` は退路の探索に使う。
     pub fn advance_day(&mut self, graph: &ProvinceGraph) -> Vec<MoveEvent> {
         let mut events = Vec::new();
+        // 0. 日次補給(M6-d): その日の移動・戦闘・占領より前に、前日終値の状態(師団の位置・戦闘状態・支配)で1回だけ計算し、備蓄の消費と充足率を一緒に更新する。
+        self.plan_daily_supply(graph, &mut events);
         let ids: Vec<MapDivisionId> = self.divisions.keys().copied().collect();
         // 1. 経路の事前検証(旧 `validate_and_stop_invalid_movements`)
         for id in &ids {
@@ -529,6 +596,9 @@ impl MapMilitary {
         self.cleanup_finished_battles();
         // 6. 組織率の回復
         self.recover_organizations();
+        // 当日の占領で支配が変わった国家(変更前と変更後)の到達結果を無効化する。再計算は、次に補給を計画する時点で行う(M6-d)。
+        let targets = super::occupation::countries_to_invalidate(&events);
+        self.invalidate_reach(&targets);
         events
     }
 
@@ -561,7 +631,9 @@ impl MapMilitary {
             stop(d, target, events);
             return;
         }
-        let movement_days = (params.base_days * STEP_COST / (speed * SUPPLY_MODIFIER)).max(1.0);
+        // 補給係数 = max(その日の補給充足率, 0.5)(旧の `max(supply_ratio, 0.5)` と同じ下限。補給の設定がない師団は充足率 1.0 なので M6-a〜c と同じ)。
+        let supply_mod = (self.divisions[&id].fulfillment as f32).max(MIN_SUPPLY_MODIFIER);
+        let movement_days = (params.base_days * STEP_COST / (speed * supply_mod)).max(1.0);
         let new_progress = self.divisions[&id].progress + 1.0 / movement_days;
         if new_progress < 1.0 {
             self.divisions.get_mut(&id).expect("exists").progress = new_progress;

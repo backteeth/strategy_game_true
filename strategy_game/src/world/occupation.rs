@@ -91,6 +91,9 @@ impl MapMilitary {
             return ClaimOutcome::Rejected(ClaimRejection::EnemyDivisionsRemain { divisions: enemies });
         }
         self.control.set(req.province, Some(req.claimant));
+        // 到達結果(M6-d)の無効化: 変更前と変更後の支配国。再計算は次に補給を計画する時点で行う。
+        let affected: Vec<CountryId> = current.into_iter().chain(std::iter::once(req.claimant)).collect();
+        self.invalidate_reach(&affected);
         ClaimOutcome::Applied { previous: current, new: req.claimant }
     }
 
