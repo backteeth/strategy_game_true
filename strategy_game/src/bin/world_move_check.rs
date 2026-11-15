@@ -23,12 +23,12 @@ use std::collections::HashMap;
 use strategy_game::common::CountryId;
 use strategy_game::hexmap::data::load_from_path;
 use strategy_game::world::{
-    DivisionScenarioError, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent, OrderOutcome, ProvinceGraph, ProvinceId,
-    load_division_scenario, load_world_preview,
+    BattleOutcome, ClaimReason, DivisionScenarioError, FinishReason, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent, OrderOutcome, ProvinceGraph,
+    ProvinceId, StopReason, load_division_scenario, load_world_preview,
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]...";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--combat]";
 
 #[derive(Default)]
 struct Args {
@@ -39,6 +39,7 @@ struct Args {
     days: u32,
     orders: Vec<(u32, u32, u32)>,
     controls: Vec<(u32, u32, Option<u32>)>,
+    combat: bool,
 }
 
 fn num(name: &str, s: &str) -> Result<u32, String> {
@@ -85,6 +86,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 let label = if parts[2] == "none" { None } else { Some(num("--control label", parts[2])?) };
                 a.controls.push((day, num("--control province", parts[1])?, label));
             }
+            "--combat" => a.combat = true,
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -116,26 +118,29 @@ fn opt(p: Option<ProvinceId>) -> String {
     p.map(|x| x.0.to_string()).unwrap_or_else(|| "-".into())
 }
 
-fn print_state(day: u32, m: &MapMilitary, labels: &HashMap<CountryId, u32>) {
+fn print_state(day: u32, m: &MapMilitary, labels: &HashMap<CountryId, u32>, combat: bool) {
     for d in m.divisions() {
-        print_division(day, d, labels);
+        print_division(day, d, labels, combat);
     }
 }
 
-fn print_division(day: u32, d: &MapDivision, labels: &HashMap<CountryId, u32>) {
+fn print_division(day: u32, d: &MapDivision, labels: &HashMap<CountryId, u32>, combat: bool) {
     println!(
-        "day {day} {} (country {}) at {} {} progress {:.2} destination {} next {} remaining {}",
+        "day {day} {} (country {}) at {} {} progress {:.2} destination {} next {} remaining {}{}{}",
         d.id,
         labels.get(&d.owner).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
         d.province.0,
         match d.status {
             MapDivisionStatus::Idle => "Idle",
             MapDivisionStatus::Moving => "Moving",
+            MapDivisionStatus::Fighting => "Fighting",
         },
         d.progress,
         opt(d.destination),
         opt(d.target),
-        path_text(&d.path)
+        path_text(&d.path),
+        d.battle.map(|b| format!(" battle {}", b.0)).unwrap_or_default(),
+        if combat { format!(" manpower {} organization {:.1} equipment {:.2}", d.combat.manpower, d.combat.organization, d.combat.equipment) } else { String::new() }
     );
 }
 
@@ -211,9 +216,20 @@ fn run(a: &Args) -> i32 {
     println!("initial controlled provinces: {}", scenario.control.len());
     println!("base_days={} supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)", scenario.params.base_days);
     println!("divisions: {}", scenario.divisions.len());
+    if !scenario.wars.is_empty() {
+        println!(
+            "wars (both directions): {}",
+            scenario
+                .wars
+                .iter()
+                .map(|(x, y)| format!("{}-{}", labels.get(x).map(|l| l.to_string()).unwrap_or_else(|| "?".into()), labels.get(y).map(|l| l.to_string()).unwrap_or_else(|| "?".into())))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
     let mut military = scenario.into_military();
     println!("\n--- day 0 (initial placement) ---");
-    print_state(0, &military, &labels);
+    print_state(0, &military, &labels, a.combat);
     let mut rejected = 0usize;
     for day in 1..=a.days {
         println!("\n--- day {day} ---");
@@ -240,7 +256,7 @@ fn run(a: &Args) -> i32 {
                 }
             }
         }
-        for e in military.advance_day() {
+        for e in military.advance_day(&graph) {
             match e {
                 MoveEvent::HopCompleted { division, province } => println!("event: {division} reached {province}"),
                 MoveEvent::Arrived { division, province } => println!("event: {division} arrived at its destination {province}"),
@@ -248,9 +264,51 @@ fn run(a: &Args) -> i32 {
                     println!("event: {division} stopped at {at} before entering {blocked} (no longer passable)")
                 }
                 MoveEvent::PathTruncated { division } => println!("event: {division} path truncated (a later province is no longer passable)"),
+                MoveEvent::StoppedBefore { division, at, blocked, reason } => println!(
+                    "event: {division} stopped at {at} before entering {blocked} ({})",
+                    match reason {
+                        StopReason::NotPassable => "no longer passable",
+                        StopReason::ContestedByOthers => "a battle of another country is going on there; it cannot join",
+                    }
+                ),
+                MoveEvent::BattleStarted { battle, province, attacker, defender, attackers, defenders } => println!(
+                    "event: {battle} started at {province}: country {} attacks country {} (attackers {}; defenders {})",
+                    labels.get(&attacker).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    labels.get(&defender).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    attackers.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(","),
+                    defenders.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
+                ),
+                MoveEvent::BattleJoined { battle, division, province } => println!("event: {division} joined {battle} at {province} as an attacker"),
+                MoveEvent::Retreated { division, battle, from, to } => println!("event: {division} retreated from {from} to {to} ({battle})"),
+                MoveEvent::Destroyed { division, battle, at } => println!("event: {division} destroyed at {at} ({battle}; no retreat or manpower exhausted)"),
+                MoveEvent::BattleFinished { battle, province, attacker, defender, outcome, reason } => println!(
+                    "event: {battle} finished at {province}: {} (attacker country {}, defender country {}; reason {})",
+                    match outcome {
+                        BattleOutcome::AttackerWon => "attacker won",
+                        BattleOutcome::DefenderWon => "defender won",
+                    },
+                    labels.get(&attacker).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    labels.get(&defender).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    match reason {
+                        FinishReason::DefenderGone => "defender gone",
+                        FinishReason::AttackerGone => "attacker gone",
+                        FinishReason::BothGone => "both gone",
+                        FinishReason::ZeroDamage => "zero damage on both sides",
+                    }
+                ),
+                MoveEvent::ControlClaim { province, claimant, previous_controller, reason, divisions } => println!(
+                    "event: CONTROL CLAIM for M6-c (control NOT changed here): {province} by country {} (previous controller {}; reason {}; divisions {})",
+                    labels.get(&claimant).map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+                    previous_controller.map(|c| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into())).unwrap_or_else(|| "none".into()),
+                    match reason {
+                        ClaimReason::Undefended => "undefended".to_string(),
+                        ClaimReason::AttackerWonBattle(b) => format!("attacker won {b}"),
+                    },
+                    divisions.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
+                ),
             }
         }
-        print_state(day, &military, &labels);
+        print_state(day, &military, &labels, a.combat);
     }
     let unused: Vec<u32> = a.orders.iter().filter(|(d, _, _)| *d > a.days).map(|(d, _, _)| *d).collect();
     if !unused.is_empty() {

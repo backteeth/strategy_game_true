@@ -1,0 +1,34 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: doc list item without indentation
+  --> src\world\movement.rs:13:5
+   |
+13 | //! M6-b で加えたもの: 交戦関係(検証用シナリオが明示する国家の組。双方向)、敵支配のプロヴィンスへの進入と戦闘・退却(`battle.rs`)、...
+   |     ^
+   |
+   = help: if this is supposed to be its own paragraph, add a blank line
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_continuation
+   = note: `-D clippy::doc-lazy-continuation` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::doc_lazy_continuation)]`
+help: indent this line
+   |
+13 | //!   M6-b で加えたもの: 交戦関係(検証用シナリオが明示する国家の組。双方向)、敵支配のプロヴィンスへの進入と戦闘・退却(`battle.rs`)、戦闘中の師団への命令の拒否。
+   |     ++
+
+error: doc list item without indentation
+   --> src\world\movement.rs:487:9
+    |
+487 |     /// 支配は更新しない(`ControlClaim` を返すだけ)。`graph` は退路の探索に使う。
+    |         ^
+    |
+    = help: if this is supposed to be its own paragraph, add a blank line
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_lazy_continuation
+help: indent this line
+    |
+487 |     ///    支配は更新しない(`ControlClaim` を返すだけ)。`graph` は退路の探索に使う。
+    |         +++
+
+error: could not compile `strategy_game` (lib) due to 2 previous errors
+
+real	0m21.838s
+user	0m0.000s
+sys	0m0.015s

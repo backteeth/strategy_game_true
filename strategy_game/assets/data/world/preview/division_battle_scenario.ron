@@ -1,0 +1,56 @@
+// P32-035 交戦・進入・戦闘・退却の検証用シナリオ(M6-b)。**所有・支配・交戦関係・戦闘能力は検証入力であり、正式な世界データではない。**
+// 旧 WarRegistry・経済シナリオの担当ステート・補給検証用の通行範囲から、交戦関係や支配を推定していない(別のデータ)。
+// 実効支配の更新(占領)・日次補給・前線/AI・UI・保存には接続しない。敵支配地への到着・戦闘の結果は「更新要求(ControlClaim)」として出るだけで、支配は変わらない。
+//
+// 形式(format_version 1。M6-a の項目に加えて):
+//   wars                  交戦する国の組(国家ラベル。双方向。順序は無意味)。自国との組・重複(逆順を含む)は拒否。省略すると交戦なし(M6-a と同じ)。
+//   divisions[].combat    戦闘能力(manpower・max_manpower・equipment・max_equipment・organization・max_organization・attack_power・defense_power)。
+//                         省略した項目は標準値(人員 10000・装備 100・組織率 100・攻撃 10・防御 10)。
+// 検証地域のID: ステート20=7件、21=13件、22=6件、未所属=17903・18110・18501。
+//
+// 場面(命令の例は CLI の --order 日:師団:ProvinceId。師団は速度 1.0・基準日数 5.0 で 1ホップ 5 日):
+//   A 守備隊なし      師団1(国家1) 18311 -> 18502(国家2の支配。守備隊なし)    → 到着時に ControlClaim(Undefended)。続きの経路は破棄
+//   B 攻撃側の勝利    師団2(国家1) 17693 -> 17694(守備: 師団5=国家2、弱い)      → 戦闘 → 防御側が退却 → 攻撃側勝利、ControlClaim
+//   C 防御側の勝利    師団3(国家1、弱い) 17268 -> 17269(守備: 師団6=国家2)       → 戦闘 → 攻撃側が出撃元 17268 へ撤退
+//   D 増援の合流      師団4(国家1) 18311 -> 18111、師団7(国家1) 18310 -> 18111(2ホップ。後から合流)。守備: 師団8(国家2)
+//   D' 第三国        師団10(国家3、国家2と交戦) 18312 -> 18111 は、国家1が攻撃側の戦闘が進行中なら、進入前に止まる(合流できない)
+//   E 退路なし        師団11(国家1) 17905 -> 17906(国家2の孤立した守備: 師団12、弱い。隣接 17696・17905・18112 は国家1の支配)→ 防御側は退路がなく撃破される
+//   F 非交戦国        18312 は国家3の支配。国家1は国家3と交戦していないので、師団1 の 18311 -> 18312 は拒否される
+(
+    format_version: 1,
+    description: "P32-035 war, entry, battle and retreat validation scenario (verification input, not official data)",
+    base_days: 5.0,
+    countries: [
+        (label: 1, country_id: 1),
+        (label: 2, country_id: 2),
+        (label: 3, country_id: 3),
+    ],
+    state_owners: [
+        (state: 20, country: 1),
+        (state: 22, country: 1),
+        (state: 21, country: 2),
+    ],
+    controller_overrides: [
+        (province: 18312, country: 3),
+        (province: 17696, country: 1),
+        (province: 17905, country: 1),
+        (province: 18112, country: 1),
+    ],
+    wars: [
+        (a: 1, b: 2),
+        (a: 3, b: 2),
+    ],
+    divisions: [
+        (id: 1, country: 1, province: 18311, speed: 1.0),
+        (id: 2, country: 1, province: 17693, speed: 1.0),
+        (id: 3, country: 1, province: 17268, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 4, country: 1, province: 18311, speed: 1.0),
+        (id: 5, country: 2, province: 17694, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 6, country: 2, province: 17269, speed: 1.0),
+        (id: 7, country: 1, province: 18310, speed: 1.0),
+        (id: 8, country: 2, province: 18111, speed: 1.0),
+        (id: 10, country: 3, province: 18312, speed: 1.0),
+        (id: 11, country: 1, province: 17905, speed: 1.0),
+        (id: 12, country: 2, province: 17906, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+    ],
+)

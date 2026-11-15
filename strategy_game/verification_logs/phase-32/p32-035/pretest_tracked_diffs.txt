@@ -1,0 +1,1 @@
+pre-test tracked diffs: strategy_game/src/bin/world_move_check.rs strategy_game/src/world/division_scenario.rs strategy_game/src/world/mod.rs strategy_game/src/world/movement.rs strategy_game/tests/p32_034_map_movement_test.rs 

@@ -107,7 +107,7 @@ fn an_order_is_applied_at_once_without_moving_the_division_and_arrival_follows_t
     // 1ホップ = max(1, 5×1/(1.0×1.0)) = 5 日。日1〜4は留まり、日5に着く。
     let mut arrival_day = None;
     for day in 1..=7 {
-        let ev = m.advance_day();
+        let ev = m.advance_day(&g);
         let (prov, st, _) = pos(&m, 1);
         if day < 5 {
             assert_eq!((prov, st), (10, MapDivisionStatus::Moving), "day {day}");
@@ -124,7 +124,7 @@ fn an_order_is_applied_at_once_without_moving_the_division_and_arrival_follows_t
     let mut hops = Vec::new();
     let mut arrived = None;
     for day in 1..=25 {
-        for e in m.advance_day() {
+        for e in m.advance_day(&g) {
             match e {
                 MoveEvent::HopCompleted { province, .. } => hops.push((day, province.0)),
                 MoveEvent::Arrived { province, .. } => arrived = Some((day, province.0)),
@@ -146,8 +146,8 @@ fn reissuing_the_same_destination_and_ordering_the_current_province_are_no_ops_t
     assert_eq!(m.issue_move_order(&g, md(1), p(10)), Ok(OrderOutcome::AlreadyThere));
     assert_eq!(m, before);
     m.issue_move_order(&g, md(1), p(12)).unwrap();
-    m.advance_day();
-    m.advance_day();
+    m.advance_day(&g);
+    m.advance_day(&g);
     let mid = m.clone();
     assert!(mid.division(md(1)).unwrap().progress > 0.0);
     // 移動中の同じ目的地: no-op(進捗・経路・目的地・到着日が変わらない)
@@ -158,8 +158,8 @@ fn reissuing_the_same_destination_and_ordering_the_current_province_are_no_ops_t
     let mut b = mid;
     b.issue_move_order(&g, md(1), p(12)).unwrap();
     for _ in 0..8 {
-        a.advance_day();
-        b.advance_day();
+        a.advance_day(&g);
+        b.advance_day(&g);
         assert_eq!(a, b);
     }
 }
@@ -173,7 +173,7 @@ fn rejections_are_distinguished_and_leave_every_division_untouched() {
     let c = control_of(&[(10, C1), (11, C1), (12, C2), (13, C1)]); // 14 は支配国なし
     let mut m = military(vec![MapDivision::new(md(1), C1, p(10), 1.0), MapDivision::new(md(2), C1, p(11), 1.0)], c, 5.0);
     m.issue_move_order(&g, md(2), p(10)).unwrap(); // 師団2は移動中(拒否が他の師団・自分の命令に影響しないことを見る)
-    m.advance_day();
+    m.advance_day(&g);
     let before = m.clone();
     assert_eq!(m.issue_move_order(&g, md(9), p(11)), Err(OrderRejection::UnknownDivision(md(9))));
     assert_eq!(m.issue_move_order(&g, md(1), p(999)), Err(OrderRejection::UnknownProvince(p(999))));
@@ -207,7 +207,7 @@ fn rivers_and_the_state_layout_do_not_change_movement_cost_or_permission() {
     let mut m = military(vec![MapDivision::new(md(1), C1, p(10), 1.0)], control_of(&[(10, C1), (11, C1), (12, C1)]), 5.0);
     assert_eq!(m.issue_move_order(&g, md(1), p(12)), Ok(OrderOutcome::Started { hops: 2 }));
     for _ in 0..10 {
-        m.advance_day();
+        m.advance_day(&g);
     }
     assert_eq!(pos(&m, 1), (12, MapDivisionStatus::Idle, 0.0), "2 hops = 10 days regardless of rivers");
 }
@@ -255,7 +255,7 @@ fn division_registration_order_and_order_issue_order_do_not_change_the_result() 
         b.issue_move_order(&g, md(id), p(dest)).unwrap();
     }
     for _ in 0..30 {
-        assert_eq!(a.advance_day(), b.advance_day());
+        assert_eq!(a.advance_day(&g), b.advance_day(&g));
         assert_eq!(a, b);
     }
     assert_eq!(a.divisions().map(|d| d.id.0).collect::<Vec<_>>(), vec![1, 2, 3], "ascending MapDivisionId");
@@ -268,11 +268,11 @@ fn the_division_stops_before_entering_a_province_that_is_no_longer_passable() {
     let (g, c) = line(5);
     let mut m = military(vec![MapDivision::new(md(1), C1, p(10), 1.0)], c, 5.0);
     m.issue_move_order(&g, md(1), p(14)).unwrap();
-    m.advance_day();
-    m.advance_day(); // 10 から 11 へ向かう途中(進捗 0.4)
+    m.advance_day(&g);
+    m.advance_day(&g); // 10 から 11 へ向かう途中(進捗 0.4)
     assert_eq!(m.division(md(1)).unwrap().target, Some(p(11)));
     m.set_controller(p(11), Some(C2)); // 次の移動先が他国の支配になった
-    let ev = m.advance_day();
+    let ev = m.advance_day(&g);
     assert_eq!(ev, vec![MoveEvent::Stopped { division: md(1), at: p(10), blocked: p(11) }]);
     let d = m.division(md(1)).unwrap();
     assert_eq!((d.province, d.status, d.destination, d.target, d.path.clone(), d.progress), (p(10), MapDivisionStatus::Idle, None, None, vec![], 0.0));
@@ -281,11 +281,11 @@ fn the_division_stops_before_entering_a_province_that_is_no_longer_passable() {
     let mut m = military(vec![MapDivision::new(md(1), C1, p(10), 1.0)], c, 5.0);
     m.issue_move_order(&g, md(1), p(12)).unwrap();
     for _ in 0..5 {
-        m.advance_day(); // 11 に到着。次は 12 へ
+        m.advance_day(&g); // 11 に到着。次は 12 へ
     }
     assert_eq!(pos(&m, 1).0, 11);
     m.set_controller(p(12), None);
-    let ev = m.advance_day();
+    let ev = m.advance_day(&g);
     assert_eq!(ev, vec![MoveEvent::Stopped { division: md(1), at: p(11), blocked: p(12) }]);
     assert_eq!(pos(&m, 1), (11, MapDivisionStatus::Idle, 0.0), "stopped before entering 12");
 }
@@ -295,14 +295,14 @@ fn a_later_province_becoming_impassable_cuts_the_path_and_the_current_hop_still_
     let (g, c) = line(5);
     let mut m = military(vec![MapDivision::new(md(1), C1, p(10), 1.0)], c, 5.0);
     m.issue_move_order(&g, md(1), p(14)).unwrap();
-    m.advance_day();
+    m.advance_day(&g);
     m.set_controller(p(13), Some(C2)); // 目的地までの途中(次の次)が通れなくなった
-    let ev = m.advance_day();
+    let ev = m.advance_day(&g);
     assert_eq!(ev, vec![MoveEvent::PathTruncated { division: md(1) }]);
     let d = m.division(md(1)).unwrap();
     assert_eq!((d.destination, d.path.is_empty(), d.target), (None, true, Some(p(11))), "the path and destination are dropped; the hop to 11 continues");
     for _ in 0..3 {
-        m.advance_day();
+        m.advance_day(&g);
     }
     // 現在のホップ(10→11)だけは完了して、そこで止まる
     assert_eq!(pos(&m, 1), (11, MapDivisionStatus::Idle, 0.0));
@@ -406,7 +406,7 @@ fn new_timeline(n: usize, speed: f32, days: usize) -> (Vec<(u32, MapDivisionStat
     let path: Vec<u32> = m.division(md(1)).unwrap().path.iter().map(|x| x.0).collect();
     let mut out = Vec::new();
     for _ in 0..days {
-        m.advance_day();
+        m.advance_day(&g);
         let (a, b, c) = pos(&m, 1);
         out.push((a, b, c));
     }
@@ -512,7 +512,7 @@ fn real_18309_to_18308_stays_on_day_one_and_arrives_on_day_five_even_with_a_reis
         if day == 3 {
             assert_eq!(m.issue_move_order(&g, md(1), p(18308)), Ok(OrderOutcome::AlreadyMoving));
         }
-        m.advance_day();
+        m.advance_day(&g);
         timeline.push(pos(&m, 1));
     }
     assert_eq!(timeline[0].0, 18309, "stays on day 1");
@@ -522,7 +522,7 @@ fn real_18309_to_18308_stays_on_day_one_and_arrives_on_day_five_even_with_a_reis
     let mut m2 = load_division_scenario(SCENARIO, &g, &w.model).unwrap().into_military();
     m2.issue_move_order(&g, md(1), p(18308)).unwrap();
     for t in timeline.iter().take(6) {
-        m2.advance_day();
+        m2.advance_day(&g);
         assert_eq!(pos(&m2, 1), *t);
     }
 }
@@ -540,7 +540,7 @@ fn real_18309_to_17266_crosses_the_state_boundary_in_five_hops_only_when_17903_i
     assert_eq!(g.state_of(p(17693)), Some(MapStateId(22)));
     let mut arrival = None;
     for day in 1..=30 {
-        for e in m.advance_day() {
+        for e in m.advance_day(&g) {
             if let MoveEvent::Arrived { province, .. } = e {
                 arrival = Some((day, province.0));
             }
@@ -577,11 +577,11 @@ fn real_control_change_after_the_order_stops_the_division_before_entering() {
     let mut m = load_division_scenario(SCENARIO, &g, &w.model).unwrap().into_military();
     m.issue_move_order(&g, md(1), p(17266)).unwrap();
     for _ in 0..7 {
-        m.advance_day(); // 18309 → 18109 (day 5)、18109 → 17903 の途中
+        m.advance_day(&g); // 18309 → 18109 (day 5)、18109 → 17903 の途中
     }
     assert_eq!(pos(&m, 1).0, 18109);
     m.set_controller(p(17903), None); // 橋渡しの明示が失われた(通行条件の変更)
-    let ev = m.advance_day();
+    let ev = m.advance_day(&g);
     assert_eq!(ev, vec![MoveEvent::Stopped { division: md(1), at: p(18109), blocked: p(17903) }]);
     assert_eq!(pos(&m, 1), (18109, MapDivisionStatus::Idle, 0.0));
 }
@@ -596,7 +596,8 @@ fn template() -> DivisionScenarioFile {
         countries: vec![CountryEntry { label: 1, country_id: 1 }, CountryEntry { label: 2, country_id: 2 }],
         state_owners: vec![StateOwnerEntry { state: 20, country: 1 }, StateOwnerEntry { state: 21, country: 2 }],
         controller_overrides: vec![],
-        divisions: vec![DivisionEntry { id: 1, country: 1, province: 18309, speed: 1.0 }],
+        wars: vec![],
+        divisions: vec![DivisionEntry { id: 1, country: 1, province: 18309, speed: 1.0, combat: Default::default() }],
     }
 }
 
@@ -630,7 +631,7 @@ fn every_kind_of_invalid_scenario_input_is_reported_with_its_own_code() {
     );
     assert_eq!(with(&|t| t.controller_overrides.push(ControllerOverrideEntry { province: 99999, country: 1 })), vec!["unknown-province"]);
     assert_eq!(with(&|t| t.divisions[0].province = 99999), vec!["unknown-province"]);
-    assert_eq!(with(&|t| t.divisions.push(DivisionEntry { id: 1, country: 1, province: 18308, speed: 1.0 })), vec!["duplicate-division"]);
+    assert_eq!(with(&|t| t.divisions.push(DivisionEntry { id: 1, country: 1, province: 18308, speed: 1.0, combat: Default::default() })), vec!["duplicate-division"]);
     // 初期位置の支配不一致: 他国の支配地(ステート21)・支配国なし(未所属 18110)
     assert_eq!(with(&|t| t.divisions[0].province = 17269), vec!["initial-position-not-controlled"]);
     assert_eq!(with(&|t| t.divisions[0].province = 18110), vec!["initial-position-not-controlled"]);
@@ -644,7 +645,7 @@ fn every_kind_of_invalid_scenario_input_is_reported_with_its_own_code() {
         with(&|t| {
             t.base_days = 0.0;
             t.divisions[0].speed = -1.0;
-            t.divisions.push(DivisionEntry { id: 2, country: 9, province: 99999, speed: 1.0 });
+            t.divisions.push(DivisionEntry { id: 2, country: 9, province: 99999, speed: 1.0, combat: Default::default() });
         }),
         vec!["invalid-base-days", "invalid-speed", "unresolved-country", "unknown-province"]
     );
@@ -698,7 +699,8 @@ fn ids_are_resolved_through_membership_never_by_numeric_equality() {
         countries: vec![CountryEntry { label: 1, country_id: 100 }, CountryEntry { label: 2, country_id: 200 }],
         state_owners: vec![StateOwnerEntry { state: 5, country: 1 }, StateOwnerEntry { state: 6, country: 2 }],
         controller_overrides: vec![],
-        divisions: vec![DivisionEntry { id: 5, country: 1, province: 6, speed: 1.0 }],
+        wars: vec![],
+        divisions: vec![DivisionEntry { id: 5, country: 1, province: 6, speed: 1.0, combat: Default::default() }],
     };
     let s = resolve_division_scenario(&f, &g, &w).unwrap();
     // ProvinceId 5 は MapStateId 6(国家ラベル2 = CountryId 200)に属する。MapStateId 5 の所有国(CountryId 100)ではない。

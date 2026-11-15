@@ -1,0 +1,15 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: unused import: `process_movement`
+  --> tests\p32_035_map_battle_test.rs:19:41
+   |
+19 | use strategy_game::military::movement::{process_movement, start_or_maintain_movement};
+   |                                         ^^^^^^^^^^^^^^^^
+   |
+   = note: `-D unused-imports` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(unused_imports)]`
+
+error: could not compile `strategy_game` (test "p32_035_map_battle_test") due to 1 previous error
+
+real	0m56.492s
+user	0m0.015s
+sys	0m0.015s

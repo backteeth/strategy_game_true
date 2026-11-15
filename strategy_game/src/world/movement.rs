@@ -1,16 +1,22 @@
-//! P32-034 (M6-a): 新経路の師団の初期配置と、**自国支配の陸上プロヴィンス間の日単位の移動**(純粋な Rust。Bevy・経済・保存・軍の旧型に依存しない)。
+//! P32-034/035 (M6-a/b): 新経路の師団の初期配置と、陸上プロヴィンス間の日単位の移動・敵支配地への進入(純粋な Rust。Bevy・経済・保存・軍の旧型に依存しない)。
 //!
-//! 設計は `verification_logs/phase-32/p32-033/p32-033_m6_design.md`(§5・§6・§10)。**戦争関係・戦闘・占領・日次補給・前線/AI・UI・保存は含まない**(後続の単位)。
-//! 旧経路(`military::movement`・`military::pathfinding`)の挙動のうち、次を引き継ぐ(旧コードを呼ばず、同じ規則を新しい型で実装する。比較は `tests/p32_034_map_movement_test.rs`):
+//! 設計は `verification_logs/phase-32/p32-033/p32-033_m6_design.md`(§5・§6・§10)。**占領(実効支配の更新)・日次補給・前線/AI・UI・保存は含まない**(M6-c 以降)。
+//! 戦闘の本体は `battle.rs`、旧経路の戦闘計算の再利用は `legacy_combat.rs`(隔離)。
+//!
+//! 旧経路(`military::movement`・`military::pathfinding`・`military::invasion`)の挙動のうち、次を引き継ぐ(旧コードを呼ばず、同じ規則を新しい型で実装する。比較は
+//! `tests/p32_034_map_movement_test.rs`・`tests/p32_035_map_battle_test.rs`):
 //! - 移動命令は冪等: 現在地(Idle)・移動中の同じ目的地への命令は no-op。新しい命令は、経路が確定した時点で `destination`/`path`/`target=None`/`progress=0`/`Moving` を**まとめて**適用し、
 //!   その時点では現在地を動かさない。拒否したときは何も変更しない。
-//! - 経路: 辺の費用は 1、同費用の候補は `ProvinceId` 昇順(旧の `(費用, StateId)` 順と同じ)。通れるのは**所属国が支配するプロヴィンスだけ**(戦争関係が入る M6-b までは、敵支配も通れない)。
-//!   河川は費用にも可否にも加えない。範囲外の陸・水域には `ProvinceId` が無いので通れない。
-//! - 日次: `MapDivisionId` 昇順。日の初めに経路を検証し(次の移動先が通れなければ進入前に停止、残りの経路に通れない所があれば経路を切って現在のホップだけ続ける)、
-//!   その後に移動する。1ホップの日数 = `max(1, 基準日数 × 費用 / (速度 × 補給係数))`(f32、旧と同じ式)。進捗が 1.0 に達した日に現在地を更新する。補給係数は **1.0 固定**(M6-d で補給計画に接続する)。
+//! - 経路: 辺の費用は 1、同費用の候補は `ProvinceId` 昇順。通れるのは**所属国の支配地と、交戦国の支配地**(旧の `allowed`/`hostile`)。河川は費用にも可否にも加えない。
+//! - 日次: `MapDivisionId` 昇順。日の初めに経路を検証し(次の移動先が通れなければ進入前に停止、残りの経路に通れない所があれば経路を切って現在のホップだけ続ける)、その後に移動する。
+//!   1ホップの日数 = `max(1, 基準日数 × 費用 / (速度 × 補給係数))`(f32、旧と同じ式。補給係数は 1.0 固定)。
 //!
-//! 実行時状態であり、保存しない(M8 まで)。`ProvinceId`・`MapStateId`・旧 `StateId` を数値の一致で変換しない。
+//! M6-b で加えたもの: 交戦関係(検証用シナリオが明示する国家の組。双方向)、敵支配のプロヴィンスへの進入と戦闘・退却(`battle.rs`)、戦闘中の師団への命令の拒否。
+//!
+//! **敵支配地に着いたときの扱い(M6-b 単体)**: 師団は到着したプロヴィンスに入り(現在地を更新)、**残りの経路と目的地を破棄**して止まる(占領が成立したものとして敵領の奥へ進まない)。
+//! 続きの移動は、M6-c で実効支配が更新された後に、改めて命令する。実行時状態であり、保存しない(M8 まで)。
 
+use super::battle::{MapBattle, MapBattleId};
 use super::connectivity::ProvinceGraph;
 use super::ids::ProvinceId;
 use crate::common::CountryId;
@@ -30,9 +36,47 @@ impl std::fmt::Display for MapDivisionId {
 pub enum MapDivisionStatus {
     Idle,
     Moving,
+    /// 戦闘に参加中(M6-b)。命令は受け付けない。旧の `Retreating` は本番で一度も設定されない(撤退は同じ処理の中で即座に完了する)ので、新経路にも持たない。
+    Fighting,
 }
 
-/// 新経路の師団(M6-a の範囲。旧 `Division` とは並行する別の型で、自動変換は無い)。
+/// 師団の戦闘能力(旧 `Division` の戦闘に関わる値。計算は旧の関数を再利用する: `legacy_combat`)。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CombatStats {
+    pub manpower: u64,
+    pub max_manpower: u64,
+    pub equipment: f64,
+    pub max_equipment: f64,
+    pub organization: f32,
+    pub max_organization: f32,
+    pub attack_power: i32,
+    pub defense_power: i32,
+}
+
+impl CombatStats {
+    /// 検証用の標準値(旧経路のテストの標準師団と同じ: 人員 10,000・装備 100・組織率 100・攻撃 10・防御 10)。
+    pub fn standard() -> CombatStats {
+        CombatStats { manpower: 10_000, max_manpower: 10_000, equipment: 100.0, max_equipment: 100.0, organization: 100.0, max_organization: 100.0, attack_power: 10, defense_power: 10 }
+    }
+
+    /// 値が正常か(有限・範囲内)。
+    pub fn is_valid(&self) -> bool {
+        self.max_manpower > 0
+            && self.manpower <= self.max_manpower
+            && self.max_equipment.is_finite()
+            && self.max_equipment > 0.0
+            && self.equipment.is_finite()
+            && (0.0..=self.max_equipment).contains(&self.equipment)
+            && self.max_organization.is_finite()
+            && self.max_organization > 0.0
+            && self.organization.is_finite()
+            && (0.0..=self.max_organization).contains(&self.organization)
+            && self.attack_power >= 0
+            && self.defense_power >= 0
+    }
+}
+
+/// 新経路の師団(旧 `Division` とは並行する別の型で、自動変換は無い)。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapDivision {
     pub id: MapDivisionId,
@@ -49,12 +93,32 @@ pub struct MapDivision {
     pub progress: f32,
     pub status: MapDivisionStatus,
     pub speed: f32,
+    pub combat: CombatStats,
+    /// 参加中の戦闘(`Fighting` のときだけ)。
+    pub battle: Option<MapBattleId>,
 }
 
 impl MapDivision {
-    /// 初期配置(Idle・命令なし)。
+    /// 初期配置(Idle・命令なし・標準の戦闘能力)。
     pub fn new(id: MapDivisionId, owner: CountryId, province: ProvinceId, speed: f32) -> MapDivision {
-        MapDivision { id, owner, province, destination: None, path: Vec::new(), target: None, progress: 0.0, status: MapDivisionStatus::Idle, speed }
+        MapDivision {
+            id,
+            owner,
+            province,
+            destination: None,
+            path: Vec::new(),
+            target: None,
+            progress: 0.0,
+            status: MapDivisionStatus::Idle,
+            speed,
+            combat: CombatStats::standard(),
+            battle: None,
+        }
+    }
+
+    pub fn with_combat(mut self, combat: CombatStats) -> MapDivision {
+        self.combat = combat;
+        self
     }
 }
 
@@ -107,7 +171,7 @@ pub struct MovementParams {
 /// 旧経路の既定の基準日数。
 pub const DEFAULT_BASE_DAYS: f32 = 5.0;
 
-/// 補給係数(M6-a は 1.0 固定。旧経路は `max(supply_ratio, 0.5)`)。
+/// 補給係数(1.0 固定。旧経路は `max(supply_ratio, 0.5)`。M6-d で補給計画に接続する)。
 pub const SUPPLY_MODIFIER: f32 = 1.0;
 
 /// 辺の費用(旧経路の `calculate_step_cost` と同じく常に 1。河川・地形は加えない)。
@@ -118,7 +182,12 @@ pub const STEP_COST: f32 = 1.0;
 pub enum MapMilitaryError {
     DuplicateDivision(MapDivisionId),
     InvalidSpeed(MapDivisionId),
+    InvalidCombat(MapDivisionId),
     InvalidBaseDays,
+    /// 同じ国家の組(自国との交戦)。
+    SelfWar(CountryId),
+    /// 同じ組(逆順を含む)が重複している。
+    DuplicateWar(CountryId, CountryId),
 }
 
 impl std::fmt::Display for MapMilitaryError {
@@ -126,7 +195,10 @@ impl std::fmt::Display for MapMilitaryError {
         match self {
             Self::DuplicateDivision(d) => write!(f, "{d} is defined more than once"),
             Self::InvalidSpeed(d) => write!(f, "{d} has a non-finite or non-positive speed"),
+            Self::InvalidCombat(d) => write!(f, "{d} has invalid combat stats"),
             Self::InvalidBaseDays => write!(f, "base_days must be finite and positive"),
+            Self::SelfWar(c) => write!(f, "country {} cannot be at war with itself", c.0),
+            Self::DuplicateWar(a, b) => write!(f, "the war between countries {} and {} is listed more than once", a.0, b.0),
         }
     }
 }
@@ -150,9 +222,11 @@ pub enum OrderRejection {
     UnknownDivision(MapDivisionId),
     /// グラフのノードでない(水域・範囲外の陸のセルには ID が無い)。
     UnknownProvince(ProvinceId),
-    /// 目的地が所属国の支配でない(他国の支配、または支配国なし)。
+    /// 戦闘に参加中の師団(M6-b)。現在地への命令を含め、すべて拒否する。
+    DivisionInCombat(MapDivisionId),
+    /// 目的地が所属国の支配でも、交戦国の支配でもない。`controller` が `Some` なら非交戦国の支配、`None` なら支配国なし。
     DestinationNotPassable { province: ProvinceId, controller: Option<CountryId> },
-    /// 自国支配のプロヴィンスだけでは経路が無い。
+    /// 通れるプロヴィンス(自国・交戦国の支配地)だけでは経路が無い。
     NoPath,
 }
 
@@ -161,43 +235,100 @@ impl std::fmt::Display for OrderRejection {
         match self {
             Self::UnknownDivision(d) => write!(f, "unknown-division: {d} does not exist"),
             Self::UnknownProvince(p) => write!(f, "unknown-province: {p} is not a province of the graph"),
+            Self::DivisionInCombat(d) => write!(f, "division-in-combat: {d} is fighting and takes no orders"),
             Self::DestinationNotPassable { province, controller: Some(c) } => {
-                write!(f, "destination-not-passable: {province} is controlled by country {}", c.0)
+                write!(f, "destination-not-passable: {province} is controlled by country {} (not the division's country, and not at war with it)", c.0)
             }
             Self::DestinationNotPassable { province, controller: None } => {
                 write!(f, "destination-not-passable: {province} has no controller")
             }
-            Self::NoPath => write!(f, "no-path: no route through provinces controlled by the division's country"),
+            Self::NoPath => write!(f, "no-path: no route through provinces controlled by the division's country or a country at war with it"),
         }
     }
 }
 
-/// 日次処理で起きたこと(表示・テスト用)。
+/// 停止の理由(進入前に止まる場合)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    /// 次の移動先が、自国でも交戦国でもない支配になった(または支配国なしになった)。
+    NotPassable,
+    /// 次の移動先が敵支配地で、既に別の国が攻撃側の戦闘が進行中(合流できない)。
+    ContestedByOthers,
+}
+
+/// 戦闘の結末。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BattleOutcome {
+    AttackerWon,
+    DefenderWon,
+}
+
+/// 戦闘が終わった理由。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinishReason {
+    /// 防御側の参加者がいなくなった(撤退・撃破)。
+    DefenderGone,
+    /// 攻撃側の参加者がいなくなった(撤退・撃破)。
+    AttackerGone,
+    /// 両陣営とも参加者がいなくなった(旧: 防御側勝利、支配は変わらない)。
+    BothGone,
+    /// その日、どちらの陣営も人員損失が 0(旧 P27-007: 防御側勝利、攻撃側全員を撤退)。
+    ZeroDamage,
+}
+
+/// 実効支配の更新要求の理由(M6-c が受け取る)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimReason {
+    /// 守備隊のいない敵支配地に進入した。
+    Undefended,
+    /// 戦闘で攻撃側が勝った。
+    AttackerWonBattle(MapBattleId),
+}
+
+/// 日次処理で起きたこと(表示・テスト・M6-c への引き渡し用)。**支配は更新しない**(`ControlClaim` を M6-c が適用する)。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MoveEvent {
     /// 1ホップを終えて `province` に着いた(最終目的地ではない場合を含む)。
     HopCompleted { division: MapDivisionId, province: ProvinceId },
-    /// 最終目的地に着いて Idle になった。
+    /// 最終目的地(または経路の切れた所)に着いて Idle になった。
     Arrived { division: MapDivisionId, province: ProvinceId },
-    /// 次の移動先 `blocked` が通れなくなったので、`at` で進入前に停止した。
+    /// 次の移動先 `blocked` が通れなくなったので、`at` で進入前に停止した(旧経路の互換: 理由が通行不可の場合)。
     Stopped { division: MapDivisionId, at: ProvinceId, blocked: ProvinceId },
+    /// 進入前の停止で、理由が `NotPassable` 以外(`ContestedByOthers`)。
+    StoppedBefore { division: MapDivisionId, at: ProvinceId, blocked: ProvinceId, reason: StopReason },
     /// 残りの経路に通れない所ができたので、経路を切った(今のホップだけ続ける)。
     PathTruncated { division: MapDivisionId },
+    /// 敵支配地へ進入して戦闘を開始した。
+    BattleStarted { battle: MapBattleId, province: ProvinceId, attacker: CountryId, defender: CountryId, attackers: Vec<MapDivisionId>, defenders: Vec<MapDivisionId> },
+    /// 進行中の戦闘へ攻撃側として合流した。
+    BattleJoined { battle: MapBattleId, division: MapDivisionId, province: ProvinceId },
+    /// 戦闘から脱落した師団が `from` から `to` へ撤退した(追加の人員損失・装備損失を適用済み。即座に完了する)。
+    Retreated { division: MapDivisionId, battle: MapBattleId, from: ProvinceId, to: ProvinceId },
+    /// 戦闘から脱落した師団が撃破された(人員が尽きた、または退路がない)。
+    Destroyed { division: MapDivisionId, battle: MapBattleId, at: ProvinceId },
+    /// 戦闘が終わった。
+    BattleFinished { battle: MapBattleId, province: ProvinceId, attacker: CountryId, defender: CountryId, outcome: BattleOutcome, reason: FinishReason },
+    /// 実効支配の更新要求(M6-c が適用する。**この処理は支配を変えない**)。守備隊のいない進入、または戦闘での攻撃側の勝利で、1回だけ発行される。
+    ControlClaim { province: ProvinceId, claimant: CountryId, previous_controller: Option<CountryId>, reason: ClaimReason, divisions: Vec<MapDivisionId> },
 }
 
-/// 新経路の師団と支配の集合(M6-a の実行時状態)。
+/// 新経路の師団・支配・交戦関係・戦闘の集合(実行時状態)。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapMilitary {
-    divisions: BTreeMap<MapDivisionId, MapDivision>,
-    control: ProvinceControl,
-    params: MovementParams,
+    pub(super) divisions: BTreeMap<MapDivisionId, MapDivision>,
+    pub(super) control: ProvinceControl,
+    pub(super) params: MovementParams,
+    /// 交戦する国の組(双方向。`(小さい CountryId の数値, 大きい数値)` に正規化して保持)。
+    pub(super) wars: Vec<(usize, usize)>,
+    pub(super) battles: BTreeMap<MapBattleId, MapBattle>,
+    pub(super) next_battle: u32,
 }
 
-/// 所属国が支配するプロヴィンスだけを通る最短経路(費用 1、同費用は `ProvinceId` 昇順)。終点は `start` を含まず `end` を含む。
-/// `start == end` は空の経路。終点の支配は呼び出し側が確認する(ここでは通行条件として扱うだけ)。経路が無ければ `None`。
+/// 通れるプロヴィンスだけを通る最短経路(費用 1、同費用は `ProvinceId` 昇順)。終点は `start` を含まず `end` を含む。`start == end` は空の経路。
+/// 経路が無ければ `None`。`passable` は中継点・終点の通行可否(始点は問わない)。
 ///
 /// 同費用の tie-break: 各階層の候補を `ProvinceId` 昇順に展開し、最初に見つけた親を採る(旧 `find_path` の `(費用, ID)` 順のヒープと同じ結果)。
-pub fn find_land_path(graph: &ProvinceGraph, control: &ProvinceControl, owner: CountryId, start: ProvinceId, end: ProvinceId) -> Option<Vec<ProvinceId>> {
+pub fn find_path_where(graph: &ProvinceGraph, start: ProvinceId, end: ProvinceId, passable: &dyn Fn(ProvinceId) -> bool) -> Option<Vec<ProvinceId>> {
     if start == end {
         return Some(Vec::new());
     }
@@ -207,7 +338,7 @@ pub fn find_land_path(graph: &ProvinceGraph, control: &ProvinceControl, owner: C
         let mut next: Vec<ProvinceId> = Vec::new();
         for &x in &frontier {
             for n in graph.neighbor_ids(x) {
-                if n == start || pred.contains_key(&n) || control.controller(n) != Some(owner) {
+                if n == start || pred.contains_key(&n) || !passable(n) {
                     continue;
                 }
                 pred.insert(n, x);
@@ -233,6 +364,11 @@ pub fn find_land_path(graph: &ProvinceGraph, control: &ProvinceControl, owner: C
     None
 }
 
+/// 所属国が支配するプロヴィンスだけを通る最短経路(M6-a の形。交戦関係なし)。
+pub fn find_land_path(graph: &ProvinceGraph, control: &ProvinceControl, owner: CountryId, start: ProvinceId, end: ProvinceId) -> Option<Vec<ProvinceId>> {
+    find_path_where(graph, start, end, &|n| control.controller(n) == Some(owner))
+}
+
 impl MapMilitary {
     pub fn new(divisions: Vec<MapDivision>, control: ProvinceControl, params: MovementParams) -> Result<MapMilitary, MapMilitaryError> {
         if !(params.base_days.is_finite() && params.base_days > 0.0) {
@@ -243,12 +379,38 @@ impl MapMilitary {
             if !(d.speed.is_finite() && d.speed > 0.0) {
                 return Err(MapMilitaryError::InvalidSpeed(d.id));
             }
+            if !d.combat.is_valid() {
+                return Err(MapMilitaryError::InvalidCombat(d.id));
+            }
             let id = d.id;
             if map.insert(id, d).is_some() {
                 return Err(MapMilitaryError::DuplicateDivision(id));
             }
         }
-        Ok(MapMilitary { divisions: map, control, params })
+        Ok(MapMilitary { divisions: map, control, params, wars: Vec::new(), battles: BTreeMap::new(), next_battle: 0 })
+    }
+
+    /// 交戦関係を設定する(検証用シナリオが明示する組。双方向)。自国との組・重複(逆順を含む)は `Err`。
+    pub fn with_wars(mut self, wars: Vec<(CountryId, CountryId)>) -> Result<MapMilitary, MapMilitaryError> {
+        let mut out: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in wars {
+            if a == b {
+                return Err(MapMilitaryError::SelfWar(a));
+            }
+            let key = (a.0.min(b.0), a.0.max(b.0));
+            if out.contains(&key) {
+                return Err(MapMilitaryError::DuplicateWar(a, b));
+            }
+            out.push(key);
+        }
+        out.sort_unstable();
+        self.wars = out;
+        Ok(self)
+    }
+
+    /// 2国が交戦中か(双方向。同一国は常に false)。
+    pub fn at_war(&self, a: CountryId, b: CountryId) -> bool {
+        a != b && self.wars.contains(&(a.0.min(b.0), a.0.max(b.0)))
     }
 
     pub fn params(&self) -> MovementParams {
@@ -259,7 +421,7 @@ impl MapMilitary {
         &self.control
     }
 
-    /// 支配国を設定する(命令後の通行条件の変更の検証用。占領は M6-c)。
+    /// 支配国を設定する(命令後の通行条件の変更の検証用。**占領の更新は M6-c**。ここから呼ばれて戦闘・進行中の経路が自動で直ることはない)。
     pub fn set_controller(&mut self, p: ProvinceId, c: Option<CountryId>) {
         self.control.set(p, c);
     }
@@ -273,6 +435,14 @@ impl MapMilitary {
         self.divisions.values()
     }
 
+    /// `owner` の師団が、`p` を通れるか(自国の支配地、または交戦国の支配地)。
+    pub(super) fn passable_for(&self, owner: CountryId, p: ProvinceId) -> bool {
+        match self.control.controller(p) {
+            Some(c) => c == owner || self.at_war(owner, c),
+            None => false,
+        }
+    }
+
     /// 移動命令(旧 `start_or_maintain_movement` の新経路版)。受理されたときだけ状態を変える。
     pub fn issue_move_order(&mut self, graph: &ProvinceGraph, id: MapDivisionId, destination: ProvinceId) -> Result<OrderOutcome, OrderRejection> {
         let Some(d) = self.divisions.get(&id) else {
@@ -280,6 +450,10 @@ impl MapMilitary {
         };
         if !graph.contains(destination) {
             return Err(OrderRejection::UnknownProvince(destination));
+        }
+        // 戦闘中は、現在地への命令も含めてすべて拒否する(旧経路は呼び出し側 UI/AI がこの確認を持つ。新経路は API に持たせる)。
+        if d.status == MapDivisionStatus::Fighting {
+            return Err(OrderRejection::DivisionInCombat(id));
         }
         // 旧の冪等契約: 移動中は「同じ目的地」だけで判定する(現在地ではなく)。Idle は現在地で判定する。
         if d.status == MapDivisionStatus::Moving {
@@ -289,11 +463,12 @@ impl MapMilitary {
         } else if d.province == destination {
             return Ok(OrderOutcome::AlreadyThere);
         }
-        let controller = self.control.controller(destination);
-        if controller != Some(d.owner) {
-            return Err(OrderRejection::DestinationNotPassable { province: destination, controller });
+        let owner = d.owner;
+        if !self.passable_for(owner, destination) {
+            return Err(OrderRejection::DestinationNotPassable { province: destination, controller: self.control.controller(destination) });
         }
-        let Some(path) = find_land_path(graph, &self.control, d.owner, d.province, destination) else {
+        let start = d.province;
+        let Some(path) = find_path_where(graph, start, destination, &|n| self.passable_for(owner, n)) else {
             return Err(OrderRejection::NoPath);
         };
         let hops = path.len();
@@ -306,34 +481,63 @@ impl MapMilitary {
         Ok(OrderOutcome::Started { hops })
     }
 
-    /// 1日分の処理(旧 `MilitaryAction` の経路検証 → 移動)。`MapDivisionId` 昇順。
-    pub fn advance_day(&mut self) -> Vec<MoveEvent> {
+    /// 1日分の処理。順序(旧 `handle_daily_military` の経路検証〜組織率回復に対応。**安定した ID 昇順**):
+    /// 1. 経路の事前検証(`MapDivisionId` 昇順)→ 2. 移動と接触(`MapDivisionId` 昇順。敵支配地への進入で戦闘の開始・合流・守備隊なし)→
+    /// 3. 戦闘の進行(`MapBattleId` 昇順。旧 `process_daily_battles`)→ 4. 終了処理(`MapBattleId` 昇順。旧 `resolve_finished_battles`。旧は HashMap 順)→
+    /// 5. 終了した戦闘の除去 → 6. 組織率の回復(`MapDivisionId` 昇順)。
+    ///
+    /// 支配は更新しない(`ControlClaim` を返すだけ)。`graph` は退路の探索に使う。
+    pub fn advance_day(&mut self, graph: &ProvinceGraph) -> Vec<MoveEvent> {
         let mut events = Vec::new();
         let ids: Vec<MapDivisionId> = self.divisions.keys().copied().collect();
         // 1. 経路の事前検証(旧 `validate_and_stop_invalid_movements`)
         for id in &ids {
-            let d = self.divisions.get_mut(id).expect("id from keys");
-            if d.status != MapDivisionStatus::Moving {
+            let (status, target, owner) = {
+                let d = &self.divisions[id];
+                (d.status, d.target, d.owner)
+            };
+            if status != MapDivisionStatus::Moving {
                 continue;
             }
-            if let Some(t) = d.target
-                && self.control.controller(t) != Some(d.owner)
+            if let Some(t) = target
+                && !self.passable_for(owner, t)
             {
+                let d = self.divisions.get_mut(id).expect("id from keys");
                 stop(d, t, &mut events);
                 continue;
             }
-            if d.path.iter().any(|p| self.control.controller(*p) != Some(d.owner)) {
+            let bad = self.divisions[id].path.iter().any(|p| !self.passable_for(owner, *p));
+            if bad {
+                let d = self.divisions.get_mut(id).expect("id from keys");
                 d.path.clear();
                 d.destination = None;
                 events.push(MoveEvent::PathTruncated { division: d.id });
             }
         }
-        // 2. 移動(旧 `process_movement`)
+        // 2. 移動と接触(旧 `process_movement` + `process_division_arrival`)
         for id in &ids {
-            let d = self.divisions.get_mut(id).expect("id from keys");
+            self.move_one(*id, &mut events);
+        }
+        // 3.〜5. 戦闘(battle.rs)
+        let zero = self.run_daily_battles();
+        self.resolve_battles(graph, &zero, &mut events);
+        self.cleanup_finished_battles();
+        // 6. 組織率の回復
+        self.recover_organizations();
+        events
+    }
+
+    fn move_one(&mut self, id: MapDivisionId, events: &mut Vec<MoveEvent>) {
+        let params = self.params;
+        let (owner, speed) = {
+            let d = &self.divisions[&id];
             if d.status != MapDivisionStatus::Moving {
-                continue;
+                return;
             }
+            (d.owner, d.speed)
+        };
+        {
+            let d = self.divisions.get_mut(&id).expect("exists");
             if d.target.is_none() {
                 if !d.path.is_empty() {
                     d.target = Some(d.path.remove(0));
@@ -342,33 +546,58 @@ impl MapMilitary {
                     d.status = MapDivisionStatus::Idle;
                     d.destination = None;
                     d.progress = 0.0;
-                    continue;
+                    return;
                 }
-            }
-            let target = d.target.expect("set above");
-            if self.control.controller(target) != Some(d.owner) {
-                stop(d, target, &mut events);
-                continue;
-            }
-            let movement_days = (self.params.base_days * STEP_COST / (d.speed * SUPPLY_MODIFIER)).max(1.0);
-            let new_progress = d.progress + 1.0 / movement_days;
-            if new_progress >= 1.0 {
-                d.province = target;
-                d.progress = 0.0;
-                events.push(MoveEvent::HopCompleted { division: d.id, province: target });
-                if !d.path.is_empty() {
-                    d.target = Some(d.path.remove(0));
-                } else {
-                    d.target = None;
-                    d.destination = None;
-                    d.status = MapDivisionStatus::Idle;
-                    events.push(MoveEvent::Arrived { division: d.id, province: target });
-                }
-            } else {
-                d.progress = new_progress;
             }
         }
-        events
+        let target = self.divisions[&id].target.expect("set above");
+        if !self.passable_for(owner, target) {
+            let d = self.divisions.get_mut(&id).expect("exists");
+            stop(d, target, events);
+            return;
+        }
+        let movement_days = (params.base_days * STEP_COST / (speed * SUPPLY_MODIFIER)).max(1.0);
+        let new_progress = self.divisions[&id].progress + 1.0 / movement_days;
+        if new_progress < 1.0 {
+            self.divisions.get_mut(&id).expect("exists").progress = new_progress;
+            return;
+        }
+        // 到着。敵支配地で、別の国が攻撃側の戦闘が進行中なら、進入前に停止する(合流できない)。
+        let hostile = self.control.controller(target).is_some_and(|c| c != owner);
+        if hostile && self.ongoing_battle_at(target).is_some_and(|b| b.attacker_country != owner) {
+            let d = self.divisions.get_mut(&id).expect("exists");
+            let at = d.province;
+            d.status = MapDivisionStatus::Idle;
+            d.target = None;
+            d.destination = None;
+            d.path.clear();
+            d.progress = 0.0;
+            events.push(MoveEvent::StoppedBefore { division: id, at, blocked: target, reason: StopReason::ContestedByOthers });
+            return;
+        }
+        // 出撃元 = このホップの出発地(到着前の現在地)。攻撃側が敗れたときの退路の第一候補。
+        let from = {
+            let d = self.divisions.get_mut(&id).expect("exists");
+            let from = d.province;
+            d.province = target;
+            d.progress = 0.0;
+            events.push(MoveEvent::HopCompleted { division: id, province: target });
+            from
+        };
+        if hostile {
+            // 敵支配地: 残りの経路と目的地を破棄して止まり(M6-b 単体では占領しない)、接触を処理する。
+            self.contact(id, from, events);
+        } else {
+            let d = self.divisions.get_mut(&id).expect("exists");
+            if !d.path.is_empty() {
+                d.target = Some(d.path.remove(0));
+            } else {
+                d.target = None;
+                d.destination = None;
+                d.status = MapDivisionStatus::Idle;
+                events.push(MoveEvent::Arrived { division: id, province: target });
+            }
+        }
     }
 }
 

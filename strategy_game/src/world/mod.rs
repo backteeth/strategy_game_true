@@ -13,6 +13,7 @@
 //! プロヴィンス→ステートの逆引きは読み込み時に導出する索引で、保存しない。
 
 pub mod aggregate;
+pub mod battle;
 pub mod connectivity;
 pub mod division_scenario;
 pub mod facilities;
@@ -20,6 +21,7 @@ pub mod files;
 pub mod fingerprint;
 pub mod ids;
 pub mod issue;
+pub mod legacy_combat;
 pub mod measure;
 pub mod model;
 pub mod movement;
@@ -56,9 +58,10 @@ pub use fingerprint::{GeographyChange, GeographyFingerprint, compute_fingerprint
 pub use ids::{HexCoord, MapStateId, ProvinceId};
 pub use issue::{IssueCode, Severity, WorldIssue};
 pub use model::{MapStateDef, ProvinceDef, WorldModel};
+pub use battle::{MapBattle, MapBattleId, MapBattleStatus};
 pub use movement::{
-    DEFAULT_BASE_DAYS, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MapMilitaryError, MoveEvent, MovementParams, OrderOutcome,
-    OrderRejection, ProvinceControl, find_land_path,
+    BattleOutcome, ClaimReason, CombatStats, DEFAULT_BASE_DAYS, FinishReason, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MapMilitaryError, MoveEvent,
+    MovementParams, OrderOutcome, OrderRejection, ProvinceControl, StopReason, find_land_path, find_path_where,
 };
 pub use overlay::{
     BoundaryEdge, BoundaryKind, CellStatus, WorldPreviewData, cell_status, compute_boundaries,

@@ -1,0 +1,7 @@
+$ cargo run --release --bin world_move_check -- --scenario verification_logs/phase-32/p32-035/bad_inputs/bad_wars.ron --days 1
+SCENARIO INPUT ERROR: verification_logs/phase-32/p32-035/bad_inputs/bad_wars.ron: 4 issue(s)
+  [unresolved-country] wars (entry 0): country label 9 is not defined in `countries`
+  [self-war] wars (entry 1): a country cannot be at war with itself
+  [duplicate-war] wars (entry 3): the same pair (in either order) is listed more than once
+  [invalid-combat] division 1: combat stats must be finite and in range (manpower <= max_manpower, 0 <= equipment <= max_equipment, 0 <= organization <= max_organization, maxima positive)
+exit=65

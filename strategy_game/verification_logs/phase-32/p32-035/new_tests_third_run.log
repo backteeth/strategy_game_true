@@ -1,0 +1,47 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+warning: unused import: `process_movement`
+  --> tests\p32_035_map_battle_test.rs:19:41
+   |
+19 | use strategy_game::military::movement::{process_movement, start_or_maintain_movement};
+   |                                         ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `strategy_game` (test "p32_035_map_battle_test") generated 1 warning (run `cargo fix --test "p32_035_map_battle_test" -p strategy_game` to apply 1 suggestion)
+    Finished `test` profile [optimized + debuginfo] target(s) in 5.66s
+     Running tests\p32_035_map_battle_test.rs (target\debug\deps\p32_035_map_battle_test-83e3e8fb84c94c2a.exe)
+
+running 26 tests
+test a_battle_includes_only_the_divisions_in_the_same_province_even_inside_one_state ... ok
+test a_day_with_no_damage_on_either_side_is_a_defender_win_and_the_attacker_goes_back ... ok
+test a_defender_with_no_retreat_is_destroyed_and_the_attacker_wins ... ok
+test a_province_that_stops_being_enterable_stops_the_division_before_arriving ... ok
+test a_retreat_candidate_with_an_ongoing_battle_is_skipped_and_a_battle_resolved_earlier_in_id_order_still_counts_as_ongoing ... ok
+test an_undefended_enemy_province_stops_the_division_issues_one_claim_and_discards_the_rest_of_the_path ... ok
+test attacker_victory_issues_one_claim_with_the_full_result_and_leaves_control_unchanged ... ok
+test belligerents_may_try_to_enter_enemy_provinces_and_other_countries_are_distinguished ... ok
+test defender_victory_sends_the_attacker_back_to_its_origin_and_issues_no_claim ... ok
+test fighting_divisions_take_no_orders_and_ordinary_idempotency_and_rejection_safety_hold_with_wars ... ok
+test old_comparison_a_defender_without_a_retreat_is_destroyed ... ok
+test old_comparison_a_reinforcement_joins_the_ongoing_battle_as_an_attacker ... ok
+test old_comparison_attacker_wins_the_defender_retreats_and_the_claim_matches_the_old_occupation ... ok
+test old_comparison_defender_wins_and_the_attacker_retreats_to_its_origin_and_recovers ... ok
+test old_comparison_known_differences_undefended_entry_and_a_third_country ... ok
+test old_comparison_ordinary_movement_and_a_moving_division_ordered_to_its_current_province ... ok
+test old_comparison_the_attacker_origin_is_lost_and_the_lowest_controlled_neighbour_is_used ... ok
+test old_comparison_the_attacker_origin_is_lost_and_there_is_no_other_retreat_so_it_is_destroyed ... ok
+test old_comparison_zero_damage_on_both_sides_sends_the_attacker_back ... ok
+test registration_order_and_order_issue_order_do_not_change_events_or_final_state ... ok
+test reinforcements_join_the_ongoing_battle_in_id_order_other_countries_stop_before_entering_and_nobody_is_registered_twice ... ok
+test the_attacker_retreats_to_its_origin_then_to_the_lowest_controlled_neighbour_then_is_destroyed ... ok
+test the_battle_code_depends_on_the_old_model_only_through_the_isolated_adapter ... ok
+test the_defender_retreats_to_the_lowest_province_id_it_controls ... ok
+test the_shipped_battle_scenario_resolves_with_explicit_wars_and_combat ... ok
+test war_pairs_are_validated_bidirectionally_and_scenarios_without_wars_still_run ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+
+real	0m6.550s
+user	0m0.015s
+sys	0m0.015s

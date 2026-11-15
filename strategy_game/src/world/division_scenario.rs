@@ -25,7 +25,7 @@
 use super::connectivity::ProvinceGraph;
 use super::ids::{MapStateId, ProvinceId};
 use super::model::WorldModel;
-use super::movement::{MapDivision, MapDivisionId, MapMilitary, MovementParams, ProvinceControl};
+use super::movement::{CombatStats, MapDivision, MapDivisionId, MapMilitary, MovementParams, ProvinceControl};
 use crate::common::CountryId;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,6 +55,51 @@ pub struct ControllerOverrideEntry {
     pub country: u32,
 }
 
+/// 戦闘能力(省略した項目は標準値 = `CombatStats::standard()`。M6-b)。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct CombatEntry {
+    pub manpower: u64,
+    pub max_manpower: u64,
+    pub equipment: f64,
+    pub max_equipment: f64,
+    pub organization: f32,
+    pub max_organization: f32,
+    pub attack_power: i32,
+    pub defense_power: i32,
+}
+
+impl Default for CombatEntry {
+    fn default() -> CombatEntry {
+        let c = CombatStats::standard();
+        CombatEntry {
+            manpower: c.manpower,
+            max_manpower: c.max_manpower,
+            equipment: c.equipment,
+            max_equipment: c.max_equipment,
+            organization: c.organization,
+            max_organization: c.max_organization,
+            attack_power: c.attack_power,
+            defense_power: c.defense_power,
+        }
+    }
+}
+
+impl CombatEntry {
+    pub fn to_stats(&self) -> CombatStats {
+        CombatStats {
+            manpower: self.manpower,
+            max_manpower: self.max_manpower,
+            equipment: self.equipment,
+            max_equipment: self.max_equipment,
+            organization: self.organization,
+            max_organization: self.max_organization,
+            attack_power: self.attack_power,
+            defense_power: self.defense_power,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DivisionEntry {
@@ -63,6 +108,17 @@ pub struct DivisionEntry {
     pub country: u32,
     pub province: u32,
     pub speed: f32,
+    /// 戦闘能力(省略可。省略した項目は標準値)。
+    #[serde(default)]
+    pub combat: CombatEntry,
+}
+
+/// 交戦する国の組(国家ラベル。双方向。順序は意味を持たない)。M6-b。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WarEntry {
+    pub a: u32,
+    pub b: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -76,6 +132,9 @@ pub struct DivisionScenarioFile {
     pub state_owners: Vec<StateOwnerEntry>,
     #[serde(default)]
     pub controller_overrides: Vec<ControllerOverrideEntry>,
+    /// 交戦する国の組(省略可。省略したシナリオは M6-a と同じく交戦なし)。
+    #[serde(default)]
+    pub wars: Vec<WarEntry>,
     pub divisions: Vec<DivisionEntry>,
 }
 
@@ -85,6 +144,7 @@ pub enum RefSite {
     StateOwner(u32),
     Override(u32),
     Division(u32),
+    War(usize),
 }
 
 impl std::fmt::Display for RefSite {
@@ -93,6 +153,7 @@ impl std::fmt::Display for RefSite {
             RefSite::StateOwner(s) => write!(f, "state_owners (state {s})"),
             RefSite::Override(p) => write!(f, "controller_overrides (province {p})"),
             RefSite::Division(d) => write!(f, "divisions (id {d})"),
+            RefSite::War(i) => write!(f, "wars (entry {i})"),
         }
     }
 }
@@ -111,6 +172,12 @@ pub enum DivisionScenarioIssue {
     InitialPositionNotControlled { division: u32, province: ProvinceId, expected: CountryId, actual: Option<CountryId> },
     InvalidSpeed { division: u32 },
     InvalidBaseDays,
+    /// 自国との交戦(同じ国家ラベル、または同じ `CountryId` に解決される組)。
+    SelfWar { index: usize },
+    /// 同じ組(逆順を含む)の重複。
+    DuplicateWar { index: usize },
+    /// 戦闘能力の値が不正(有限でない・範囲外)。
+    InvalidCombat { division: u32 },
 }
 
 impl DivisionScenarioIssue {
@@ -127,6 +194,9 @@ impl DivisionScenarioIssue {
             Self::InitialPositionNotControlled { .. } => "initial-position-not-controlled",
             Self::InvalidSpeed { .. } => "invalid-speed",
             Self::InvalidBaseDays => "invalid-base-days",
+            Self::SelfWar { .. } => "self-war",
+            Self::DuplicateWar { .. } => "duplicate-war",
+            Self::InvalidCombat { .. } => "invalid-combat",
         }
     }
 }
@@ -151,6 +221,9 @@ impl std::fmt::Display for DivisionScenarioIssue {
             }
             Self::InvalidSpeed { division } => write!(f, "division {division}: speed must be finite and positive"),
             Self::InvalidBaseDays => write!(f, "base_days must be finite and positive"),
+            Self::SelfWar { index } => write!(f, "wars (entry {index}): a country cannot be at war with itself"),
+            Self::DuplicateWar { index } => write!(f, "wars (entry {index}): the same pair (in either order) is listed more than once"),
+            Self::InvalidCombat { division } => write!(f, "division {division}: combat stats must be finite and in range (manpower <= max_manpower, 0 <= equipment <= max_equipment, 0 <= organization <= max_organization, maxima positive)"),
         }
     }
 }
@@ -194,6 +267,8 @@ pub struct DivisionScenario {
     pub countries: BTreeMap<u32, CountryId>,
     /// 初期の実効支配(プロヴィンスごと)。
     pub control: ProvinceControl,
+    /// 交戦する国の組(双方向。`CountryId`)。
+    pub wars: Vec<(CountryId, CountryId)>,
     /// 師団(`MapDivisionId` 昇順)。
     pub divisions: Vec<MapDivision>,
 }
@@ -201,7 +276,7 @@ pub struct DivisionScenario {
 impl DivisionScenario {
     /// 実行時状態を作る(検証済みの入力なので失敗しない)。
     pub fn into_military(self) -> MapMilitary {
-        MapMilitary::new(self.divisions, self.control, self.params).expect("a validated scenario builds")
+        MapMilitary::new(self.divisions, self.control, self.params).and_then(|m| m.with_wars(self.wars)).expect("a validated scenario builds")
     }
 
     /// 国家ラベル(`CountryId` から)。対応表に無ければ `None`。
@@ -293,6 +368,23 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
             overrides.insert(p, c);
         }
     }
+    // 交戦する国の組(双方向。自国との組・重複(逆順を含む)を区別する)
+    let mut wars: Vec<(CountryId, CountryId)> = Vec::new();
+    let mut seen_wars: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for (i, w) in file.wars.iter().enumerate() {
+        let a = resolve(RefSite::War(i), w.a, &mut issues);
+        let b = resolve(RefSite::War(i), w.b, &mut issues);
+        let (Some(a), Some(b)) = (a, b) else { continue };
+        if a == b {
+            issues.push(DivisionScenarioIssue::SelfWar { index: i });
+            continue;
+        }
+        if !seen_wars.insert((a.0.min(b.0), a.0.max(b.0))) {
+            issues.push(DivisionScenarioIssue::DuplicateWar { index: i });
+            continue;
+        }
+        wars.push((a, b));
+    }
     // 初期の実効支配(上書き > ステートの所有国 > なし)。所属は所属情報(WorldModel)から解決する。
     let mut control: BTreeMap<ProvinceId, CountryId> = BTreeMap::new();
     for p in graph.node_ids() {
@@ -319,12 +411,15 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
         if !(e.speed.is_finite() && e.speed > 0.0) {
             issues.push(DivisionScenarioIssue::InvalidSpeed { division: e.id });
         }
+        if !e.combat.to_stats().is_valid() {
+            issues.push(DivisionScenarioIssue::InvalidCombat { division: e.id });
+        }
         if let (Some(owner), true) = (owner, known) {
             let actual = control.controller(p);
             if actual != Some(owner) {
                 issues.push(DivisionScenarioIssue::InitialPositionNotControlled { division: e.id, province: p, expected: owner, actual });
             } else {
-                divisions.push(MapDivision::new(MapDivisionId(e.id), owner, p, e.speed));
+                divisions.push(MapDivision::new(MapDivisionId(e.id), owner, p, e.speed).with_combat(e.combat.to_stats()));
             }
         }
     }
@@ -332,5 +427,5 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
         return Err(issues);
     }
     divisions.sort_by_key(|d| d.id);
-    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, divisions })
+    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, wars, divisions })
 }

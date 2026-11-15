@@ -1,0 +1,4 @@
+$ cargo run --release --bin world_move_check -- --scenario assets/data/world/preview/division_battle_scenario.ron --order 1:2
+USAGE ERROR: --order: "1:2" is not DAY:DIVISION:PROVINCE
+usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] [--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--combat]
+exit=64

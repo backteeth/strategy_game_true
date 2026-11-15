@@ -1,0 +1,8 @@
+(
+ format_version: 1,
+ base_days: 5.0,
+ countries: [ (label: 1, country_id: 1), (label: 2, country_id: 2) ],
+ state_owners: [ (state: 20, country: 1), (state: 21, country: 2) ],
+ wars: [ (a: 1, b: 9), (a: 2, b: 2), (a: 1, b: 2), (a: 2, b: 1) ],
+ divisions: [ (id: 1, country: 1, province: 18309, speed: 1.0, combat: (manpower: 20000)) ],
+)
