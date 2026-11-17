@@ -16,6 +16,7 @@
 //! ## 操作(画面にも表示)
 //! - 左クリック: セル選択(既存)。上部帯の `師団N` ボタン、または `PageUp`/`PageDown`(MapDivisionId 順)で師団を選ぶ。`X` または「選択解除」で解除。
 //! - 移動先は**地図で選んだセル**(左クリック)。`M` または「選択セルへ移動」で、選択中の師団へ `issue_move_order` を発行する(拒否の理由は下部帯に出し、既存の経路・進捗は変えない)。
+//! - `T` または「選択セルのステートを選択師団の国へ割譲」で、選択中の師団の国が、選択セルのステートを併合する(P32-041 の領土移転。移転ステート内の進行中の戦闘は中止する。拒否の理由は下部帯)。
 //! - `Space` / `N` または「1日進める」で `advance_day` を**ちょうど1回**。自動では進まない(検証モードは停止状態で始まる)。
 //! - `Tab` は既存どおり画面を閉じる/開く。閉じる・終了で本セッションを破棄し、開き直すとシナリオを読み直して**初期配置**から始まる(古いマーカー・選択を持ち越さない)。
 //!
@@ -29,8 +30,8 @@ use super::view::{
 use super::world_view::{LoadedWorld, enter_world};
 use crate::common::CountryId;
 use crate::world::{
-    DivisionScenario, HexCoord, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MapStateId, MoveEvent, OrderOutcome, ProvinceGraph, ProvinceId, StateControlKind,
-    WorldModel, load_division_scenario, summarize_control,
+    CountryStatus, DisbandReason, DivisionScenario, HexCoord, MapBattleStatus, MapDivision, MapDivisionId, MapDivisionStatus, MapMilitary, MoveEvent, OrderOutcome, ProvinceGraph, ProvinceId, StateControlKind,
+    Territory, TransferContext, TransferOutcome, TransferRequest, WorldModel, load_division_scenario, summarize_control, transfer_state,
 };
 use bevy::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
@@ -105,7 +106,8 @@ pub struct DivisionSession {
     pub description: String,
     military: MapMilitary,
     graph: ProvinceGraph,
-    state_owners: BTreeMap<MapStateId, CountryId>,
+    /// 実行時の法的所有・首都の正本・国家の存続(M7-a。移転で変わる)。
+    territory: Territory,
     /// `CountryId` の数値 → 国家ラベル(表示用)。
     labels: BTreeMap<usize, u32>,
     day: u32,
@@ -119,26 +121,26 @@ impl DivisionSession {
     /// 検証用シナリオを読んで初期化する(既存のローダーを使う)。失敗は理由つき(ファイルが読めない・RON が不正・非対応の版・地図との不一致)。
     pub fn load(path: &str, graph: ProvinceGraph, model: &WorldModel) -> Result<DivisionSession, String> {
         let sc = load_division_scenario(path, &graph, model).map_err(|e| format!("{e}"))?;
-        Ok(DivisionSession::from_scenario(path, sc, graph))
+        DivisionSession::from_scenario(path, sc, graph, model)
     }
 
-    pub fn from_scenario(path: &str, sc: DivisionScenario, graph: ProvinceGraph) -> DivisionSession {
+    pub fn from_scenario(path: &str, sc: DivisionScenario, graph: ProvinceGraph, model: &WorldModel) -> Result<DivisionSession, String> {
         let labels = sc.countries.iter().map(|(l, c)| (c.0, *l)).collect();
-        let state_owners = sc.state_owners.clone();
+        let territory = Territory::from_scenario(&sc, model, &graph).map_err(|e| e.to_string())?;
         let description = sc.description.clone();
-        DivisionSession {
+        Ok(DivisionSession {
             scenario_path: path.to_string(),
             description,
             military: sc.into_military(),
             graph,
-            state_owners,
+            territory,
             labels,
             day: 0,
             selected: None,
             revision: 0,
             instance: NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
             log: VecDeque::new(),
-        }
+        })
     }
 
     pub fn military(&self) -> &MapMilitary {
@@ -165,8 +167,9 @@ impl DivisionSession {
     pub fn log(&self) -> impl Iterator<Item = &(bool, String)> {
         self.log.iter()
     }
-    pub fn state_owners(&self) -> &BTreeMap<MapStateId, CountryId> {
-        &self.state_owners
+    /// 実行時の領土(法的所有・首都・国家の存続)。
+    pub fn territory(&self) -> &Territory {
+        &self.territory
     }
 
     fn push(&mut self, ok: bool, text: String) {
@@ -334,7 +337,7 @@ impl DivisionSession {
             .node_ids()
             .filter_map(|p| {
                 let controller = self.military.control().controller(p)?;
-                let legal_owner = model.state_of(p).and_then(|s| self.state_owners.get(&s).copied());
+                let legal_owner = model.state_of(p).and_then(|s| self.territory.owner(s));
                 if legal_owner == Some(controller) {
                     return None;
                 }
@@ -363,7 +366,7 @@ impl DivisionSession {
             return "師団: 未選択".to_string();
         };
         let state = model.state_of(d.province);
-        let legal = state.and_then(|s| self.state_owners.get(&s).copied());
+        let legal = state.and_then(|s| self.territory.owner(s));
         let mut t = format!(
             "師団: {}\n所属国: {}\n現在地: {}{}\n  法的所有国(ステート): {}\n  実効支配国(現在地): {}\n状態: {}",
             d.id,
@@ -411,10 +414,10 @@ impl DivisionSession {
 
     /// ステート単位の支配(P32-038 の集計)。法的所有国と実効支配の内訳を別々に出す。
     pub fn control_text(&self, model: &WorldModel) -> String {
-        let Ok(sum) = summarize_control(model, &self.state_owners, self.military.control()) else {
+        let Ok(sum) = summarize_control(model, &self.territory.owners().collect(), self.military.control()) else {
             return "ステートの支配: 集計できません".to_string();
         };
-        let mut t = String::from("ステート単位の支配(検証入力):");
+        let mut t = String::from("ステート単位の所有と支配(検証入力。所有は領土移転で変わる):");
         for s in sum.states() {
             let owner = self.controller_text(s.legal_owner);
             let ctl = match s.kind() {
@@ -429,7 +432,80 @@ impl DivisionSession {
             };
             t += &format!("\n  {}: 法的所有 {owner} / 実効支配 {ctl}", s.state);
         }
+        let caps: Vec<String> = self.territory.countries().filter_map(|c| self.territory.capital(c).map(|p| format!("{} {p}", self.country_text(c)))).collect();
+        if !caps.is_empty() {
+            t += &format!("\n首都(正本): {}", caps.join(" / "));
+        }
+        let gone: Vec<String> = self
+            .territory
+            .countries()
+            .filter_map(|c| match self.territory.status(c) {
+                Some(CountryStatus::Eliminated { annexed_by }) => Some(format!("{}(併合: {})", self.country_text(c), self.country_text(annexed_by))),
+                _ => None,
+            })
+            .collect();
+        if !gone.is_empty() {
+            t += &format!("\n消滅した国家: {}", gone.join(" / "));
+        }
         t
+    }
+
+    /// 領土移転(M7-a): 選択中の師団の国が、選択セルのステートを(現在の法的所有国から)併合する。移転ステート内の進行中の戦闘は中止の対象に明示する。
+    /// 拒否は何も変えず、理由を結果欄に出す。適用したら、結果(支配・首都・師団・戦闘・消滅・補給)を結果欄に出し、選択中の師団が解散されたら選択を解除する。
+    pub fn transfer_selected_cell_state(&mut self, model: &WorldModel, cell_province: Option<ProvinceId>) -> Result<TransferOutcome, String> {
+        let fail = |this: &mut DivisionSession, t: String| -> Result<TransferOutcome, String> {
+            this.push(false, t.clone());
+            Err(t)
+        };
+        let Some(sel) = self.selected.and_then(|id| self.military.division(id)).map(|d| (d.id, d.owner)) else {
+            return fail(self, "領土移転: 師団が選択されていません(選択した師団の国が、選択セルのステートを併合します)".to_string());
+        };
+        let Some(p) = cell_province else {
+            return fail(self, "領土移転: 移転するステートのセルが選ばれていません".to_string());
+        };
+        let Some(state) = model.state_of(p) else {
+            return fail(self, format!("領土移転: {p} はステートに所属していません"));
+        };
+        let Some(owner) = self.territory.owner(state) else {
+            return fail(self, format!("領土移転: {state} には法的所有国がありません"));
+        };
+        let provinces: Vec<ProvinceId> = model.provinces_of(state).map(|v| v.to_vec()).unwrap_or_default();
+        let battles: Vec<_> = self.military.battles().filter(|b| b.status == MapBattleStatus::Ongoing && provinces.contains(&b.province)).map(|b| b.id).collect();
+        let req = TransferRequest::new(state, owner, sel.1).with_cancel_battles(battles);
+        let ctx = TransferContext { model, graph: &self.graph };
+        match transfer_state(ctx, &mut self.territory, &mut self.military, &req) {
+            Err(e) => fail(self, format!("領土移転を拒否: {state}({} -> {}): {e}(所有・支配・師団・戦闘は変わりません)", self.country_text(owner), self.country_text(sel.1))),
+            Ok(o) => {
+                self.revision += 1;
+                self.push(true, format!("領土移転: {state} の法的所有 {} -> {}(支配を変更 {} 件、第三国の占領を解消 {} 件)", self.country_text(o.previous_owner), self.country_text(o.new_owner), o.control_changes.len(), o.third_party_resolved.len()));
+                if let Some(m) = &o.capital_move {
+                    self.push(true, format!("  首都を移転: {} {} -> {}", self.country_text(m.country), m.from, m.to));
+                }
+                for b in &o.cancelled_battles {
+                    self.push(true, format!("  戦闘を中止: {} {}(勝敗・占領なし。参加師団は待機)", b.battle, b.province));
+                }
+                if let Some(e) = &o.elimination {
+                    self.push(true, format!("  国家が消滅: {}(併合: {}。IDは保持)", self.country_text(e.country), self.country_text(e.annexed_by)));
+                }
+                for r in &o.relocated {
+                    self.push(true, format!("  師団{} が帰還: {} -> {}", r.division.0, r.from, r.to));
+                }
+                for d in &o.disbanded {
+                    let why = match d.reason {
+                        DisbandReason::CountryEliminated => "国家の消滅",
+                        DisbandReason::NoReturnProvince => "帰還先なし",
+                    };
+                    self.push(true, format!("  師団{} を解散({why}。戦闘の撃破ではありません)", d.division.0));
+                }
+                if let Some(s) = self.selected
+                    && self.military.division(s).is_none()
+                {
+                    self.selected = None;
+                    self.push(false, format!("  選択中の {s} は解散されたため、選択と詳細表示を解除しました"));
+                }
+                Ok(o)
+            }
+        }
     }
 
     /// 上部の見出し。
@@ -471,6 +547,8 @@ pub fn selected_province(model: &WorldModel, map: &HexMap, selection: Option<u32
 pub enum DivisionCommand {
     Select(MapDivisionId),
     ClearSelection,
+    /// 選択中の師団の国が、選択セルのステートを併合する(領土移転。M7-a の検証用)。
+    TransferSelectedCellState,
     /// 前(false)/次(true)の師団へ。
     Cycle(bool),
     /// 選択中の師団を、選択中のセルのプロヴィンスへ移動させる。
@@ -525,6 +603,16 @@ pub fn apply_division_commands(
                 let _ = s.select(id);
             }
             DivisionCommand::ClearSelection => s.clear_selection(),
+            DivisionCommand::TransferSelectedCellState => match &world {
+                Some(w) => {
+                    let cell = match (&map, &selection) {
+                        (Some(m), Some(sel)) => selected_province(&w.data.model, &m.0, sel.0),
+                        _ => None,
+                    };
+                    let _ = s.transfer_selected_cell_state(&w.data.model, cell);
+                }
+                None => s.push(false, "領土移転: ワールド設定がありません".to_string()),
+            },
             DivisionCommand::Cycle(fw) => s.cycle(fw),
             DivisionCommand::AdvanceDay => {
                 s.advance_one_day();
@@ -555,6 +643,7 @@ pub enum DivisionButtonKind {
     Advance,
     Order,
     Clear,
+    Transfer,
     Prev,
     Next,
     Pick(MapDivisionId),
@@ -656,6 +745,7 @@ pub fn spawn_division_ui(commands: &mut Commands, session: Option<&DivisionSessi
                 r.spawn(button_bundle(DivisionButton(DivisionButtonKind::Advance), "1日進める (Space/N)"));
                 r.spawn(button_bundle(DivisionButton(DivisionButtonKind::Order), "選択セルへ移動 (M)"));
                 r.spawn(button_bundle(DivisionButton(DivisionButtonKind::Clear), "選択解除 (X)"));
+                r.spawn(button_bundle(DivisionButton(DivisionButtonKind::Transfer), "選択セルのステートを選択師団の国へ割譲 (T)"));
                 r.spawn(button_bundle(DivisionButton(DivisionButtonKind::Prev), "前の師団 (PgUp)"));
                 r.spawn(button_bundle(DivisionButton(DivisionButtonKind::Next), "次の師団 (PgDn)"));
             });
@@ -686,6 +776,7 @@ pub fn division_buttons(buttons: Query<(&Interaction, &DivisionButton), Changed<
             DivisionButtonKind::Advance => DivisionCommand::AdvanceDay,
             DivisionButtonKind::Order => DivisionCommand::OrderToSelectedCell,
             DivisionButtonKind::Clear => DivisionCommand::ClearSelection,
+            DivisionButtonKind::Transfer => DivisionCommand::TransferSelectedCellState,
             DivisionButtonKind::Prev => DivisionCommand::Cycle(false),
             DivisionButtonKind::Next => DivisionCommand::Cycle(true),
             DivisionButtonKind::Pick(id) => DivisionCommand::Select(id),
@@ -703,6 +794,9 @@ pub fn division_keys(keys: Res<ButtonInput<KeyCode>>, mut out: MessageWriter<Div
     }
     if keys.just_pressed(KeyCode::KeyX) {
         out.write(DivisionCommand::ClearSelection);
+    }
+    if keys.just_pressed(KeyCode::KeyT) {
+        out.write(DivisionCommand::TransferSelectedCellState);
     }
     if keys.just_pressed(KeyCode::PageUp) {
         out.write(DivisionCommand::Cycle(false));
@@ -833,7 +927,7 @@ fn sync_division_text(
             text += &format!("\n{here}");
         }
         text += &format!("\n\n{}", s.0.control_text(&w.data.model));
-        text += "\n\n操作: 師団ボタン/PgUp,PgDn=選択 X=解除 / 地図で移動先を左クリック→M=移動命令 / Space,N=1日進める";
+        text += "\n\n操作: 師団ボタン/PgUp,PgDn=選択 X=解除 / 地図で移動先を左クリック→M=移動命令 / Space,N=1日進める / 地図でステートのセルを左クリック→T=選択師団の国へ割譲(領土移転)";
         t.0 = text;
     }
 }

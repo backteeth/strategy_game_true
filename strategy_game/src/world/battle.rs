@@ -55,7 +55,78 @@ pub struct MapBattle {
     pub status: MapBattleStatus,
 }
 
+/// 中止した戦闘の記録(勝敗も占領も発生しない)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CancelledBattle {
+    pub battle: MapBattleId,
+    pub province: ProvinceId,
+    pub attacker_country: CountryId,
+    pub defender_country: CountryId,
+    /// 戦闘から外れた師団(戦闘中 → 待機。`MapDivisionId` 昇順)。
+    pub released: Vec<MapDivisionId>,
+}
+
+/// 戦闘の中止の拒否(何も変えない)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelError {
+    UnknownBattle(MapBattleId),
+    NotOngoing(MapBattleId),
+    DuplicateBattle(MapBattleId),
+}
+
+impl std::fmt::Display for CancelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CancelError::UnknownBattle(b) => write!(f, "{b} は存在しません"),
+            CancelError::NotOngoing(b) => write!(f, "{b} は進行中ではありません"),
+            CancelError::DuplicateBattle(b) => write!(f, "{b} が重複して指定されています"),
+        }
+    }
+}
+
+impl std::error::Error for CancelError {}
+
 impl MapMilitary {
+    /// 検証用の戦闘中止: **対象を明示**して、進行中の戦闘を取り除く。勝敗・占領・組織率の回復・損失は発生させず、参加師団を戦闘から外す(戦闘中 → 待機、戦闘参照を外す)。
+    /// 指定にない戦闘は維持する。未知・進行中でない・重複した指定が 1 つでもあれば、何も変えずに拒否する。
+    pub fn cancel_battles(&mut self, ids: &[MapBattleId]) -> Result<Vec<CancelledBattle>, CancelError> {
+        let mut set: BTreeSet<MapBattleId> = BTreeSet::new();
+        for id in ids {
+            match self.battles.get(id) {
+                None => return Err(CancelError::UnknownBattle(*id)),
+                Some(b) if b.status != MapBattleStatus::Ongoing => return Err(CancelError::NotOngoing(*id)),
+                Some(_) => {}
+            }
+            if !set.insert(*id) {
+                return Err(CancelError::DuplicateBattle(*id));
+            }
+        }
+        Ok(self.cancel_battles_unchecked(&set))
+    }
+
+    /// 検証済みの戦闘を取り除く(呼び出し側が存在と進行中を確認済み)。`MapBattleId` 昇順。
+    pub(super) fn cancel_battles_unchecked(&mut self, ids: &BTreeSet<MapBattleId>) -> Vec<CancelledBattle> {
+        let mut out = Vec::new();
+        for id in ids {
+            let Some(b) = self.battles.remove(id) else { continue };
+            let mut released: Vec<MapDivisionId> = Vec::new();
+            for d in b.attackers.iter().chain(b.defenders.iter()) {
+                if let Some(div) = self.divisions.get_mut(d)
+                    && div.status == MapDivisionStatus::Fighting
+                    && div.battle == Some(*id)
+                {
+                    div.status = MapDivisionStatus::Idle;
+                    div.battle = None;
+                    released.push(*d);
+                }
+            }
+            released.sort();
+            released.dedup();
+            out.push(CancelledBattle { battle: *id, province: b.province, attacker_country: b.attacker_country, defender_country: b.defender_country, released });
+        }
+        out
+    }
+
     /// 戦闘(`MapBattleId` 昇順)。
     pub fn battles(&self) -> impl Iterator<Item = &MapBattle> + '_ {
         self.battles.values()

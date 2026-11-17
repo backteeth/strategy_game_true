@@ -1,0 +1,17 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: link reference defined in list item
+  --> src\world\territory.rs:11:8
+   |
+11 | //! 2. [`apply_transfer`]: 適用の**直前に、現在の状態で同じ検証をやり直し**(所有・支配・首都・師団・戦闘・戦争・補給)、計画の結果と...
+   |        ^^^^^^^^^^^^^^^^^^
+   |
+   = help: link definitions are not shown in rendered documentation
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#doc_nested_refdefs
+   = note: `-D clippy::doc-nested-refdefs` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::doc_nested_refdefs)]`
+help: for an intra-doc link, add `[]` between the label and the colon
+   |
+11 | //! 2. [`apply_transfer`][]: 適用の**直前に、現在の状態で同じ検証をやり直し**(所有・支配・首都・師団・戦闘・戦争・補給)、計画の結果と一致したときだけ適用する。古い計画・適用済みの計画は拒否(何も変えない)。
+   |                          ++
+
+error: could not compile `strategy_game` (lib) due to 1 previous error

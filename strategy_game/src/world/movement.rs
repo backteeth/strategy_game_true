@@ -479,6 +479,20 @@ impl MapMilitary {
         a != b && self.wars.contains(&(a.0.min(b.0), a.0.max(b.0)))
     }
 
+    /// `country` が当事国の交戦関係をすべて取り除き、取り除いた組を返す(`(小さい CountryId, 大きい CountryId)`、昇順。国家消滅。P32-041)。
+    pub(super) fn remove_wars_of(&mut self, country: CountryId) -> Vec<(CountryId, CountryId)> {
+        let mut removed = Vec::new();
+        self.wars.retain(|&(a, b)| {
+            if a == country.0 || b == country.0 {
+                removed.push((CountryId(a), CountryId(b)));
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+
     pub fn params(&self) -> MovementParams {
         self.params
     }

@@ -398,7 +398,8 @@ fn world_shot_script(
 /// `--division-scenario --shots`用の自動スクリプト(実マウス操作の代替ではない。同じ `DivisionCommand` の経路を使う)。
 /// 移動シナリオ(ファイル名に "battle" を含まない): 師団1を選び、18309→18308 へ命令して 5 日進める(4日目まで 18309、5日目に 18308)。
 /// 戦闘シナリオ("battle" を含む): 同じ 18311 にいる師団1・4 の選択、師団2 の 17694 への攻撃(戦闘→占領)、表示モード切替とズーム後の確認。
-/// どちらも最後に Tab で閉じて開き直し、初期配置へ戻ることを確認する。各段階の師団の位置は `[DivisionShots]` のログに出す。
+/// 領土移転シナリオ("territory" を含む): 国家2 の師団でステート22 を併合(国家1 の首都移転)→ 国家1 の師団でステート21 を併合 → ステート22 を併合して国家2 が消滅。
+/// いずれも最後に Tab で閉じて開き直し、初期配置へ戻ることを確認する。各段階の師団の位置は `[DivisionShots]` のログに出す。
 #[allow(clippy::too_many_arguments)]
 fn division_shot_script(
     mut commands: Commands,
@@ -421,6 +422,7 @@ fn division_shot_script(
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(dir.0.join(name)));
     };
     let battle = config.scenario.contains("battle");
+    let territory = config.scenario.contains("territory");
     let log_state = |tag: &str| {
         if let Some(s) = &session {
             let m = s.0.military();
@@ -483,7 +485,57 @@ fn division_shot_script(
         }
     };
     use strategy_game::world::MapDivisionId as D;
-    if !battle {
+    if territory {
+        // 領土移転(P32-041): 選択した師団の国が、選択セルのステートを併合する(同じ DivisionCommand の経路)。
+        match f {
+            40 => {
+                log_state("initial");
+                shot(&mut commands, "t1_initial.png");
+            }
+            45 => {
+                out.write(DivisionCommand::Select(D(6)));
+                select_cell(&mut selection, 17266);
+                settings.mode = HexViewMode::State;
+                if let Ok(mut tf) = cam.single_mut() {
+                    focus(&mut tf, 17485, 0.06);
+                }
+            }
+            60 => {
+                log_state("division 6 (country 2) selected, a cell of state 22 (country 1's, capital 17266) selected");
+                shot(&mut commands, "t2_before_cession_of_state22.png");
+            }
+            65 => {
+                out.write(DivisionCommand::TransferSelectedCellState);
+            }
+            85 => {
+                log_state("after state 22 -> country 2 (country 1's capital moves, 17484 occupation by country 3 resolved, division 17 returns)");
+                shot(&mut commands, "t3_state22_to_country2.png");
+            }
+            90 => {
+                out.write(DivisionCommand::Select(D(1)));
+                select_cell(&mut selection, 17269);
+            }
+            95 => {
+                out.write(DivisionCommand::TransferSelectedCellState);
+            }
+            115 => {
+                log_state("after state 21 -> country 1 (country 2 still owns state 22: not eliminated)");
+                shot(&mut commands, "t4_state21_to_country1.png");
+            }
+            120 => {
+                out.write(DivisionCommand::Select(D(1)));
+                select_cell(&mut selection, 17266);
+            }
+            125 => {
+                out.write(DivisionCommand::TransferSelectedCellState);
+            }
+            145 => {
+                log_state("after state 22 -> country 1 (country 2 lost its last state: eliminated)");
+                shot(&mut commands, "t5_country2_eliminated.png");
+            }
+            _ => {}
+        }
+    } else if !battle {
         match f {
             40 => {
                 log_state("initial");

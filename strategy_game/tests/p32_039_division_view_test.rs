@@ -430,10 +430,10 @@ fn the_screen_panels_are_buttons_so_clicks_never_reach_the_map() {
     app.update();
     let mut strips = app.world_mut().query_filtered::<&Button, With<DivisionStrip>>();
     assert_eq!(strips.iter(app.world()).count(), 2, "top and bottom strips are `Button`s (they publish `Interaction`, which suppresses map input)");
-    // 操作ボタンはすべて Button(操作 5 つ + 師団 3 件)
+    // 操作ボタンはすべて Button(操作 6 つ + 師団 3 件)
     let mut buttons = app.world_mut().query::<(&Button, &DivisionButton)>();
     let kinds: Vec<DivisionButtonKind> = buttons.iter(app.world()).map(|(_, b)| b.0).collect();
-    assert_eq!(kinds.len(), 5 + 3);
+    assert_eq!(kinds.len(), 6 + 3);
     for id in [1, 2, 3] {
         assert!(kinds.contains(&DivisionButtonKind::Pick(md(id))));
     }

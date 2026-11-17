@@ -1,0 +1,60 @@
+$ cargo run --release --bin world_move_check -- --scenario assets/data/world/preview/division_territory_scenario.ron --days 1 --transfer 1:22:2:1 --transfer 1:20:1:1 --transfer 1:99:1:2
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_territory_scenario.ron
+description: P32-041 territory transfer and country elimination validation scenario (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+wars (both directions): 1-2
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 1 ---
+transfer request (between days; before day 1 is processed): MapState#22 owner country 2 -> country 1; cancel battles []
+transfer REJECTED at planning: MapState#22 の法的所有国は CountryId 1 で、期待した CountryId 2 ではありません (nothing changed)
+transfer request (between days; before day 1 is processed): MapState#20 owner country 1 -> country 1; cancel battles []
+transfer REJECTED at planning: 移転元と移転先が同じ国(CountryId 1)です (nothing changed)
+transfer request (between days; before day 1 is processed): MapState#99 owner country 1 -> country 2; cancel battles []
+transfer REJECTED at planning: MapState#99 は世界にありません (nothing changed)
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach recomputed; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 97750000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach recomputed; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 96750000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach recomputed; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 9000000 units
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+orders rejected: 0 (a rejection is a normal result)
+exit=0

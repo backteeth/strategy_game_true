@@ -1,0 +1,82 @@
+// P32-041 領土移転・国家消滅の検証用シナリオ(M7-a)。division_supply_scenario.ron(交戦・戦闘・占領・補給の検証用)を元に、**首都・交戦・第三国・中立国の配置を領土移転の検証用に変えたもの**。**検証入力であり、正式な世界データではない。**
+// 国家1: ステート20・22 を所有、首都 17266(ステート22 内)。国家2: ステート21 だけを所有(最後のステート)、首都 17695。国家3: 所有ステートなし、首都 18312(ステート21 内の第三国の支配地)。国家4: 所有ステートなし・支配地は 17904 だけの中立国。
+// 交戦は 国家1-国家2 だけ(国家3・4 はどちらとも交戦していない)。第三国の占領: 国家3 が 17484(ステート22)・18312(ステート21)・17903(ステート未所属)を支配、国家4 が 17904(ステート21)を支配。国家1 が 17696・17905・18112 を支配(ステート21 内)。
+// 再現(CLI。`strategy_game/` で。--state-control でステートの所有と支配の内訳、--combat で師団の状態が出る):
+//   A ステート22 を国家1→2 へ割譲(首都移転): --transfer 1:22:1:2 → 国家1 の首都 17266 が失われ、残るステート20 の最小の自国支配 18109 へ移る。ステート22 の全プロヴィンスが国家2 の支配になり、
+//     第三国(国家3)の 17484 の占領は解消する。国家3 の師団17(17484)は、国家2 と交戦していないので帰還(隣接する自国支配がないので、自国支配の最小 17903 へ)。国家1 の師団(2・3・14)は国家2 と交戦中なので移転地に残る。
+//   B ステート21 を国家2→1 へ割譲(国家2 の消滅): --transfer 1:21:2:1 → 国家2 は最後のステートを失って消滅(ID は保持)。師団5・6・8・12・15・16 は解散、交戦関係 1-2 と補給の設定は取り除かれる。
+//     18312 の国家3 の占領は解消、国家3 の師団10 は自国支配の最小 17484(ステート22 内の国家3 の占領地)へ帰還、国家4 の 17904 の占領も解消し、国家4 の師団20(17904)は帰還先がなく解散(戦闘による撃破ではない)。
+//   C 戦闘の中止: --order 1:14:17486 --transfer 1:20:1:2 --transfer 6:21:2:1:0(国家2 はステート20 も得るので消滅しない)。5 日目に始まる戦闘 MapBattle#0(17486 = ステート21)を、6 日目の移転で**番号を明示して**中止する。
+//     明示しない --transfer 6:21:2:1 は、移転ステート内で戦闘が進行中なので拒否される。勝敗・占領は発生せず、参加師団(14・15)は待機に戻る。無関係な戦闘は維持される。
+//   D 拒否: --transfer 1:22:2:1(所有国が違う)、--transfer 1:20:1:1(同じ国)、--transfer 1:99:1:2(未知のステート)。何も変わらない(国家ラベルがシナリオにないときは入力不正で終了コード 65)。
+//   E 古い・適用済みの計画の拒否は自動テスト(tests/p32_041_territory_test.rs)で確認する。
+(
+    format_version: 1,
+    description: "P32-041 territory transfer and country elimination validation scenario (verification input, not official data)",
+    base_days: 5.0,
+    countries: [
+        (label: 1, country_id: 1),
+        (label: 2, country_id: 2),
+        (label: 3, country_id: 3),
+        (label: 4, country_id: 4),
+    ],
+    state_owners: [
+        (state: 20, country: 1),
+        (state: 22, country: 1),
+        (state: 21, country: 2),
+    ],
+    controller_overrides: [
+        (province: 18312, country: 3),
+        (province: 17696, country: 1),
+        (province: 17905, country: 1),
+        (province: 18112, country: 1),
+        (province: 17903, country: 3),
+        (province: 17484, country: 3),
+        (province: 17904, country: 4),
+    ],
+    wars: [
+        (a: 1, b: 2),
+    ],
+    divisions: [
+        (id: 1, country: 1, province: 18311, speed: 1.0),
+        (id: 2, country: 1, province: 17693, speed: 1.0),
+        (id: 3, country: 1, province: 17268, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 4, country: 1, province: 18311, speed: 1.0),
+        (id: 5, country: 2, province: 17694, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 6, country: 2, province: 17269, speed: 1.0),
+        (id: 7, country: 1, province: 18310, speed: 1.0),
+        (id: 8, country: 2, province: 18111, speed: 1.0),
+        (id: 10, country: 3, province: 18312, speed: 1.0),
+        (id: 11, country: 1, province: 17905, speed: 1.0),
+        (id: 12, country: 2, province: 17906, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 14, country: 1, province: 17485, speed: 1.0, combat: (attack_power: 12)),
+        (id: 15, country: 2, province: 17486, speed: 1.0),
+        (id: 16, country: 2, province: 17487, speed: 1.0),
+        (id: 17, country: 3, province: 17484, speed: 1.0),
+        (id: 20, country: 4, province: 17904, speed: 1.0),
+    ],
+    supply: (
+        countries: [
+            (country: 1, capital: 17266, military_supplies: 100.0),
+            (country: 2, capital: 17695, military_supplies: 100.0),
+            (country: 3, capital: 18312, military_supplies: 10.0),
+        ],
+        divisions: [
+            (division: 1, supply_usage: 1.0),
+            (division: 2, supply_usage: 1.0),
+            (division: 3, supply_usage: 1.0),
+            (division: 4, supply_usage: 1.0),
+            (division: 5, supply_usage: 1.0),
+            (division: 6, supply_usage: 1.0),
+            (division: 7, supply_usage: 1.0),
+            (division: 8, supply_usage: 1.0),
+            (division: 10, supply_usage: 1.0),
+            (division: 11, supply_usage: 1.0),
+            (division: 12, supply_usage: 1.0),
+            (division: 14, supply_usage: 1.0),
+            (division: 15, supply_usage: 1.0),
+            (division: 16, supply_usage: 1.0),
+            (division: 17, supply_usage: 1.0),
+        ],
+    ),
+)

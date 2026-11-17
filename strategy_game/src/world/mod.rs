@@ -32,6 +32,7 @@ pub mod state_control;
 pub mod state_reach;
 pub mod supply;
 pub mod supply_scenario;
+pub mod territory;
 pub mod validate;
 
 pub use aggregate::{
@@ -62,7 +63,7 @@ pub use fingerprint::{GeographyChange, GeographyFingerprint, compute_fingerprint
 pub use ids::{HexCoord, MapStateId, ProvinceId};
 pub use issue::{IssueCode, Severity, WorldIssue};
 pub use model::{MapStateDef, ProvinceDef, WorldModel};
-pub use battle::{MapBattle, MapBattleId, MapBattleStatus};
+pub use battle::{CancelError, CancelledBattle, MapBattle, MapBattleId, MapBattleStatus};
 pub use supply::{SupplyCountryConfig, SupplyRuntime, SupplyStats};
 pub use occupation::{ClaimOutcome, ClaimRejection, ClaimRequest, countries_to_invalidate};
 pub use movement::{
@@ -84,5 +85,9 @@ pub use supply_scenario::{
     AgentOutcome, AgentRef, EvaluateError, SUPPLY_SCENARIO_FORMAT_VERSION, SupplyAgent, SupplyScenario, SupplyScenarioError,
     SupplyScenarioFile, SupplyScenarioIssue, evaluate_supply_scenario, load_supply_scenario, parse_supply_scenario,
     resolve_supply_scenario,
+};
+pub use territory::{
+    ApplyError, CapitalMove, ControlChange, CountryStatus, DisbandReason, Disbanded, EliminationOutcome, Relocation, StaleReason, Territory, TerritoryError, TransferContext, TransferError,
+    TransferOutcome, TransferPlan, TransferRequest, apply_transfer, plan_transfer, transfer_state,
 };
 pub use validate::{ValidationMode, ValidationReport, validate_against_geography};

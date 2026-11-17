@@ -20,6 +20,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use strategy_game::world::{DisbandReason, MapBattleId, Territory, TransferContext, TransferError, TransferOutcome, TransferRequest, apply_transfer, plan_transfer};
+
 use strategy_game::common::CountryId;
 use strategy_game::hexmap::data::load_from_path;
 use strategy_game::world::{
@@ -28,7 +30,7 @@ use strategy_game::world::{
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control]";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]...";
 
 #[derive(Default)]
 struct Args {
@@ -42,6 +44,7 @@ struct Args {
     capitals: Vec<(u32, u32, u32)>,
     combat: bool,
     state_control: bool,
+    transfers: Vec<(u32, u32, u32, u32, Vec<u32>)>,
 }
 
 fn num(name: &str, s: &str) -> Result<u32, String> {
@@ -102,6 +105,24 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--combat" => a.combat = true,
             "--state-control" => a.state_control = true,
+            "--transfer" => {
+                let v = value()?;
+                let parts: Vec<&str> = v.split(':').collect();
+                if parts.len() != 4 && parts.len() != 5 {
+                    return Err(format!("--transfer: \"{v}\" is not DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]"));
+                }
+                let day = num("--transfer day", parts[0])?;
+                if day == 0 {
+                    return Err("--transfer: the day starts at 1".into());
+                }
+                let mut battles = Vec::new();
+                if parts.len() == 5 {
+                    for b in parts[4].split(',').filter(|b| !b.is_empty()) {
+                        battles.push(num("--transfer battle", b)?);
+                    }
+                }
+                a.transfers.push((day, num("--transfer state", parts[1])?, num("--transfer from", parts[2])?, num("--transfer to", parts[3])?, battles));
+            }
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -134,6 +155,70 @@ fn opt(p: Option<ProvinceId>) -> String {
 }
 
 /// M6-e: ステート単位の実効支配の集計(法的所有と実効支配は別々に出す。占領は交戦関係を明示して数え、第三国の支配は加算しない)。
+fn rejection_hint(e: &TransferError) -> &'static str {
+    match e {
+        TransferError::NoCapitalCandidate { .. } => " [capital: no valid province in the remaining states]",
+        TransferError::BattleInTransferredState { .. } => " [name the battle: --transfer DAY:STATE:FROM:TO:BATTLE_NUMBER]",
+        _ => "",
+    }
+}
+
+fn print_transfer_outcome(o: &TransferOutcome, labels: &HashMap<CountryId, u32>) {
+    let name = |c: CountryId| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into());
+    let opt = |c: Option<CountryId>| c.map(name).unwrap_or_else(|| "none".into());
+    println!("transfer APPLIED: {} legal owner country {} -> country {}", o.state, name(o.previous_owner), name(o.new_owner));
+    println!("  control changes (all provinces of the state are set to country {}): {}", name(o.new_owner), o.control_changes.len());
+    for c in &o.control_changes {
+        println!("    {}: country {} -> country {}", c.province, opt(c.previous), opt(c.new));
+    }
+    for c in &o.third_party_resolved {
+        println!("  third-party occupation resolved: {} held by country {}", c.province, opt(c.previous));
+    }
+    match &o.capital_move {
+        Some(m) => println!("  capital moved: country {} {} -> {} (smallest province the country controls in the first remaining state with one; the representative if it is controlled)", name(m.country), m.from, m.to),
+        None => println!("  capital: unchanged"),
+    }
+    for b in &o.cancelled_battles {
+        println!(
+            "  battle cancelled: {} at {} (attacker country {}, defender country {}); released divisions [{}]; no winner, no occupation",
+            b.battle,
+            b.province,
+            name(b.attacker_country),
+            name(b.defender_country),
+            b.released.iter().map(|d| d.0.to_string()).collect::<Vec<_>>().join(",")
+        );
+    }
+    if let Some(e) = &o.elimination {
+        println!(
+            "  COUNTRY ELIMINATED: country {} (annexed by country {}; the id is kept). wars removed: [{}]; supply setup removed: {}; capital removed: {}",
+            name(e.country),
+            name(e.annexed_by),
+            e.wars_removed.iter().map(|(x, y)| format!("{}-{}", name(*x), name(*y))).collect::<Vec<_>>().join(" "),
+            e.supply_removed,
+            e.capital_removed.map(|p| p.to_string()).unwrap_or_else(|| "none".into())
+        );
+        for c in &e.control_reverted {
+            println!("    control outside the state returned: {}: country {} -> country {}", c.province, opt(c.previous), opt(c.new));
+        }
+    }
+    for r in &o.relocated {
+        println!("  division {} (country {}) returned: {} -> {}", r.division.0, name(r.owner), r.from, r.to);
+    }
+    for d in &o.disbanded {
+        println!(
+            "  division {} (country {}) DISBANDED at {}: {} (not a battle loss)",
+            d.division.0,
+            name(d.owner),
+            d.at,
+            match d.reason {
+                DisbandReason::CountryEliminated => "its country was eliminated",
+                DisbandReason::NoReturnProvince => "no province to return to",
+            }
+        );
+    }
+    println!("  supply reach invalidated for countries: [{}]", o.invalidated_countries.iter().map(|c| name(*c)).collect::<Vec<_>>().join(", "));
+}
+
 fn print_state_control(day: u32, model: &WorldModel, owners: &BTreeMap<MapStateId, CountryId>, m: &MapMilitary, labels: &HashMap<CountryId, u32>) {
     let name = |c: CountryId| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into());
     let summary = match summarize_control(model, owners, m.control()) {
@@ -236,7 +321,21 @@ fn run(a: &Args) -> i32 {
     };
     let labels: HashMap<CountryId, u32> = scenario.countries.iter().map(|(l, c)| (*c, *l)).collect();
     let scenario_countries = scenario.countries.clone();
-    let state_owners = scenario.state_owners.clone();
+    let mut territory = match Territory::from_scenario(&scenario, &world.model, &graph) {
+        Ok(t) => t,
+        Err(e) => {
+            println!("SCENARIO INPUT ERROR: {e}");
+            return 65;
+        }
+    };
+    for (_, _, from, to, _) in &a.transfers {
+        for l in [from, to] {
+            if !scenario.countries.contains_key(l) {
+                println!("INPUT ERROR: --transfer: country label {l} is not defined in the scenario");
+                return 65;
+            }
+        }
+    }
     // --control の参照を事前に確認(未知のプロヴィンス・国家ラベルは入力不正)
     let mut controls: Vec<(u32, ProvinceId, Option<CountryId>)> = Vec::new();
     for (day, p, label) in &a.controls {
@@ -308,7 +407,7 @@ fn run(a: &Args) -> i32 {
     println!("\n--- day 0 (initial placement) ---");
     print_state(0, &military, &labels, a.combat);
     if a.state_control {
-        print_state_control(0, &world.model, &state_owners, &military, &labels);
+        print_state_control(0, &world.model, &territory.owners().collect(), &military, &labels);
     }
     let mut rejected = 0usize;
     for day in 1..=a.days {
@@ -328,6 +427,33 @@ fn run(a: &Args) -> i32 {
             if let Some(c) = scenario_countries.get(label) {
                 military.set_capital(*c, ProvinceId(*p));
                 println!("capital change: country {label} -> {}", ProvinceId(*p));
+            }
+        }
+        for (_, state, from, to, battles) in a.transfers.iter().filter(|t| t.0 == day) {
+            let req = TransferRequest::new(MapStateId(*state), scenario_countries[from], scenario_countries[to]).with_cancel_battles(battles.iter().map(|b| MapBattleId(*b)));
+            let ctx = TransferContext { model: &world.model, graph: &graph };
+            println!(
+                "transfer request (between days; before day {day} is processed): {} owner country {from} -> country {to}; cancel battles [{}]",
+                MapStateId(*state),
+                battles.iter().map(|b| format!("MapBattle#{b}")).collect::<Vec<_>>().join(", ")
+            );
+            match plan_transfer(ctx, &territory, &military, &req) {
+                Err(e) => println!("transfer REJECTED at planning: {e} (nothing changed){}", rejection_hint(&e)),
+                Ok(plan) => match apply_transfer(ctx, &mut territory, &mut military, &plan) {
+                    Err(e) => println!("transfer REJECTED at apply: {e} (nothing changed)"),
+                    Ok(o) => {
+                        print_transfer_outcome(&o, &labels);
+                        match territory.check_consistency(&military) {
+                            Ok(()) => println!("consistency: supply capitals equal the territory capitals; no supply setup remains for an eliminated country"),
+                            Err(e) => println!("consistency: BROKEN: {e}"),
+                        }
+                        println!("--- state right after the transfer (before day {day} is processed) ---");
+                        print_state(day, &military, &labels, a.combat);
+                        if a.state_control {
+                            print_state_control(day, &world.model, &territory.owners().collect(), &military, &labels);
+                        }
+                    }
+                },
             }
         }
         for (_, div, p) in a.orders.iter().filter(|(d, _, _)| *d == day) {
@@ -449,7 +575,7 @@ fn run(a: &Args) -> i32 {
         }
         print_state(day, &military, &labels, a.combat);
         if a.state_control {
-            print_state_control(day, &world.model, &state_owners, &military, &labels);
+            print_state_control(day, &world.model, &territory.owners().collect(), &military, &labels);
         }
     }
     let unused: Vec<u32> = a.orders.iter().filter(|(d, _, _)| *d > a.days).map(|(d, _, _)| *d).collect();

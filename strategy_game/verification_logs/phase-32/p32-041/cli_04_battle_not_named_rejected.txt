@@ -1,0 +1,215 @@
+$ cargo run --release --bin world_move_check -- --scenario assets/data/world/preview/division_territory_scenario.ron --days 7 --order 1:14:17486 --transfer 1:20:1:2 --transfer 6:21:2:1
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_territory_scenario.ron
+description: P32-041 territory transfer and country elimination validation scenario (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+wars (both directions): 1-2
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 1 ---
+transfer request (between days; before day 1 is processed): MapState#20 owner country 1 -> country 2; cancel battles []
+transfer APPLIED: MapState#20 legal owner country 1 -> country 2
+  control changes (all provinces of the state are set to country 2): 7
+    Province#18109: country 1 -> country 2
+    Province#18308: country 1 -> country 2
+    Province#18309: country 1 -> country 2
+    Province#18310: country 1 -> country 2
+    Province#18311: country 1 -> country 2
+    Province#18499: country 1 -> country 2
+    Province#18500: country 1 -> country 2
+  capital: unchanged
+  supply reach invalidated for countries: [1, 2]
+consistency: supply capitals equal the territory capitals; no supply setup remains for an eliminated country
+--- state right after the transfer (before day 1 is processed) ---
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+order MapDivision#14 -> Province#17486: accepted (1 hop(s))
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach recomputed; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 97750000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach recomputed; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 96750000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach recomputed; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 9000000 units
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#14 (country 1) at 17485 Moving progress 0.20 destination 17486 next 17486 remaining - supply 1.0000
+day 1 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 2 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 95500000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 93500000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 8000000 units
+day 2 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#14 (country 1) at 17485 Moving progress 0.40 destination 17486 next 17486 remaining - supply 1.0000
+day 2 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 3 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 93250000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 90250000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 7000000 units
+day 3 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#14 (country 1) at 17485 Moving progress 0.60 destination 17486 next 17486 remaining - supply 1.0000
+day 3 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 4 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 91000000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 87000000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 6000000 units
+day 4 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#14 (country 1) at 17485 Moving progress 0.80 destination 17486 next 17486 remaining - supply 1.0000
+day 4 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 5 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 88750000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 83750000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 5000000 units
+event: MapDivision#14 reached Province#17486
+event: MapBattle#0 started at Province#17486: country 1 attacks country 2 (attackers 14; defenders 15)
+day 5 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 5 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 5 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 6 ---
+transfer request (between days; before day 6 is processed): MapState#21 owner country 2 -> country 1; cancel battles []
+transfer REJECTED at planning: 移転するステート内の Province#17486 で MapBattle#0 が進行中ですが、中止の対象に指定されていません (nothing changed) [name the battle: --transfer DAY:STATE:FROM:TO:BATTLE_NUMBER]
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach reused from cache; demand 6241700 (eligible 2241700) consumed 2241700 units; stockpile 86508300 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 4488000 (eligible 3238000) consumed 3238000 units; stockpile 80512000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 4000000 units
+day 6 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 6 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 6 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+--- day 7 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 3 (not counted as connected); reach reused from cache; demand 6233700 (eligible 2233700) consumed 2233700 units; stockpile 84274600 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 4475500 (eligible 3225500) consumed 3225500 units; stockpile 77286500 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 3000000 units
+day 7 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 7 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 7 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+
+orders rejected: 0 (a rejection is a normal result)
+exit=0

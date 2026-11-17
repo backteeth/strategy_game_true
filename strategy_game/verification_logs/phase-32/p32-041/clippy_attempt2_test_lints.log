@@ -1,0 +1,32 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: methods called `from_*` usually take no `self`
+  --> tests\p32_041_territory_test.rs:52:18
+   |
+52 |     fn from_file(&self, path: &str) -> (Territory, MapMilitary) {
+   |                  ^^^^^
+   |
+   = help: consider choosing a less ambiguous name
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+   = note: `-D clippy::wrong-self-convention` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::wrong_self_convention)]`
+
+error: methods called `from_*` usually take no `self`
+  --> tests\p32_041_territory_test.rs:58:18
+   |
+58 |     fn from_text(&self, text: &str) -> (Territory, MapMilitary) {
+   |                  ^^^^^
+   |
+   = help: consider choosing a less ambiguous name
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#wrong_self_convention
+
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> tests\p32_041_territory_test.rs:572:16
+    |
+572 |     let table: Vec<(Result<_, OwnershipTransferError>, TransferRequest, fn(&TransferError) -> bool)> = vec![
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: could not compile `strategy_game` (test "p32_041_territory_test") due to 3 previous errors

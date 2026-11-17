@@ -131,6 +131,13 @@ impl MapMilitary {
         true
     }
 
+    /// 国家の補給の設定(首都・備蓄)と到達結果を取り除く(国家消滅。P32-041)。設定があった場合だけ `true`。
+    pub(super) fn remove_supply_country(&mut self, country: CountryId) -> bool {
+        let Some(s) = self.supply.as_mut() else { return false };
+        s.cache.remove(&country.0);
+        s.countries.remove(&country.0).is_some()
+    }
+
     /// 国家の到達結果(キャッシュ)を無効化する。再計算は、次に補給を計画する時点で行う。
     pub fn invalidate_reach(&mut self, countries: &[CountryId]) {
         if let Some(s) = self.supply.as_mut() {
