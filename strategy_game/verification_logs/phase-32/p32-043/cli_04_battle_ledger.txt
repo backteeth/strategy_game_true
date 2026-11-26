@@ -1,0 +1,1402 @@
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_war_scenario.ron
+description: P32-042 war record, ending and truce validation scenario A (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 0: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 0: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 0: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 0: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war records (day 0; hostility is derived from the active wars + legacy pairs):
+  MapWar#1: attacker 2 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#2: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#3: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  hostile pairs: 1-2 1-3 3-4
+
+--- day 1 ---
+order MapDivision#14 -> Province#17486: accepted (1 hop(s))
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach recomputed; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 97750000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach recomputed; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 96750000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach recomputed; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 9000000 units
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#14 (country 1) at 17485 Moving progress 0.20 destination 17486 next 17486 remaining - supply 1.0000
+day 1 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 1: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 1: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 1: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 1: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 2 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 95500000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 93500000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 8000000 units
+day 2 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#14 (country 1) at 17485 Moving progress 0.40 destination 17486 next 17486 remaining - supply 1.0000
+day 2 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 2: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 2: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 2: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 2: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 3 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 93250000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 90250000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 7000000 units
+day 3 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#14 (country 1) at 17485 Moving progress 0.60 destination 17486 next 17486 remaining - supply 1.0000
+day 3 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 3 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 3 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 3: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 3: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 3: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 3: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 4 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 91000000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 87000000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 6000000 units
+day 4 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#14 (country 1) at 17485 Moving progress 0.80 destination 17486 next 17486 remaining - supply 1.0000
+day 4 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 4 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 4 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 4: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 4: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 4: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 4: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 5 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6250000 (eligible 2250000) consumed 2250000 units; stockpile 88750000 units
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4500000 (eligible 3250000) consumed 3250000 units; stockpile 83750000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 5000000 units
+event: MapDivision#14 reached Province#17486
+event: MapBattle#0 started at Province#17486: country 1 attacks country 2 (attackers 14; defenders 15)
+day 5 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 5 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 5 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 5 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 5 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 5: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 5: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 5: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 5: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 6 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6241700 (eligible 2241700) consumed 2241700 units; stockpile 86508300 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4488000 (eligible 3238000) consumed 3238000 units; stockpile 80512000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 4000000 units
+day 6 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 6 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 6 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 6 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 6 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 6: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 6: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 6: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 6: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 7 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6233700 (eligible 2233700) consumed 2233700 units; stockpile 84274600 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4475500 (eligible 3225500) consumed 3225500 units; stockpile 77286500 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 3000000 units
+day 7 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 7 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 7 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 7 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 7 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 7: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 7: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 7: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 7: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 8 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6226000 (eligible 2226000) consumed 2226000 units; stockpile 82048600 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4462700 (eligible 3212700) consumed 3212700 units; stockpile 74073800 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 2000000 units
+day 8 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 8 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 8 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 8 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 8 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 8 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 8 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 8 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 8 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 8 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 8: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 8: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 8: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 8: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 9 ---
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6218500 (eligible 2218500) consumed 2218500 units; stockpile 79830100 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4449400 (eligible 3199400) consumed 3199400 units; stockpile 70874400 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 1000000 units
+day 9 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 9 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 9 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 9 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 9 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 9 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#14 (country 1) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 9 MapDivision#15 (country 2) at 17486 Fighting progress 0.00 destination - next - remaining - battle 0 supply 1.0000
+day 9 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 9 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 9 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 9: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 9: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 9: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 9: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 10 ---
+ledger: MapBattle#0 counted once for MapWar#1: defender side won
+supply: country 1: capital controlled; connected 5 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6212800 (eligible 2212800) consumed 2212800 units; stockpile 77617300 units; frontline supply exception for divisions 14
+supply: country 2: capital controlled; connected 5 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4431900 (eligible 3181900) consumed 3181900 units; stockpile 67692500 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 1000000 units; stockpile 0 units
+event: MapDivision#15 retreated from Province#17486 to Province#17269 (MapBattle#0)
+event: MapBattle#0 finished at Province#17486: attacker won (attacker country 1, defender country 2; reason defender gone)
+event: control claim: Province#17486 by country 1 (controller at the time 2; reason attacker won MapBattle#0; divisions 14)
+event: CONTROL CHANGED Province#17486: country 2 -> country 1 (attacker won MapBattle#0; divisions 14). Only this province changed; the state's legal owner is untouched
+reach invalidation targets for M6-d (previous and new controllers; no duplicates): countries 1, 2
+day 10 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 10 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 10 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 10: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 10: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 10: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 10: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 11 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach recomputed; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 75407300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach recomputed; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 64645600 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 11 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 11 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 11 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 11: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 11: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 11: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 11: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 12 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 73197300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 61598700 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 12 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 12 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 12 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 12: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 12: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 12: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 12: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 13 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 70987300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 58551800 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 13 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 13 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 13 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 13: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 13: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 13: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 13: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 14 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 68777300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 55504900 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 14 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 14 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 14 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 14: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 14: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 14: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 14: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 15 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 66567300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 52458000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 15 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 15 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 15 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 15: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 15: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 15: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 15: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 16 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 64357300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 49411100 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 16 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 16 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 16 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 16: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 16: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 16: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 16: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 17 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 62147300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 46364200 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 17 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 17 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 17 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 17: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 17: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 17: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 17: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 18 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 59937300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 43317300 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 18 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 18 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 18 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 18: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 18: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 18: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 18: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 19 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 57727300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 40270400 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 19 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 19 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 19 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 19: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 19: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 19: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 19: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 20 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 55517300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 37223500 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 20 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 20 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 20 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 20: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 20: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 20: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 20: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 21 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 53307300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 34176600 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 21 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 21 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 21 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 21: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 21: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 21: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 21: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 22 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 51097300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 31129700 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 22 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 22 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 22 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 22: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 22: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 22: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 22: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 23 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 48887300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 28082800 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 23 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 23 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 23 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 23: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 23: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 23: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 23: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 24 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 46677300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 25035900 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 24 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 24 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 24 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 24: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 24: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 24: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 24: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+--- day 25 ---
+supply: country 1: capital controlled; connected 6 province(s), unknown 10 (not counted as connected); reach reused from cache; demand 6210000 (eligible 2210000) consumed 2210000 units; stockpile 44467300 units
+supply: country 2: capital controlled; connected 4 province(s), unknown 2 (not counted as connected); reach reused from cache; demand 4296900 (eligible 3046900) consumed 3046900 units; stockpile 21989000 units
+supply: country 3: capital controlled; connected 1 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 2000000 (eligible 1000000) consumed 0 units; stockpile 0 units
+day 25 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#14 (country 1) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#15 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 25 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 25 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 25: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 4/13 (30.7692%) over 1 state(s) [MapState#21 4/13] -> floor(rate*40) = -12 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 1 win(s) -> -5 (cap +-20)
+  total: -17 (before the +-100 cap: -17)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 25: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 25: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 25: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+
+orders rejected: 0 (a rejection is a normal result)

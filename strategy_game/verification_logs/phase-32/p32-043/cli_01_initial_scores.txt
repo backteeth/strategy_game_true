@@ -1,0 +1,68 @@
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_war_scenario.ron
+description: P32-042 war record, ending and truce validation scenario A (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war score day 0: MapWar#1 (attacker country 2 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 2 over country 1's states = 0/1 (0.0000%) over 2 state(s) [MapState#20 0/7, MapState#22 0/6] -> floor(rate*40) = +0 point(s); 60% reached: false
+  defender occupation: country 1 over country 2's states = 3/13 (23.0769%) over 1 state(s) [MapState#21 3/13] -> floor(rate*40) = -9 point(s); 60% reached: false
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: -9 (before the +-100 cap: -9)
+  defender country 1: combat-ready divisions yes; attacker country 2: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 0: MapWar#2 (attacker country 3 vs defender country 1; target MapState#22; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 0: MapWar#3 (attacker country 3 vs defender country 1; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: country 3 over country 1's states = 1/12 (8.3333%) over 2 state(s) [MapState#20 0/7, MapState#22 1/6] -> floor(rate*40) = +3 point(s); 60% reached: false
+  defender occupation: rate undefined (country 3 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 3 (before the +-100 cap: 3)
+  defender country 1: combat-ready divisions yes; attacker country 3: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war score day 0: MapWar#4 (attacker country 4 vs defender country 3; target MapState#20; attacker's point of view)
+  war goal: 0 (target not fully controlled by the attacker's primary)
+  attacker occupation: rate undefined (country 3 owns no state with provinces) -> +0 point(s); the 60% condition is not met
+  defender occupation: rate undefined (country 4 owns no state with provinces) -> -0 point(s); the 60% condition is not met
+  battles: attacker side 0 win(s), defender side 0 win(s) -> +0 (cap +-20)
+  total: 0 (before the +-100 cap: 0)
+  defender country 3: combat-ready divisions yes; attacker country 4: combat-ready divisions yes
+  verdict: no surrender (a verdict only; M7-c applies nothing, the peace is M7-d)
+war records (day 0; hostility is derived from the active wars + legacy pairs):
+  MapWar#1: attacker 2 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#2: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#3: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  hostile pairs: 1-2 1-3 3-4
+
+orders rejected: 0 (a rejection is a normal result)

@@ -24,6 +24,7 @@ use strategy_game::world::{
     Conflicts, DisbandReason, EndReason, EndWarApplyError, EndWarError, EndWarOutcome, EndWarRequest, MapBattleId, MapWarId, Territory, TransferContext, TransferError, TransferOutcome, TransferRequest,
     WarResult, apply_end_war, apply_transfer, plan_end_war, plan_transfer,
 };
+use strategy_game::world::{AttackerReason, BattleLedger, DefenderReason, LedgerEntry, ScoreError, SkipReason, Verdict, WarAssessment, assess_war};
 
 use strategy_game::common::CountryId;
 use strategy_game::hexmap::data::load_from_path;
@@ -33,7 +34,7 @@ use strategy_game::world::{
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]... [--end-war DAY:WAR:white|cede[:BATTLE,BATTLE...]]... [--wars]";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]... [--end-war DAY:WAR:white|cede[:BATTLE,BATTLE...]]... [--wars] [--war-score]";
 
 #[derive(Default)]
 struct Args {
@@ -51,6 +52,7 @@ struct Args {
     /// (day, war, cede?, battles)
     end_wars: Vec<(u32, u32, bool, Vec<u32>)>,
     wars: bool,
+    war_score: bool,
 }
 
 fn num(name: &str, s: &str) -> Result<u32, String> {
@@ -130,6 +132,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 a.transfers.push((day, num("--transfer state", parts[1])?, num("--transfer from", parts[2])?, num("--transfer to", parts[3])?, battles));
             }
             "--wars" => a.wars = true,
+            "--war-score" => a.war_score = true,
             "--end-war" => {
                 let v = value()?;
                 let parts: Vec<&str> = v.split(':').collect();
@@ -333,6 +336,94 @@ fn print_end_war_outcome(o: &EndWarOutcome, labels: &HashMap<CountryId, u32>) {
     println!("  supply reach invalidated (end-war) for countries: [{}]", o.invalidated_countries.iter().map(|c| name(*c)).collect::<Vec<_>>().join(", "));
 }
 
+fn lab(labels: &HashMap<CountryId, u32>, c: CountryId) -> String {
+    labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into())
+}
+
+fn print_assessment(day: u32, a: &WarAssessment, labels: &HashMap<CountryId, u32>, c: &Conflicts) {
+    let b = &a.breakdown;
+    let Some(w) = c.war(b.war) else { return };
+    let (ap, dp) = (w.attacker.primary, w.defender.primary);
+    println!("war score day {day}: {} (attacker country {} vs defender country {}; target {}; attacker's point of view)", b.war, lab(labels, ap), lab(labels, dp), w.target_state);
+    println!("  war goal: {} ({})", b.war_goal_score, if b.target_held { "the whole target state is controlled by the attacker's primary" } else { "target not fully controlled by the attacker's primary" });
+    for (name, r, pts, sign) in [("attacker occupation", &b.attacker_occupation, b.attacker_occupation_score, "+"), ("defender occupation", &b.defender_occupation, b.defender_occupation_score, "-")] {
+        match r.rate {
+            None => println!("  {name}: rate undefined (country {} owns no state with provinces) -> {sign}{pts} point(s); the 60% condition is not met", lab(labels, r.owner)),
+            Some(x) => println!(
+                "  {name}: country {} over country {}'s states = {}/{} ({:.4}%) over {} state(s) [{}] -> floor(rate*40) = {sign}{pts} point(s); 60% reached: {}",
+                lab(labels, r.occupier),
+                lab(labels, r.owner),
+                x.num,
+                x.den,
+                x.as_f64() * 100.0,
+                r.states.len(),
+                r.states.iter().map(|s| format!("{} {}/{}", s.state, s.controlled, s.total)).collect::<Vec<_>>().join(", "),
+                r.reaches_surrender_rate().map(|b| b.to_string()).unwrap_or_else(|e| e.to_string())
+            ),
+        }
+    }
+    println!("  battles: attacker side {} win(s), defender side {} win(s) -> {:+} (cap +-20)", b.attacker_battle_wins, b.defender_battle_wins, b.battle_score);
+    println!("  total: {} (before the +-100 cap: {})", b.total_score, b.raw_total);
+    println!(
+        "  defender country {}: combat-ready divisions {}; attacker country {}: combat-ready divisions {}",
+        lab(labels, dp),
+        if a.defender_combat_ready { "yes" } else { "none" },
+        lab(labels, ap),
+        if a.attacker_combat_ready { "yes" } else { "none" }
+    );
+    for r in &a.defender_reasons {
+        println!(
+            "  defender surrender condition met: {}",
+            match r {
+                DefenderReason::TargetHeldAndOccupation => "target fully controlled and the attacker's occupation rate is >= 60%",
+                DefenderReason::TargetHeldAndNoCombatReadyDivisions => "target fully controlled and the defender has no combat-ready division",
+            }
+        );
+    }
+    for r in &a.attacker_reasons {
+        match r {
+            AttackerReason::OccupationRate => println!("  attacker surrender condition met: the defender's occupation rate of the attacker's land is >= 60%"),
+            AttackerReason::NoCombatReadyDivisionsAndStateHeld(s) => println!(
+                "  attacker surrender condition met: no combat-ready division and the defender fully controls the attacker's state(s) {}",
+                s.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ")
+            ),
+        }
+    }
+    println!(
+        "  verdict: {}{} (a verdict only; M7-c applies nothing, the peace is M7-d)",
+        match a.verdict {
+            Verdict::None => "no surrender",
+            Verdict::DefenderSurrenders => "DEFENDER SURRENDERS",
+            Verdict::AttackerSurrenders => "ATTACKER SURRENDERS",
+        },
+        if a.both_met_tie_break { " (both sides met a condition: decided by the total score; > 0 means the defender, otherwise the attacker)" } else { "" }
+    );
+}
+
+fn print_war_scores(day: u32, world: &WorldModel, territory: &Territory, military: &MapMilitary, conflicts: &Conflicts, ledger: &BattleLedger, labels: &HashMap<CountryId, u32>) {
+    let mut any = false;
+    for w in conflicts.wars() {
+        any = true;
+        match assess_war(w, world, territory, military, ledger) {
+            Ok(a) => print_assessment(day, &a, labels, conflicts),
+            Err(ScoreError::AlreadyEnded(id)) => println!("war score day {day}: {id} has ended (not judged)"),
+            Err(e) => println!("war score day {day}: {} could not be judged: {e}", w.id),
+        }
+    }
+    if !any {
+        println!("war score day {day}: no war records in this scenario");
+    }
+    for (b, r) in ledger.skipped() {
+        println!(
+            "  battle {b} not counted: {}",
+            match r {
+                SkipReason::NoWar => "no active war record has the two countries on opposite sides (legacy pair)".to_string(),
+                SkipReason::Ambiguous(ids) => format!("{} active wars match the two countries ({}), so it cannot be assigned to one", ids.len(), ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")),
+            }
+        );
+    }
+}
+
 fn print_state_control(day: u32, model: &WorldModel, owners: &BTreeMap<MapStateId, CountryId>, m: &MapMilitary, labels: &HashMap<CountryId, u32>) {
     let name = |c: CountryId| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into());
     let summary = match summarize_control(model, owners, m.control()) {
@@ -525,8 +616,12 @@ fn run(a: &Args) -> i32 {
         println!("INPUT ERROR: --transfer cannot be used with a scenario that has war records (use --end-war, which keeps the records and the hostility consistent)");
         return 65;
     }
+    let mut ledger = BattleLedger::new();
     println!("\n--- day 0 (initial placement) ---");
     print_state(0, &military, &labels, a.combat);
+    if a.war_score {
+        print_war_scores(0, &world.model, &territory, &military, &conflicts, &ledger, &labels);
+    }
     if a.state_control {
         print_state_control(0, &world.model, &territory.owners().collect(), &military, &labels);
     }
@@ -624,6 +719,15 @@ fn run(a: &Args) -> i32 {
             }
         }
         let day_events = military.advance_day(&graph);
+        if a.war_score {
+            for e in ledger.record_events(&conflicts, &day_events) {
+                match e {
+                    LedgerEntry::Counted { battle, war, attacker_side_won } => println!("ledger: {battle} counted once for {war}: {} side won", if attacker_side_won { "attacker" } else { "defender" }),
+                    LedgerEntry::Skipped { battle, .. } => println!("ledger: {battle} not counted (reason listed below)"),
+                    LedgerEntry::Duplicate { battle } => println!("ledger: {battle} already counted (ignored)"),
+                }
+            }
+        }
         for e in day_events.iter().cloned() {
             match e {
                 MoveEvent::HopCompleted { division, province } => println!("event: {division} reached {province}"),
@@ -731,6 +835,9 @@ fn run(a: &Args) -> i32 {
         print_state(day, &military, &labels, a.combat);
         if a.state_control {
             print_state_control(day, &world.model, &territory.owners().collect(), &military, &labels);
+        }
+        if a.war_score {
+            print_war_scores(day, &world.model, &territory, &military, &conflicts, &ledger, &labels);
         }
     }
     let unused: Vec<u32> = a.orders.iter().filter(|(d, _, _)| *d > a.days).map(|(d, _, _)| *d).collect();

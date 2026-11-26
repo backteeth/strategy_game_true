@@ -1,0 +1,7 @@
+ M strategy_game/src/bin/world_move_check.rs
+ M strategy_game/src/world/mod.rs
+ M strategy_game/verification_logs/phase-32/p32-042/p32-042_m7b_war_record_report.md
+?? hex_atlas/
+?? strategy_game/src/world/war_score.rs
+?? strategy_game/tests/p32_043_war_score_test.rs
+?? strategy_game/verification_logs/phase-32/p32-043/
