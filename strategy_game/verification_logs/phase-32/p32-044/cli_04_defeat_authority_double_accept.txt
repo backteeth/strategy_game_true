@@ -1,0 +1,73 @@
+$ world_move_check --scenario assets/data/world/preview/division_war_scenario.ron --brief --days 4 --propose 2:1:1:cede --propose 2:1:3:white --propose 2:1:2:defeat --accept 3:1:1 --accept 4:1:1
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_war_scenario.ron
+description: P32-042 war record, ending and truce validation scenario A (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war records (day 0; hostility is derived from the active wars + legacy pairs):
+  MapWar#1: attacker 2 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#2: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#3: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  hostile pairs: 1-2 1-3 3-4
+
+--- day 1 ---
+
+--- day 2 ---
+proposal (day 2): MapWar#1 country 1 proposes cede to country 2
+proposal REJECTED: CountryId 1 は CedeTarget を提案する権限がありません(割譲・敗北は攻撃側代表国だけ) (nothing changed)
+proposal (day 2): MapWar#1 country 3 proposes white to country 2
+proposal REJECTED: CountryId 3 と 2 は MapWar#1 の対立する代表国の組ではありません (nothing changed)
+proposal (day 2): MapWar#1 country 2 proposes defeat to country 1
+proposal created: MapWar#1 defeat from country 2 to country 1 on day 2
+  query (read-only, as of day 2): acceptable; total score -9 (defender-alone surrender condition: not met); acceptance would end 1 war(s)
+
+--- day 3 ---
+accept (day 3): country 1 accepts the AcceptDefeat proposal of day 2 for MapWar#1
+end-war APPLIED on day 3:
+  MapWar#1 ended: defender victory (attacker's defeat accepted (proposal; no territory moves))
+  hostility ended: [1-2]; kept by other wars: []
+  occupation returned to the legal owner: Province#17696: country 1 -> country 2
+  occupation returned to the legal owner: Province#17905: country 1 -> country 2
+  occupation returned to the legal owner: Province#18112: country 1 -> country 2
+  division 11 (country 1) returned (hostility ended): Province#17905 -> Province#17266
+  truce set: country 1-2 until day 1828 (1825 days from day 3; in force through day 1827)
+  supply reach invalidated (end-war) for countries: [1, 2]
+consistency: supply capitals equal the territory capitals; hostility equals the one derived from the war records
+war records (day 3; hostility is derived from the active wars + legacy pairs):
+  MapWar#1: attacker 2 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ENDED day 3 defender victory (attacker's defeat accepted (proposal; no territory moves))
+  MapWar#2: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#3: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  hostile pairs: 1-3 3-4
+  truce 1-2 until day 1828 (in force through day 1827; expires on day 1828)
+
+--- day 4 ---
+accept (day 4): country 1 accepts the AcceptDefeat proposal of day 2 for MapWar#1
+accept REJECTED: MapWar#1 は 3 日に終結済みです (nothing changed)
+
+orders rejected: 0 (a rejection is a normal result)
+exit=0

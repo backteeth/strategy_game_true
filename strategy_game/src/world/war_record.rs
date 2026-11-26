@@ -28,7 +28,10 @@
 //! 師団の帰還の対象: 移転・正常化のあとの位置で、**自国の支配でも交戦相手の支配でもない**プロヴィンス(支配国あり)にいて、かつ(位置の支配国・位置の旧支配国・法的所有国のいずれかと)
 //! **敵対が今回解けた**師団。帰還先は M7-a と同じ(隣接する自国支配のプロヴィンス → 自国支配の最小 `ProvinceId`、どちらも進行中の戦闘なし。なければ解散 `NoReturnProvince`)。
 //!
-//! 限界: 戦争点数・降伏・講和の受諾・停滞による自動講和はない。`Conflicts` と `Territory`・`MapMilitary` は別の値で、呼び出し側が 3 つを渡す。
+//! M7-d(P32-044): 条件は白紙講和・割譲に加えて敗北(`PeaceTerms::Defeat`。領土移転なしの防御側勝利)、経緯は合意か降伏(`EndBasis`。`EndReason` の `Cession` / `DefeatAccepted` と
+//! `DefenderSurrender` / `AttackerSurrender` で判別できる)。割譲で首都を失う国の候補には、**同じ講和で敵対が解けて返還されるプロヴィンス**(返還後の支配)を含める(`territory::execute` の `returned`)。
+//! 提案・受諾・自動講和は `world::peace`。
+//! 限界: 講和の受諾・自動講和は `world::peace`、停滞による自動講和はない。`Conflicts` と `Territory`・`MapMilitary` は別の値で、呼び出し側が 3 つを渡す。
 //! 記録のある世界では、移転は終結 API 経由で行う(単独の `apply_transfer` は戦争記録を整理しないので、`Conflicts::check_consistency` が不一致を検出する)。
 
 use super::battle::{CancelledBattle, MapBattleId, MapBattleStatus};
@@ -99,6 +102,12 @@ pub enum EndReason {
     DefenderEliminated,
     /// 目標のステートの所有国が割譲で変わり、目標を達成できなくなった(白紙講和で失効)。
     TargetOwnerChanged,
+    /// 攻撃側の敗北受諾(M7-d の提案の受諾。領土移転なし、防御側の勝利)。
+    DefeatAccepted,
+    /// 自動講和: 防御側の降伏(目標ステートの割譲、攻撃側の勝利。提案の受諾条件は介さない)。
+    DefenderSurrender,
+    /// 自動講和: 攻撃側の降伏(領土移転なし、防御側の勝利)。
+    AttackerSurrender,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -299,6 +308,17 @@ pub enum PeaceTerms {
     /// 目標ステートの割譲(防御側の代表国 → 攻撃側の代表国。攻撃側の勝利)。`cancel_battles` は M7-a と同じ**明示**の戦闘中止
     /// (移転ステート内の、敵対が続く組の戦闘を中止する場合に指定する。敵対が解ける組の戦闘は自動で中止する)。
     Cession { cancel_battles: Vec<MapBattleId> },
+    /// 攻撃側の敗北(領土移転なし。防御側の勝利。M7-d)。
+    Defeat,
+}
+
+/// 講和の成立の経緯(記録の `EndReason` で判別できる)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndBasis {
+    /// 明示した合意(M7-b の直接の終結、M7-d の提案の受諾)。
+    Agreement,
+    /// 自動講和(降伏の判定。割譲か敗北だけ)。
+    Surrender,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -307,15 +327,32 @@ pub struct EndWarRequest {
     pub terms: PeaceTerms,
     /// 終結日(日番号。休戦の起点。開始日より前は不可)。
     pub day: u32,
+    /// 成立の経緯(合意か降伏か)。結果の理由の記録に使う。
+    pub basis: EndBasis,
 }
 
 impl EndWarRequest {
     pub fn white_peace(war: MapWarId, day: u32) -> EndWarRequest {
-        EndWarRequest { war, terms: PeaceTerms::White, day }
+        EndWarRequest { war, terms: PeaceTerms::White, day, basis: EndBasis::Agreement }
     }
 
     pub fn cession(war: MapWarId, day: u32) -> EndWarRequest {
-        EndWarRequest { war, terms: PeaceTerms::Cession { cancel_battles: Vec::new() }, day }
+        EndWarRequest { war, terms: PeaceTerms::Cession { cancel_battles: Vec::new() }, day, basis: EndBasis::Agreement }
+    }
+
+    /// 攻撃側の敗北(合意。領土移転なし)。
+    pub fn defeat(war: MapWarId, day: u32) -> EndWarRequest {
+        EndWarRequest { war, terms: PeaceTerms::Defeat, day, basis: EndBasis::Agreement }
+    }
+
+    /// 自動講和: 防御側の降伏(目標の割譲)。
+    pub fn defender_surrender(war: MapWarId, day: u32) -> EndWarRequest {
+        EndWarRequest { basis: EndBasis::Surrender, ..EndWarRequest::cession(war, day) }
+    }
+
+    /// 自動講和: 攻撃側の降伏(領土移転なしの防御側勝利)。
+    pub fn attacker_surrender(war: MapWarId, day: u32) -> EndWarRequest {
+        EndWarRequest { basis: EndBasis::Surrender, ..EndWarRequest::defeat(war, day) }
     }
 
     pub fn with_cancel_battles(mut self, ids: impl IntoIterator<Item = MapBattleId>) -> EndWarRequest {
@@ -347,6 +384,8 @@ pub enum EndWarError {
     HostilityOutOfSync,
     /// 割譲の移転(M7-a の検証)が拒否した。
     Transfer(TransferError),
+    /// 条件と経緯の組み合わせが不正(降伏は割譲か敗北だけ)。
+    InvalidTerms,
 }
 
 impl std::fmt::Display for EndWarError {
@@ -357,6 +396,7 @@ impl std::fmt::Display for EndWarError {
             EndWarError::DayBeforeStart { war, start_day, day } => write!(f, "{war} の開始日 {start_day} より前の日 {day} には終結できません"),
             EndWarError::HostilityOutOfSync => write!(f, "交戦関係が戦争の記録と一致しません(記録を経由しない変更があります)"),
             EndWarError::Transfer(e) => write!(f, "割譲を適用できません: {e}"),
+            EndWarError::InvalidTerms => write!(f, "条件と経緯の組み合わせが不正です(降伏は割譲か敗北だけ)"),
         }
     }
 }
@@ -531,9 +571,12 @@ fn cascade(conflicts: &Conflicts, req: &EndWarRequest, eliminated: Option<Countr
     let mut wars = conflicts.wars.clone();
     let mut ended: Vec<EndedWar> = Vec::new();
     let mut supporters_removed: Vec<SupporterRemoved> = Vec::new();
-    let (result, reason) = match req.terms {
-        PeaceTerms::White => (WarResult::WhitePeace, EndReason::WhitePeace),
-        PeaceTerms::Cession { .. } => (WarResult::AttackerVictory, EndReason::Cession),
+    let (result, reason) = match (&req.terms, req.basis) {
+        (PeaceTerms::White, _) => (WarResult::WhitePeace, EndReason::WhitePeace),
+        (PeaceTerms::Cession { .. }, EndBasis::Agreement) => (WarResult::AttackerVictory, EndReason::Cession),
+        (PeaceTerms::Cession { .. }, EndBasis::Surrender) => (WarResult::AttackerVictory, EndReason::DefenderSurrender),
+        (PeaceTerms::Defeat, EndBasis::Agreement) => (WarResult::DefenderVictory, EndReason::DefeatAccepted),
+        (PeaceTerms::Defeat, EndBasis::Surrender) => (WarResult::DefenderVictory, EndReason::AttackerSurrender),
     };
     let mut ended_ids: BTreeSet<MapWarId> = BTreeSet::new();
     ended_ids.insert(req.war);
@@ -590,6 +633,9 @@ fn execute(ctx: TransferContext<'_>, territory: &mut Territory, conflicts: &mut 
         return Err(EndWarError::DayBeforeStart { war: war.id, start_day: war.start_day, day: req.day });
     }
     conflicts.check_consistency(military).map_err(|_| EndWarError::HostilityOutOfSync)?;
+    if req.basis == EndBasis::Surrender && matches!(req.terms, PeaceTerms::White) {
+        return Err(EndWarError::InvalidTerms);
+    }
     let (attacker, defender, target) = (war.attacker.primary, war.defender.primary, war.target_state);
     let cession = matches!(req.terms, PeaceTerms::Cession { .. });
     // 割譲で消滅する国(防御側の代表国が目標だけを所有している)
@@ -618,7 +664,19 @@ fn execute(ctx: TransferContext<'_>, territory: &mut Territory, conflicts: &mut 
         let mut cancel: BTreeSet<MapBattleId> = cancel_battles.iter().copied().collect();
         cancel.extend(dissolved.iter().copied());
         let treq = TransferRequest::new(target, defender, attacker).with_cancel_battles(cancel);
-        transfer = Some(super::territory::execute(ctx, territory, military, &treq).map_err(EndWarError::Transfer)?);
+        // 同じ講和で敵対が解けて法的所有国へ返還されるプロヴィンス(返還後の支配国)。首都を失う国の候補選びに含める(M7-d)。
+        let mut returned_control: BTreeMap<ProvinceId, CountryId> = BTreeMap::new();
+        for (p, x) in military.control().iter() {
+            let Some(st) = model.state_of(p) else { continue };
+            let owner = if st == target { Some(attacker) } else { territory.owner(st) };
+            if let Some(o) = owner
+                && o != x
+                && hostility_ended.contains(&key(o, x))
+            {
+                returned_control.insert(p, o);
+            }
+        }
+        transfer = Some(super::territory::execute(ctx, territory, military, &treq, &returned_control).map_err(EndWarError::Transfer)?);
     }
 
     // ---- 変更(ここから先は失敗しない)

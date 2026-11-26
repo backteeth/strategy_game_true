@@ -24,6 +24,7 @@ use strategy_game::world::{
     Conflicts, DisbandReason, EndReason, EndWarApplyError, EndWarError, EndWarOutcome, EndWarRequest, MapBattleId, MapWarId, Territory, TransferContext, TransferError, TransferOutcome, TransferRequest,
     WarResult, apply_end_war, apply_transfer, plan_end_war, plan_transfer,
 };
+use strategy_game::world::{AutoPeaceEntry, PeaceProposal, ProposalTerms, accept_peace, check_acceptance, propose_peace, run_auto_peace};
 use strategy_game::world::{AttackerReason, BattleLedger, DefenderReason, LedgerEntry, ScoreError, SkipReason, Verdict, WarAssessment, assess_war};
 
 use strategy_game::common::CountryId;
@@ -34,7 +35,7 @@ use strategy_game::world::{
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]... [--end-war DAY:WAR:white|cede[:BATTLE,BATTLE...]]... [--wars] [--war-score]";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]... [--end-war DAY:WAR:white|cede[:BATTLE,BATTLE...]]... [--wars] [--war-score] [--propose DAY:WAR:PROPOSER_LABEL:white|cede|defeat]... [--accept DAY:WAR:ACCEPTOR_LABEL]... [--auto-peace] [--brief]";
 
 #[derive(Default)]
 struct Args {
@@ -53,6 +54,12 @@ struct Args {
     end_wars: Vec<(u32, u32, bool, Vec<u32>)>,
     wars: bool,
     war_score: bool,
+    /// (day, war, proposer label, terms)
+    proposals: Vec<(u32, u32, u32, String)>,
+    /// (day, war, acceptor label)
+    accepts: Vec<(u32, u32, u32)>,
+    auto_peace: bool,
+    brief: bool,
 }
 
 fn num(name: &str, s: &str) -> Result<u32, String> {
@@ -133,6 +140,32 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--wars" => a.wars = true,
             "--war-score" => a.war_score = true,
+            "--auto-peace" => a.auto_peace = true,
+            "--brief" => a.brief = true,
+            "--propose" => {
+                let v = value()?;
+                let parts: Vec<&str> = v.split(':').collect();
+                if parts.len() != 4 || !matches!(parts[3], "white" | "cede" | "defeat") {
+                    return Err(format!("--propose: \"{v}\" is not DAY:WAR:PROPOSER_LABEL:white|cede|defeat"));
+                }
+                let day = num("--propose day", parts[0])?;
+                if day == 0 {
+                    return Err("--propose: the day starts at 1".into());
+                }
+                a.proposals.push((day, num("--propose war", parts[1])?, num("--propose proposer", parts[2])?, parts[3].to_string()));
+            }
+            "--accept" => {
+                let v = value()?;
+                let parts: Vec<&str> = v.split(':').collect();
+                if parts.len() != 3 {
+                    return Err(format!("--accept: \"{v}\" is not DAY:WAR:ACCEPTOR_LABEL"));
+                }
+                let day = num("--accept day", parts[0])?;
+                if day == 0 {
+                    return Err("--accept: the day starts at 1".into());
+                }
+                a.accepts.push((day, num("--accept war", parts[1])?, num("--accept acceptor", parts[2])?));
+            }
             "--end-war" => {
                 let v = value()?;
                 let parts: Vec<&str> = v.split(':').collect();
@@ -270,6 +303,9 @@ fn reason_text(r: EndReason) -> &'static str {
         EndReason::AttackerEliminated => "attacker primary eliminated",
         EndReason::DefenderEliminated => "defender primary eliminated",
         EndReason::TargetOwnerChanged => "target's owner changed (invalidated by white peace)",
+        EndReason::DefeatAccepted => "attacker's defeat accepted (proposal; no territory moves)",
+        EndReason::DefenderSurrender => "AUTOMATIC: defender surrender (cession of the target)",
+        EndReason::AttackerSurrender => "AUTOMATIC: attacker surrender (no territory moves)",
     }
 }
 
@@ -541,6 +577,18 @@ fn run(a: &Args) -> i32 {
             }
         }
     }
+    for (_, _, l, _) in &a.proposals {
+        if !scenario.countries.contains_key(l) {
+            println!("INPUT ERROR: --propose: country label {l} is not defined in the scenario");
+            return 65;
+        }
+    }
+    for (_, _, l) in &a.accepts {
+        if !scenario.countries.contains_key(l) {
+            println!("INPUT ERROR: --accept: country label {l} is not defined in the scenario");
+            return 65;
+        }
+    }
     // --control の参照を事前に確認(未知のプロヴィンス・国家ラベルは入力不正)
     let mut controls: Vec<(u32, ProvinceId, Option<CountryId>)> = Vec::new();
     for (day, p, label) in &a.controls {
@@ -617,6 +665,7 @@ fn run(a: &Args) -> i32 {
         return 65;
     }
     let mut ledger = BattleLedger::new();
+    let mut proposals: Vec<PeaceProposal> = Vec::new();
     println!("\n--- day 0 (initial placement) ---");
     print_state(0, &military, &labels, a.combat);
     if a.war_score {
@@ -679,6 +728,59 @@ fn run(a: &Args) -> i32 {
                 },
             }
         }
+        for (_, war, proposer, terms) in a.proposals.iter().filter(|t| t.0 == day) {
+            let id = MapWarId(*war);
+            let proposer_c = scenario_countries[proposer];
+            let Some(w) = conflicts.war(id) else {
+                println!("proposal REJECTED: {id} does not exist (nothing changed)");
+                continue;
+            };
+            let recipient = if proposer_c == w.attacker.primary { w.defender.primary } else { w.attacker.primary };
+            let t = match terms.as_str() {
+                "white" => ProposalTerms::WhitePeace,
+                "cede" => ProposalTerms::CedeTarget,
+                _ => ProposalTerms::AcceptDefeat,
+            };
+            println!("proposal (day {day}): {id} country {proposer} proposes {terms} to country {}", lab(&labels, recipient));
+            match propose_peace(&conflicts, &territory, id, proposer_c, recipient, t, day) {
+                Err(e) => println!("proposal REJECTED: {e} (nothing changed)"),
+                Ok(pr) => {
+                    println!("proposal created: {id} {terms} from country {proposer} to country {} on day {day}", lab(&labels, recipient));
+                    proposals.push(pr);
+                    let ctx = TransferContext { model: &world.model, graph: &graph };
+                    match check_acceptance(ctx, &territory, &conflicts, &military, &ledger, &pr, recipient, day) {
+                        Ok(acc) => println!(
+                            "  query (read-only, as of day {day}): acceptable; total score {} (defender-alone surrender condition: {}); acceptance would end {} war(s)",
+                            acc.assessment.breakdown.total_score,
+                            if acc.assessment.defender_reasons.is_empty() { "not met" } else { "met" },
+                            acc.plan.outcome().ended.len()
+                        ),
+                        Err(e) => println!("  query (read-only, as of day {day}): NOT acceptable now: {e}"),
+                    }
+                }
+            }
+        }
+        for (_, war, acceptor) in a.accepts.iter().filter(|t| t.0 == day) {
+            let id = MapWarId(*war);
+            let acceptor_c = scenario_countries[acceptor];
+            let Some(pr) = proposals.iter().rev().find(|p| p.war == id).copied() else {
+                println!("accept REJECTED: no proposal for {id} has been made (nothing changed)");
+                continue;
+            };
+            println!("accept (day {day}): country {acceptor} accepts the {:?} proposal of day {} for {id}", pr.terms, pr.day);
+            let ctx = TransferContext { model: &world.model, graph: &graph };
+            match accept_peace(ctx, &mut territory, &mut conflicts, &mut military, &ledger, &pr, acceptor_c, day) {
+                Err(e) => println!("accept REJECTED: {e} (nothing changed)"),
+                Ok(o) => {
+                    print_end_war_outcome(&o, &labels);
+                    match (territory.check_consistency(&military), conflicts.check_consistency(&military)) {
+                        (Ok(()), Ok(())) => println!("consistency: supply capitals equal the territory capitals; hostility equals the one derived from the war records"),
+                        (x, y) => println!("consistency: BROKEN: {:?} {:?}", x.err(), y.err()),
+                    }
+                    print_wars(day, &conflicts, &labels);
+                }
+            }
+        }
         for (_, state, from, to, battles) in a.transfers.iter().filter(|t| t.0 == day) {
             let req = TransferRequest::new(MapStateId(*state), scenario_countries[from], scenario_countries[to]).with_cancel_battles(battles.iter().map(|b| MapBattleId(*b)));
             let ctx = TransferContext { model: &world.model, graph: &graph };
@@ -719,8 +821,18 @@ fn run(a: &Args) -> i32 {
             }
         }
         let day_events = military.advance_day(&graph);
-        if a.war_score {
-            for e in ledger.record_events(&conflicts, &day_events) {
+        let auto_report = if a.auto_peace {
+            let ctx = TransferContext { model: &world.model, graph: &graph };
+            Some(run_auto_peace(ctx, &mut territory, &mut conflicts, &mut military, &mut ledger, &day_events, day))
+        } else {
+            None
+        };
+        let ledger_entries = match &auto_report {
+            Some(r) => r.ledger_entries.clone(),
+            None => ledger.record_events(&conflicts, &day_events),
+        };
+        if a.war_score || a.auto_peace {
+            for e in ledger_entries {
                 match e {
                     LedgerEntry::Counted { battle, war, attacker_side_won } => println!("ledger: {battle} counted once for {war}: {} side won", if attacker_side_won { "attacker" } else { "defender" }),
                     LedgerEntry::Skipped { battle, .. } => println!("ledger: {battle} not counted (reason listed below)"),
@@ -728,7 +840,7 @@ fn run(a: &Args) -> i32 {
                 }
             }
         }
-        for e in day_events.iter().cloned() {
+        for e in day_events.iter().filter(|_| !a.brief).cloned() {
             match e {
                 MoveEvent::HopCompleted { division, province } => println!("event: {division} reached {province}"),
                 MoveEvent::Arrived { division, province } => println!("event: {division} arrived at its destination {province}"),
@@ -825,14 +937,47 @@ fn run(a: &Args) -> i32 {
                 ),
             }
         }
+        if let Some(r) = &auto_report {
+            for e in &r.entries {
+                match e {
+                    AutoPeaceEntry::Ended { war, verdict, outcome } => {
+                        println!(
+                            "AUTO-PEACE day {day}: {war}: {} -> peace applied through the common end API (no proposal conditions involved)",
+                            match verdict {
+                                Verdict::DefenderSurrenders => "defender surrenders".to_string(),
+                                Verdict::AttackerSurrenders => "attacker surrenders".to_string(),
+                                Verdict::None => "none".to_string(),
+                            }
+                        );
+                        print_end_war_outcome(outcome, &labels);
+                        match (territory.check_consistency(&military), conflicts.check_consistency(&military)) {
+                            (Ok(()), Ok(())) => println!("consistency: supply capitals equal the territory capitals; hostility equals the one derived from the war records"),
+                            (x, y) => println!("consistency: BROKEN: {:?} {:?}", x.err(), y.err()),
+                        }
+                    }
+                    AutoPeaceEntry::SkippedEnded { war } => println!("AUTO-PEACE day {day}: {war} was already ended by an earlier peace of the day (chain); skipped as processed"),
+                    AutoPeaceEntry::Failed { war, verdict, error } => println!(
+                        "AUTO-PEACE day {day}: {war}: {} but the peace could NOT be applied: {error} (nothing changed; the war stays active and is judged again next time)",
+                        if *verdict == Verdict::DefenderSurrenders { "defender surrenders" } else { "attacker surrenders" }
+                    ),
+                    AutoPeaceEntry::NotJudged { war, error } => println!("AUTO-PEACE day {day}: {war} could not be judged: {error}"),
+                }
+            }
+            if r.entries.is_empty() {
+                println!("AUTO-PEACE day {day}: no surrender condition is met in any active war");
+            }
+            print_wars(day, &conflicts, &labels);
+        }
         let invalidated = countries_to_invalidate(&day_events);
-        if !invalidated.is_empty() {
+        if !invalidated.is_empty() && !a.brief {
             println!(
                 "reach invalidation targets for M6-d (previous and new controllers; no duplicates): countries {}",
                 invalidated.iter().map(|c| labels.get(c).map(|l| l.to_string()).unwrap_or_else(|| "?".into())).collect::<Vec<_>>().join(", ")
             );
         }
-        print_state(day, &military, &labels, a.combat);
+        if !a.brief {
+            print_state(day, &military, &labels, a.combat);
+        }
         if a.state_control {
             print_state_control(day, &world.model, &territory.owners().collect(), &military, &labels);
         }

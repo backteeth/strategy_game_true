@@ -1,0 +1,121 @@
+$ world_move_check --scenario assets/data/world/preview/division_war_scenario.ron --brief --propose 1:1:1:white --accept 29:1:2 --accept 30:1:2 --days 30
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_war_scenario.ron
+description: P32-042 war record, ending and truce validation scenario A (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war records (day 0; hostility is derived from the active wars + legacy pairs):
+  MapWar#1: attacker 2 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#2: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#3: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  hostile pairs: 1-2 1-3 3-4
+
+--- day 1 ---
+proposal (day 1): MapWar#1 country 1 proposes white to country 2
+proposal created: MapWar#1 white from country 1 to country 2 on day 1
+  query (read-only, as of day 1): NOT acceptable now: 白紙講和には開戦から 30 日以上が必要です(現在 1 日)
+
+--- day 2 ---
+
+--- day 3 ---
+
+--- day 4 ---
+
+--- day 5 ---
+
+--- day 6 ---
+
+--- day 7 ---
+
+--- day 8 ---
+
+--- day 9 ---
+
+--- day 10 ---
+
+--- day 11 ---
+
+--- day 12 ---
+
+--- day 13 ---
+
+--- day 14 ---
+
+--- day 15 ---
+
+--- day 16 ---
+
+--- day 17 ---
+
+--- day 18 ---
+
+--- day 19 ---
+
+--- day 20 ---
+
+--- day 21 ---
+
+--- day 22 ---
+
+--- day 23 ---
+
+--- day 24 ---
+
+--- day 25 ---
+
+--- day 26 ---
+
+--- day 27 ---
+
+--- day 28 ---
+
+--- day 29 ---
+accept (day 29): country 2 accepts the WhitePeace proposal of day 1 for MapWar#1
+accept REJECTED: 白紙講和には開戦から 30 日以上が必要です(現在 29 日) (nothing changed)
+
+--- day 30 ---
+accept (day 30): country 2 accepts the WhitePeace proposal of day 1 for MapWar#1
+end-war APPLIED on day 30:
+  MapWar#1 ended: white peace (explicit white peace)
+  hostility ended: [1-2]; kept by other wars: []
+  occupation returned to the legal owner: Province#17696: country 1 -> country 2
+  occupation returned to the legal owner: Province#17905: country 1 -> country 2
+  occupation returned to the legal owner: Province#18112: country 1 -> country 2
+  division 11 (country 1) returned (hostility ended): Province#17905 -> Province#17266
+  truce set: country 1-2 until day 1855 (1825 days from day 30; in force through day 1854)
+  supply reach invalidated (end-war) for countries: [1, 2]
+consistency: supply capitals equal the territory capitals; hostility equals the one derived from the war records
+war records (day 30; hostility is derived from the active wars + legacy pairs):
+  MapWar#1: attacker 2 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ENDED day 30 white peace (explicit white peace)
+  MapWar#2: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#3: attacker 3 (supporters []) vs defender 1 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  hostile pairs: 1-3 3-4
+  truce 1-2 until day 1855 (in force through day 1854; expires on day 1855)
+
+orders rejected: 0 (a rejection is a normal result)
+exit=0

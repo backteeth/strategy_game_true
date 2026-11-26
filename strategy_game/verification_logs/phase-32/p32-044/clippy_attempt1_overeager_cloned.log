@@ -1,0 +1,14 @@
+    Checking strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+error: unnecessarily eager cloning of iterator items
+   --> src\bin\world_move_check.rs:843:18
+    |
+843 |         for e in day_events.iter().cloned().filter(|_| !a.brief) {
+    |                  ^^^^^^^^^^^^^^^^^------------------------------
+    |                                   |
+    |                                   help: try: `.filter(|&_| !a.brief).cloned()`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#iter_overeager_cloned
+    = note: `-D clippy::iter-overeager-cloned` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::iter_overeager_cloned)]`
+
+error: could not compile `strategy_game` (bin "world_move_check" test) due to 1 previous error

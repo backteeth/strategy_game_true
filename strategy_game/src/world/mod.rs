@@ -28,6 +28,7 @@ pub mod model;
 pub mod occupation;
 pub mod movement;
 pub mod overlay;
+pub mod peace;
 pub mod state_control;
 pub mod state_reach;
 pub mod supply;
@@ -94,10 +95,14 @@ pub use territory::{
 };
 pub use validate::{ValidationMode, ValidationReport, validate_against_geography};
 pub use war_record::{
-    ConflictError, Conflicts, EndReason, EndWarApplyError, EndWarError, EndWarOutcome, EndWarPlan, EndWarRequest, EndWarStale, EndedWar, MapWarId, PeaceTerms, SupporterRemoved, TRUCE_DAYS, TruceSet, WarEnd,
+    ConflictError, Conflicts, EndBasis, EndReason, EndWarApplyError, EndWarError, EndWarOutcome, EndWarPlan, EndWarRequest, EndWarStale, EndedWar, MapWarId, PeaceTerms, SupporterRemoved, TRUCE_DAYS, TruceSet, WarEnd,
     WarRecord, WarResult, WarSide, apply_end_war, end_war, plan_end_war,
 };
 pub use war_score::{
     AttackerReason, BattleLedger, DefenderReason, LedgerEntry, OccupationRate, Ratio, ScoreError, SkipReason, StateOccupation, Verdict, WarAssessment, WarScoreBreakdown, assess_active_wars, assess_war, assess_with_summary, score_with_summary,
     has_combat_ready_divisions, occupation_rate, war_score,
+};
+pub use peace::{
+    Acceptance, AutoPeaceEntry, AutoPeaceReport, CESSION_MIN_SCORE, PeaceError, PeaceProposal, ProposalTerms, WHITE_PEACE_MIN_SCORE, WHITE_PEACE_MIN_WAR_DAYS, accept_peace, check_acceptance, propose_peace,
+    run_auto_peace,
 };

@@ -380,7 +380,7 @@ pub fn plan_transfer(ctx: TransferContext<'_>, territory: &Territory, military: 
     let request = request.normalized();
     let mut t = territory.clone();
     let mut m = military.clone();
-    let outcome = execute(ctx, &mut t, &mut m, &request)?;
+    let outcome = execute(ctx, &mut t, &mut m, &request, &BTreeMap::new())?;
     Ok(TransferPlan { request, base_revision: territory.revision, outcome })
 }
 
@@ -396,14 +396,14 @@ pub fn apply_transfer(ctx: TransferContext<'_>, territory: &mut Territory, milit
     {
         let mut t = territory.clone();
         let mut m = military.clone();
-        match execute(ctx, &mut t, &mut m, &plan.request) {
+        match execute(ctx, &mut t, &mut m, &plan.request, &BTreeMap::new()) {
             Err(e) => return Err(ApplyError::Stale(StaleReason::Invalid(e))),
             Ok(o) if o != plan.outcome => return Err(ApplyError::Stale(StaleReason::OutcomeChanged)),
             Ok(_) => {}
         }
     }
     // 検証済み: 同じ処理を実体に行う(検証は変更の前に済むので、ここで失敗すれば何も変わっていない)。
-    execute(ctx, territory, military, &plan.request).map_err(|e| ApplyError::Stale(StaleReason::Invalid(e)))
+    execute(ctx, territory, military, &plan.request, &BTreeMap::new()).map_err(|e| ApplyError::Stale(StaleReason::Invalid(e)))
 }
 
 /// 計画と適用をまとめて行う(間に別の変更を挟まない呼び出し向け)。
@@ -413,8 +413,9 @@ pub fn transfer_state(ctx: TransferContext<'_>, territory: &mut Territory, milit
 }
 
 /// 残る所有ステートの中から、首都にできる代表地点を選ぶ(`MapStateId` 昇順、最初に候補があるステート。`representative` → 自国が支配する最小 `ProvinceId`)。
-fn capital_candidate(model: &WorldModel, military: &MapMilitary, country: CountryId, states: &[MapStateId]) -> Option<ProvinceId> {
-    let controlled = |p: ProvinceId| military.control().controller(p) == Some(country);
+fn capital_candidate(model: &WorldModel, military: &MapMilitary, country: CountryId, states: &[MapStateId], returned: &BTreeMap<ProvinceId, CountryId>) -> Option<ProvinceId> {
+    // `returned` = 同じ講和で法的所有国へ返還されるプロヴィンスの支配国(M7-d。単独の移転では空)。返還後の支配で候補を選ぶ。
+    let controlled = |p: ProvinceId| returned.get(&p).copied().or_else(|| military.control().controller(p)) == Some(country);
     for s in states {
         let Some(def) = model.state(*s) else { continue };
         if let Some(r) = def.representative
@@ -450,7 +451,8 @@ pub(super) fn relocate_division(military: &mut MapMilitary, id: MapDivisionId, t
 }
 
 /// 検証(状態を変えない)→ 変更(途中で失敗しない)。`plan_transfer` は複製に、`apply_transfer` は実体に呼ぶ。
-pub(super) fn execute(ctx: TransferContext<'_>, territory: &mut Territory, military: &mut MapMilitary, req: &TransferRequest) -> Result<TransferOutcome, TransferError> {
+/// `returned`: 同じ講和で、この移転のあとに法的所有国へ返還されるプロヴィンス(→ 返還後の支配国)。首都候補の判定だけに使う(M7-d)。単独の移転は空を渡す。
+pub(super) fn execute(ctx: TransferContext<'_>, territory: &mut Territory, military: &mut MapMilitary, req: &TransferRequest, returned: &BTreeMap<ProvinceId, CountryId>) -> Result<TransferOutcome, TransferError> {
     let TransferContext { model, graph } = ctx;
     let (prev, new) = (req.expected_owner, req.new_owner);
 
@@ -507,7 +509,7 @@ pub(super) fn execute(ctx: TransferContext<'_>, territory: &mut Territory, milit
         && let Some(cap) = territory.capital(prev)
         && model.state_of(cap) == Some(req.state)
     {
-        match capital_candidate(model, military, prev, &remaining) {
+        match capital_candidate(model, military, prev, &remaining, returned) {
             Some(to) => capital_move = Some(CapitalMove { country: prev, from: cap, to }),
             None => return Err(TransferError::NoCapitalCandidate { country: prev }),
         }
