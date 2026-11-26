@@ -1,0 +1,141 @@
+=== 師団の移動 (M6-a: verification input, not official ownership or control) ===
+world: assets/data/world/preview/provinces.ron / assets/data/world/preview/states.ron
+scenario: assets/data/world/preview/division_war_elimination_scenario.ron
+description: P32-042 war record validation scenario B: country elimination decides other wars (verification input, not official data)
+graph: nodes=29 edges=65
+countries (label -> CountryId): 1->1 2->2 3->3 4->4
+initial controlled provinces: 27
+base_days=5 supply_modifier=1.0 (fixed) step_cost=1 (rivers do not matter)
+divisions: 16
+daily supply (M6-d; computed once at the start of each day, before movement, battle and occupation): country 1 capital 17266 stockpile 100; country 2 capital 17695 stockpile 100; country 3 capital 18312 stockpile 10
+
+--- day 0 (initial placement) ---
+day 0 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#5 (country 2) at 17694 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#6 (country 2) at 17269 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#8 (country 2) at 18111 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#10 (country 3) at 18312 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#12 (country 2) at 17906 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#15 (country 2) at 17486 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#16 (country 2) at 17487 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 0 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+state control (day 0; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 2 | provinces 13 | 内訳あり (mixed) | controllers: country 1 3/13, country 2 8/13, country 3 1/13, country 4 1/13, no controller 0/13
+      occupation by country 1 (at war with the owner, country 2): 3/13 = 0.231
+      occupation by country 3 (at war with the owner, country 2): 1/13 = 0.077
+      occupation by country 4 (at war with the owner, country 2): 1/13 = 0.077
+  MapState#22 legal owner: country 1 | provinces 6 | 内訳あり (mixed) | controllers: country 1 5/6, country 3 1/6, no controller 0/6
+      control by country 3 1/6 is NOT counted as occupation (not at war with the owner)
+war records (day 0; hostility is derived from the active wars + legacy pairs):
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#5: attacker 2 (supporters []) vs defender 4 (supporters []); target MapState#22; started day 0; ACTIVE
+  MapWar#6: attacker 1 (supporters [2]) vs defender 4 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#7: attacker 3 (supporters []) vs defender 2 (supporters []); target MapState#21; started day 0; ACTIVE
+  MapWar#8: attacker 1 (supporters []) vs defender 2 (supporters []); target MapState#21; started day 0; ACTIVE
+  hostile pairs: 1-2 1-4 2-3 2-4 3-4
+
+--- day 1 ---
+end-war request (between days; before day 1 is processed): MapWar#8 cession; cancel battles []
+end-war APPLIED on day 1:
+  MapWar#8 ended: attacker victory (explicit cession)
+  MapWar#5 ended: defender victory (attacker primary eliminated)
+  MapWar#7 ended: attacker victory (defender primary eliminated)
+  MapWar#6: eliminated supporter country 2 removed from its side (the war continues)
+  hostility ended: [1-2 2-3 2-4]; kept by other wars: []
+transfer APPLIED: MapState#21 legal owner country 2 -> country 1
+  control changes (all provinces of the state are set to country 1): 10
+    Province#17269: country 2 -> country 1
+    Province#17486: country 2 -> country 1
+    Province#17487: country 2 -> country 1
+    Province#17694: country 2 -> country 1
+    Province#17695: country 2 -> country 1
+    Province#17904: country 4 -> country 1
+    Province#17906: country 2 -> country 1
+    Province#18111: country 2 -> country 1
+    Province#18312: country 3 -> country 1
+    Province#18502: country 2 -> country 1
+  third-party occupation resolved: Province#17904 held by country 4
+  third-party occupation resolved: Province#18312 held by country 3
+  capital: unchanged
+  COUNTRY ELIMINATED: country 2 (annexed by country 1; the id is kept). wars removed: [1-2 2-3 2-4]; supply setup removed: true; capital removed: Province#17695
+  division 10 (country 3) returned: Province#18312 -> Province#17484
+  division 5 (country 2) DISBANDED at Province#17694: its country was eliminated (not a battle loss)
+  division 6 (country 2) DISBANDED at Province#17269: its country was eliminated (not a battle loss)
+  division 8 (country 2) DISBANDED at Province#18111: its country was eliminated (not a battle loss)
+  division 12 (country 2) DISBANDED at Province#17906: its country was eliminated (not a battle loss)
+  division 15 (country 2) DISBANDED at Province#17486: its country was eliminated (not a battle loss)
+  division 16 (country 2) DISBANDED at Province#17487: its country was eliminated (not a battle loss)
+  supply reach invalidated for countries: [1, 2, 3, 4]
+  truce: none kept (a party was eliminated)
+  truce cleared (eliminated country): 1-2
+  supply reach invalidated (end-war) for countries: [1, 2, 3, 4]
+consistency: supply capitals equal the territory capitals; hostility equals the one derived from the war records
+--- state right after the end-war (before day 1 is processed) ---
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#10 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+war records (day 1; hostility is derived from the active wars + legacy pairs):
+  MapWar#4: attacker 4 (supporters []) vs defender 3 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#5: attacker 2 (supporters []) vs defender 4 (supporters []); target MapState#22; started day 0; ENDED day 1 defender victory (attacker primary eliminated)
+  MapWar#6: attacker 1 (supporters []) vs defender 4 (supporters []); target MapState#20; started day 0; ACTIVE
+  MapWar#7: attacker 3 (supporters []) vs defender 2 (supporters []); target MapState#21; started day 0; ENDED day 1 attacker victory (defender primary eliminated)
+  MapWar#8: attacker 1 (supporters []) vs defender 2 (supporters []); target MapState#21; started day 0; ENDED day 1 attacker victory (explicit cession)
+  hostile pairs: 1-4 3-4
+state control (day 1; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 1 | provinces 13 | 全域支配 (full) (country 1) | controllers: country 1 13/13, no controller 0/13
+  MapState#22 legal owner: country 1 | provinces 6 | 内訳あり (mixed) | controllers: country 1 5/6, country 3 1/6, no controller 0/6
+      control by country 3 1/6 is NOT counted as occupation (not at war with the owner)
+supply: country 1: capital controlled; connected 25 province(s), unknown 0 (not counted as connected); reach recomputed; demand 6250000 (eligible 6250000) consumed 6250000 units; stockpile 93750000 units
+supply: country 3: capital LOST (reach is empty); connected 0 province(s), unknown 0 (not counted as connected); reach not computed (the capital is not controlled: empty); demand 2000000 (eligible 0) consumed 0 units; stockpile 10000000 units
+day 1 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#10 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 1 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 1 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+state control (day 1; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 1 | provinces 13 | 全域支配 (full) (country 1) | controllers: country 1 13/13, no controller 0/13
+  MapState#22 legal owner: country 1 | provinces 6 | 内訳あり (mixed) | controllers: country 1 5/6, country 3 1/6, no controller 0/6
+      control by country 3 1/6 is NOT counted as occupation (not at war with the owner)
+
+--- day 2 ---
+supply: country 1: capital controlled; connected 25 province(s), unknown 0 (not counted as connected); reach reused from cache; demand 6250000 (eligible 6250000) consumed 6250000 units; stockpile 87500000 units
+supply: country 3: capital LOST (reach is empty); connected 0 province(s), unknown 0 (not counted as connected); reach not computed (the capital is not controlled: empty); demand 2000000 (eligible 0) consumed 0 units; stockpile 10000000 units
+day 2 MapDivision#1 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#2 (country 1) at 17693 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#3 (country 1) at 17268 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#4 (country 1) at 18311 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#7 (country 1) at 18310 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#10 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#11 (country 1) at 17905 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#14 (country 1) at 17485 Idle progress 0.00 destination - next - remaining - supply 1.0000
+day 2 MapDivision#17 (country 3) at 17484 Idle progress 0.00 destination - next - remaining - supply 0.0000
+day 2 MapDivision#20 (country 4) at 17904 Idle progress 0.00 destination - next - remaining - supply 1.0000
+state control (day 2; derived from province control, nothing stored; consistent=true; unassigned provinces (in no state's denominator): 3):
+  MapState#20 legal owner: country 1 | provinces 7 | 全域支配 (full) (country 1) | controllers: country 1 7/7, no controller 0/7
+  MapState#21 legal owner: country 1 | provinces 13 | 全域支配 (full) (country 1) | controllers: country 1 13/13, no controller 0/13
+  MapState#22 legal owner: country 1 | provinces 6 | 内訳あり (mixed) | controllers: country 1 5/6, country 3 1/6, no controller 0/6
+      control by country 3 1/6 is NOT counted as occupation (not at war with the owner)
+
+orders rejected: 0 (a rejection is a normal result)

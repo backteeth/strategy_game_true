@@ -20,7 +20,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use strategy_game::world::{DisbandReason, MapBattleId, Territory, TransferContext, TransferError, TransferOutcome, TransferRequest, apply_transfer, plan_transfer};
+use strategy_game::world::{
+    Conflicts, DisbandReason, EndReason, EndWarApplyError, EndWarError, EndWarOutcome, EndWarRequest, MapBattleId, MapWarId, Territory, TransferContext, TransferError, TransferOutcome, TransferRequest,
+    WarResult, apply_end_war, apply_transfer, plan_end_war, plan_transfer,
+};
 
 use strategy_game::common::CountryId;
 use strategy_game::hexmap::data::load_from_path;
@@ -30,7 +33,7 @@ use strategy_game::world::{
 };
 
 const USAGE: &str = "usage: world_move_check [--scenario PATH] [--map P] [--world-provinces P] [--world-states P] [--days N] \
-[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]...";
+[--order DAY:DIVISION:PROVINCE]... [--control DAY:PROVINCE:LABEL|none]... [--capital DAY:LABEL:PROVINCE]... [--combat] [--state-control] [--transfer DAY:STATE:FROM_LABEL:TO_LABEL[:BATTLE,BATTLE...]]... [--end-war DAY:WAR:white|cede[:BATTLE,BATTLE...]]... [--wars]";
 
 #[derive(Default)]
 struct Args {
@@ -45,6 +48,9 @@ struct Args {
     combat: bool,
     state_control: bool,
     transfers: Vec<(u32, u32, u32, u32, Vec<u32>)>,
+    /// (day, war, cede?, battles)
+    end_wars: Vec<(u32, u32, bool, Vec<u32>)>,
+    wars: bool,
 }
 
 fn num(name: &str, s: &str) -> Result<u32, String> {
@@ -122,6 +128,33 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                     }
                 }
                 a.transfers.push((day, num("--transfer state", parts[1])?, num("--transfer from", parts[2])?, num("--transfer to", parts[3])?, battles));
+            }
+            "--wars" => a.wars = true,
+            "--end-war" => {
+                let v = value()?;
+                let parts: Vec<&str> = v.split(':').collect();
+                if parts.len() != 3 && parts.len() != 4 {
+                    return Err(format!("--end-war: \"{v}\" is not DAY:WAR:white|cede[:BATTLE,BATTLE...]"));
+                }
+                let day = num("--end-war day", parts[0])?;
+                if day == 0 {
+                    return Err("--end-war: the day starts at 1".into());
+                }
+                let cede = match parts[2] {
+                    "white" => false,
+                    "cede" => true,
+                    other => return Err(format!("--end-war: the terms must be white or cede, not \"{other}\"")),
+                };
+                let mut battles = Vec::new();
+                if parts.len() == 4 {
+                    for b in parts[3].split(',').filter(|b| !b.is_empty()) {
+                        battles.push(num("--end-war battle", b)?);
+                    }
+                }
+                if !cede && !battles.is_empty() {
+                    return Err("--end-war: battles can be named only with cede".into());
+                }
+                a.end_wars.push((day, num("--end-war war", parts[1])?, cede, battles));
             }
             "--help" | "-h" => return Err(String::new()),
             other => return Err(format!("unknown argument {other}")),
@@ -217,6 +250,87 @@ fn print_transfer_outcome(o: &TransferOutcome, labels: &HashMap<CountryId, u32>)
         );
     }
     println!("  supply reach invalidated for countries: [{}]", o.invalidated_countries.iter().map(|c| name(*c)).collect::<Vec<_>>().join(", "));
+}
+
+fn result_text(r: WarResult) -> &'static str {
+    match r {
+        WarResult::WhitePeace => "white peace",
+        WarResult::AttackerVictory => "attacker victory",
+        WarResult::DefenderVictory => "defender victory",
+    }
+}
+
+fn reason_text(r: EndReason) -> &'static str {
+    match r {
+        EndReason::WhitePeace => "explicit white peace",
+        EndReason::Cession => "explicit cession",
+        EndReason::AttackerEliminated => "attacker primary eliminated",
+        EndReason::DefenderEliminated => "defender primary eliminated",
+        EndReason::TargetOwnerChanged => "target's owner changed (invalidated by white peace)",
+    }
+}
+
+fn print_wars(day: u32, c: &Conflicts, labels: &HashMap<CountryId, u32>) {
+    let name = |x: CountryId| labels.get(&x).map(|l| l.to_string()).unwrap_or_else(|| "?".into());
+    let list = |v: &[CountryId]| v.iter().map(|x| name(*x)).collect::<Vec<_>>().join(",");
+    println!("war records (day {day}; hostility is derived from the active wars + legacy pairs):");
+    for w in c.wars() {
+        let status = match w.end {
+            None => "ACTIVE".to_string(),
+            Some(e) => format!("ENDED day {} {} ({})", e.day, result_text(e.result), reason_text(e.reason)),
+        };
+        println!(
+            "  {}: attacker {} (supporters [{}]) vs defender {} (supporters [{}]); target {}; started day {}; {status}",
+            w.id,
+            name(w.attacker.primary),
+            list(&w.attacker.supporters),
+            name(w.defender.primary),
+            list(&w.defender.supporters),
+            w.target_state,
+            w.start_day
+        );
+    }
+    println!("  hostile pairs: {}", c.hostile_pairs().iter().map(|(x, y)| format!("{}-{}", name(*x), name(*y))).collect::<Vec<_>>().join(" "));
+    for (x, y, until) in c.truces() {
+        println!("  truce {}-{} until day {until} (in force through day {}; expires on day {until})", name(x), name(y), until.saturating_sub(1));
+    }
+}
+
+fn print_end_war_outcome(o: &EndWarOutcome, labels: &HashMap<CountryId, u32>) {
+    let name = |c: CountryId| labels.get(&c).map(|l| l.to_string()).unwrap_or_else(|| "?".into());
+    let opt = |c: Option<CountryId>| c.map(name).unwrap_or_else(|| "none".into());
+    let pairs = |v: &[(CountryId, CountryId)]| v.iter().map(|(x, y)| format!("{}-{}", name(*x), name(*y))).collect::<Vec<_>>().join(" ");
+    println!("end-war APPLIED on day {}:", o.day);
+    for e in &o.ended {
+        println!("  {} ended: {} ({})", e.war, result_text(e.result), reason_text(e.reason));
+    }
+    for r in &o.supporters_removed {
+        println!("  {}: eliminated supporter country {} removed from its side (the war continues)", r.war, name(r.country));
+    }
+    println!("  hostility ended: [{}]; kept by other wars: [{}]", pairs(&o.hostility_ended), pairs(&o.hostility_kept));
+    if let Some(t) = &o.transfer {
+        print_transfer_outcome(t, labels);
+    }
+    for b in &o.cancelled_battles {
+        println!("  battle cancelled (hostility ended): {} at {}; no winner, no occupation", b.battle, b.province);
+    }
+    for c in &o.occupation_normalized {
+        println!("  occupation returned to the legal owner: {}: country {} -> country {}", c.province, opt(c.previous), opt(c.new));
+    }
+    for r in &o.returned {
+        println!("  division {} (country {}) returned (hostility ended): {} -> {}", r.division.0, name(r.owner), r.from, r.to);
+    }
+    for d in &o.disbanded {
+        println!("  division {} (country {}) DISBANDED at {}: no province to return to (not a battle loss)", d.division.0, name(d.owner), d.at);
+    }
+    match &o.truce {
+        Some(t) => println!("  truce set: country {}-{} until day {} (1825 days from day {}; in force through day {})", name(t.a), name(t.b), t.until, o.day, t.until - 1),
+        None => println!("  truce: none kept (a party was eliminated)"),
+    }
+    for (x, y) in &o.truces_cleared {
+        println!("  truce cleared (eliminated country): {}-{}", name(*x), name(*y));
+    }
+    println!("  supply reach invalidated (end-war) for countries: [{}]", o.invalidated_countries.iter().map(|c| name(*c)).collect::<Vec<_>>().join(", "));
 }
 
 fn print_state_control(day: u32, model: &WorldModel, owners: &BTreeMap<MapStateId, CountryId>, m: &MapMilitary, labels: &HashMap<CountryId, u32>) {
@@ -403,11 +517,21 @@ fn run(a: &Args) -> i32 {
                 .join("; ")
         );
     }
+    let mut conflicts = scenario.conflicts();
+    let has_records = conflicts.wars().next().is_some();
     let mut military = scenario.into_military();
+    conflicts.sync(&mut military);
+    if has_records && !a.transfers.is_empty() {
+        println!("INPUT ERROR: --transfer cannot be used with a scenario that has war records (use --end-war, which keeps the records and the hostility consistent)");
+        return 65;
+    }
     println!("\n--- day 0 (initial placement) ---");
     print_state(0, &military, &labels, a.combat);
     if a.state_control {
         print_state_control(0, &world.model, &territory.owners().collect(), &military, &labels);
+    }
+    if a.wars || has_records {
+        print_wars(0, &conflicts, &labels);
     }
     let mut rejected = 0usize;
     for day in 1..=a.days {
@@ -427,6 +551,37 @@ fn run(a: &Args) -> i32 {
             if let Some(c) = scenario_countries.get(label) {
                 military.set_capital(*c, ProvinceId(*p));
                 println!("capital change: country {label} -> {}", ProvinceId(*p));
+            }
+        }
+        for (_, war, cede, battles) in a.end_wars.iter().filter(|t| t.0 == day) {
+            let id = MapWarId(*war);
+            let req = if *cede { EndWarRequest::cession(id, day).with_cancel_battles(battles.iter().map(|b| MapBattleId(*b))) } else { EndWarRequest::white_peace(id, day) };
+            let ctx = TransferContext { model: &world.model, graph: &graph };
+            println!(
+                "end-war request (between days; before day {day} is processed): {id} {}; cancel battles [{}]",
+                if *cede { "cession" } else { "white peace" },
+                battles.iter().map(|b| format!("MapBattle#{b}")).collect::<Vec<_>>().join(", ")
+            );
+            match plan_end_war(ctx, &territory, &conflicts, &military, &req) {
+                Err(EndWarError::AlreadyEnded { war, end }) => println!("end-war REJECTED at planning: {war} already ended on day {} (nothing applied twice; nothing changed)", end.day),
+                Err(e) => println!("end-war REJECTED at planning: {e} (nothing changed)"),
+                Ok(plan) => match apply_end_war(ctx, &mut territory, &mut conflicts, &mut military, &plan) {
+                    Err(EndWarApplyError::AlreadyEnded { war, end }) => println!("end-war REJECTED at apply: {war} already ended on day {} (nothing changed)", end.day),
+                    Err(e) => println!("end-war REJECTED at apply: {e} (nothing changed)"),
+                    Ok(o) => {
+                        print_end_war_outcome(&o, &labels);
+                        match (territory.check_consistency(&military), conflicts.check_consistency(&military)) {
+                            (Ok(()), Ok(())) => println!("consistency: supply capitals equal the territory capitals; hostility equals the one derived from the war records"),
+                            (x, y) => println!("consistency: BROKEN: {:?} {:?}", x.err(), y.err()),
+                        }
+                        println!("--- state right after the end-war (before day {day} is processed) ---");
+                        print_state(day, &military, &labels, a.combat);
+                        print_wars(day, &conflicts, &labels);
+                        if a.state_control {
+                            print_state_control(day, &world.model, &territory.owners().collect(), &military, &labels);
+                        }
+                    }
+                },
             }
         }
         for (_, state, from, to, battles) in a.transfers.iter().filter(|t| t.0 == day) {

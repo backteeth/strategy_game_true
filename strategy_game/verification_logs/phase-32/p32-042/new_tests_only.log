@@ -1,0 +1,23 @@
+   Compiling strategy_game v0.1.0 (C:\Users\hirom\Desktop\strategy_game\strategy_game)
+    Finished `test` profile [optimized + debuginfo] target(s) in 2m 31s
+     Running tests\p32_042_war_record_test.rs (target\debug\deps\p32_042_war_record_test-8e38889314d9f3b9.exe)
+
+running 14 tests
+test a_hostility_that_another_war_keeps_keeps_its_occupation_and_its_battle_unless_named_in_the_transferred_state ... ok
+test a_truce_is_only_between_the_primaries_and_the_boundary_matches_the_old_path ... ok
+test an_eliminated_supporter_is_removed_even_from_a_war_that_the_cession_expires_and_a_decision_by_elimination_wins ... ok
+test an_ended_war_is_not_applied_twice_and_a_stale_plan_is_refused ... ok
+test battles_of_a_dissolved_hostility_are_cancelled_without_a_result_and_other_battles_are_kept ... ok
+test cession_expires_the_other_war_with_the_same_target_keeps_the_hostility_other_wars_hold_and_leaves_unrelated_wars ... ok
+test eliminating_a_primary_decides_its_other_wars_for_the_opposing_side_and_a_supporter_is_only_removed ... ok
+test every_rejected_request_leaves_everything_exactly_as_before ... ok
+test invalid_records_are_refused ... ok
+test returned_divisions_lose_their_orders_while_other_orders_are_left_to_the_daily_path_check ... ok
+test the_ended_state_is_deterministic_across_repeated_runs ... ok
+test the_records_derive_the_hostility_and_legacy_scenarios_still_work ... ok
+test the_result_does_not_depend_on_the_input_order ... ok
+test white_peace_ends_the_war_dissolves_only_that_hostility_and_sets_the_1825_day_truce_between_the_primaries ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+done 0

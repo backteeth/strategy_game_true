@@ -34,6 +34,7 @@ pub mod supply;
 pub mod supply_scenario;
 pub mod territory;
 pub mod validate;
+pub mod war_record;
 
 pub use aggregate::{
     AdjacencyLookup, Completeness, DeriveError, StateAdjacency, StateGeoSummary, WorldGeoDerived,
@@ -91,3 +92,7 @@ pub use territory::{
     TransferOutcome, TransferPlan, TransferRequest, apply_transfer, plan_transfer, transfer_state,
 };
 pub use validate::{ValidationMode, ValidationReport, validate_against_geography};
+pub use war_record::{
+    ConflictError, Conflicts, EndReason, EndWarApplyError, EndWarError, EndWarOutcome, EndWarPlan, EndWarRequest, EndWarStale, EndedWar, MapWarId, PeaceTerms, SupporterRemoved, TRUCE_DAYS, TruceSet, WarEnd,
+    WarRecord, WarResult, WarSide, apply_end_war, end_war, plan_end_war,
+};

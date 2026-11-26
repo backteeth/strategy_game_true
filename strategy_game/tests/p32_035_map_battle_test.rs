@@ -179,6 +179,7 @@ fn template() -> DivisionScenarioFile {
         state_owners: vec![StateOwnerEntry { state: 20, country: 1 }, StateOwnerEntry { state: 21, country: 2 }],
         controller_overrides: vec![],
         wars: vec![WarEntry { a: 1, b: 2 }],
+        war_records: vec![],
         supply: Default::default(),
         divisions: vec![DivisionEntry { id: 1, country: 1, province: 18309, speed: 1.0, combat: CombatEntry::default() }],
     }

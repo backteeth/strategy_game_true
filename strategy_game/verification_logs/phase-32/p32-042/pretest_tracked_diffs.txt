@@ -1,0 +1,15 @@
+ M strategy_game/src/bin/world_move_check.rs
+ M strategy_game/src/world/division_scenario.rs
+ M strategy_game/src/world/mod.rs
+ M strategy_game/src/world/territory.rs
+ M strategy_game/verification_logs/p20-007/screenshots/03_playing_topbar.png
+ M strategy_game/verification_logs/p20-009/screenshots/04_playing_ja_jp.png
+ M strategy_game/verification_logs/p20-009/screenshots/05_playing_en_us.png
+ M strategy_game/verification_logs/p20-009/screenshots/06_playing_ja_jp_again.png
+ M strategy_game/verification_logs/phase-21/p21-save-002e/screenshots/01_playing_topbar_with_save_load_buttons.png
+ M strategy_game/verification_logs/phase-21/p21-save-002e/screenshots/02_after_save_click.png
+ M strategy_game/verification_logs/phase-21/p21-save-002e/screenshots/03_load_confirm_dialog_open.png
+ M strategy_game/verification_logs/phase-21/p21-save-002e/screenshots/04_after_cancel_dialog_closed.png
+ M strategy_game/verification_logs/phase-21/p21-save-002e/screenshots/05_after_load_success.png
+ M strategy_game/verification_logs/phase-32/p32-041/checks.md
+ M strategy_game/verification_logs/phase-32/p32-041/p32-041_m7a_territory_report.md

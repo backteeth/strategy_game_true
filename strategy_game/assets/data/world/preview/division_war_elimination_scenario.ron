@@ -1,0 +1,81 @@
+// P32-042 戦争記録・終結・休戦の検証用シナリオ B(M7-b。国家消滅による決着)。所有・支配・師団・補給は division_territory_scenario.ron(P32-041)と同じ。**検証入力であり、正式な世界データではない。**
+// 記録: 戦争4: 攻撃側 4 対 防御側 3、目標20(無関係)/ 戦争5: 攻撃側 2 対 防御側 4、目標22(国家2 が攻撃側の代表国)/ 戦争6: 攻撃側 1(支持国 2)対 防御側 4、目標20(国家2 は支持国)/
+//   戦争7: 攻撃側 3 対 防御側 2、目標21(国家2 が防御側の代表国で、目標も割譲されるステート。消滅による決着が優先)/ 戦争8: 攻撃側 1 対 防御側 2、目標21(国家2 の最後のステート)。
+//   導出される交戦関係: 1-2、1-4、2-3、2-4、3-4。
+// 再現: --end-war 1:8:cede → 国家1 がステート21 を得て国家2 が消滅(ID は保持)。戦争8 は攻撃側の勝利(割譲)、戦争7 は防御側の代表国の消滅で攻撃側(国家3)の勝利(白紙講和ではない)、
+//   戦争5 は攻撃側の代表国の消滅で防御側(国家4)の勝利、戦争6 は国家2 が支持国なので陣営から除くだけで継続(1-4 の敵対は続き、2-4 は消える)、戦争4 は無関係で維持。休戦は国家2 が絡むので残らない。
+(
+    format_version: 1,
+    description: "P32-042 war record validation scenario B: country elimination decides other wars (verification input, not official data)",
+    base_days: 5.0,
+    countries: [
+        (label: 1, country_id: 1),
+        (label: 2, country_id: 2),
+        (label: 3, country_id: 3),
+        (label: 4, country_id: 4),
+    ],
+    state_owners: [
+        (state: 20, country: 1),
+        (state: 22, country: 1),
+        (state: 21, country: 2),
+    ],
+    controller_overrides: [
+        (province: 18312, country: 3),
+        (province: 17696, country: 1),
+        (province: 17905, country: 1),
+        (province: 18112, country: 1),
+        (province: 17903, country: 3),
+        (province: 17484, country: 3),
+        (province: 17904, country: 4),
+    ],
+    wars: [],
+    war_records: [
+        (id: 4, attacker: 4, defender: 3, target_state: 20),
+        (id: 5, attacker: 2, defender: 4, target_state: 22),
+        (id: 6, attacker: 1, attacker_supporters: [2], defender: 4, target_state: 20),
+        (id: 7, attacker: 3, defender: 2, target_state: 21),
+        (id: 8, attacker: 1, defender: 2, target_state: 21),
+    ],
+    divisions: [
+        (id: 1, country: 1, province: 18311, speed: 1.0),
+        (id: 2, country: 1, province: 17693, speed: 1.0),
+        (id: 3, country: 1, province: 17268, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 4, country: 1, province: 18311, speed: 1.0),
+        (id: 5, country: 2, province: 17694, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 6, country: 2, province: 17269, speed: 1.0),
+        (id: 7, country: 1, province: 18310, speed: 1.0),
+        (id: 8, country: 2, province: 18111, speed: 1.0),
+        (id: 10, country: 3, province: 18312, speed: 1.0),
+        (id: 11, country: 1, province: 17905, speed: 1.0),
+        (id: 12, country: 2, province: 17906, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 14, country: 1, province: 17485, speed: 1.0, combat: (attack_power: 12)),
+        (id: 15, country: 2, province: 17486, speed: 1.0),
+        (id: 16, country: 2, province: 17487, speed: 1.0),
+        (id: 17, country: 3, province: 17484, speed: 1.0),
+        (id: 20, country: 4, province: 17904, speed: 1.0),
+    ],
+    supply: (
+        countries: [
+            (country: 1, capital: 17266, military_supplies: 100.0),
+            (country: 2, capital: 17695, military_supplies: 100.0),
+            (country: 3, capital: 18312, military_supplies: 10.0),
+        ],
+        divisions: [
+            (division: 1, supply_usage: 1.0),
+            (division: 2, supply_usage: 1.0),
+            (division: 3, supply_usage: 1.0),
+            (division: 4, supply_usage: 1.0),
+            (division: 5, supply_usage: 1.0),
+            (division: 6, supply_usage: 1.0),
+            (division: 7, supply_usage: 1.0),
+            (division: 8, supply_usage: 1.0),
+            (division: 10, supply_usage: 1.0),
+            (division: 11, supply_usage: 1.0),
+            (division: 12, supply_usage: 1.0),
+            (division: 14, supply_usage: 1.0),
+            (division: 15, supply_usage: 1.0),
+            (division: 16, supply_usage: 1.0),
+            (division: 17, supply_usage: 1.0),
+        ],
+    ),
+)

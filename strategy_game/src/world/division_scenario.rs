@@ -148,6 +148,22 @@ pub struct WarEntry {
     pub b: u32,
 }
 
+/// 戦争の記録(国家ラベル。P32-042)。稼働中の戦争として始まる。両陣営は代表国と支持国、目標は対象ステート 1 件。
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WarRecordEntry {
+    pub id: u32,
+    pub attacker: u32,
+    #[serde(default)]
+    pub attacker_supporters: Vec<u32>,
+    pub defender: u32,
+    #[serde(default)]
+    pub defender_supporters: Vec<u32>,
+    pub target_state: u32,
+    #[serde(default)]
+    pub start_day: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DivisionScenarioFile {
@@ -162,6 +178,9 @@ pub struct DivisionScenarioFile {
     /// 交戦する国の組(省略可。省略したシナリオは M6-a と同じく交戦なし)。
     #[serde(default)]
     pub wars: Vec<WarEntry>,
+    /// 戦争の記録(省略可。P32-042。あれば交戦関係は稼働中の戦争から導出され、`wars` は記録を持たない従来の組として併用できる)。
+    #[serde(default)]
+    pub war_records: Vec<WarRecordEntry>,
     pub divisions: Vec<DivisionEntry>,
     /// 国家ごとの首都・初期の備蓄と、師団の補給消費量(省略可。M6-d)。
     #[serde(default)]
@@ -175,6 +194,7 @@ pub enum RefSite {
     Override(u32),
     Division(u32),
     War(usize),
+    WarRecord(u32),
     SupplyCountry(u32),
 }
 
@@ -185,6 +205,7 @@ impl std::fmt::Display for RefSite {
             RefSite::Override(p) => write!(f, "controller_overrides (province {p})"),
             RefSite::Division(d) => write!(f, "divisions (id {d})"),
             RefSite::War(i) => write!(f, "wars (entry {i})"),
+            RefSite::WarRecord(id) => write!(f, "war_records (id {id})"),
             RefSite::SupplyCountry(l) => write!(f, "supply.countries (country {l})"),
         }
     }
@@ -228,6 +249,10 @@ pub enum DivisionScenarioIssue {
     SupplyMissingUsage { division: u32 },
     /// 補給の設定がない国家の師団に、補給消費量が設定されている。
     SupplyUsageWithoutCountry { division: u32 },
+    /// 戦争の記録の構造の不正(重複・同じ代表国・両陣営に同じ国・従来の組との重複)。
+    WarRecordInvalid(String),
+    /// 戦争の記録の目標が世界にないステート。
+    WarRecordUnknownState { id: u32, state: MapStateId },
 }
 
 impl DivisionScenarioIssue {
@@ -256,6 +281,8 @@ impl DivisionScenarioIssue {
             Self::SupplyInvalidUsage { .. } => "supply-invalid-usage",
             Self::SupplyMissingUsage { .. } => "supply-missing-usage",
             Self::SupplyUsageWithoutCountry { .. } => "supply-usage-without-country",
+            Self::WarRecordInvalid(_) => "war-record-invalid",
+            Self::WarRecordUnknownState { .. } => "war-record-unknown-state",
         }
     }
 }
@@ -295,6 +322,8 @@ impl std::fmt::Display for DivisionScenarioIssue {
             Self::SupplyInvalidUsage { division } => write!(f, "supply.divisions (division {division}): supply_usage must be finite, non-negative and within the supported range"),
             Self::SupplyMissingUsage { division } => write!(f, "division {division} belongs to a country with a supply setup but has no entry in supply.divisions"),
             Self::SupplyUsageWithoutCountry { division } => write!(f, "supply.divisions names division {division}, whose country has no entry in supply.countries"),
+            Self::WarRecordInvalid(m) => write!(f, "war_records: {m}"),
+            Self::WarRecordUnknownState { id, state } => write!(f, "war_records (id {id}): the target {state} is not a state of the world"),
         }
     }
 }
@@ -342,6 +371,8 @@ pub struct DivisionScenario {
     pub state_owners: BTreeMap<MapStateId, CountryId>,
     /// 交戦する国の組(双方向。`CountryId`)。
     pub wars: Vec<(CountryId, CountryId)>,
+    /// 戦争の記録(`MapWarId` 昇順。すべて稼働中。P32-042)。
+    pub war_records: Vec<super::war_record::WarRecord>,
     /// 国家ごとの補給の設定(首都・初期の備蓄。空なら補給なし)。師団の補給消費量は各師団の `supply_usage`。
     pub supply: Vec<SupplyCountryConfig>,
     /// 師団(`MapDivisionId` 昇順)。
@@ -352,6 +383,11 @@ impl DivisionScenario {
     /// 実行時状態を作る(検証済みの入力なので失敗しない)。
     pub fn into_military(self) -> MapMilitary {
         MapMilitary::new(self.divisions, self.control, self.params).and_then(|m| m.with_wars(self.wars)).and_then(|m| m.with_supply(self.supply)).expect("a validated scenario builds")
+    }
+
+    /// 戦争の記録と従来の交戦関係(`wars`)から `Conflicts` を作る(検証済みの入力なので失敗しない)。記録がなければ従来の組だけ。
+    pub fn conflicts(&self) -> super::war_record::Conflicts {
+        super::war_record::Conflicts::new(self.war_records.clone(), self.wars.clone()).expect("a validated scenario builds")
     }
 
     /// 国家ラベル(`CountryId` から)。対応表に無ければ `None`。
@@ -460,6 +496,35 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
         }
         wars.push((a, b));
     }
+    // 戦争の記録(P32-042)
+    let mut war_records: Vec<super::war_record::WarRecord> = Vec::new();
+    for e in &file.war_records {
+        let site = RefSite::WarRecord(e.id);
+        let a = resolve(site, e.attacker, &mut issues);
+        let d = resolve(site, e.defender, &mut issues);
+        let asup: Vec<Option<CountryId>> = e.attacker_supporters.iter().map(|l| resolve(site, *l, &mut issues)).collect();
+        let dsup: Vec<Option<CountryId>> = e.defender_supporters.iter().map(|l| resolve(site, *l, &mut issues)).collect();
+        let st = MapStateId(e.target_state);
+        if model.state(st).is_none() {
+            issues.push(DivisionScenarioIssue::WarRecordUnknownState { id: e.id, state: st });
+        }
+        let (Some(a), Some(d)) = (a, d) else { continue };
+        if asup.iter().chain(dsup.iter()).any(|c| c.is_none()) {
+            continue;
+        }
+        war_records.push(super::war_record::WarRecord {
+            id: super::war_record::MapWarId(e.id),
+            attacker: super::war_record::WarSide::new(a, asup.into_iter().flatten().filter(|c| *c != a)),
+            defender: super::war_record::WarSide::new(d, dsup.into_iter().flatten().filter(|c| *c != d)),
+            target_state: st,
+            start_day: e.start_day,
+            end: None,
+        });
+    }
+    if let Err(e) = super::war_record::Conflicts::new(war_records.clone(), wars.clone()) {
+        issues.push(DivisionScenarioIssue::WarRecordInvalid(e.to_string()));
+    }
+    war_records.sort_by_key(|r| r.id);
     // 初期の実効支配(上書き > ステートの所有国 > なし)。所属は所属情報(WorldModel)から解決する。
     let mut control: BTreeMap<ProvinceId, CountryId> = BTreeMap::new();
     for p in graph.node_ids() {
@@ -565,5 +630,5 @@ pub fn resolve_division_scenario(file: &DivisionScenarioFile, graph: &ProvinceGr
         return Err(issues);
     }
     divisions.sort_by_key(|d| d.id);
-    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, state_owners: owners, wars, supply, divisions })
+    Ok(DivisionScenario { description: file.description.clone(), params: MovementParams { base_days: file.base_days }, countries, control, state_owners: owners, wars, war_records, supply, divisions })
 }

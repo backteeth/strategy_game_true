@@ -431,13 +431,26 @@ fn capital_candidate(model: &WorldModel, military: &MapMilitary, country: Countr
 }
 
 /// 帰還先: 隣接する自国支配のプロヴィンス(昇順)→ 自国支配の最小 `ProvinceId`。どちらも進行中の戦闘がない地点。
-fn return_destination(graph: &ProvinceGraph, military: &MapMilitary, owner: CountryId, from: ProvinceId) -> Option<ProvinceId> {
+pub(super) fn return_destination(graph: &ProvinceGraph, military: &MapMilitary, owner: CountryId, from: ProvinceId) -> Option<ProvinceId> {
     let eligible = |p: ProvinceId| military.control().controller(p) == Some(owner) && military.ongoing_battle_at(p).is_none();
     graph.neighbor_ids(from).find(|p| eligible(*p)).or_else(|| graph.node_ids().find(|p| eligible(*p)))
 }
 
+/// 師団を `to` へ帰還させる(経路・目的地・進捗・戦闘参照を破棄して待機にする)。
+pub(super) fn relocate_division(military: &mut MapMilitary, id: MapDivisionId, to: ProvinceId) {
+    if let Some(d) = military.divisions.get_mut(&id) {
+        d.province = to;
+        d.status = MapDivisionStatus::Idle;
+        d.destination = None;
+        d.target = None;
+        d.path.clear();
+        d.progress = 0.0;
+        d.battle = None;
+    }
+}
+
 /// 検証(状態を変えない)→ 変更(途中で失敗しない)。`plan_transfer` は複製に、`apply_transfer` は実体に呼ぶ。
-fn execute(ctx: TransferContext<'_>, territory: &mut Territory, military: &mut MapMilitary, req: &TransferRequest) -> Result<TransferOutcome, TransferError> {
+pub(super) fn execute(ctx: TransferContext<'_>, territory: &mut Territory, military: &mut MapMilitary, req: &TransferRequest) -> Result<TransferOutcome, TransferError> {
     let TransferContext { model, graph } = ctx;
     let (prev, new) = (req.expected_owner, req.new_owner);
 
@@ -556,14 +569,7 @@ fn execute(ctx: TransferContext<'_>, territory: &mut Territory, military: &mut M
         };
         match return_destination(graph, military, owner, from) {
             Some(to) => {
-                let d = military.divisions.get_mut(&id).expect("exists");
-                d.province = to;
-                d.status = MapDivisionStatus::Idle;
-                d.destination = None;
-                d.target = None;
-                d.path.clear();
-                d.progress = 0.0;
-                d.battle = None;
+                relocate_division(military, id, to);
                 relocated.push(Relocation { division: id, owner, from, to });
             }
             None => {

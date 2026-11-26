@@ -1,0 +1,86 @@
+// P32-042 戦争記録・終結・休戦の検証用シナリオ A(M7-b)。division_territory_scenario.ron(P32-041)と同じ所有・支配・師団・補給で、交戦関係を**戦争の記録**(war_records)にしたもの。**検証入力であり、正式な世界データではない。**
+// 国家1: ステート20・22 を所有(首都 17266)。国家2: ステート21 だけを所有。国家3・4: 所有ステートなし。記録(代表国どうし。支持国なし):
+//   戦争1: 攻撃側 2 対 防御側 1、目標ステート22  / 戦争2: 攻撃側 3 対 防御側 1、目標ステート22(同じ目標)  / 戦争3: 攻撃側 3 対 防御側 1、目標ステート20(3-1 の敵対を別の戦争で続ける)
+//   戦争4: 攻撃側 4 対 防御側 3、目標ステート20(無関係な戦争)。導出される交戦関係: 1-2、1-3、3-4。
+// 再現(CLI。`strategy_game/` で。--state-control でステートの所有と支配、--wars で戦争の記録と休戦が出る):
+//   A 白紙講和: --end-war 1:1:white → 戦争1 が白紙講和で終結(結果 WhitePeace)。1-2 の敵対が解け、国家1 が占領していたステート21 の 3 プロヴィンス(17696・17905・18112)は国家2(法的所有国)へ戻り、
+//     そこにいた国家1 の師団 11 は自国支配地へ帰還する。ステート22 は動かないので、国家1 の師団 2・3・14 は残る。1-2 の休戦は 1825 日(終了日 1826 日目の前日まで有効、1826 日目から切れる)。
+//     同じ目標の戦争2 は(割譲がないので)維持され、3-1 の敵対も戦争2・3 で続く。
+//   B 割譲: --end-war 1:1:cede → 国家1 がステート22 を国家2 へ割譲(攻撃側の勝利)。戦争2(同じ目標)は白紙講和で失効、戦争3 は目標が違うので維持(3-1 の敵対は続く)、戦争4 は無関係で維持。
+//     1-2 の敵対が解けるので、国家1 の師団 2・3・14(移転地)と 11(ステート21)は帰還し、ステート21 の占領は国家2 へ戻る。国家1 の首都は 18109 へ移る(M7-a と同じ規則)。
+//   C 終結済みの戦争への再要求: --end-war 1:1:cede --end-war 2:1:cede → 2 回目は拒否(割譲・休戦は二重に適用されない)。
+//   D 不正: --end-war 1:9:white(未知の戦争)。何も変わらない。
+(
+    format_version: 1,
+    description: "P32-042 war record, ending and truce validation scenario A (verification input, not official data)",
+    base_days: 5.0,
+    countries: [
+        (label: 1, country_id: 1),
+        (label: 2, country_id: 2),
+        (label: 3, country_id: 3),
+        (label: 4, country_id: 4),
+    ],
+    state_owners: [
+        (state: 20, country: 1),
+        (state: 22, country: 1),
+        (state: 21, country: 2),
+    ],
+    controller_overrides: [
+        (province: 18312, country: 3),
+        (province: 17696, country: 1),
+        (province: 17905, country: 1),
+        (province: 18112, country: 1),
+        (province: 17903, country: 3),
+        (province: 17484, country: 3),
+        (province: 17904, country: 4),
+    ],
+    wars: [],
+    war_records: [
+        (id: 1, attacker: 2, defender: 1, target_state: 22),
+        (id: 2, attacker: 3, defender: 1, target_state: 22),
+        (id: 3, attacker: 3, defender: 1, target_state: 20),
+        (id: 4, attacker: 4, defender: 3, target_state: 20),
+    ],
+    divisions: [
+        (id: 1, country: 1, province: 18311, speed: 1.0),
+        (id: 2, country: 1, province: 17693, speed: 1.0),
+        (id: 3, country: 1, province: 17268, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 4, country: 1, province: 18311, speed: 1.0),
+        (id: 5, country: 2, province: 17694, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 6, country: 2, province: 17269, speed: 1.0),
+        (id: 7, country: 1, province: 18310, speed: 1.0),
+        (id: 8, country: 2, province: 18111, speed: 1.0),
+        (id: 10, country: 3, province: 18312, speed: 1.0),
+        (id: 11, country: 1, province: 17905, speed: 1.0),
+        (id: 12, country: 2, province: 17906, speed: 1.0, combat: (manpower: 2500, organization: 20.0)),
+        (id: 14, country: 1, province: 17485, speed: 1.0, combat: (attack_power: 12)),
+        (id: 15, country: 2, province: 17486, speed: 1.0),
+        (id: 16, country: 2, province: 17487, speed: 1.0),
+        (id: 17, country: 3, province: 17484, speed: 1.0),
+        (id: 20, country: 4, province: 17904, speed: 1.0),
+    ],
+    supply: (
+        countries: [
+            (country: 1, capital: 17266, military_supplies: 100.0),
+            (country: 2, capital: 17695, military_supplies: 100.0),
+            (country: 3, capital: 18312, military_supplies: 10.0),
+        ],
+        divisions: [
+            (division: 1, supply_usage: 1.0),
+            (division: 2, supply_usage: 1.0),
+            (division: 3, supply_usage: 1.0),
+            (division: 4, supply_usage: 1.0),
+            (division: 5, supply_usage: 1.0),
+            (division: 6, supply_usage: 1.0),
+            (division: 7, supply_usage: 1.0),
+            (division: 8, supply_usage: 1.0),
+            (division: 10, supply_usage: 1.0),
+            (division: 11, supply_usage: 1.0),
+            (division: 12, supply_usage: 1.0),
+            (division: 14, supply_usage: 1.0),
+            (division: 15, supply_usage: 1.0),
+            (division: 16, supply_usage: 1.0),
+            (division: 17, supply_usage: 1.0),
+        ],
+    ),
+)
